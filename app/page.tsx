@@ -204,6 +204,18 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const resizeAnswerInput = useCallback(() => {
+    const input = answerInputRef.current;
+
+    if (!input) {
+      return;
+    }
+
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+  }, []);
 
   const appendQuestion = useCallback((nextQuestion: string) => {
     setMessages((current) => {
@@ -316,6 +328,10 @@ export default function Home() {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
+  useEffect(() => {
+    resizeAnswerInput();
+  }, [answer, resizeAnswerInput]);
+
   const submit = useCallback(async () => {
     if (!question || isSubmitting) {
       return;
@@ -383,7 +399,12 @@ export default function Home() {
   }
 
   function handleAnswerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey
+    ) {
       event.preventDefault();
       void submit();
     }
@@ -481,12 +502,17 @@ export default function Home() {
 
         <form className="composer" onSubmit={handleSubmit}>
           <textarea
+            ref={answerInputRef}
             className="composer-input"
             value={answer}
-            onChange={(event) => setAnswer(event.target.value)}
+            onChange={(event) => {
+              setAnswer(event.target.value);
+              window.requestAnimationFrame(resizeAnswerInput);
+            }}
             onKeyDown={handleAnswerKeyDown}
             placeholder="Type your answer"
             aria-label="Answer"
+            rows={1}
             autoFocus
             disabled={isSubmitting || !question}
           />
@@ -511,6 +537,7 @@ export default function Home() {
           type="button"
           onClick={() => setIsDebugOpen(false)}
           aria-label="Hide queues"
+          tabIndex={isDebugOpen ? 0 : -1}
         >
           ×
         </button>
