@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./public/brand/logo/logo-1024.png" alt="Flashcarder" width="256" />
+  <img src="./public/brand/logo/logo-1024.png" alt="Flashcarder" width="512" />
 
   **🧠 Fast free-text flashcard review 🧠**
 </div>
