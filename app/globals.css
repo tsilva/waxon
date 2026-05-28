@@ -1,0 +1,572 @@
+:root {
+  color-scheme: light;
+  --bg: #f7efe6;
+  --rail: #f1e5d4;
+  --ink: #06442b;
+  --ink-soft: #424b55;
+  --muted: #827a6e;
+  --line: #e7d8c4;
+  --panel: #fffaf2;
+  --composer: #fffdf8;
+  --shadow: rgb(84 63 38 / 14%);
+  --success: #287c4a;
+  --danger: #8b3328;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+.page {
+  min-height: 100vh;
+  padding: 24px 0;
+  background:
+    radial-gradient(circle at 50% 0, rgb(255 255 255 / 62%), transparent 34%),
+    linear-gradient(90deg, var(--rail) 0 64px, transparent 64px),
+    var(--bg);
+}
+
+.page::after {
+  content: "N";
+  position: fixed;
+  left: 16px;
+  bottom: 18px;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: #262727;
+  color: #fffaf2;
+  box-shadow: 0 10px 24px rgb(33 28 21 / 24%);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.reader-panel {
+  position: relative;
+  width: min(1504px, calc(100vw - 180px));
+  min-height: calc(100vh - 48px);
+  margin: 0 auto;
+  overflow: hidden;
+  border: 1px solid rgb(231 216 196 / 78%);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 14% 10%, rgb(238 228 204 / 34%), transparent 18%),
+    radial-gradient(circle at 78% 18%, rgb(255 255 255 / 54%), transparent 30%),
+    var(--panel);
+  box-shadow: 0 26px 88px rgb(86 63 34 / 16%);
+}
+
+.chat-stream {
+  display: grid;
+  width: min(1040px, calc(100% - 300px));
+  gap: 0;
+  align-content: start;
+  min-height: calc(100vh - 250px);
+  margin-left: clamp(128px, 10%, 150px);
+  margin-right: auto;
+  padding: 70px 0 180px;
+}
+
+.review-entry {
+  color: var(--ink);
+}
+
+.entry-divider {
+  height: 1px;
+  margin: 52px 0 54px 124px;
+  background: var(--line);
+}
+
+.entry-grid {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 42px;
+  align-items: start;
+}
+
+.entry-icon {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  margin-top: 2px;
+  border: 1px solid #e7dbc7;
+  border-radius: 999px;
+  background: #f2eedc;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 42%);
+}
+
+.entry-icon svg {
+  width: 40px;
+  height: 40px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+}
+
+.entry-content {
+  min-width: 0;
+}
+
+.question-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: 44px;
+  font-weight: 650;
+  line-height: 1.14;
+  letter-spacing: 0;
+}
+
+.answer-text {
+  max-width: 860px;
+  margin: 34px 0 0;
+  color: var(--ink-soft);
+  font-size: 26px;
+  font-weight: 500;
+  line-height: 1.48;
+}
+
+.judgement {
+  margin-top: 26px;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.judgement-pending {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.judgement-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 74px;
+  min-height: 36px;
+  border-radius: 999px;
+  padding: 0 16px;
+  background: #eee8d7;
+  box-shadow: inset 0 0 0 1px #e2d4bd;
+  color: var(--ink);
+  font-weight: 850;
+}
+
+.judgement-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.judgement-text,
+.judgement-next {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.judgement-next {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+  color: var(--success);
+}
+
+.judgement-next svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.error-message {
+  color: var(--danger);
+  font-size: 18px;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+.composer {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  z-index: 30;
+  width: min(1000px, calc(100vw - 520px));
+  min-height: 96px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px 18px 32px;
+  border: 1px solid #e7d8c4;
+  border-radius: 28px;
+  background: var(--composer);
+  box-shadow: 0 18px 52px rgb(82 60 34 / 16%);
+  transform: translateX(-50%);
+}
+
+.composer-input {
+  flex: 1;
+  width: 100%;
+  height: 52px;
+  max-height: 136px;
+  min-height: 52px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  caret-color: var(--ink);
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 52px;
+  overflow-y: auto;
+}
+
+.composer-input::placeholder {
+  color: #b4aa9a;
+  line-height: 52px;
+}
+
+.composer-submit {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8dc8a2, #4d8768);
+  color: white;
+  box-shadow: 0 12px 24px rgb(55 102 75 / 22%);
+  cursor: pointer;
+}
+
+.composer-submit svg {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3.2;
+}
+
+.composer-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.queue-button {
+  position: absolute;
+  top: 44px;
+  right: 32px;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border: 1px solid #e7d8c4;
+  border-radius: 10px;
+  background: rgb(255 250 242 / 72%);
+  color: var(--ink);
+  box-shadow: 0 10px 24px rgb(65 43 20 / 9%);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.queue-button:hover,
+.queue-button:focus-visible {
+  background: #fffdf8;
+  outline: 2px solid rgb(11 63 38 / 20%);
+  outline-offset: 2px;
+}
+
+.debug-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 50;
+  width: min(420px, 100vw);
+  height: 100vh;
+  padding: 24px;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -22px 0 70px rgb(54 35 16 / 18%);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  transform: translateX(100%);
+  transition: transform 180ms ease;
+}
+
+.debug-panel.open {
+  transform: translateX(0);
+}
+
+.debug-close {
+  position: sticky;
+  top: 0;
+  float: right;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #eadfca;
+  color: var(--ink);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.debug-close:hover,
+.debug-close:focus-visible {
+  background: #ded0b6;
+  outline: 2px solid rgb(11 63 38 / 18%);
+  outline-offset: 2px;
+}
+
+.debug-content {
+  clear: both;
+  padding-top: 18px;
+}
+
+.debug-section {
+  border-top: 1px solid var(--line);
+  margin-top: 22px;
+  padding-top: 22px;
+}
+
+.debug-section.first {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sidebar-header h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.sidebar-header span,
+.sidebar-empty {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.sidebar-empty {
+  margin: 0;
+}
+
+.debug-list {
+  list-style: none;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+}
+
+.debug-row {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.debug-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.debug-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+
+.debug-question,
+.debug-justification {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.debug-question {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.debug-justification {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.review-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.review-meta strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.due-badge {
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.due-badge.now {
+  background: #e5efd4;
+  color: var(--success);
+}
+
+.due-badge.scheduled {
+  background: #eadfca;
+  color: #705235;
+}
+
+@media (max-width: 760px) {
+  .page {
+    padding: 0;
+    background: var(--bg);
+  }
+
+  .page::after {
+    display: none;
+  }
+
+  .reader-panel {
+    width: 100%;
+    min-height: 100vh;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .chat-stream {
+    width: 100%;
+    padding: 72px 24px 142px;
+  }
+
+  .entry-grid {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .entry-divider {
+    margin: 34px 0 36px 66px;
+  }
+
+  .entry-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .entry-icon svg {
+    width: 27px;
+    height: 27px;
+    stroke-width: 4;
+  }
+
+  .question-title {
+    font-size: 29px;
+    line-height: 1.18;
+  }
+
+  .answer-text {
+    margin-top: 22px;
+    font-size: 20px;
+  }
+
+  .composer {
+    width: calc(100vw - 28px);
+    min-height: 70px;
+    bottom: 18px;
+    border-radius: 24px;
+    padding: 12px 14px 12px 22px;
+  }
+
+  .composer-input {
+    height: 44px;
+    min-height: 44px;
+    font-size: 21px;
+    line-height: 44px;
+  }
+
+  .composer-input::placeholder {
+    line-height: 44px;
+  }
+
+  .composer-submit {
+    width: 48px;
+    height: 48px;
+  }
+
+  .queue-button {
+    top: 18px;
+    right: 18px;
+    width: 46px;
+    height: 46px;
+  }
+}

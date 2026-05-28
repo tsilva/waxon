@@ -1,0 +1,157 @@
+question,reviews,next_due
+What is the basic supervised training loop?,1779986365010:8,1780159165010
+What does a supervised loss measure?,1779987197113:9,1780332797113
+Does loss directly measure distance from ideal parameters?,1779987962420:9,1780333562420
+"In classification, what does cross-entropy penalize?",1779988165417:0,1779988225417
+"With gradient descent, what happens to a parameter when its loss gradient is positive?",1779988212852:9,1780333812852
+"With gradient descent, what happens to a parameter when its loss gradient is negative?",,0
+What is the gradient descent update rule for one parameter?,,0
+What does $\frac{dL}{dw} = 0.3$ mean locally?,,0
+"If $\frac{dL}{dw} = -0.7$, what local change to $w$ decreases loss?",,0
+What does the learning rate scale?,,0
+Why is a raw gradient not an exact correction for an example?,,0
+What can happen if the learning rate is too high?,,0
+Why use mini-batches instead of single-example updates?,,0
+What does a full-batch gradient represent?,,0
+Why can larger batches often support larger learning rates?,,0
+What does training loss down while validation loss rises usually indicate?,,0
+What should be checked before trusting an overfitting diagnosis?,,0
+Why can data augmentation improve generalization?,,0
+What makes an augmentation unsafe?,,0
+What is an inductive bias in a model architecture?,,0
+What bias do shared CNN filters create?,,0
+What is translation equivariance?,,0
+What is translation invariance?,,0
+Why should early vision layers preserve spatial location?,,0
+What is attention's core role in a transformer?,,0
+"In attention, what do queries and keys determine?",,0
+"How are Q, K, and V produced in a transformer layer?",,0
+"If $\frac{dL}{dy} = 48$ and $\Delta y = 0.01$, what is the approximate $\Delta L$?",,0
+"For one variable $z$ with local derivative $\frac{dL}{dz}$, how do you estimate the loss change from a small $\Delta z$?",,0
+"If $L = y^2$, what is $\frac{dL}{dy}$?",,0
+Why are local derivatives multiplied along a chain?,,0
+"For $h = wx$, $y = 2h$, $L = y^2$, $w = 3$, and $x = 4$, what is $\frac{dL}{dw}$?",,0
+"For input batch shape (batch, in_features) and weight shape (in_features, out_features), what is the output shape?",,0
+"When adding bias shape (out_features,) to activations shape (batch, out_features), how is the bias broadcast?",,0
+"For logits shape (batch, classes), what does one row represent?",,0
+"For target class k, what pressure does cross-entropy put on logits?",,0
+"Why can a classification target be class ID 0 instead of one-hot vector [1, 0, 0, 0]?",,0
+"With logits shape (batch, classes) and targets shape (batch,), how many per-example losses are computed before reduction?",,0
+Why reduce per-example losses to one scalar before backprop?,,0
+"For the same batch, how does mean-reduction gradient compare to sum-reduction gradient?",,0
+"If you switch from sum loss to mean loss and keep the same learning rate, what happens to update size?",,0
+Why call zero_grad() before backprop on the next batch?,,0
+What is gradient accumulation used for?,,0
+What is the usual order of a training step?,,0
+What can happen if optimizer.step() runs before loss.backward()?,,0
+What does eval mode change during validation?,,0
+What does no-grad or inference mode change during validation?,,0
+Why should dropout be disabled during validation?,,0
+Why should batch norm use eval mode during validation?,,0
+Why not use validation data for gradient updates?,,0
+Why keep a final test set separate from validation?,,0
+What validation split problems should be checked before changing model capacity or regularization?,,0
+Why can training loss be higher than validation loss without a bug?,,0
+What is the failure mode of too-aggressive augmentation?,,0
+When is an augmentation appropriate?,,0
+Why can CNNs need less image data than MLPs?,,0
+Why do stacked CNN layers support hierarchical visual features?,,0
+"Given dL/dw = -20, manual Delta w = +0.03, and optimizer learning rate eta = 0.03, what are approximate Delta L and optimizer Delta w?",,0
+"Given w = 2.0, dL/dw = +8, and optimizer learning rate eta = 0.05, what are optimizer Delta w and new w?",,0
+"Given w = 7.0, dL/dw = -6, and optimizer learning rate eta = 0.2, what are optimizer Delta w and new w?",,0
+"You increase batch size from 32 to 4096, keep the same optimizer and learning rate, and training becomes much less noisy but also makes slower progress per epoch. What are two plausible reasons?",,0
+"If loss uses mean reduction, and batch size increases from 32 to 4096, what happens by default to gradient noise vs expected gradient scale?",,0
+"If batch size is 100 and sum-reduction gradient is 500, what would the mean-reduction gradient be for that same batch?",,0
+"A training script accidentally changes CrossEntropyLoss(reduction=""mean"") to reduction=""sum"" while keeping the same batch size and learning rate. What happens to the effective update size, and what symptom might you see during training?",,0
+"You change batch size from 32 to 128, keep reduction=""mean"" and the same learning rate. Compared to before, do you expect each optimizer step to be automatically 4x larger, 4x smaller, or neither by default? Why?",,0
+"A model is training with batch size 32, reduction=""mean"", and learning rate 1e-3. You increase batch size to 512. Name one thing that improves and one thing you may need to retune or watch.",,0
+"Same dataset, same number of epochs: if batch size increases from 32 to 512, what happens to the number of optimizer updates per epoch?",,0
+"A classifier outputs logits with shape (64, 10), and the targets have shape (64,). What does one row of the logits represent, and what does one target integer represent?",,0
+"Suppose after softmax, one example has class probabilities [0.1, 0.7, 0.2], and the target class index is 1. Which number does cross-entropy take the negative log of?",,0
+"Probabilities are [0.92, 0.05, 0.03], and the target class index is 1. Does cross-entropy produce a small or large loss, and why?",,0
+"In PyTorch, CrossEntropyLoss expects raw logits, not softmax probabilities. Why is it usually better to pass logits directly instead of applying softmax yourself first?",,0
+"During training, your classifier's final layer outputs shape (64, 10). You apply softmax, then pass the result into CrossEntropyLoss. What is the bug, and what should you pass instead?",,0
+"Why is passing softmax probabilities into CrossEntropyLoss not just redundant, but the wrong API usage?",,0
+"For logits [2, 1, -1] with target index 0, which is bigger: logsumexp(logits) or the largest logit 2, and why?",,0
+"If logits are [2, -100, -100] and the target is class 0, will the cross-entropy loss be near 0 or large? Why?",,0
+"If logits are [4, -2, 0] and the target class index is 2, what is the target logit value used in logsumexp(logits) - target_logit?",,0
+"For logits [4, -2, 0] and target class index 2, is the cross-entropy loss closer to 0, 4, or 100? Use logsumexp(logits) - target_logit qualitatively.",,0
+"Why does computing logsumexp([1000, 999]) naively as log(exp(1000) + exp(999)) risk numerical overflow, and what does subtracting the max logit change inside the exponentials?",,0
+Natural log maps 1 to 0 and e ~= 2.718 to 1. Is log(1.1) closer to 0 or 1?,,0
+"Now use the same anchors: is ln(1.368) closer to 0 or to 1, and why?",,0
+"Put it together: why is logsumexp([1000, 999]) about 1000.313 instead of about 1001?",,0
+"Without exact calculation, if the shifted logits are [0, -1], why must the logsumexp correction ln(exp(0) + exp(-1)) be less than ln(2)?",,0
+"Since exp(-1) = 1 / exp(1), and exp(1) = e ~= 2.718, is exp(-1) about 0, about 0.37, or about 2.7?",,0
+"Directed recall: what is exp(1) equal to, approximately?",,0
+Directed recall: complete the pattern exp(-a) = ?,,0
+"Is exp(-3) exactly zero, or a small positive number? Use the reciprocal rule.",,0
+"Simpler analogy: if you factor x^10 out of x^3, what leftover factor do you need so that x^10 * leftover = x^3?",,0
+"Same pattern: if you factor exp(1000) out of exp(100), what leftover factor do you need so that exp(1000) * leftover = exp(100)?",,0
+Fill in the blank: exp(1000) + exp(100) = exp(1000) * (exp(0) + ___).,,0
+Now take ln of both sides: why does ln(exp(1000) * (exp(0) + exp(-900))) become 1000 + ln(exp(0) + exp(-900))?,,0
+"If logits are [1000, 100], what goes wrong with naive softmax's exp(1000) step, and how does subtracting the max avoid it?",,0
+"For a 3-class one-hot target [0, 1, 0] and predicted probabilities [0.2, 0.7, 0.1], what terms remain in the general cross-entropy sum -sum target_i * log(prob_i)?",,0
+"If the target class is 1, and softmax says p_target = exp(logit_1) / sum_j exp(logit_j), what expression do we get when substituting that into CE = -ln(p_target)?",,0
+"Algebra-only: if A = ln(exp(logit_i)) and B = ln(sum_j exp(logit_j)), what is -(A - B)?",,0
+Now simplify -ln(exp(logit_i)) + ln(sum_j exp(logit_j)). What does it become using ln(exp(x)) = x and logsumexp(logits) = ln(sum_j exp(logit_j))?,,0
+"In one sentence, why does cross-entropy with a one-hot target reduce to logsumexp(logits) - target_logit?",,0
+"Complete the sentence: one-hot cross-entropy becomes -ln(p_target), and because p_target = exp(target_logit) / sum_j exp(logit_j), this simplifies to what?",,0
+Sign check: what is ln(sum_j exp(logit_j)) equal to in shorthand: logsumexp(logits) or -logsumexp(logits)?,,0
+"Final recap: in one or two lines, derive CE = logsumexp(logits) - target_logit from CE = -ln(p_target) and the softmax formula for p_target.",,0
+"Directed recall: what are the four anchor formulas exp(1), exp(-a), ln(1), and ln(exp(x))?",,0
+"A linear layer maps input shape (batch, 20) to output shape (batch, 5). What shape should its weight matrix have if we use the convention output = input @ W + b?",,0
+"Concrete version: if input is (32, 20), W is (20, 5), and b is (5,), what is the shape of input @ W, and what shape is b broadcast to when added?",,0
+"Bug check: a batch has input shape (32, 20), but your linear layer was created with weight shape (10, 5) under input @ W. What dimension mismatch causes the error?",,0
+"In matrix multiply (32, 20) @ (10, 5), which two dimensions are supposed to match, and what are their actual values here?",,0
+"If the multiply were valid as (32, 20) @ (20, 5), which dimensions survive into the output shape?",,0
+"A classifier outputs logits shape (32, 5), but the target tensor has shape (32, 5) with one-hot rows. If using PyTorch CrossEntropyLoss in its usual class-index mode, what target shape should it have instead, and what does each value mean?",,0
+"Your model outputs logits (16, 3), targets are class indices (16,), and CrossEntropyLoss(reduction=""none"") is used. What shape is the unreduced loss, and what does each element represent?",,0
+"If that (16,) unreduced loss is changed to reduction=""mean"", what shape is the final loss, and why is a scalar convenient for backprop?",,0
+"In a normal PyTorch training step, should optimizer.step() happen before or after loss.backward(), and why?",,0
+What can go wrong if you forget optimizer.zero_grad() before the next backward pass?,,0
+"When is it intentional to not call optimizer.step() after every backward() call, and what training technique is that?",,0
+"If you want an effective batch size of 128 but can only fit micro-batches of 32, how many micro-batches would you accumulate before one optimizer step?",,0
+"If each micro-batch loss is already a mean over 32 examples and you accumulate 4 micro-batches, why might you divide each loss by 4 before calling backward()?",,0
+"Training bug: validation loss is computed without torch.no_grad(), but you still never call backward() on it. What is the main problem?",,0
+"If dL/dw = -12 at the current point and you manually nudge w by +0.04, what is the approximate change in loss, and is this an optimizer update?",,0
+"Same gradient: dL/dw = -12. If the optimizer uses learning rate 0.04, what Delta w does gradient descent apply?",,0
+"If a full-batch gradient is the exact gradient of the current training-set loss, why might mini-batches still train better or faster in practice?",,0
+"What is one way mini-batch gradient noise can help optimization or generalization, compared with a deterministic full-batch gradient?",,0
+"Imagine two parameter regions fit training equally well: one is very sharp, where tiny parameter changes quickly hurt loss, and one is flat, where tiny changes barely hurt loss. Why might mini-batch noise make the flat region easier to stay in?",,0
+"In mini-batch SGD, each batch gives a slightly different gradient estimate. If the full-dataset gradient points straight downhill, why might the mini-batch gradient sometimes point a bit sideways instead?",,0
+"Suppose the full-dataset gradient is mostly [downhill=1.0, sideways=0.0], but one mini-batch gives [downhill=1.0, sideways=0.3]. In this toy setup, which part is the useful downhill signal and which part is stochastic sideways noise?",,0
+"If logits has shape (32, 5) and target[0] = 2, which single logit does cross-entropy use as the true-class logit for the first example?",,0
+"If logits[0] = [1.2, -0.4, 3.0, 0.7, -2.1] and target[0] = 2, what is the true-class logit value, and why is that value not itself a probability?",,0
+"If logits[0] = [1.2, -0.4, 3.0, 0.7, -2.1] and target[0] = 2, what is the true-class logit value?",,0
+Why is the value 3.0 a logit rather than a probability?,,0
+What two constraints must class probabilities satisfy that raw logits do not?,,0
+What operation converts logits into class probabilities?,,0
+"If you apply softmax to model outputs before passing them to PyTorch CrossEntropyLoss, what is the mistake?",,0
+"For logits shape (64, 10), what shape should class-index targets have for PyTorch CrossEntropyLoss?",,0
+"If a batch has 64 examples, how many class-index target values should the target tensor contain?",,0
+"So for logits shape (64, 10), what is the class-index target tensor shape?",,0
+"During validation, what different problem does model.eval() solve compared with torch.no_grad()?",,0
+"Sign check: starting from CE = -ln(exp(target_logit) / sum_j exp(logit_j)), what does it simplify to?",,0
+What is ln(A / B) equal to in terms of ln(A) and ln(B)?,,0
+Then what is -ln(A / B) equal to?,,0
+"In attention, after the query-key scores choose weights over positions, what role do the value vectors play?",,0
+"With logits shape (16, 3), class-index targets shape (16,), and CrossEntropyLoss(reduction=""none""), what shape is the unreduced loss?",,0
+"Why does unreduced cross-entropy for logits (16, 3) and class-index targets (16,) return (16,) instead of (16, 3)?",,0
+"For one row of 3 logits and one target class index, how many loss scalars does cross-entropy produce?",,0
+"If each of 16 examples produces one loss scalar, what is the shape of the unreduced loss?",,0
+"If shifting the input image right causes the convolutional feature map to shift right too, is that translation equivariance or translation invariance?",,0
+"If a classifier gives the same class score whether the object is left or right in the image, is that closer to translation equivariance or translation invariance?",,0
+"In one sentence, what is the difference between translation equivariance and translation invariance?",,0
+"In attention, after the query-key scores become weights, what role do the value vectors play in producing the output?",,0
+"In the formula output = attention_weights @ V, what exactly is being multiplied by the attention weights?",,0
+"Does each row of V represent content for one token, or content for a pair of tokens?",,0
+"For one query token, if its attention weights over three source tokens are [0.1, 0.7, 0.2], what kind of combination of the three value vectors forms its output?",,0
+"If x and y are tensors with the same shape, what happens to the shape when you compute x + y?",,0
+"If x has shape (4, 5), what shape does x * 3.0 have?",,0
+"If x has shape (2, 3, 4), what shape does torch.relu(x) have?",,0
+"What do elementwise operations do to each tensor entry, and why does that usually preserve shape?",,0
+"If h has shape (4, 3) and bias b has shape (3,), what shape is h + b?",,0
+"In h + b with h shape (4, 3) and b shape (3,), is b reused across the batch axis or across the feature axis?",,0
+"If b = [b1, b2, b3], does each row of h get the same three bias values, or does each column get one repeated bias value down the batch?",,0
+"In h + b where h is (4, 3) and b is (3,), which axis is b repeated across?",,0
+"If b has one value per feature column, is it aligned with the feature axis or repeated across the feature axis?",,0
