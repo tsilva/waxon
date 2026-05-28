@@ -2,7 +2,9 @@
 
 import {
   FormEvent,
+  Fragment,
   KeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -71,6 +73,26 @@ type TranscriptItem = {
   answer: Extract<ChatMessage, { kind: "answer" }> | null;
 };
 
+type MathParseResult = {
+  content: string;
+  nextIndex: number;
+};
+
+const mathSymbolMap: Record<string, string> = {
+  alpha: "\u03b1",
+  beta: "\u03b2",
+  delta: "\u03b4",
+  Delta: "\u0394",
+  epsilon: "\u03b5",
+  eta: "\u03b7",
+  gamma: "\u03b3",
+  lambda: "\u03bb",
+  mu: "\u03bc",
+  nabla: "\u2207",
+  partial: "\u2202",
+  theta: "\u03b8",
+};
+
 function buildTranscriptItems(messages: ChatMessage[]): TranscriptItem[] {
   const items: TranscriptItem[] = [];
 
@@ -106,6 +128,317 @@ function buildTranscriptItems(messages: ChatMessage[]): TranscriptItem[] {
   }
 
   return items;
+}
+
+function findClosingDelimiter(
+  source: string,
+  delimiter: string,
+  startIndex: number,
+) {
+  for (let index = startIndex; index < source.length; index += 1) {
+    if (
+      source.startsWith(delimiter, index) &&
+      source[index - 1] !== "\\"
+    ) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function readMathGroup(source: string, startIndex: number): MathParseResult | null {
+  if (source[startIndex] !== "{") {
+    return null;
+  }
+
+  let depth = 0;
+
+  for (let index = startIndex; index < source.length; index += 1) {
+    const character = source[index];
+
+    if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return {
+          content: source.slice(startIndex + 1, index),
+          nextIndex: index + 1,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function readMathAtom(source: string, startIndex: number): MathParseResult {
+  const group = readMathGroup(source, startIndex);
+
+  if (group) {
+    return group;
+  }
+
+  const atomMatch = source.slice(startIndex).match(/^[A-Za-z0-9]+/);
+
+  if (atomMatch) {
+    return {
+      content: atomMatch[0],
+      nextIndex: startIndex + atomMatch[0].length,
+    };
+  }
+
+  return {
+    content: source[startIndex] ?? "",
+    nextIndex: startIndex + 1,
+  };
+}
+
+function renderMathNodes(expression: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let index = 0;
+
+  while (index < expression.length) {
+    if (expression.startsWith("\\frac", index)) {
+      const numerator = readMathGroup(expression, index + "\\frac".length);
+
+      if (numerator) {
+        const denominator = readMathGroup(expression, numerator.nextIndex);
+
+        if (denominator) {
+          nodes.push(
+            <span className="math-fraction" key={`frac-${index}`}>
+              <span className="math-fraction-numerator">
+                {renderMathNodes(numerator.content)}
+              </span>
+              <span className="math-fraction-denominator">
+                {renderMathNodes(denominator.content)}
+              </span>
+            </span>,
+          );
+          index = denominator.nextIndex;
+          continue;
+        }
+      }
+    }
+
+    const character = expression[index];
+
+    if (character === "_" || character === "^") {
+      const atom = readMathAtom(expression, index + 1);
+      const Element = character === "_" ? "sub" : "sup";
+
+      nodes.push(
+        <Element key={`${character}-${index}`}>
+          {renderMathNodes(atom.content)}
+        </Element>,
+      );
+      index = atom.nextIndex;
+      continue;
+    }
+
+    if (character === "\\") {
+      const command = expression.slice(index + 1).match(/^[A-Za-z]+/);
+
+      if (command) {
+        nodes.push(
+          <span className="math-command" key={`command-${index}`}>
+            {mathSymbolMap[command[0]] ?? command[0]}
+          </span>,
+        );
+        index += command[0].length + 1;
+        continue;
+      }
+    }
+
+    nodes.push(character);
+    index += 1;
+  }
+
+  return nodes;
+}
+
+function MathExpression({
+  expression,
+  display = false,
+}: {
+  expression: string;
+  display?: boolean;
+}) {
+  return (
+    <span className={display ? "math-expression display" : "math-expression"}>
+      {renderMathNodes(expression.trim())}
+    </span>
+  );
+}
+
+function renderInlineMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let index = 0;
+
+  while (index < text.length) {
+    if (text.startsWith("**", index)) {
+      const closeIndex = findClosingDelimiter(text, "**", index + 2);
+
+      if (closeIndex > index) {
+        nodes.push(
+          <strong key={`strong-${index}`}>
+            {renderInlineMarkdown(text.slice(index + 2, closeIndex))}
+          </strong>,
+        );
+        index = closeIndex + 2;
+        continue;
+      }
+    }
+
+    if (text[index] === "`") {
+      const closeIndex = findClosingDelimiter(text, "`", index + 1);
+
+      if (closeIndex > index) {
+        nodes.push(
+          <code className="markdown-inline-code" key={`code-${index}`}>
+            {text.slice(index + 1, closeIndex)}
+          </code>,
+        );
+        index = closeIndex + 1;
+        continue;
+      }
+    }
+
+    if (text[index] === "$" && text[index + 1] !== "$") {
+      const closeIndex = findClosingDelimiter(text, "$", index + 1);
+
+      if (closeIndex > index) {
+        nodes.push(
+          <MathExpression
+            expression={text.slice(index + 1, closeIndex)}
+            key={`math-${index}`}
+          />,
+        );
+        index = closeIndex + 1;
+        continue;
+      }
+    }
+
+    if (
+      text[index] === "*" &&
+      text[index + 1] !== "*" &&
+      text[index - 1] !== "*"
+    ) {
+      const closeIndex = findClosingDelimiter(text, "*", index + 1);
+
+      if (closeIndex > index) {
+        nodes.push(
+          <em key={`em-${index}`}>
+            {renderInlineMarkdown(text.slice(index + 1, closeIndex))}
+          </em>,
+        );
+        index = closeIndex + 1;
+        continue;
+      }
+    }
+
+    const nextSpecial = text
+      .slice(index + 1)
+      .search(/(\*\*|`|\$|\*)/);
+    const endIndex =
+      nextSpecial === -1 ? text.length : index + 1 + nextSpecial;
+
+    nodes.push(text.slice(index, endIndex));
+    index = endIndex;
+  }
+
+  return nodes;
+}
+
+function MarkdownInline({
+  as: Element,
+  className,
+  text,
+}: {
+  as: "h2" | "p";
+  className: string;
+  text: string;
+}) {
+  const lines = text.split("\n");
+
+  return (
+    <Element className={className}>
+      {lines.map((line, index) => (
+        <Fragment key={`${line}-${index}`}>
+          {index > 0 ? <br /> : null}
+          {renderInlineMarkdown(line)}
+        </Fragment>
+      ))}
+    </Element>
+  );
+}
+
+function MarkdownContent({
+  className,
+  text,
+}: {
+  className: string;
+  text: string;
+}) {
+  const blocks = text.trim().split(/\n{2,}/);
+
+  return (
+    <div className={`markdown-content ${className}`}>
+      {blocks.map((block, index) => {
+        const trimmedBlock = block.trim();
+        const lines = trimmedBlock.split("\n");
+
+        if (trimmedBlock.startsWith("$$") && trimmedBlock.endsWith("$$")) {
+          return (
+            <p className="markdown-paragraph" key={`display-${index}`}>
+              <MathExpression
+                display
+                expression={trimmedBlock.slice(2, -2)}
+              />
+            </p>
+          );
+        }
+
+        if (lines.every((line) => /^[-*]\s+/.test(line.trim()))) {
+          return (
+            <ul className="markdown-list" key={`ul-${index}`}>
+              {lines.map((line, lineIndex) => (
+                <li key={`${line}-${lineIndex}`}>
+                  {renderInlineMarkdown(line.trim().slice(2))}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        if (lines.every((line) => /^\d+\.\s+/.test(line.trim()))) {
+          return (
+            <ol className="markdown-list" key={`ol-${index}`}>
+              {lines.map((line, lineIndex) => (
+                <li key={`${line}-${lineIndex}`}>
+                  {renderInlineMarkdown(line.trim().replace(/^\d+\.\s+/, ""))}
+                </li>
+              ))}
+            </ol>
+          );
+        }
+
+        return (
+          <p className="markdown-paragraph" key={`p-${index}`}>
+            {lines.map((line, lineIndex) => (
+              <Fragment key={`${line}-${lineIndex}`}>
+                {lineIndex > 0 ? <br /> : null}
+                {renderInlineMarkdown(line)}
+              </Fragment>
+            ))}
+          </p>
+        );
+      })}
+    </div>
+  );
 }
 
 function formatDueBadge(item: ReviewQueueItem): string {
@@ -439,10 +772,17 @@ export default function Home() {
                   <ReviewIcon status={item.answer ? "answered" : "active"} />
                 </div>
                 <div className="entry-content">
-                  <h2 className="question-title">{item.question}</h2>
+                  <MarkdownInline
+                    as="h2"
+                    className="question-title"
+                    text={item.question}
+                  />
                   {item.answer ? (
                     <>
-                      <p className="answer-text">{item.answer.answer}</p>
+                      <MarkdownContent
+                        className="answer-text"
+                        text={item.answer.answer}
+                      />
                       <div className="judgement">
                         {item.answer.status === "grading" ? (
                           <span className="judgement-pending">Judging...</span>
@@ -566,7 +906,11 @@ export default function Home() {
                         {formatDueBadge(item)}
                       </span>
                     </div>
-                    <p className="debug-question">{item.question}</p>
+                    <MarkdownInline
+                      as="p"
+                      className="debug-question"
+                      text={item.question}
+                    />
                     {item.lastScore !== null ? (
                       <div className="review-meta">
                         <span>Last score</span>

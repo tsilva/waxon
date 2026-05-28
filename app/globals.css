@@ -89,18 +89,39 @@ button {
 
 .chat-stream {
   display: grid;
-  width: min(1040px, calc(100% - 300px));
+  width: 100%;
   gap: 0;
   align-content: start;
   min-height: 0;
-  margin-left: clamp(128px, 10%, 150px);
-  margin-right: auto;
-  padding: 70px 0 34px;
+  padding: 70px 24px 34px;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  scrollbar-color: #b79f81 rgb(245 238 226 / 66%);
+  scrollbar-width: thin;
+}
+
+.chat-stream::-webkit-scrollbar {
+  width: 14px;
+}
+
+.chat-stream::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgb(245 238 226 / 66%);
+}
+
+.chat-stream::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background:
+    linear-gradient(#b79f81, #7f9d7d) padding-box,
+    transparent border-box;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 42%);
 }
 
 .review-entry {
+  width: min(1040px, calc(100% - 300px));
+  margin-left: clamp(128px, 10%, 150px);
+  margin-right: auto;
   color: var(--ink);
 }
 
@@ -160,7 +181,86 @@ button {
   font-size: 26px;
   font-weight: 500;
   line-height: 1.48;
-  white-space: pre-wrap;
+}
+
+.markdown-content {
+  display: grid;
+  gap: 14px;
+}
+
+.markdown-paragraph {
+  margin: 0;
+}
+
+.markdown-list {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.markdown-list li + li {
+  margin-top: 8px;
+}
+
+.markdown-inline-code {
+  border-radius: 6px;
+  padding: 0.08em 0.24em;
+  background: #eee8d7;
+  color: var(--ink);
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.82em;
+}
+
+.math-expression {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.13em;
+  max-width: 100%;
+  color: inherit;
+  font-family:
+    "Times New Roman", "STIX Two Math", "Cambria Math", Georgia, serif;
+  font-style: italic;
+  line-height: 1;
+  vertical-align: -0.08em;
+  white-space: nowrap;
+}
+
+.math-expression.display {
+  display: flex;
+  justify-content: center;
+  padding: 0.2em 0;
+}
+
+.math-command {
+  font-style: normal;
+}
+
+.math-fraction {
+  display: inline-grid;
+  grid-template-rows: auto auto;
+  align-items: center;
+  min-width: 1.3em;
+  margin: 0 0.08em;
+  vertical-align: middle;
+}
+
+.math-fraction-numerator,
+.math-fraction-denominator {
+  display: block;
+  padding: 0 0.16em;
+  text-align: center;
+  font-size: 0.72em;
+  line-height: 1.05;
+}
+
+.math-fraction-numerator {
+  border-bottom: 0.07em solid currentColor;
+}
+
+.math-expression sub,
+.math-expression sup {
+  font-size: 0.62em;
+  line-height: 0;
 }
 
 .judgement {
@@ -510,8 +610,12 @@ button {
 
   .chat-stream {
     width: 100%;
-    margin-left: 0;
     padding: 72px 24px 24px;
+  }
+
+  .review-entry {
+    width: 100%;
+    margin-left: 0;
   }
 
   .entry-grid {
