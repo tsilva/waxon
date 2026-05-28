@@ -4,9 +4,9 @@ What does a supervised loss measure?,1779987197113:9,1780332797113
 Does loss directly measure distance from ideal parameters?,1779987962420:9,1780333562420
 "In classification, what does cross-entropy penalize?",1779988165417:0,1779988225417
 "With gradient descent, what happens to a parameter when its loss gradient is positive?",1779988212852:9,1780333812852
-"With gradient descent, what happens to a parameter when its loss gradient is negative?",,0
-What is the gradient descent update rule for one parameter?,,0
-What does $\frac{dL}{dw} = 0.3$ mean locally?,,0
+"With gradient descent, what happens to a parameter when its loss gradient is negative?",1779990800415:0|1779990822577:0,1779990882577
+What is the gradient descent update rule for one parameter?,1779990007744:10,1780594807744
+What does $\frac{dL}{dw} = 0.3$ mean locally?,1779990818254:0|1779990824336:0,1779990884336
 "If $\frac{dL}{dw} = -0.7$, what local change to $w$ decreases loss?",,0
 What does the learning rate scale?,,0
 Why is a raw gradient not an exact correction for an example?,,0
