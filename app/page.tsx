@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import {
   FormEvent,
   Fragment,
@@ -8,6 +9,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -99,6 +101,51 @@ type PreviousAnswerItem = {
 
 type ActiveTab = "review" | "queue";
 
+type PendingSpeechCommand = {
+  command: "skip" | "submit";
+  heldText: string;
+  submitAnswer: string;
+};
+
+type SpeechStatus =
+  | "idle"
+  | "starting"
+  | "listening"
+  | "unsupported"
+  | "error";
+
+type SpeechRecognitionAlternative = {
+  transcript: string;
+};
+
+type SpeechRecognitionResult = {
+  isFinal: boolean;
+  [index: number]: SpeechRecognitionAlternative;
+};
+
+type SpeechRecognitionResultList = {
+  length: number;
+  [index: number]: SpeechRecognitionResult;
+};
+
+type SpeechRecognitionEvent = Event & {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+};
+
+type SpeechRecognition = EventTarget & {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onend: (() => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognition;
+
 type QuestionStats = {
   question: string;
   reviewHistory: ReviewHistoryEntry[];
@@ -122,6 +169,8 @@ type MathParseResult = {
 
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
+const SPEECH_COMMAND_SETTLE_MS = 1000;
+const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit|skip)[.!?]*$/i;
 
 const mathSymbolMap: Record<string, string> = {
   alpha: "\u03b1",
@@ -531,6 +580,79 @@ function formatNextDue(stats: QuestionStats): string {
   return `In ${formatDurationBadge(stats.msUntilDue)}`;
 }
 
+function mergeTranscriptText(base: string, addition: string): string {
+  const trimmedAddition = addition.trim();
+
+  if (!trimmedAddition) {
+    return base;
+  }
+
+  if (!base.trim()) {
+    return trimmedAddition;
+  }
+
+  return /\s$/.test(base) ? `${base}${trimmedAddition}` : `${base} ${trimmedAddition}`;
+}
+
+function extractTerminalSpeechCommand(
+  baseAnswer: string,
+  transcript: string,
+): PendingSpeechCommand | null {
+  const commandMatch = transcript.match(TERMINAL_SPEECH_COMMAND);
+
+  if (!commandMatch) {
+    return null;
+  }
+
+  const command = commandMatch[1]?.toLowerCase();
+
+  if (command !== "submit" && command !== "skip") {
+    return null;
+  }
+
+  const commandStart = commandMatch.index ?? 0;
+  const beforeCommand = transcript.slice(0, commandStart);
+
+  return {
+    command,
+    heldText: transcript.slice(commandStart).trim(),
+    submitAnswer: mergeTranscriptText(baseAnswer, beforeCommand),
+  };
+}
+
+function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const speechWindow = window as Window &
+    typeof globalThis & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+
+  return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
+}
+
+function MicrophoneIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <path d="M12 14a4 4 0 0 0 4-4V6a4 4 0 0 0-8 0v4a4 4 0 0 0 4 4Z" />
+      <path d="M19 10a7 7 0 0 1-14 0" />
+      <path d="M12 17v4" />
+      <path d="M8 21h8" />
+    </svg>
+  );
+}
+
+function StopIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <rect height="10" rx="2" width="10" x="7" y="7" />
+    </svg>
+  );
+}
+
 function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
   const width = 520;
   const height = 190;
@@ -624,6 +746,9 @@ function SubmitIcon() {
 export default function Home() {
   const [question, setQuestion] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
+  const [speechPreview, setSpeechPreview] = useState("");
+  const [speechStatus, setSpeechStatus] = useState<SpeechStatus>("idle");
+  const [speechMessage, setSpeechMessage] = useState<string | null>(null);
   const [queueRemaining, setQueueRemaining] = useState(0);
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>([]);
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
@@ -637,6 +762,44 @@ export default function Home() {
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const answerRef = useRef(answer);
+  const questionRef = useRef(question);
+  const isSubmittingRef = useRef(isSubmitting);
+  const keepListeningRef = useRef(false);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const pendingSpeechCommandRef = useRef<PendingSpeechCommand | null>(null);
+  const pendingSpeechCommandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  useEffect(() => {
+    answerRef.current = answer;
+  }, [answer]);
+
+  useEffect(() => {
+    questionRef.current = question;
+  }, [question]);
+
+  useEffect(() => {
+    isSubmittingRef.current = isSubmitting;
+  }, [isSubmitting]);
+
+  const clearPendingSpeechCommand = useCallback(() => {
+    if (pendingSpeechCommandTimerRef.current) {
+      clearTimeout(pendingSpeechCommandTimerRef.current);
+      pendingSpeechCommandTimerRef.current = null;
+    }
+
+    pendingSpeechCommandRef.current = null;
+  }, []);
+
+  const appendAnswerText = useCallback((text: string) => {
+    setAnswer((current) => {
+      const nextAnswer = mergeTranscriptText(current, text);
+      answerRef.current = nextAnswer;
+      return nextAnswer;
+    });
+  }, []);
 
   const appendQuestion = useCallback((nextQuestion: string) => {
     setMessages((current) => {
@@ -713,7 +876,7 @@ export default function Home() {
 
   useEffect(() => {
     void loadNextQuestion();
-  }, [loadNextQuestion]);
+  }, [clearPendingSpeechCommand, loadNextQuestion]);
 
   useEffect(() => {
     const events = new EventSource("/api/queue-status/stream");
@@ -781,16 +944,20 @@ export default function Home() {
     });
   }, [evaluations]);
 
-  const submit = useCallback(async () => {
-    if (!question || isSubmitting) {
-      return;
+  const submit = useCallback(async (answerOverride?: string) => {
+    clearPendingSpeechCommand();
+    const activeQuestion = questionRef.current;
+
+    if (!activeQuestion || isSubmittingRef.current) {
+      return false;
     }
 
-    const submittedQuestion = question;
-    const submittedAnswer = answer.trim();
+    const submittedQuestion = activeQuestion;
+    const submittedAnswer = (answerOverride ?? answerRef.current).trim();
 
     setIsSubmitting(true);
     setAnswer("");
+    setSpeechPreview("");
     setError(null);
 
     try {
@@ -829,6 +996,7 @@ export default function Home() {
       ]);
 
       await loadNextQuestion();
+      return true;
     } catch (submitError) {
       setQuestion(submittedQuestion);
       setAnswer(submittedAnswer);
@@ -837,15 +1005,216 @@ export default function Home() {
           ? submitError.message
           : "Failed to submit the answer.",
       );
+      return false;
     } finally {
       setIsSubmitting(false);
     }
-  }, [answer, isSubmitting, loadNextQuestion, question]);
+  }, [clearPendingSpeechCommand, loadNextQuestion]);
+
+  const skipCurrentQuestion = useCallback(async () => {
+    clearPendingSpeechCommand();
+    const activeQuestion = questionRef.current;
+
+    if (!activeQuestion || isSubmittingRef.current) {
+      return false;
+    }
+
+    setAnswer("");
+    answerRef.current = "";
+    setSpeechPreview("");
+    setError(null);
+
+    try {
+      const response = await fetch("/api/skip-question", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          question: activeQuestion,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to skip the question.");
+      }
+
+      const data = (await response.json()) as NextQuestionResponse;
+      setQuestion(data.question);
+      questionRef.current = data.question;
+      setQueueRemaining(data.queueRemaining);
+
+      if (data.question) {
+        appendQuestion(data.question);
+      }
+
+      return true;
+    } catch (skipError) {
+      setError(
+        skipError instanceof Error
+          ? skipError.message
+          : "Failed to skip the question.",
+      );
+      return false;
+    }
+  }, [appendQuestion, clearPendingSpeechCommand]);
+
+  const handleSpeechText = useCallback(
+    async (transcript: string) => {
+      let transcriptToApply = transcript;
+      const pendingCommand = pendingSpeechCommandRef.current;
+
+      if (pendingCommand) {
+        clearPendingSpeechCommand();
+        transcriptToApply = mergeTranscriptText(
+          pendingCommand.heldText,
+          transcriptToApply,
+        );
+      }
+
+      const speechCommand = extractTerminalSpeechCommand(
+        answerRef.current,
+        transcriptToApply,
+      );
+
+      if (!speechCommand) {
+        appendAnswerText(transcriptToApply);
+        return;
+      }
+
+      setAnswer(speechCommand.submitAnswer);
+      answerRef.current = speechCommand.submitAnswer;
+      pendingSpeechCommandRef.current = speechCommand;
+      pendingSpeechCommandTimerRef.current = setTimeout(() => {
+        const commandToRun = pendingSpeechCommandRef.current;
+
+        if (!commandToRun) {
+          return;
+        }
+
+        clearPendingSpeechCommand();
+
+        if (commandToRun.command === "submit") {
+          void submit(commandToRun.submitAnswer);
+          return;
+        }
+
+        void skipCurrentQuestion();
+      }, SPEECH_COMMAND_SETTLE_MS);
+    },
+    [
+      appendAnswerText,
+      clearPendingSpeechCommand,
+      skipCurrentQuestion,
+      submit,
+    ],
+  );
+
+  const stopSpeech = useCallback(() => {
+    clearPendingSpeechCommand();
+    keepListeningRef.current = false;
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setSpeechPreview("");
+    setSpeechMessage(null);
+    setSpeechStatus("idle");
+  }, [clearPendingSpeechCommand]);
+
+  const startSpeech = useCallback(() => {
+    const SpeechRecognitionConstructor = getSpeechRecognitionConstructor();
+
+    if (!SpeechRecognitionConstructor) {
+      setSpeechStatus("unsupported");
+      setSpeechMessage("Speech recognition is not available in this browser.");
+      return;
+    }
+
+    keepListeningRef.current = true;
+    setSpeechStatus("starting");
+    setSpeechMessage("Starting microphone...");
+
+    const recognition = new SpeechRecognitionConstructor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language || "en-US";
+    recognition.onresult = (event) => {
+      let finalTranscript = "";
+      let interimTranscript = "";
+
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const transcript = result[0]?.transcript ?? "";
+
+        if (result.isFinal) {
+          finalTranscript = mergeTranscriptText(finalTranscript, transcript);
+        } else {
+          interimTranscript = mergeTranscriptText(interimTranscript, transcript);
+        }
+      }
+
+      if (interimTranscript && pendingSpeechCommandRef.current) {
+        const pendingCommand = pendingSpeechCommandRef.current;
+
+        clearPendingSpeechCommand();
+        appendAnswerText(pendingCommand.heldText);
+      }
+
+      setSpeechPreview(interimTranscript);
+
+      if (finalTranscript) {
+        setSpeechPreview("");
+        void handleSpeechText(finalTranscript);
+      }
+    };
+    recognition.onerror = () => {
+      setSpeechStatus("error");
+      setSpeechMessage("Microphone transcription stopped.");
+    };
+    recognition.onend = () => {
+      if (!keepListeningRef.current) {
+        return;
+      }
+
+      try {
+        recognition.start();
+      } catch {
+        setSpeechStatus("error");
+        setSpeechMessage("Microphone transcription stopped.");
+      }
+    };
+
+    recognitionRef.current = recognition;
+
+    try {
+      recognition.start();
+      setSpeechStatus("listening");
+      setSpeechMessage("Streaming speech into the answer.");
+    } catch {
+      setSpeechStatus("error");
+      setSpeechMessage("Microphone transcription could not start.");
+      return;
+    }
+  }, [appendAnswerText, clearPendingSpeechCommand, handleSpeechText]);
+
+  useEffect(() => {
+    return () => {
+      clearPendingSpeechCommand();
+      keepListeningRef.current = false;
+      recognitionRef.current?.stop();
+    };
+  }, [clearPendingSpeechCommand]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void submit();
   }
+
+  const displayedAnswer = speechPreview
+    ? mergeTranscriptText(answer, speechPreview)
+    : answer;
+  const isSpeechActive =
+    speechStatus === "starting" ||
+    speechStatus === "listening";
 
   function handleAnswerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
@@ -1110,7 +1479,17 @@ export default function Home() {
       <section className="review-shell" aria-label="Flashcard review">
         <header className="reader-header">
           <div className="reader-heading">
-            <p className="reader-brand">waxon</p>
+            <p className="reader-brand">
+              <Image
+                className="reader-brand-mark"
+                src="/brand/icon/header-mark.svg"
+                alt=""
+                aria-hidden="true"
+                width={34}
+                height={34}
+              />
+              <span>waxon</span>
+            </p>
             <div className="reader-tabs" role="tablist" aria-label="Review views">
               <button
                 className={`reader-tab ${
@@ -1176,8 +1555,13 @@ export default function Home() {
               <textarea
                 id="answer-input"
                 className="composer-input"
-                value={answer}
-                onChange={(event) => setAnswer(event.target.value)}
+                value={displayedAnswer}
+                onChange={(event) => {
+                  clearPendingSpeechCommand();
+                  setSpeechPreview("");
+                  setAnswer(event.target.value);
+                  answerRef.current = event.target.value;
+                }}
                 onKeyDown={handleAnswerKeyDown}
                 placeholder="Your answer"
                 aria-label="Your answer"
@@ -1185,6 +1569,23 @@ export default function Home() {
                 autoFocus
                 disabled={isSubmitting || !question}
               />
+              <button
+                className={`composer-mic ${
+                  isSpeechActive ? "composer-mic-active" : ""
+                }`}
+                type="button"
+                aria-label={
+                  isSpeechActive ? "Stop voice answer" : "Start voice answer"
+                }
+                aria-pressed={isSpeechActive}
+                onClick={isSpeechActive ? stopSpeech : startSpeech}
+                disabled={isSubmitting || !question}
+                title={
+                  isSpeechActive ? "Stop voice answer" : "Start voice answer"
+                }
+              >
+                {isSpeechActive ? <StopIcon /> : <MicrophoneIcon />}
+              </button>
               <button
                 className="composer-submit"
                 type="submit"
@@ -1194,6 +1595,14 @@ export default function Home() {
                 <SubmitIcon />
               </button>
             </div>
+            {speechMessage ? (
+              <p
+                className={`speech-status speech-status-${speechStatus}`}
+                aria-live="polite"
+              >
+                {speechMessage}
+              </p>
+            ) : null}
           </form>
 
           {error ? <p className="error-message">{error}</p> : null}

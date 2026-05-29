@@ -284,7 +284,9 @@ async function processEvaluation(submission: Submission): Promise<void> {
       question: submission.question,
       answer: submission.answer,
       answerSummary: result.answerSummary,
+      justification: result.justification,
       score: result.score,
+      submittedAt: submission.submittedAt,
       now: Date.now(),
     });
 
@@ -322,6 +324,23 @@ export async function peekNextQuestion(): Promise<{
     question: state.queue[0]?.question ?? null,
     queueRemaining: state.queue.length,
   };
+}
+
+export async function skipQuestion(input: {
+  question: string;
+}): Promise<{ question: string | null; queueRemaining: number }> {
+  await initializeQueue();
+  await refreshIfEmpty();
+
+  const skipped = removeFromQueue(input.question);
+
+  if (skipped) {
+    state.queue.push(skipped);
+    logQueueFlushStatus("skipped-question");
+    void broadcastQueueStatus();
+  }
+
+  return peekNextQuestion();
 }
 
 export async function submitAnswer(input: {
