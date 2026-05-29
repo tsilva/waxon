@@ -482,6 +482,22 @@ function formatEvaluationNextDue(message: Extract<ChatMessage, { kind: "answer" 
   return formatDurationBadge(message.nextDue - message.resolvedAt);
 }
 
+function scoreTone(score: number | null) {
+  if (score === null) {
+    return "pending";
+  }
+
+  if (score <= 3) {
+    return "low";
+  }
+
+  if (score <= 7) {
+    return "medium";
+  }
+
+  return "high";
+}
+
 function ReviewIcon({ status }: { status: "answered" | "active" }) {
   if (status === "answered") {
     return (
@@ -528,7 +544,7 @@ function SubmitIcon() {
 export default function Home() {
   const [question, setQuestion] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
-  const [pendingEvaluations, setPendingEvaluations] = useState(0);
+  const [queueRemaining, setQueueRemaining] = useState(0);
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>([]);
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -538,6 +554,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastAutoScrolledMessageIdRef = useRef<string | null>(null);
 
   const resizeAnswerInput = useCallback(() => {
     const input = answerInputRef.current;
@@ -584,6 +601,7 @@ export default function Home() {
 
       const data = (await response.json()) as NextQuestionResponse;
       setQuestion(data.question);
+      setQueueRemaining(data.queueRemaining);
 
       if (data.question) {
         appendQuestion(data.question);
@@ -610,7 +628,7 @@ export default function Home() {
       }
 
       const data = (await response.json()) as QueueStatusResponse;
-      setPendingEvaluations(data.pendingEvaluations);
+      setQueueRemaining(data.queueRemaining);
       setEvaluations(data.evaluations);
       setReviewQueue(data.reviewQueue);
     } catch {
@@ -631,8 +649,10 @@ export default function Home() {
   }, [loadStatus]);
 
   useEffect(() => {
-    setMessages((current) =>
-      current.map((message) => {
+    setMessages((current) => {
+      let hasChanged = false;
+
+      const nextMessages = current.map((message) => {
         if (message.kind !== "answer") {
           return message;
         }
@@ -645,6 +665,18 @@ export default function Home() {
           return message;
         }
 
+        if (
+          message.status === evaluation.status &&
+          message.score === evaluation.score &&
+          message.justification === evaluation.justification &&
+          message.nextDue === evaluation.nextDue &&
+          message.resolvedAt === evaluation.resolvedAt
+        ) {
+          return message;
+        }
+
+        hasChanged = true;
+
         return {
           ...message,
           status: evaluation.status,
@@ -653,11 +685,20 @@ export default function Home() {
           nextDue: evaluation.nextDue,
           resolvedAt: evaluation.resolvedAt,
         };
-      }),
-    );
+      });
+
+      return hasChanged ? nextMessages : current;
+    });
   }, [evaluations]);
 
   useEffect(() => {
+    const lastMessage = messages.at(-1);
+
+    if (!lastMessage || lastAutoScrolledMessageIdRef.current === lastMessage.id) {
+      return;
+    }
+
+    lastAutoScrolledMessageIdRef.current = lastMessage.id;
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
@@ -748,15 +789,27 @@ export default function Home() {
   return (
     <main className="page">
       <section className="reader-panel" aria-label="Flashcard review chat">
-        <button
-          className="queue-button"
-          type="button"
-          onClick={() => setIsDebugOpen((value) => !value)}
-          aria-expanded={isDebugOpen}
-          aria-label={isDebugOpen ? "Toggle queues panel" : "Show queues"}
-        >
-          •••
-        </button>
+        <header className="reader-header">
+          <div className="reader-heading">
+            <p className="reader-brand">waxon</p>
+            <h1 className="reader-title">Review</h1>
+          </div>
+
+          <div className="reader-actions">
+            <span className="queue-summary">
+              {queueRemaining} {queueRemaining === 1 ? "card" : "cards"} queued
+            </span>
+            <button
+              className="queue-button"
+              type="button"
+              onClick={() => setIsDebugOpen((value) => !value)}
+              aria-expanded={isDebugOpen}
+              aria-label="Queue panel"
+            >
+              •••
+            </button>
+          </div>
+        </header>
 
         <div className="chat-stream">
           {transcriptItems.map((item, index) => (
@@ -768,9 +821,37 @@ export default function Home() {
             >
               {index > 0 ? <div className="entry-divider" /> : null}
               <div className="entry-grid">
-                <div className="entry-icon">
-                  <ReviewIcon status={item.answer ? "answered" : "active"} />
-                </div>
+                <aside className="entry-status-rail" aria-label="Review status">
+                  <div className="entry-icon">
+                    <ReviewIcon status={item.answer ? "answered" : "active"} />
+                  </div>
+                  {item.answer ? (
+                    <div className="rail-judgement">
+                      {item.answer.status === "grading" ? (
+                        <span className="judgement-pending">Judging...</span>
+                      ) : (
+                        <>
+                          <div
+                            className={`judgement-score score-${scoreTone(
+                              item.answer.score,
+                            )}`}
+                          >
+                            {item.answer.score}/10
+                          </div>
+                          {formatEvaluationNextDue(item.answer) ? (
+                            <p className="judgement-next">
+                              <ClockIcon />
+                              <span>
+                                Next review in{" "}
+                                {formatEvaluationNextDue(item.answer)}
+                              </span>
+                            </p>
+                          ) : null}
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+                </aside>
                 <div className="entry-content">
                   <MarkdownInline
                     as="h2"
@@ -779,38 +860,56 @@ export default function Home() {
                   />
                   {item.answer ? (
                     <>
-                      <MarkdownContent
-                        className="answer-text"
-                        text={item.answer.answer}
-                      />
-                      <div className="judgement">
+                      <section className="answer-capture" aria-label="Your answer">
+                        <p className="answer-label">Your answer</p>
+                        <MarkdownContent
+                          className="answer-text"
+                          text={item.answer.answer}
+                        />
+                      </section>
+                      <div
+                        className={`feedback-band feedback-${scoreTone(
+                          item.answer.score,
+                        )}`}
+                      >
                         {item.answer.status === "grading" ? (
-                          <span className="judgement-pending">Judging...</span>
+                          <p>Evaluating your answer...</p>
+                        ) : item.answer.justification ? (
+                          <MarkdownContent
+                            className="feedback-text"
+                            text={item.answer.justification}
+                          />
                         ) : (
-                          <>
-                            <div className="judgement-row">
-                              <div className="judgement-score">
-                                {item.answer.score}/10
-                              </div>
-                              {item.answer.justification ? (
-                                <p className="judgement-text">
-                                  {item.answer.justification}
-                                </p>
-                              ) : null}
-                            </div>
-                            {formatEvaluationNextDue(item.answer) ? (
-                              <p className="judgement-next">
-                                <ClockIcon />
-                                <span>
-                                  Next review in{" "}
-                                  {formatEvaluationNextDue(item.answer)}
-                                </span>
-                              </p>
-                            ) : null}
-                          </>
+                          <p>No feedback returned.</p>
                         )}
                       </div>
                     </>
+                  ) : item.question === question ? (
+                    <form className="composer" onSubmit={handleSubmit}>
+                      <textarea
+                        ref={answerInputRef}
+                        className="composer-input"
+                        value={answer}
+                        onChange={(event) => {
+                          setAnswer(event.target.value);
+                          window.requestAnimationFrame(resizeAnswerInput);
+                        }}
+                        onKeyDown={handleAnswerKeyDown}
+                        placeholder="Type your answer"
+                        aria-label="Answer"
+                        rows={1}
+                        autoFocus
+                        disabled={isSubmitting || !question}
+                      />
+                      <button
+                        className="composer-submit"
+                        type="submit"
+                        disabled={isSubmitting || !question}
+                        aria-label="Submit answer"
+                      >
+                        <SubmitIcon />
+                      </button>
+                    </form>
                   ) : null}
                 </div>
               </div>
@@ -823,9 +922,11 @@ export default function Home() {
                 <div className="entry-divider" />
               ) : null}
               <div className="entry-grid">
-                <div className="entry-icon">
-                  <ReviewIcon status="active" />
-                </div>
+                <aside className="entry-status-rail" aria-label="Review status">
+                  <div className="entry-icon">
+                    <ReviewIcon status="active" />
+                  </div>
+                </aside>
                 <div className="entry-content">
                   <h2 className="question-title">No questions due right now.</h2>
                 </div>
@@ -839,32 +940,6 @@ export default function Home() {
 
           <div ref={bottomRef} />
         </div>
-
-        <form className="composer" onSubmit={handleSubmit}>
-          <textarea
-            ref={answerInputRef}
-            className="composer-input"
-            value={answer}
-            onChange={(event) => {
-              setAnswer(event.target.value);
-              window.requestAnimationFrame(resizeAnswerInput);
-            }}
-            onKeyDown={handleAnswerKeyDown}
-            placeholder="Type your answer"
-            aria-label="Answer"
-            rows={1}
-            autoFocus
-            disabled={isSubmitting || !question}
-          />
-          <button
-            className="composer-submit"
-            type="submit"
-            disabled={isSubmitting || !question}
-            aria-label="Submit answer"
-          >
-            <SubmitIcon />
-          </button>
-        </form>
       </section>
 
       <aside
@@ -926,16 +1001,6 @@ export default function Home() {
                 ))}
               </ol>
             )}
-          </section>
-
-          <section className="debug-section" aria-label="Pending grading">
-            <div className="sidebar-header">
-              <h2>Pending grading</h2>
-              <span>{pendingEvaluations} active</span>
-            </div>
-            <p className="sidebar-empty">
-              Judgements appear inline in the chat transcript.
-            </p>
           </section>
         </div>
       </aside>
