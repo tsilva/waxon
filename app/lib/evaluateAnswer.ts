@@ -7,15 +7,18 @@ export type EvaluateAnswerInput = {
 export type EvaluationResult = {
   score: number;
   justification: string;
+  answerSummary: string;
 };
 
 const INVALID_JSON_RESULT: EvaluationResult = {
   score: 0,
   justification: "LLM evaluation failed or returned invalid JSON.",
+  answerSummary: "Evaluation failed.",
 };
 
 const EVALUATION_TIMEOUT_MS = 25_000;
 const MAX_JUSTIFICATION_WORDS = 12;
+const MAX_ANSWER_SUMMARY_WORDS = 12;
 
 function clampScore(score: unknown): number {
   if (typeof score !== "number" || !Number.isFinite(score)) {
@@ -46,16 +49,22 @@ Scoring:
 9 = excellent recall
 10 = complete, precise, confident answer
 
+Also rewrite the user's answer as the answerSummary: what you understood
+the user's answer to be, not the ideal corrected answer. Keep it concise,
+faithful to the user's meaning, and 12 words maximum. Preserve important
+math symbols or formulas.
+
 Keep justification very concise: one sentence, 12 words maximum.
 
 Return strict JSON only:
 {
   "score": number,
-  "justification": string
+  "justification": string,
+  "answerSummary": string
 }`;
 }
 
-function parseEvaluation(rawText: string): EvaluationResult {
+function parseEvaluation(rawText: string, fallbackAnswer: string): EvaluationResult {
   try {
     const json = rawText
       .trim()
@@ -65,14 +74,24 @@ function parseEvaluation(rawText: string): EvaluationResult {
     const parsed = JSON.parse(json) as {
       score?: unknown;
       justification?: unknown;
+      answerSummary?: unknown;
+      answer_summary?: unknown;
+      conciseAnswer?: unknown;
     };
 
     return {
       score: clampScore(parsed.score),
       justification: conciseJustification(parsed.justification),
+      answerSummary: conciseAnswerSummary(
+        parsed.answerSummary ?? parsed.answer_summary ?? parsed.conciseAnswer,
+        fallbackAnswer,
+      ),
     };
   } catch {
-    return INVALID_JSON_RESULT;
+    return {
+      ...INVALID_JSON_RESULT,
+      answerSummary: conciseAnswerSummary(fallbackAnswer, fallbackAnswer),
+    };
   }
 }
 
@@ -88,6 +107,20 @@ function conciseJustification(justification: unknown): string {
   }
 
   return `${words.slice(0, MAX_JUSTIFICATION_WORDS).join(" ")}...`;
+}
+
+function conciseAnswerSummary(summary: unknown, fallbackAnswer: string): string {
+  const source =
+    typeof summary === "string" && summary.trim()
+      ? summary
+      : fallbackAnswer.trim() || "(blank)";
+  const words = source.trim().replace(/\s+/g, " ").split(" ");
+
+  if (words.length <= MAX_ANSWER_SUMMARY_WORDS) {
+    return words.join(" ");
+  }
+
+  return `${words.slice(0, MAX_ANSWER_SUMMARY_WORDS).join(" ")}...`;
 }
 
 function extractChatCompletionText(response: unknown): string {
@@ -126,6 +159,7 @@ export async function evaluateAnswer(
     return {
       score: 0,
       justification: "OPENROUTER_API_KEY or LLM_API_KEY is not configured.",
+      answerSummary: conciseAnswerSummary(input.answer, input.answer),
     };
   }
 
@@ -171,14 +205,17 @@ export async function evaluateAnswer(
     }
 
     const body: unknown = await response.json();
-    return parseEvaluation(extractChatCompletionText(body));
+    return parseEvaluation(extractChatCompletionText(body), input.answer);
   } catch (error) {
     console.info("[waxon] llm evaluation failed", {
       provider: "openrouter",
       model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
       error: error instanceof Error ? error.message : "unknown error",
     });
-    return INVALID_JSON_RESULT;
+    return {
+      ...INVALID_JSON_RESULT,
+      answerSummary: conciseAnswerSummary(input.answer, input.answer),
+    };
   } finally {
     clearTimeout(timeout);
   }
