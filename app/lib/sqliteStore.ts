@@ -1,29 +1,38 @@
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { parse } from "csv-parse/sync";
-import { stringify } from "csv-stringify/sync";
+import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { appendReview, parseReviews, scheduleNextReview } from "./scheduler";
 
 export type QuestionRow = {
   question: string;
   reviews: string;
-  next_due: string;
+  next_due: number;
+  last_answer: string;
+  last_answer_summary: string;
+  reference_answer: string;
 };
 
 export type DueQuestion = {
   question: string;
   reviews: string;
   nextDue: number;
+  lastAnswer: string | null;
+  lastAnswerSummary: string | null;
+  referenceAnswer: string | null;
 };
 
 export type PersistedEvaluation = {
   question: string;
   reviews: string;
   nextDue: number;
+  lastAnswer: string | null;
+  lastAnswerSummary: string | null;
+  referenceAnswer: string | null;
 } | null;
 
 const DATA_DIR = path.join(process.cwd(), "data");
-const QUESTIONS_FILE = path.join(DATA_DIR, "questions.csv");
+const QUESTIONS_DB_FILE = path.join(DATA_DIR, "questions.sqlite");
+const LEGACY_QUESTIONS_FILE = path.join(DATA_DIR, "questions.csv");
 const BOOTSTRAP_QUESTIONS = Array.from(
   new Set(
     String.raw`
@@ -191,135 +200,368 @@ If b has one value per feature column, is it aligned with the feature axis or re
   ),
 );
 
-let writeLock: Promise<void> = Promise.resolve();
+let database: DatabaseSync | null = null;
+let databaseInitialized = false;
 
-async function withWriteLock<T>(work: () => Promise<T>): Promise<T> {
-  const previous = writeLock;
-  let release!: () => void;
-  writeLock = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+function parseCsvRows(source: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
 
-  await previous;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
 
-  try {
-    return await work();
-  } finally {
-    release();
+    if (inQuotes) {
+      if (character === '"' && source[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else if (character === '"') {
+        inQuotes = false;
+      } else {
+        field += character;
+      }
+
+      continue;
+    }
+
+    if (character === '"') {
+      inQuotes = true;
+    } else if (character === ",") {
+      row.push(field);
+      field = "";
+    } else if (character === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (character !== "\r") {
+      field += character;
+    }
   }
+
+  if (field || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows;
 }
 
-async function questionsFileExists(): Promise<boolean> {
+function readLegacyCsvQuestions(): QuestionRow[] | null {
+  if (!existsSync(LEGACY_QUESTIONS_FILE)) {
+    return null;
+  }
+
+  const rows = parseCsvRows(readFileSync(LEGACY_QUESTIONS_FILE, "utf8"));
+  const header = rows[0] ?? [];
+  const questionIndex = header.indexOf("question");
+  const reviewsIndex = header.indexOf("reviews");
+  const nextDueIndex = header.indexOf("next_due");
+
+  if (questionIndex === -1) {
+    return null;
+  }
+
+  return rows
+    .slice(1)
+    .filter((row) => row[questionIndex]?.trim())
+    .map((row) => ({
+      question: row[questionIndex] ?? "",
+      reviews: reviewsIndex === -1 ? "" : (row[reviewsIndex] ?? ""),
+      next_due: Number(nextDueIndex === -1 ? 0 : row[nextDueIndex]),
+      last_answer: "",
+      last_answer_summary: "",
+      reference_answer: "",
+    }))
+    .map((row) => ({
+      ...row,
+      next_due: Number.isFinite(row.next_due) ? row.next_due : 0,
+    }));
+}
+
+function withWriteTransaction<T>(db: DatabaseSync, work: () => T): T {
+  db.exec("BEGIN IMMEDIATE");
+
   try {
-    await stat(QUESTIONS_FILE);
-    return true;
+    const result = work();
+    db.exec("COMMIT");
+    return result;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return false;
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Ignore rollback failures so the original error stays visible.
     }
 
     throw error;
   }
 }
 
-function normalizeRows(records: unknown[]): QuestionRow[] {
-  return records
-    .map((record) => record as Partial<QuestionRow>)
-    .filter((record) => typeof record.question === "string")
-    .map((record) => ({
-      question: record.question ?? "",
-      reviews: record.reviews ?? "",
-      next_due: record.next_due ?? "0",
-    }));
-}
+function insertSeedRows(db: DatabaseSync, rows: QuestionRow[]): void {
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO questions (question, reviews, next_due)
+    VALUES (?, ?, ?)
+  `);
 
-async function writeRows(rows: QuestionRow[]): Promise<void> {
-  await mkdir(DATA_DIR, { recursive: true });
-  const csv = stringify(rows, {
-    header: true,
-    columns: ["question", "reviews", "next_due"],
+  withWriteTransaction(db, () => {
+    for (const row of rows) {
+      insert.run(row.question, row.reviews, Math.round(row.next_due));
+    }
   });
-  const tmpFile = `${QUESTIONS_FILE}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(tmpFile, csv, "utf8");
-  await rename(tmpFile, QUESTIONS_FILE);
 }
 
-export async function ensureQuestionsFile(): Promise<void> {
-  if (await questionsFileExists()) {
+function ensureColumn(
+  db: DatabaseSync,
+  tableName: string,
+  columnName: string,
+  definition: string,
+): void {
+  const columns = db
+    .prepare(`PRAGMA table_info(${tableName})`)
+    .all() as Record<string, SQLOutputValue>[];
+  const hasColumn = columns.some((column) => column.name === columnName);
+
+  if (!hasColumn) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+}
+
+function initializeDatabase(db: DatabaseSync): void {
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA busy_timeout = 5000;
+
+    CREATE TABLE IF NOT EXISTS questions (
+      question TEXT PRIMARY KEY,
+      reviews TEXT NOT NULL DEFAULT '',
+      next_due INTEGER NOT NULL DEFAULT 0,
+      last_answer TEXT NOT NULL DEFAULT '',
+      last_answer_summary TEXT NOT NULL DEFAULT '',
+      reference_answer TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000)
+    );
+
+    CREATE INDEX IF NOT EXISTS questions_next_due_idx
+      ON questions (next_due);
+  `);
+  ensureColumn(db, "questions", "last_answer", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(
+    db,
+    "questions",
+    "last_answer_summary",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+  ensureColumn(db, "questions", "reference_answer", "TEXT NOT NULL DEFAULT ''");
+
+  const countRow = db
+    .prepare("SELECT COUNT(*) AS count FROM questions")
+    .get() as { count?: SQLOutputValue } | undefined;
+  const questionCount = Number(countRow?.count ?? 0);
+
+  if (questionCount > 0) {
     return;
   }
 
-  await withWriteLock(async () => {
-    if (await questionsFileExists()) {
-      return;
-    }
-
-    await writeRows(
+  insertSeedRows(
+    db,
+    readLegacyCsvQuestions() ??
       BOOTSTRAP_QUESTIONS.map((question) => ({
         question,
         reviews: "",
-        next_due: "0",
+        next_due: 0,
+        last_answer: "",
+        last_answer_summary: "",
+        reference_answer: "",
       })),
-    );
-  });
+  );
+}
+
+function getDatabase(): DatabaseSync {
+  mkdirSync(DATA_DIR, { recursive: true });
+
+  if (!database) {
+    database = new DatabaseSync(QUESTIONS_DB_FILE);
+  }
+
+  if (!databaseInitialized) {
+    initializeDatabase(database);
+    databaseInitialized = true;
+  }
+
+  return database;
+}
+
+function normalizeRow(row: Record<string, SQLOutputValue>): QuestionRow {
+  return {
+    question: String(row.question ?? ""),
+    reviews: String(row.reviews ?? ""),
+    next_due: Number(row.next_due ?? 0),
+    last_answer: String(row.last_answer ?? ""),
+    last_answer_summary: String(row.last_answer_summary ?? ""),
+    reference_answer: String(row.reference_answer ?? ""),
+  };
+}
+
+export async function ensureQuestionsDatabase(): Promise<void> {
+  getDatabase();
 }
 
 export async function readQuestions(): Promise<QuestionRow[]> {
-  await ensureQuestionsFile();
-  const csv = await readFile(QUESTIONS_FILE, "utf8");
-  const records = parse(csv, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: false,
-  });
-
-  return normalizeRows(records);
+  const db = getDatabase();
+  return db
+    .prepare(
+      `
+      SELECT question, reviews, next_due, last_answer, last_answer_summary, reference_answer
+      FROM questions
+      ORDER BY rowid ASC
+    `,
+    )
+    .all()
+    .map(normalizeRow);
 }
 
 export async function getDueQuestions(now = Date.now()): Promise<DueQuestion[]> {
-  const rows = await readQuestions();
+  const db = getDatabase();
 
-  return rows
+  return db
+    .prepare(
+      `
+      SELECT question, reviews, next_due, last_answer, last_answer_summary, reference_answer
+      FROM questions
+      WHERE next_due <= ?
+      ORDER BY next_due ASC
+    `,
+    )
+    .all(Math.round(now))
+    .map(normalizeRow)
     .map((row) => ({
       question: row.question,
       reviews: row.reviews,
-      nextDue: Number(row.next_due),
+      nextDue: row.next_due,
+      lastAnswer: row.last_answer || null,
+      lastAnswerSummary: row.last_answer_summary || null,
+      referenceAnswer: row.reference_answer || null,
     }))
     .filter((row) => Number.isFinite(row.nextDue) && row.nextDue <= now)
+    .sort((a, b) => a.nextDue - b.nextDue);
+}
+
+export async function getAllQueuedQuestions(): Promise<DueQuestion[]> {
+  const db = getDatabase();
+
+  return db
+    .prepare(
+      `
+      SELECT question, reviews, next_due, last_answer, last_answer_summary, reference_answer
+      FROM questions
+      ORDER BY next_due ASC
+    `,
+    )
+    .all()
+    .map(normalizeRow)
+    .map((row) => ({
+      question: row.question,
+      reviews: row.reviews,
+      nextDue: row.next_due,
+      lastAnswer: row.last_answer || null,
+      lastAnswerSummary: row.last_answer_summary || null,
+      referenceAnswer: row.reference_answer || null,
+    }))
+    .filter((row) => Number.isFinite(row.nextDue))
     .sort((a, b) => a.nextDue - b.nextDue);
 }
 
 export async function getQuestionSnapshot(
   question: string,
 ): Promise<DueQuestion | null> {
-  const rows = await readQuestions();
-  const row = rows.find((candidate) => candidate.question === question);
+  const db = getDatabase();
+  const row = db
+    .prepare(
+      `
+      SELECT question, reviews, next_due, last_answer, last_answer_summary, reference_answer
+      FROM questions
+      WHERE question = ?
+    `,
+    )
+    .get(question);
 
   if (!row) {
     return null;
   }
 
+  const normalized = normalizeRow(row);
+
   return {
-    question: row.question,
-    reviews: row.reviews,
-    nextDue: Number(row.next_due),
+    question: normalized.question,
+    reviews: normalized.reviews,
+    nextDue: normalized.next_due,
+    lastAnswer: normalized.last_answer || null,
+    lastAnswerSummary: normalized.last_answer_summary || null,
+    referenceAnswer: normalized.reference_answer || null,
   };
 }
 
-export async function applyEvaluationToCsv(input: {
+export async function getStoredReferenceAnswer(
+  question: string,
+): Promise<string | null> {
+  const db = getDatabase();
+  const row = db
+    .prepare(
+      `
+      SELECT reference_answer
+      FROM questions
+      WHERE question = ?
+    `,
+    )
+    .get(question) as { reference_answer?: SQLOutputValue } | undefined;
+  const answer = String(row?.reference_answer ?? "").trim();
+
+  return answer || null;
+}
+
+export async function saveReferenceAnswer(input: {
   question: string;
+  answer: string;
+  now: number;
+}): Promise<void> {
+  const db = getDatabase();
+
+  db.prepare(
+    `
+    UPDATE questions
+    SET reference_answer = ?, updated_at = ?
+    WHERE question = ?
+  `,
+  ).run(input.answer, Math.round(input.now), input.question);
+}
+
+export async function applyEvaluationToSqlite(input: {
+  question: string;
+  answer: string;
+  answerSummary: string;
   score: number;
   now: number;
 }): Promise<PersistedEvaluation> {
-  return withWriteLock(async () => {
-    const rows = await readQuestions();
-    const index = rows.findIndex((row) => row.question === input.question);
+  const db = getDatabase();
 
-    if (index === -1) {
+  return withWriteTransaction(db, () => {
+    const rawRow = db
+      .prepare(
+        `
+        SELECT question, reviews, next_due, last_answer, last_answer_summary, reference_answer
+        FROM questions
+        WHERE question = ?
+      `,
+      )
+      .get(input.question);
+
+    if (!rawRow) {
       return null;
     }
 
-    const row = rows[index];
+    const row = normalizeRow(rawRow);
     const previousReviews = parseReviews(row.reviews);
     const reviews = appendReview(row.reviews, {
       ts: input.now,
@@ -330,19 +572,30 @@ export async function applyEvaluationToCsv(input: {
       newScore: input.score,
       now: input.now,
     });
+    const roundedNextDue = Math.round(nextDue);
 
-    rows[index] = {
-      ...row,
+    db.prepare(
+      `
+      UPDATE questions
+      SET reviews = ?, next_due = ?, last_answer = ?, last_answer_summary = ?, updated_at = ?
+      WHERE question = ?
+    `,
+    ).run(
       reviews,
-      next_due: String(Math.round(nextDue)),
-    };
-
-    await writeRows(rows);
+      roundedNextDue,
+      input.answer,
+      input.answerSummary,
+      Math.round(input.now),
+      input.question,
+    );
 
     return {
       question: row.question,
       reviews,
-      nextDue: Math.round(nextDue),
+      nextDue: roundedNextDue,
+      lastAnswer: input.answer || null,
+      lastAnswerSummary: input.answerSummary || null,
+      referenceAnswer: row.reference_answer || null,
     };
   });
 }

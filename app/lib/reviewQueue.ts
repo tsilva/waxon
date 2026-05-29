@@ -1,13 +1,14 @@
 import {
-  applyEvaluationToCsv,
+  applyEvaluationToSqlite,
+  getAllQueuedQuestions,
   getDueQuestions,
   getQuestionSnapshot,
   type DueQuestion,
-} from "./csvStore";
+} from "./sqliteStore";
 import { evaluateAnswer, type EvaluationResult } from "./evaluateAnswer";
-import { parseReviews, reinsertionDelay } from "./scheduler";
+import { parseReviews, reinsertionDelay, type ReviewEntry } from "./scheduler";
 
-const RESOLVED_JUDGING_VISIBLE_MS = 10_000;
+export const RESOLVED_JUDGING_VISIBLE_MS = 10_000;
 
 type Submission = {
   evaluationId: string;
@@ -24,6 +25,7 @@ export type EvaluationQueueItem = {
   submittedAt: number;
   score: number | null;
   justification: string | null;
+  answerSummary: string | null;
   resolvedAt: number | null;
   nextDue: number | null;
 };
@@ -33,13 +35,27 @@ export type ReviewQueueItem = {
   nextDue: number;
   msUntilDue: number;
   status: "now" | "scheduled";
+  reviewHistory: ReviewEntry[];
   lastScore: number | null;
+  lastAnswer: string | null;
+  lastAnswerSummary: string | null;
+  referenceAnswer: string | null;
   lastJustification: string | null;
 };
+
+export type QueueStatusSnapshot = {
+  queueRemaining: number;
+  pendingEvaluations: number;
+  evaluations: EvaluationQueueItem[];
+  reviewQueue: ReviewQueueItem[];
+};
+
+type QueueStatusSubscriber = (status: QueueStatusSnapshot) => void;
 
 type LatestEvaluation = {
   score: number;
   justification: string;
+  answerSummary: string;
   resolvedAt: number;
 };
 
@@ -51,6 +67,7 @@ type QueueState = {
   inFlightQuestions: Set<string>;
   evaluations: EvaluationQueueItem[];
   latestByQuestion: Record<string, LatestEvaluation>;
+  subscribers: Set<QueueStatusSubscriber>;
 };
 
 const globalForQueue = globalThis as typeof globalThis & {
@@ -67,10 +84,12 @@ const state: QueueState =
     inFlightQuestions: new Set<string>(),
     evaluations: [],
     latestByQuestion: {},
+    subscribers: new Set<QueueStatusSubscriber>(),
   };
 
 globalForQueue.waxonQueue = state;
 state.latestByQuestion ??= {};
+state.subscribers ??= new Set<QueueStatusSubscriber>();
 
 function logQueueFlushStatus(action: string): void {
   console.info("[waxon] queue flush status", {
@@ -81,6 +100,34 @@ function logQueueFlushStatus(action: string): void {
     evaluationsTracked: state.evaluations.length,
     initialized: state.initialized,
   });
+}
+
+async function broadcastQueueStatus(): Promise<void> {
+  if (state.subscribers.size === 0) {
+    return;
+  }
+
+  let status: QueueStatusSnapshot;
+
+  try {
+    status = await queueStatus();
+  } catch {
+    return;
+  }
+
+  for (const subscriber of state.subscribers) {
+    subscriber(status);
+  }
+}
+
+export function subscribeQueueStatus(
+  subscriber: QueueStatusSubscriber,
+): () => void {
+  state.subscribers.add(subscriber);
+
+  return () => {
+    state.subscribers.delete(subscriber);
+  };
 }
 
 function createEvaluationItem(input: {
@@ -96,6 +143,7 @@ function createEvaluationItem(input: {
     submittedAt: input.submittedAt,
     score: null,
     justification: null,
+    answerSummary: null,
     resolvedAt: null,
     nextDue: null,
   };
@@ -117,11 +165,13 @@ function resolveEvaluationItem(
   item.status = "resolved";
   item.score = result.score;
   item.justification = result.justification;
+  item.answerSummary = result.answerSummary;
   item.resolvedAt = Date.now();
   item.nextDue = nextDue;
   state.latestByQuestion[item.question] = {
     score: result.score,
     justification: result.justification,
+    answerSummary: result.answerSummary,
     resolvedAt: item.resolvedAt,
   };
 }
@@ -137,19 +187,27 @@ function getVisibleEvaluations(now = Date.now()): EvaluationQueueItem[] {
   return state.evaluations;
 }
 
-function getReviewQueueItems(now = Date.now()): ReviewQueueItem[] {
-  return state.queue
+async function getReviewQueueItems(now = Date.now()): Promise<ReviewQueueItem[]> {
+  const queuedQuestions = await getAllQueuedQuestions();
+
+  return queuedQuestions
+    .filter((item) => !state.inFlightQuestions.has(item.question))
     .map((item) => {
       const msUntilDue = item.nextDue - now;
       const latest = state.latestByQuestion[item.question];
-      const lastReview = parseReviews(item.reviews).at(-1);
+      const reviewHistory = parseReviews(item.reviews);
+      const lastReview = reviewHistory.at(-1);
 
       return {
         question: item.question,
         nextDue: item.nextDue,
         msUntilDue,
         status: msUntilDue <= 0 ? "now" : "scheduled",
+        reviewHistory,
         lastScore: latest?.score ?? lastReview?.score ?? null,
+        lastAnswer: item.lastAnswer,
+        lastAnswerSummary: latest?.answerSummary ?? item.lastAnswerSummary,
+        referenceAnswer: item.referenceAnswer,
         lastJustification: latest?.justification ?? null,
       } satisfies ReviewQueueItem;
     })
@@ -222,8 +280,10 @@ async function processEvaluation(submission: Submission): Promise<void> {
       answer: submission.answer,
       previousReviews: submission.previousReviews,
     });
-    const persisted = await applyEvaluationToCsv({
+    const persisted = await applyEvaluationToSqlite({
       question: submission.question,
+      answer: submission.answer,
+      answerSummary: result.answerSummary,
       score: result.score,
       now: Date.now(),
     });
@@ -234,6 +294,9 @@ async function processEvaluation(submission: Submission): Promise<void> {
           question: persisted.question,
           reviews: persisted.reviews,
           nextDue: persisted.nextDue,
+          lastAnswer: persisted.lastAnswer,
+          lastAnswerSummary: persisted.lastAnswerSummary,
+          referenceAnswer: persisted.referenceAnswer,
         },
         result.score,
       );
@@ -244,6 +307,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
     state.pendingEvaluations = Math.max(0, state.pendingEvaluations - 1);
     state.inFlightQuestions.delete(submission.question);
     logQueueFlushStatus("evaluation-finished");
+    void broadcastQueueStatus();
   }
 }
 
@@ -278,6 +342,7 @@ export async function submitAnswer(input: {
   state.pendingEvaluations += 1;
   state.inFlightQuestions.add(input.question);
   logQueueFlushStatus("submitted-answer");
+  void broadcastQueueStatus();
 
   void processEvaluation({
     evaluationId: evaluation.id,
@@ -292,12 +357,7 @@ export async function submitAnswer(input: {
   };
 }
 
-export async function queueStatus(): Promise<{
-  queueRemaining: number;
-  pendingEvaluations: number;
-  evaluations: EvaluationQueueItem[];
-  reviewQueue: ReviewQueueItem[];
-}> {
+export async function queueStatus(): Promise<QueueStatusSnapshot> {
   await initializeQueue();
   await refreshIfEmpty();
 
@@ -305,6 +365,6 @@ export async function queueStatus(): Promise<{
     queueRemaining: state.queue.length,
     pendingEvaluations: state.pendingEvaluations,
     evaluations: getVisibleEvaluations(),
-    reviewQueue: getReviewQueueItems(),
+    reviewQueue: await getReviewQueueItems(),
   };
 }

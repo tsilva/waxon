@@ -4,7 +4,7 @@
   **🧠 Fast free-text flashcard review 🧠**
 </div>
 
-waxon is a Next.js app for practicing recall with typed answers. It serves due questions, sends each answer for LLM grading, stores the score history in a local CSV file, and schedules the next review from that score.
+waxon is a Next.js app for practicing recall with typed answers. It serves due questions, sends each answer for LLM grading, stores the score history in a local SQLite database, and schedules the next review from that score.
 
 The app is built for a single local or single-server review loop. A small queue panel shows active cards, pending evaluations, recent scores, and upcoming due times.
 
@@ -18,6 +18,8 @@ pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
+
+SQLite storage uses Node's built-in `node:sqlite` module, so use Node 22.5 or newer.
 
 For answer grading, create `.env.local` with an OpenRouter-compatible API key:
 
@@ -40,9 +42,9 @@ pnpm typecheck  # run TypeScript without emitting files
 
 ## Notes
 
-- Questions and review history live in `data/questions.csv`.
-- If `data/questions.csv` is missing, the app bootstraps it with the built-in question list.
-- CSV rows use `question`, `reviews`, and `next_due` columns.
+- Questions and review history live in `data/questions.sqlite`.
+- If `data/questions.sqlite` is missing, the app bootstraps it from `data/questions.csv` when present, then falls back to the built-in question list.
+- The `questions` table uses `question`, `reviews`, and `next_due` columns.
 - Review queue state and pending evaluations are kept in memory for the current server process.
 - API routes run on the Node.js runtime and are forced dynamic.
 - Without `OPENROUTER_API_KEY` or `LLM_API_KEY`, submitted answers are recorded with a `0` score and a configuration message.
