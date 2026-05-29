@@ -1,18 +1,18 @@
 <div align="center">
-  <img src="./public/brand/logo/logo-1024.png" alt="Flashcarder" width="512" />
+  <img src="./public/brand/logo/logo-1024.png" alt="waxon" width="512" />
 
   **🧠 Fast free-text flashcard review 🧠**
 </div>
 
-Flashcarder is a Next.js app for practicing recall with typed answers. It serves due questions, sends each answer for LLM grading, stores the score history in a local CSV file, and schedules the next review from that score.
+waxon is a Next.js app for practicing recall with typed answers. It serves due questions, sends each answer for LLM grading, stores the score history in a local CSV file, and schedules the next review from that score.
 
 The app is built for a single local or single-server review loop. A small queue panel shows active cards, pending evaluations, recent scores, and upcoming due times.
 
 ## Install
 
 ```bash
-git clone https://github.com/tsilva/waxon.git flashcarder
-cd flashcarder
+git clone https://github.com/tsilva/waxon.git
+cd waxon
 pnpm install
 pnpm dev
 ```
@@ -50,7 +50,7 @@ pnpm typecheck  # run TypeScript without emitting files
 
 ## Architecture
 
-![Flashcarder architecture diagram](./architecture.png)
+![waxon architecture diagram](./architecture.png)
 
 ## License
 

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Flashcarder",
+  title: "waxon",
   description: "Fast free-text flashcard review",
 };
 

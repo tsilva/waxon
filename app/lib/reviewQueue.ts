@@ -54,11 +54,11 @@ type QueueState = {
 };
 
 const globalForQueue = globalThis as typeof globalThis & {
-  flashcarderQueue?: QueueState;
+  waxonQueue?: QueueState;
 };
 
 const state: QueueState =
-  globalForQueue.flashcarderQueue ??
+  globalForQueue.waxonQueue ??
   {
     initialized: false,
     initializing: null,
@@ -69,11 +69,11 @@ const state: QueueState =
     latestByQuestion: {},
   };
 
-globalForQueue.flashcarderQueue = state;
+globalForQueue.waxonQueue = state;
 state.latestByQuestion ??= {};
 
 function logQueueFlushStatus(action: string): void {
-  console.info("[flashcarder] queue flush status", {
+  console.info("[waxon] queue flush status", {
     action,
     queueRemaining: state.queue.length,
     pendingEvaluations: state.pendingEvaluations,
