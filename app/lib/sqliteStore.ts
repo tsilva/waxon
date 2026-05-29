@@ -21,6 +21,17 @@ export type DueQuestion = {
   referenceAnswer: string | null;
 };
 
+export type QuestionAttempt = {
+  id: number;
+  question: string;
+  rawAnswer: string;
+  answerSummary: string;
+  score: number;
+  justification: string;
+  submittedAt: number;
+  resolvedAt: number;
+};
+
 export type PersistedEvaluation = {
   question: string;
   reviews: string;
@@ -345,6 +356,21 @@ function initializeDatabase(db: DatabaseSync): void {
 
     CREATE INDEX IF NOT EXISTS questions_next_due_idx
       ON questions (next_due);
+
+    CREATE TABLE IF NOT EXISTS question_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      question TEXT NOT NULL,
+      raw_answer TEXT NOT NULL,
+      answer_summary TEXT NOT NULL,
+      score INTEGER NOT NULL,
+      justification TEXT NOT NULL,
+      submitted_at INTEGER NOT NULL,
+      resolved_at INTEGER NOT NULL,
+      FOREIGN KEY (question) REFERENCES questions(question) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS question_attempts_question_submitted_idx
+      ON question_attempts (question, submitted_at DESC);
   `);
   ensureColumn(db, "questions", "last_answer", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(
@@ -401,6 +427,19 @@ function normalizeRow(row: Record<string, SQLOutputValue>): QuestionRow {
     last_answer: String(row.last_answer ?? ""),
     last_answer_summary: String(row.last_answer_summary ?? ""),
     reference_answer: String(row.reference_answer ?? ""),
+  };
+}
+
+function normalizeAttemptRow(row: Record<string, SQLOutputValue>): QuestionAttempt {
+  return {
+    id: Number(row.id ?? 0),
+    question: String(row.question ?? ""),
+    rawAnswer: String(row.raw_answer ?? ""),
+    answerSummary: String(row.answer_summary ?? ""),
+    score: Number(row.score ?? 0),
+    justification: String(row.justification ?? ""),
+    submittedAt: Number(row.submitted_at ?? 0),
+    resolvedAt: Number(row.resolved_at ?? 0),
   };
 }
 
@@ -503,6 +542,31 @@ export async function getQuestionSnapshot(
   };
 }
 
+export async function getQuestionAttempts(
+  question: string,
+): Promise<QuestionAttempt[]> {
+  const db = getDatabase();
+
+  return db
+    .prepare(
+      `
+      SELECT id, question, raw_answer, answer_summary, score, justification, submitted_at, resolved_at
+      FROM question_attempts
+      WHERE question = ?
+      ORDER BY submitted_at ASC, id ASC
+    `,
+    )
+    .all(question)
+    .map(normalizeAttemptRow)
+    .filter(
+      (attempt) =>
+        Number.isFinite(attempt.id) &&
+        Number.isFinite(attempt.score) &&
+        Number.isFinite(attempt.submittedAt) &&
+        Number.isFinite(attempt.resolvedAt),
+    );
+}
+
 export async function getStoredReferenceAnswer(
   question: string,
 ): Promise<string | null> {
@@ -541,7 +605,9 @@ export async function applyEvaluationToSqlite(input: {
   question: string;
   answer: string;
   answerSummary: string;
+  justification: string;
   score: number;
+  submittedAt: number;
   now: number;
 }): Promise<PersistedEvaluation> {
   const db = getDatabase();
@@ -587,6 +653,29 @@ export async function applyEvaluationToSqlite(input: {
       input.answerSummary,
       Math.round(input.now),
       input.question,
+    );
+
+    db.prepare(
+      `
+      INSERT INTO question_attempts (
+        question,
+        raw_answer,
+        answer_summary,
+        score,
+        justification,
+        submitted_at,
+        resolved_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `,
+    ).run(
+      input.question,
+      input.answer,
+      input.answerSummary,
+      input.score,
+      input.justification,
+      Math.round(input.submittedAt),
+      Math.round(input.now),
     );
 
     return {

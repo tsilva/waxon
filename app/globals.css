@@ -138,11 +138,22 @@ button {
 }
 
 .reader-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   color: var(--ink);
   font-size: 31px;
   font-weight: 850;
   letter-spacing: 0;
   line-height: 1;
+  white-space: nowrap;
+}
+
+.reader-brand-mark {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  object-fit: contain;
 }
 
 .reader-tabs {
@@ -288,7 +299,7 @@ button {
 
 .composer-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: flex-end;
   gap: 14px;
   border: 1px solid rgb(229 220 204 / 92%);
@@ -339,6 +350,19 @@ button {
   cursor: pointer;
 }
 
+.composer-mic {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgb(47 139 103 / 28%);
+  border-radius: 999px;
+  background: rgb(233 244 236 / 84%);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.composer-mic svg,
 .composer-submit svg {
   width: 24px;
   height: 24px;
@@ -349,6 +373,28 @@ button {
   stroke-width: 3;
 }
 
+.composer-mic:hover,
+.composer-mic:focus-visible {
+  border-color: rgb(47 139 103 / 48%);
+  background: #ffffff;
+  outline: 3px solid rgb(47 139 103 / 14%);
+  outline-offset: 3px;
+}
+
+.composer-mic-active {
+  border-color: #9f2f26;
+  background: var(--danger);
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgb(139 51 40 / 22%);
+}
+
+.composer-mic-active:hover,
+.composer-mic-active:focus-visible {
+  border-color: #7a241d;
+  background: #7a241d;
+  outline-color: rgb(139 51 40 / 18%);
+}
+
 .composer-submit:hover,
 .composer-submit:focus-visible {
   background: #247956;
@@ -356,9 +402,27 @@ button {
   outline-offset: 3px;
 }
 
+.composer-mic:disabled,
 .composer-submit:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.speech-status {
+  margin: 9px 2px 0;
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.speech-status-error,
+.speech-status-unsupported {
+  color: var(--danger);
+}
+
+.speech-status-listening {
+  color: var(--accent);
 }
 
 .error-message {
@@ -1138,9 +1202,15 @@ button {
   }
 
   .reader-brand {
+    gap: 8px;
     font-size: 24px;
     letter-spacing: 0;
     text-transform: none;
+  }
+
+  .reader-brand-mark {
+    width: 28px;
+    height: 28px;
   }
 
   .reader-tabs {
