@@ -140,7 +140,7 @@ export async function evaluateAnswer(
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
         "HTTP-Referer": "http://localhost:3000",
-        "X-Title": "Flashcarder",
+        "X-Title": "waxon",
       },
       body: JSON.stringify({
         model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
@@ -160,7 +160,7 @@ export async function evaluateAnswer(
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      console.info("[flashcarder] llm evaluation failed", {
+      console.info("[waxon] llm evaluation failed", {
         provider: "openrouter",
         model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
         status: response.status,
@@ -173,7 +173,7 @@ export async function evaluateAnswer(
     const body: unknown = await response.json();
     return parseEvaluation(extractChatCompletionText(body));
   } catch (error) {
-    console.info("[flashcarder] llm evaluation failed", {
+    console.info("[waxon] llm evaluation failed", {
       provider: "openrouter",
       model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
       error: error instanceof Error ? error.message : "unknown error",
