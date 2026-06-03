@@ -1729,7 +1729,7 @@ export default function Home() {
       return {
         id: message.id,
         question: message.question,
-        answer: message.answerSummary ?? message.answer,
+        answer: message.answer,
         status: message.status,
         score: message.score,
         justification: message.justification,
@@ -1775,7 +1775,7 @@ export default function Home() {
       return {
         id: `history-${item.question}`,
         question: item.question,
-        answer: item.lastAnswerSummary ?? item.lastAnswer,
+        answer: item.lastAnswer,
         status: "resolved",
         score: item.lastScore,
         justification:
@@ -2323,23 +2323,49 @@ export default function Home() {
                       </div>
 
                       <div className="previous-copy">
-                        {item.answer ? (
-                          <p className="previous-answer">
-                            <span>Your answer</span>
-                            {" "}
-                            {item.answer}
-                          </p>
-                        ) : null}
-                        {isPending ? (
-                          <p className="previous-summary">
-                            Evaluating in background...
-                          </p>
-                        ) : (
-                          <MarkdownContent
-                            className="previous-summary"
-                            text={item.justification ?? "No feedback returned."}
+                        <div className="previous-field previous-question-field">
+                          <span className="previous-field-label">Question</span>
+                          <MarkdownInline
+                            as="p"
+                            className="previous-question"
+                            text={item.question}
                           />
-                        )}
+                        </div>
+
+                        <div className="previous-detail-grid">
+                          <div className="previous-field">
+                            <span className="previous-field-label">Answer</span>
+                            {item.answer ? (
+                              <MarkdownInline
+                                as="p"
+                                className="previous-answer"
+                                text={item.answer}
+                              />
+                            ) : (
+                              <p className="previous-answer previous-answer-empty">
+                                No answer text recorded.
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="previous-field">
+                            <span className="previous-field-label">
+                              Evaluation
+                            </span>
+                            {isPending ? (
+                              <p className="previous-summary">
+                                Evaluating in background...
+                              </p>
+                            ) : (
+                              <MarkdownContent
+                                className="previous-summary"
+                                text={
+                                  item.justification ?? "No feedback returned."
+                                }
+                              />
+                            )}
+                          </div>
+                        </div>
                       </div>
 
                       <time
