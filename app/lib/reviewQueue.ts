@@ -1,12 +1,12 @@
 import {
-  applyEvaluationToSqlite,
+  applyEvaluationToPostgres,
   getAllQueuedQuestions,
   getDueQuestions,
   getQuestionAttempts,
   getQuestionSnapshot,
   type DueQuestion,
   type QuestionAttempt,
-} from "./sqliteStore";
+} from "./postgresStore";
 import { evaluateAnswer, type EvaluationResult } from "./evaluateAnswer";
 import { parseReviews, reinsertionDelay, type ReviewEntry } from "./scheduler";
 
@@ -296,7 +296,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       answer: submission.answer,
       previousReviews: submission.previousReviews,
     });
-    const persisted = await applyEvaluationToSqlite({
+    const persisted = await applyEvaluationToPostgres({
       question: submission.question,
       answer: submission.answer,
       answerSummary: result.answerSummary,
