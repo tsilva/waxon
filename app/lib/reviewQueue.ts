@@ -31,6 +31,8 @@ export type EvaluationQueueItem = {
 };
 
 export type ReviewQueueItem = {
+  deckId: string;
+  deckName: string;
   question: string;
   nextDue: number;
   msUntilDue: number;
@@ -199,6 +201,8 @@ async function getReviewQueueItems(now = Date.now()): Promise<ReviewQueueItem[]>
       const lastReview = reviewHistory.at(-1);
 
       return {
+        deckId: item.deckId,
+        deckName: item.deckName,
         question: item.question,
         nextDue: item.nextDue,
         msUntilDue,
@@ -293,6 +297,8 @@ async function processEvaluation(submission: Submission): Promise<void> {
     if (persisted) {
       reinsertQuestion(
         {
+          deckId: persisted.deckId,
+          deckName: persisted.deckName,
           question: persisted.question,
           reviews: persisted.reviews,
           nextDue: persisted.nextDue,
