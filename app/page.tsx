@@ -148,6 +148,7 @@ type PreviousAnswerItem = {
   status: "grading" | "resolved";
   score: number | null;
   justification: string | null;
+  timestamp: number | null;
   timeLabel: string;
 };
 
@@ -634,6 +635,39 @@ function formatReviewDate(timestamp: number | null): string {
   }).format(timestamp);
 }
 
+function formatRelativeTime(timestamp: number | null, now: number): string {
+  if (!timestamp) {
+    return "Just now";
+  }
+
+  const elapsedMs = Math.max(0, now - timestamp);
+  const elapsedSeconds = Math.floor(elapsedMs / 1000);
+
+  if (elapsedSeconds < 60) {
+    return "Just now";
+  }
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+
+  if (elapsedMinutes < 60) {
+    return `${elapsedMinutes}m ago`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+
+  if (elapsedHours < 24) {
+    return `${elapsedHours}h ago`;
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+
+  if (elapsedDays < 7) {
+    return `${elapsedDays}d ago`;
+  }
+
+  return formatReviewDate(timestamp);
+}
+
 function formatNextDue(stats: QuestionStats): string {
   if (stats.nextDue === null || stats.msUntilDue === null) {
     return "Unknown";
@@ -1016,6 +1050,7 @@ export default function Home() {
   const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1039,6 +1074,14 @@ export default function Home() {
   useEffect(() => {
     isSubmittingRef.current = isSubmitting;
   }, [isSubmitting]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 60_000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let isActive = true;
@@ -1680,15 +1723,23 @@ export default function Home() {
     )
     .slice()
     .reverse()
-    .map((message) => ({
-      id: message.id,
-      question: message.question,
-      answer: message.answerSummary ?? message.answer,
-      status: message.status,
-      score: message.score,
-      justification: message.justification,
-      timeLabel: message.status === "grading" ? "Just now" : "2d ago",
-    }));
+    .map((message) => {
+      const timestamp = message.resolvedAt ?? message.submittedAt;
+
+      return {
+        id: message.id,
+        question: message.question,
+        answer: message.answerSummary ?? message.answer,
+        status: message.status,
+        score: message.score,
+        justification: message.justification,
+        timestamp,
+        timeLabel:
+          message.status === "grading"
+            ? "Just now"
+            : formatRelativeTime(timestamp, currentTime),
+      };
+    });
 
   const sessionPreviousQuestions = new Set(
     sessionPreviousAnswers.map((previousItem) => previousItem.question),
@@ -1713,17 +1764,27 @@ export default function Home() {
       return b.nextDue - a.nextDue;
     })
     .slice(0, EXPANDED_PREVIOUS_ANSWER_LIMIT)
-    .map((item) => ({
-      id: `history-${item.question}`,
-      question: item.question,
-      answer: item.lastAnswerSummary ?? item.lastAnswer,
-      status: "resolved",
-      score: item.lastScore,
-      justification:
-        item.lastJustification ??
-        "Covers the core idea; a few details could be sharper.",
-      timeLabel: "2d ago",
-    }));
+    .map((item) => {
+      const latestAttempt = item.attempts.at(-1);
+      const timestamp =
+        latestAttempt?.resolvedAt ??
+        latestAttempt?.submittedAt ??
+        item.reviewHistory.at(-1)?.ts ??
+        null;
+
+      return {
+        id: `history-${item.question}`,
+        question: item.question,
+        answer: item.lastAnswerSummary ?? item.lastAnswer,
+        status: "resolved",
+        score: item.lastScore,
+        justification:
+          item.lastJustification ??
+          "Covers the core idea; a few details could be sharper.",
+        timestamp,
+        timeLabel: formatRelativeTime(timestamp, currentTime),
+      };
+    });
 
   const previousAnswers = [
     ...sessionPreviousAnswers,
@@ -2281,7 +2342,16 @@ export default function Home() {
                         )}
                       </div>
 
-                      <time className="previous-time">{item.timeLabel}</time>
+                      <time
+                        className="previous-time"
+                        dateTime={
+                          item.timestamp
+                            ? new Date(item.timestamp).toISOString()
+                            : undefined
+                        }
+                      >
+                        {item.timeLabel}
+                      </time>
                     </button>
                   </li>
                 );
