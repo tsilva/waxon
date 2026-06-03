@@ -21,6 +21,7 @@ const DEFAULT_BATCH_SIZE = 32;
 function parseArgs(argv) {
   const options = {
     apply: false,
+    approvalTable: false,
     batchSize: DEFAULT_BATCH_SIZE,
     changesPath: null,
     deckId: DEFAULT_DECK_ID,
@@ -28,6 +29,7 @@ function parseArgs(argv) {
     json: false,
     limit: 0,
     offset: 0,
+    validateChanges: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -38,8 +40,18 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === "--approval-table") {
+      options.approvalTable = true;
+      continue;
+    }
+
     if (arg === "--json") {
       options.json = true;
+      continue;
+    }
+
+    if (arg === "--validate-changes") {
+      options.validateChanges = true;
       continue;
     }
 
@@ -110,8 +122,22 @@ function parseArgs(argv) {
     throw new Error("--offset must be a non-negative integer");
   }
 
-  if (options.apply && !options.changesPath) {
-    throw new Error("--apply requires --changes <path>");
+  const changeModeCount = [
+    options.apply,
+    options.approvalTable,
+    options.validateChanges,
+  ].filter(Boolean).length;
+
+  if (changeModeCount > 1) {
+    throw new Error(
+      "--apply, --approval-table, and --validate-changes are mutually exclusive",
+    );
+  }
+
+  if (changeModeCount > 0 && !options.changesPath) {
+    throw new Error(
+      "--apply, --approval-table, and --validate-changes require --changes <path>",
+    );
   }
 
   return options;
@@ -400,6 +426,47 @@ function validateChanges(changes, activeRows) {
   }
 }
 
+function changeSummary(change) {
+  const oldTokens = roughContentTokenCount(change.oldQuestion);
+  const newTokens = roughContentTokenCount(change.newQuestion);
+
+  return {
+    newQuestion: change.newQuestion,
+    newTokens,
+    oldQuestion: change.oldQuestion,
+    oldTokens,
+    tokensSaved: oldTokens - newTokens,
+  };
+}
+
+function markdownTableCell(value) {
+  return value.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
+function printApprovalTable(changes) {
+  const summaries = changes.map(changeSummary);
+  const totalTokensSaved = summaries.reduce(
+    (total, summary) => total + summary.tokensSaved,
+    0,
+  );
+
+  console.log(
+    "| # | Old question | New question | Old tokens | New tokens | Saved |",
+  );
+  console.log("|---:|---|---|---:|---:|---:|");
+
+  for (const [index, summary] of summaries.entries()) {
+    console.log(
+      `| ${index + 1} | ${markdownTableCell(summary.oldQuestion)} | ${markdownTableCell(summary.newQuestion)} | ${summary.oldTokens} | ${summary.newTokens} | ${summary.tokensSaved} |`,
+    );
+  }
+
+  console.log("");
+  console.log(
+    `Total changes: ${summaries.length}; total rough content tokens saved: ${totalTokensSaved}`,
+  );
+}
+
 async function saveAtomicChanges(pool, rowsByOldQuestion, changes, embeddings, model) {
   const now = Date.now();
   const questionMap = new Map(
@@ -540,7 +607,7 @@ async function main() {
   const pool = new Pool({ connectionString });
 
   try {
-    if (!options.apply) {
+    if (!options.apply && !options.approvalTable && !options.validateChanges) {
       const questions = await loadQuestions(pool, options);
       printQuestionReport(questions, options);
       return;
@@ -549,17 +616,28 @@ async function main() {
     const changes = await readChanges(options.changesPath);
 
     if (changes.length === 0) {
-      console.log("No question cleanups to apply.");
+      console.log("No question cleanups.");
       return;
     }
 
-    const apiKey = requireEnv("OPENROUTER_API_KEY", "LLM_API_KEY");
     const activeRows = await loadQuestions(pool, {
       ...options,
       limit: 0,
       offset: 0,
     });
     validateChanges(changes, activeRows);
+
+    if (options.validateChanges) {
+      console.log(`${changes.length} changes checked; all valid`);
+      return;
+    }
+
+    if (options.approvalTable) {
+      printApprovalTable(changes);
+      return;
+    }
+
+    const apiKey = requireEnv("OPENROUTER_API_KEY", "LLM_API_KEY");
 
     const rowsByOldQuestion = new Map(
       activeRows.map((row) => [row.question, row]),
