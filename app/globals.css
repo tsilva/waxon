@@ -155,6 +155,10 @@ textarea {
 .queue-last-score,
 .queue-justification,
 .queue-empty,
+.embedding-plot-header h2,
+.embedding-plot-header p,
+.embedding-plot-empty,
+.embedding-tooltip,
 .due-badge,
 .stats-modal-kicker,
 .stats-tile span,
@@ -1156,6 +1160,9 @@ textarea {
 }
 
 .queue-stage {
+  display: grid;
+  align-content: start;
+  gap: 16px;
   width: min(1080px, 100%);
   min-height: 0;
   margin: 0 auto;
@@ -1164,6 +1171,169 @@ textarea {
   scrollbar-color: rgb(166 124 82 / 50%) transparent;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+}
+
+.embedding-plot-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgb(227 218 196 / 78%);
+  border-radius: 8px;
+  padding: 16px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 54%), transparent),
+    rgb(251 248 240 / 74%);
+}
+
+.embedding-plot-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.embedding-plot-header h2,
+.embedding-plot-header p {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.embedding-plot-header h2 {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 780;
+}
+
+.embedding-plot-header p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
+  overflow-wrap: anywhere;
+}
+
+.embedding-plot-canvas {
+  position: relative;
+  min-height: 280px;
+  overflow: hidden;
+  border: 1px solid rgb(227 218 196 / 62%);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgb(227 218 196 / 24%) 1px, transparent 1px),
+    linear-gradient(180deg, rgb(227 218 196 / 20%) 1px, transparent 1px),
+    rgb(255 255 255 / 52%);
+  background-size: 44px 44px;
+}
+
+.embedding-plot {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 270px;
+}
+
+.embedding-plot-grid {
+  stroke: rgb(166 124 82 / 22%);
+  stroke-dasharray: 5 7;
+  stroke-width: 1.2;
+}
+
+.embedding-plot-frame {
+  fill: transparent;
+  stroke: rgb(227 218 196 / 80%);
+  stroke-width: 1.2;
+}
+
+.embedding-plot-point {
+  color: var(--accent);
+  cursor: pointer;
+  outline: none;
+}
+
+.embedding-plot-point circle:first-of-type {
+  fill: #ffffff;
+  stroke: currentColor;
+  stroke-width: 3;
+  filter: drop-shadow(0 5px 8px rgb(42 24 22 / 10%));
+}
+
+.embedding-plot-point.point-now {
+  color: var(--success);
+}
+
+.embedding-plot-hit-area {
+  fill: transparent;
+  stroke: transparent;
+}
+
+.embedding-plot-point:hover circle:first-of-type,
+.embedding-plot-point:focus-visible circle:first-of-type {
+  fill: var(--accent-soft);
+  stroke-width: 4;
+}
+
+.embedding-plot-point.point-now:hover circle:first-of-type,
+.embedding-plot-point.point-now:focus-visible circle:first-of-type {
+  fill: var(--success-soft);
+}
+
+.embedding-tooltip {
+  position: absolute;
+  z-index: 4;
+  width: min(340px, calc(100% - 28px));
+  pointer-events: none;
+  border: 1px solid rgb(227 218 196 / 90%);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgb(251 248 240 / 98%);
+  box-shadow: 0 18px 40px rgb(42 24 22 / 16%);
+  color: var(--ink);
+  transform: translate(-50%, calc(-100% - 14px));
+}
+
+.embedding-tooltip::after {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  border-right: 1px solid rgb(227 218 196 / 90%);
+  border-bottom: 1px solid rgb(227 218 196 / 90%);
+  background: rgb(251 248 240 / 98%);
+  content: "";
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.embedding-tooltip p,
+.embedding-tooltip span {
+  margin: 0;
+}
+
+.embedding-tooltip p {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.embedding-tooltip span {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.25;
+}
+
+.embedding-plot-empty {
+  display: grid;
+  place-items: center;
+  min-height: 160px;
+  border: 1px dashed rgb(227 218 196 / 92%);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+  text-align: center;
 }
 
 .queue-list {
@@ -1831,7 +2001,30 @@ textarea {
 
   .queue-stage {
     width: 100%;
+    gap: 14px;
     padding: 26px 22px 20px;
+  }
+
+  .embedding-plot-panel {
+    padding: 13px;
+  }
+
+  .embedding-plot-canvas {
+    min-height: 220px;
+    background-size: 34px 34px;
+  }
+
+  .embedding-plot {
+    min-height: 220px;
+  }
+
+  .embedding-tooltip {
+    width: min(280px, calc(100% - 20px));
+    padding: 9px 10px;
+  }
+
+  .embedding-tooltip p {
+    font-size: 12px;
   }
 
   .queue-row {
