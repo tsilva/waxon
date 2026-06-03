@@ -8,17 +8,22 @@ export type EvaluationResult = {
   score: number;
   justification: string;
   answerSummary: string;
+  probingQuestions: string[];
 };
 
 const INVALID_JSON_RESULT: EvaluationResult = {
   score: 0,
   justification: "LLM evaluation failed or returned invalid JSON.",
   answerSummary: "Evaluation failed.",
+  probingQuestions: [],
 };
 
 const EVALUATION_TIMEOUT_MS = 25_000;
 const MAX_JUSTIFICATION_WORDS = 12;
 const MAX_ANSWER_SUMMARY_WORDS = 12;
+const MAX_PROBING_QUESTIONS = 3;
+const MAX_PROBING_QUESTION_CHARS = 220;
+export const PROBING_QUESTION_SCORE_THRESHOLD = 5;
 
 function clampScore(score: unknown): number {
   if (typeof score !== "number" || !Number.isFinite(score)) {
@@ -37,7 +42,9 @@ User answer: ${input.answer}
 
 Previous review history: ${input.previousReviews}
 
-Grade the answer from 0 to 10.
+Grade the answer from 0 to 10. In the same response, generate extra
+probingQuestions only when the score is ${PROBING_QUESTION_SCORE_THRESHOLD} or
+lower.
 
 Scoring:
 0 = no useful knowledge or completely wrong
@@ -56,11 +63,19 @@ math symbols or formulas.
 
 Keep justification very concise: one sentence, 12 words maximum.
 
+If score is ${PROBING_QUESTION_SCORE_THRESHOLD} or lower, include 1 to 3
+probingQuestions that directly test the specific misconception, missing step,
+or confusion shown in the user's answer. Each probing question must be a
+standalone recall question, not a hint, and must not reveal the corrected
+answer. If score is above ${PROBING_QUESTION_SCORE_THRESHOLD}, probingQuestions
+must be an empty array.
+
 Return strict JSON only:
 {
   "score": number,
   "justification": string,
-  "answerSummary": string
+  "answerSummary": string,
+  "probingQuestions": string[]
 }`;
 }
 
@@ -77,15 +92,24 @@ function parseEvaluation(rawText: string, fallbackAnswer: string): EvaluationRes
       answerSummary?: unknown;
       answer_summary?: unknown;
       conciseAnswer?: unknown;
+      probingQuestions?: unknown;
+      probing_questions?: unknown;
     };
+    const score = clampScore(parsed.score);
 
     return {
-      score: clampScore(parsed.score),
+      score,
       justification: conciseJustification(parsed.justification),
       answerSummary: conciseAnswerSummary(
         parsed.answerSummary ?? parsed.answer_summary ?? parsed.conciseAnswer,
         fallbackAnswer,
       ),
+      probingQuestions:
+        score <= PROBING_QUESTION_SCORE_THRESHOLD
+          ? sanitizeProbingQuestions(
+              parsed.probingQuestions ?? parsed.probing_questions,
+            )
+          : [],
     };
   } catch {
     return {
@@ -121,6 +145,42 @@ function conciseAnswerSummary(summary: unknown, fallbackAnswer: string): string 
   }
 
   return `${words.slice(0, MAX_ANSWER_SUMMARY_WORDS).join(" ")}...`;
+}
+
+function sanitizeProbingQuestions(questions: unknown): string[] {
+  if (!Array.isArray(questions)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const sanitized: string[] = [];
+
+  for (const question of questions) {
+    if (typeof question !== "string") {
+      continue;
+    }
+
+    const normalized = question.trim().replace(/\s+/g, " ");
+
+    if (!normalized || normalized.length > MAX_PROBING_QUESTION_CHARS) {
+      continue;
+    }
+
+    const key = normalized.toLowerCase();
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    sanitized.push(normalized);
+
+    if (sanitized.length >= MAX_PROBING_QUESTIONS) {
+      break;
+    }
+  }
+
+  return sanitized;
 }
 
 function extractChatCompletionText(response: unknown): string {
@@ -160,6 +220,7 @@ export async function evaluateAnswer(
       score: 0,
       justification: "OPENROUTER_API_KEY or LLM_API_KEY is not configured.",
       answerSummary: conciseAnswerSummary(input.answer, input.answer),
+      probingQuestions: [],
     };
   }
 
@@ -188,7 +249,7 @@ export async function evaluateAnswer(
           type: "json_object",
         },
         temperature: 0,
-        max_tokens: 200,
+        max_tokens: 500,
       }),
     });
 

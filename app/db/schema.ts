@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
+  customType,
   index,
   integer,
   pgTable,
@@ -10,6 +12,22 @@ import {
 } from "drizzle-orm/pg-core";
 
 const nowMs = sql`(extract(epoch from now()) * 1000)::bigint`;
+
+const vector = customType<{ data: number[]; driverData: string }>({
+  dataType() {
+    return "vector";
+  },
+  toDriver(value) {
+    return JSON.stringify(value);
+  },
+  fromDriver(value) {
+    return value
+      .slice(1, -1)
+      .split(",")
+      .filter(Boolean)
+      .map((component) => Number.parseFloat(component));
+  },
+});
 
 export const users = pgTable("users", {
   id: text("id").primaryKey(),
@@ -43,6 +61,10 @@ export const questions = pgTable(
       .references(() => decks.id, { onDelete: "cascade" }),
     reviews: text("reviews").notNull().default(""),
     nextDue: bigint("next_due", { mode: "number" }).notNull().default(0),
+    generatedFromQuestion: text("generated_from_question").references(
+      (): AnyPgColumn => questions.question,
+      { onDelete: "set null" },
+    ),
     lastAnswer: text("last_answer").notNull().default(""),
     lastAnswerSummary: text("last_answer_summary").notNull().default(""),
     referenceAnswer: text("reference_answer").notNull().default(""),
@@ -81,6 +103,30 @@ export const questionAttempts = pgTable(
       table.deckId,
       table.question,
       table.submittedAt.desc(),
+    ),
+  ],
+);
+
+export const questionEmbeddings = pgTable(
+  "question_embeddings",
+  {
+    id: serial("id").primaryKey(),
+    question: text("question")
+      .notNull()
+      .references(() => questions.question, { onDelete: "cascade" }),
+    embeddingModel: text("embedding_model").notNull(),
+    embedding: vector("embedding").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => [
+    uniqueIndex("question_embeddings_question_model_idx").on(
+      table.question,
+      table.embeddingModel,
+    ),
+    index("question_embeddings_model_question_idx").on(
+      table.embeddingModel,
+      table.question,
     ),
   ],
 );

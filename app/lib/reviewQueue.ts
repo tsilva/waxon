@@ -4,10 +4,15 @@ import {
   getDueQuestions,
   getQuestionAttempts,
   getQuestionSnapshot,
+  upsertDueQuestions,
   type DueQuestion,
   type QuestionAttempt,
 } from "./postgresStore";
-import { evaluateAnswer, type EvaluationResult } from "./evaluateAnswer";
+import {
+  evaluateAnswer,
+  PROBING_QUESTION_SCORE_THRESHOLD,
+  type EvaluationResult,
+} from "./evaluateAnswer";
 import { parseReviews, reinsertionDelay, type ReviewEntry } from "./scheduler";
 
 export const RESOLVED_JUDGING_VISIBLE_MS = 10_000;
@@ -39,6 +44,7 @@ export type ReviewQueueItem = {
   nextDue: number;
   msUntilDue: number;
   status: "now" | "scheduled";
+  generatedFromQuestion: string | null;
   reviewHistory: ReviewEntry[];
   lastScore: number | null;
   lastAnswer: string | null;
@@ -218,6 +224,7 @@ async function getReviewQueueItems(now = Date.now()): Promise<ReviewQueueItem[]>
         nextDue: item.nextDue,
         msUntilDue,
         status: msUntilDue <= 0 ? "now" : "scheduled",
+        generatedFromQuestion: item.generatedFromQuestion,
         reviewHistory,
         lastScore: latest?.score ?? lastReview?.score ?? null,
         lastAnswer: item.lastAnswer,
@@ -289,6 +296,30 @@ function reinsertQuestion(question: DueQuestion, score: number): void {
   logQueueFlushStatus("reinserted-low-score");
 }
 
+function enqueueProbingQuestions(probingQuestions: DueQuestion[]): void {
+  if (probingQuestions.length === 0) {
+    return;
+  }
+
+  const dueProbingQuestions = probingQuestions.filter(
+    (question) => !state.inFlightQuestions.has(question.question),
+  );
+
+  if (dueProbingQuestions.length === 0) {
+    return;
+  }
+
+  const probeQuestionText = new Set(
+    dueProbingQuestions.map((question) => question.question),
+  );
+
+  state.queue = [
+    ...dueProbingQuestions,
+    ...state.queue.filter((question) => !probeQuestionText.has(question.question)),
+  ];
+  logQueueFlushStatus("queued-probing-questions");
+}
+
 async function processEvaluation(submission: Submission): Promise<void> {
   try {
     const result = await evaluateAnswer({
@@ -296,6 +327,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       answer: submission.answer,
       previousReviews: submission.previousReviews,
     });
+    const resolvedAt = Date.now();
     const persisted = await applyEvaluationToPostgres({
       question: submission.question,
       answer: submission.answer,
@@ -303,10 +335,33 @@ async function processEvaluation(submission: Submission): Promise<void> {
       justification: result.justification,
       score: result.score,
       submittedAt: submission.submittedAt,
-      now: Date.now(),
+      now: resolvedAt,
     });
 
     if (persisted) {
+      if (
+        result.score <= PROBING_QUESTION_SCORE_THRESHOLD &&
+        result.probingQuestions.length > 0
+      ) {
+        try {
+          const sourceQuestionKey = submission.question.trim().toLowerCase();
+          const probingQuestions = await upsertDueQuestions({
+            questions: result.probingQuestions.filter(
+              (question) => question.trim().toLowerCase() !== sourceQuestionKey,
+            ),
+            sourceQuestion: submission.question,
+            now: resolvedAt,
+          });
+
+          enqueueProbingQuestions(probingQuestions);
+        } catch (error) {
+          console.info("[waxon] probing question insertion failed", {
+            question: submission.question,
+            error: error instanceof Error ? error.message : "unknown error",
+          });
+        }
+      }
+
       reinsertQuestion(
         {
           deckId: persisted.deckId,
@@ -314,6 +369,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
           question: persisted.question,
           reviews: persisted.reviews,
           nextDue: persisted.nextDue,
+          generatedFromQuestion: persisted.generatedFromQuestion,
           lastAnswer: persisted.lastAnswer,
           lastAnswerSummary: persisted.lastAnswerSummary,
           referenceAnswer: persisted.referenceAnswer,

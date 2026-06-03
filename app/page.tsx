@@ -57,6 +57,7 @@ type ReviewQueueItem = {
   nextDue: number;
   msUntilDue: number;
   status: "now" | "scheduled";
+  generatedFromQuestion: string | null;
   reviewHistory: ReviewHistoryEntry[];
   lastScore: number | null;
   lastAnswer: string | null;
@@ -173,6 +174,7 @@ type QuestionStats = {
   msUntilDue: number | null;
   dueStatus: "now" | "scheduled" | "unknown";
   pendingCount: number;
+  generatedFromQuestion: string | null;
   referenceAnswer: string | null;
   lastJustification: string | null;
 };
@@ -1498,6 +1500,7 @@ export default function Home() {
       msUntilDue: queueItem?.msUntilDue ?? null,
       dueStatus: queueItem?.status ?? "unknown",
       pendingCount,
+      generatedFromQuestion: queueItem?.generatedFromQuestion ?? null,
       referenceAnswer: queueItem?.referenceAnswer ?? null,
       lastJustification:
         queueItem?.lastJustification ??
@@ -1972,6 +1975,13 @@ export default function Home() {
                         className="queue-question"
                         text={item.question}
                       />
+                      {item.generatedFromQuestion ? (
+                        <MarkdownInline
+                          as="p"
+                          className="queue-origin"
+                          text={`Generated from: ${item.generatedFromQuestion}`}
+                        />
+                      ) : null}
                       <div className="queue-metrics" aria-label="Card metrics">
                         <span
                           className={`due-badge ${
@@ -2115,6 +2125,15 @@ export default function Home() {
                   <MarkdownContent
                     className="stats-feedback-copy"
                     text={selectedQuestionStats.lastJustification}
+                  />
+                </div>
+              ) : null}
+              {selectedQuestionStats.generatedFromQuestion ? (
+                <div className="stats-feedback">
+                  <span>Generated from</span>
+                  <MarkdownContent
+                    className="stats-feedback-copy"
+                    text={selectedQuestionStats.generatedFromQuestion}
                   />
                 </div>
               ) : null}

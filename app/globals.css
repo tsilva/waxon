@@ -1129,6 +1129,14 @@ button {
   line-height: 1.38;
 }
 
+.queue-origin {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
 .queue-last-score,
 .queue-justification,
 .queue-empty {
