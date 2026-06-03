@@ -38,10 +38,14 @@ npm run deck:cleanup-questions -- --json
 5. Before applying, locally validate that every proposed cleanup either changes Markdown formatting while not increasing rough content tokens, or saves more than `5` rough content tokens. Discard cleanups that do not change formatting and save `5` or fewer rough content tokens. The count ignores Markdown syntax, so adding formatting markers is allowed even when it increases the raw token count. Fix or remove any candidate that fails this check.
 
 ```bash
-node -e 'const fs=require("fs"); const data=JSON.parse(fs.readFileSync("/tmp/waxon-cleanup-question-changes.json","utf8")); const changes=Array.isArray(data)?data:data.changes; const raw=s=>(s.match(/[A-Za-z0-9]+|[^\sA-Za-z0-9]/g)||[]).length; const md=s=>s.replace(/!\[([^\]]*)\]\([^)]+\)/g,"$1").replace(/\[([^\]]+)\]\([^)]+\)/g,"$1").replace(/`{1,3}([^`]+?)`{1,3}/g,"$1").replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g,"$2").replace(/(^|[^\w])\*(?=\S)([\s\S]*?\S)\*(?=[^\w]|$)/g,"$1$2").replace(/(^|[^\w])_(?=\S)([\s\S]*?\S)_(?=[^\w]|$)/g,"$1$2").replace(/~~(?=\S)([\s\S]*?\S)~~/g,"$1").replace(/\$\$(?=\S)([\s\S]*?\S)\$\$/g,"$1").replace(/\$(?=\S)([^$\n]*?\S)\$/g,"$1"); const mdSig=s=>(s.match(/!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|`{1,3}[^`]+?`{1,3}|(\*\*|__)(?=\S)[\s\S]*?\S\1|(^|[^\w])\*(?=\S)[\s\S]*?\S\*(?=[^\w]|$)|(^|[^\w])_(?=\S)[\s\S]*?\S_(?=[^\w]|$)|~~(?=\S)[\s\S]*?\S~~|\$\$(?=\S)[\s\S]*?\S\$\$|\$(?=\S)[^$\n]*?\S\$/g)||[]).join("\n"); const hasMd=s=>mdSig(s).length>0; const count=s=>raw(md(s)); let ok=true; for (const c of changes){ const old=count(c.oldQuestion), neu=count(c.newQuestion), changedMd=mdSig(c.oldQuestion)!==mdSig(c.newQuestion), saved=old-neu; if (hasMd(c.oldQuestion)&&!hasMd(c.newQuestion)){ ok=false; console.log(`REMOVES MARKDOWN: ${c.oldQuestion}\n  => ${c.newQuestion}`); } if ((!changedMd && saved<=5) || (changedMd && neu>old) || (changedMd && neu===old && md(c.oldQuestion)!==md(c.newQuestion))){ ok=false; console.log(`${old}->${neu} INVALID LOW-VALUE CLEANUP: ${c.oldQuestion}\n  => ${c.newQuestion}`); } } console.log(`${changes.length} changes checked; ${ok ? "all valid" : "some invalid"}`); process.exit(ok?0:1)'
+npm run deck:cleanup-questions -- --validate-changes --changes /tmp/waxon-cleanup-question-changes.json
 ```
 
 6. Always show the user a Markdown approval table before applying. Include at least: old question, new question, old rough content tokens, new rough content tokens, and content tokens saved. Do not run `--apply` until the user explicitly approves the displayed changes.
+
+```bash
+npm run deck:cleanup-questions -- --approval-table --changes /tmp/waxon-cleanup-question-changes.json
+```
 
 7. After approval, apply in one atomic pass:
 
@@ -59,6 +63,8 @@ The apply step bulk-fetches embeddings for all new question texts with OpenRoute
 - `--limit <n>` and `--offset <n>`: page through questions during review.
 - `--json`: print machine-readable questions for review.
 - `--apply --changes <path>`: apply approved cleanups.
+- `--validate-changes --changes <path>`: validate proposed cleanups against active deck questions without applying.
+- `--approval-table --changes <path>`: print the approval table after validating proposed cleanups.
 
 ## Rewrite Rules
 
