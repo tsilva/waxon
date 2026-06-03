@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { ArrowUp, Mic, Square } from "lucide-react";
+import { ArrowUp, Mic, Settings, Square, User } from "lucide-react";
 import {
   FormEvent,
   Fragment,
@@ -669,6 +669,14 @@ function StopIcon() {
   return <Square aria-hidden="true" fill="currentColor" />;
 }
 
+function SettingsIcon() {
+  return <Settings aria-hidden="true" />;
+}
+
+function UserIcon() {
+  return <User aria-hidden="true" />;
+}
+
 function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
   const width = 520;
   const height = 190;
@@ -772,9 +780,11 @@ export default function Home() {
   const [selectedQuestion, setSelectedQuestion] = useState<string | null>(null);
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
   const keepListeningRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -794,6 +804,40 @@ export default function Home() {
   useEffect(() => {
     isSubmittingRef.current = isSubmitting;
   }, [isSubmitting]);
+
+  useEffect(() => {
+    if (!isUserMenuOpen) {
+      return;
+    }
+
+    function closeUserMenu(event: globalThis.MouseEvent | globalThis.TouchEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Node &&
+        userMenuRef.current &&
+        !userMenuRef.current.contains(target)
+      ) {
+        setIsUserMenuOpen(false);
+      }
+    }
+
+    function closeUserMenuOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsUserMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("mousedown", closeUserMenu);
+    window.addEventListener("touchstart", closeUserMenu);
+    window.addEventListener("keydown", closeUserMenuOnEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", closeUserMenu);
+      window.removeEventListener("touchstart", closeUserMenu);
+      window.removeEventListener("keydown", closeUserMenuOnEscape);
+    };
+  }, [isUserMenuOpen]);
 
   const clearPendingSpeechCommand = useCallback(() => {
     if (pendingSpeechCommandTimerRef.current) {
@@ -1630,6 +1674,40 @@ export default function Home() {
             <span className="queue-summary">
               {queueRemaining} due
             </span>
+            <div className="user-menu" ref={userMenuRef}>
+              <button
+                className={`user-menu-trigger ${
+                  isUserMenuOpen ? "user-menu-trigger-active" : ""
+                }`}
+                type="button"
+                aria-label="Open user menu"
+                aria-haspopup="menu"
+                aria-expanded={isUserMenuOpen}
+                aria-controls="user-menu-panel"
+                title="User menu"
+                onClick={() => setIsUserMenuOpen((isOpen) => !isOpen)}
+              >
+                <UserIcon />
+              </button>
+              {isUserMenuOpen ? (
+                <div
+                  className="user-menu-panel"
+                  id="user-menu-panel"
+                  role="menu"
+                  aria-label="User menu"
+                >
+                  <button
+                    className="user-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => setIsUserMenuOpen(false)}
+                  >
+                    <SettingsIcon />
+                    <span>Settings</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
 
