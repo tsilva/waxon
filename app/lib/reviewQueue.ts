@@ -4,6 +4,7 @@ import {
   getDueQuestions,
   getQuestionAttempts,
   getQuestionSnapshot,
+  readQuestionsWithEmbeddings,
   upsertDueQuestions,
   type DueQuestion,
   type QuestionAttempt,
@@ -54,11 +55,25 @@ export type ReviewQueueItem = {
   attempts: QuestionAttempt[];
 };
 
+export type DeckEmbeddingPlotPoint = {
+  question: string;
+  x: number;
+  y: number;
+};
+
+export type DeckEmbeddingPlot = {
+  model: string | null;
+  totalQuestions: number;
+  embeddedQuestions: number;
+  points: DeckEmbeddingPlotPoint[];
+};
+
 export type QueueStatusSnapshot = {
   queueRemaining: number;
   pendingEvaluations: number;
   evaluations: EvaluationQueueItem[];
   reviewQueue: ReviewQueueItem[];
+  deckEmbeddingPlot: DeckEmbeddingPlot;
 };
 
 type QueueStatusSubscriber = (status: QueueStatusSnapshot) => void;
@@ -196,6 +211,218 @@ function getVisibleEvaluations(now = Date.now()): EvaluationQueueItem[] {
   );
 
   return state.evaluations;
+}
+
+function dotProduct(a: number[], b: number[]): number {
+  let total = 0;
+
+  for (let index = 0; index < a.length; index += 1) {
+    total += (a[index] ?? 0) * (b[index] ?? 0);
+  }
+
+  return total;
+}
+
+function normalizeVector(vector: number[]): number[] | null {
+  let squaredNorm = 0;
+
+  for (const component of vector) {
+    squaredNorm += component * component;
+  }
+
+  const norm = Math.sqrt(squaredNorm);
+
+  if (norm <= Number.EPSILON) {
+    return null;
+  }
+
+  return vector.map((component) => component / norm);
+}
+
+function initialComponent(dimensions: number, seed: number): number[] {
+  return normalizeVector(
+    Array.from({ length: dimensions }, (_, index) =>
+      Math.sin((index + 1) * seed) + Math.cos((index + 1) * (seed + 0.37)),
+    ),
+  ) ?? Array.from({ length: dimensions }, (_, index) => (index === 0 ? 1 : 0));
+}
+
+function principalComponent(
+  rows: number[][],
+  dimensions: number,
+  seed: number,
+  previousComponent?: number[],
+): number[] | null {
+  let component = initialComponent(dimensions, seed);
+
+  if (previousComponent) {
+    const overlap = dotProduct(component, previousComponent);
+    component = component.map(
+      (value, index) => value - overlap * (previousComponent[index] ?? 0),
+    );
+    component = normalizeVector(component) ?? initialComponent(dimensions, seed + 1);
+  }
+
+  for (let iteration = 0; iteration < 24; iteration += 1) {
+    const next = Array.from({ length: dimensions }, () => 0);
+
+    for (const row of rows) {
+      const score = dotProduct(row, component);
+
+      for (let index = 0; index < dimensions; index += 1) {
+        next[index] += (row[index] ?? 0) * score;
+      }
+    }
+
+    if (previousComponent) {
+      const overlap = dotProduct(next, previousComponent);
+
+      for (let index = 0; index < dimensions; index += 1) {
+        next[index] -= overlap * (previousComponent[index] ?? 0);
+      }
+    }
+
+    const normalized = normalizeVector(next);
+
+    if (!normalized) {
+      return null;
+    }
+
+    component = normalized;
+  }
+
+  return component;
+}
+
+function normalizeProjectionValue(value: number, min: number, max: number): number {
+  if (max - min <= Number.EPSILON) {
+    return 0.5;
+  }
+
+  return (value - min) / (max - min);
+}
+
+function projectEmbeddings(
+  rows: Array<{ question: string; embedding: number[] }>,
+): DeckEmbeddingPlotPoint[] {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  if (rows.length === 1) {
+    return [
+      {
+        question: rows[0]?.question ?? "",
+        x: 0.5,
+        y: 0.5,
+      },
+    ];
+  }
+
+  const dimensions = rows[0]?.embedding.length ?? 0;
+  const means = Array.from({ length: dimensions }, (_, dimension) => {
+    const total = rows.reduce(
+      (sum, row) => sum + (row.embedding[dimension] ?? 0),
+      0,
+    );
+
+    return total / rows.length;
+  });
+  const centered = rows.map((row) =>
+    row.embedding.map((component, dimension) => component - means[dimension]),
+  );
+  const firstComponent = principalComponent(centered, dimensions, 1.41);
+  const secondComponent = firstComponent
+    ? principalComponent(centered, dimensions, 2.73, firstComponent)
+    : null;
+  const projected = centered.map((row, index) => ({
+    question: rows[index]?.question ?? "",
+    rawX: firstComponent ? dotProduct(row, firstComponent) : index,
+    rawY: secondComponent ? dotProduct(row, secondComponent) : 0,
+  }));
+  const xValues = projected.map((point) => point.rawX);
+  const yValues = projected.map((point) => point.rawY);
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+  const minY = Math.min(...yValues);
+  const maxY = Math.max(...yValues);
+
+  return projected.map((point) => ({
+    question: point.question,
+    x: normalizeProjectionValue(point.rawX, minX, maxX),
+    y: normalizeProjectionValue(point.rawY, minY, maxY),
+  }));
+}
+
+async function getDeckEmbeddingPlot(): Promise<DeckEmbeddingPlot> {
+  const questions = await readQuestionsWithEmbeddings();
+  const totalQuestions = questions.length;
+  const modelCounts = new Map<string, number>();
+
+  for (const question of questions) {
+    for (const embedding of question.embeddings) {
+      modelCounts.set(
+        embedding.embeddingModel,
+        (modelCounts.get(embedding.embeddingModel) ?? 0) + 1,
+      );
+    }
+  }
+
+  const model = Array.from(modelCounts.entries()).sort(
+    ([modelA, countA], [modelB, countB]) => countB - countA || modelA.localeCompare(modelB),
+  )[0]?.[0] ?? null;
+
+  if (!model) {
+    return {
+      model: null,
+      totalQuestions,
+      embeddedQuestions: 0,
+      points: [],
+    };
+  }
+
+  const selectedEmbeddings = questions
+    .map((question) => {
+      const embedding = question.embeddings.find(
+        (candidate) => candidate.embeddingModel === model,
+      );
+
+      return embedding
+        ? {
+            question: question.question,
+            embedding: embedding.embedding,
+          }
+        : null;
+    })
+    .filter(
+      (item): item is { question: string; embedding: number[] } =>
+        item !== null &&
+        item.embedding.length > 0 &&
+        item.embedding.every(Number.isFinite),
+    );
+  const dimensionCounts = new Map<number, number>();
+
+  for (const item of selectedEmbeddings) {
+    dimensionCounts.set(
+      item.embedding.length,
+      (dimensionCounts.get(item.embedding.length) ?? 0) + 1,
+    );
+  }
+
+  const dimension = Array.from(dimensionCounts.entries()).sort(
+    ([dimensionA, countA], [dimensionB, countB]) =>
+      countB - countA || dimensionB - dimensionA,
+  )[0]?.[0] ?? 0;
+  const projectableEmbeddings = selectedEmbeddings.filter(
+    (item) => item.embedding.length === dimension,
+  );
+
+  return {
+    model,
+    totalQuestions,
+    embeddedQuestions: projectableEmbeddings.length,
+    points: projectEmbeddings(projectableEmbeddings),
+  };
 }
 
 async function getReviewQueueItems(now = Date.now()): Promise<ReviewQueueItem[]> {
@@ -453,11 +680,16 @@ export async function submitAnswer(input: {
 export async function queueStatus(): Promise<QueueStatusSnapshot> {
   await initializeQueue();
   await refreshIfEmpty();
+  const [reviewQueue, deckEmbeddingPlot] = await Promise.all([
+    getReviewQueueItems(),
+    getDeckEmbeddingPlot(),
+  ]);
 
   return {
     queueRemaining: state.queue.length,
     pendingEvaluations: state.pendingEvaluations,
     evaluations: getVisibleEvaluations(),
-    reviewQueue: await getReviewQueueItems(),
+    reviewQueue,
+    deckEmbeddingPlot,
   };
 }

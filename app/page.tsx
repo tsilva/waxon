@@ -29,6 +29,7 @@ type QueueStatusResponse = {
   pendingEvaluations: number;
   evaluations: EvaluationQueueItem[];
   reviewQueue: ReviewQueueItem[];
+  deckEmbeddingPlot: DeckEmbeddingPlotResponse;
 };
 
 type ReferenceAnswerResponse = {
@@ -81,6 +82,26 @@ type QuestionAttempt = {
   justification: string;
   submittedAt: number;
   resolvedAt: number;
+};
+
+type DeckEmbeddingPlotResponse = {
+  model: string | null;
+  totalQuestions: number;
+  embeddedQuestions: number;
+  points: DeckEmbeddingPlotPoint[];
+};
+
+type DeckEmbeddingPlotPoint = {
+  question: string;
+  x: number;
+  y: number;
+};
+
+type HoveredEmbeddingPoint = DeckEmbeddingPlotPoint & {
+  leftPercent: number;
+  topPercent: number;
+  statusLabel: string;
+  scoreLabel: string | null;
 };
 
 type ChatMessage =
@@ -759,6 +780,165 @@ function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
   );
 }
 
+function DeckEmbeddingPlot({
+  plot,
+  reviewQueue,
+  onSelectQuestion,
+}: {
+  plot: DeckEmbeddingPlotResponse;
+  reviewQueue: ReviewQueueItem[];
+  onSelectQuestion: (question: string) => void;
+}) {
+  const [hoveredPoint, setHoveredPoint] =
+    useState<HoveredEmbeddingPoint | null>(null);
+  const width = 720;
+  const height = 270;
+  const padding = 26;
+  const statusByQuestion = useMemo(
+    () => new Map(reviewQueue.map((item) => [item.question, item])),
+    [reviewQueue],
+  );
+
+  function getPointMetadata(
+    point: DeckEmbeddingPlotPoint,
+  ): Pick<HoveredEmbeddingPoint, "statusLabel" | "scoreLabel"> {
+    const queueItem = statusByQuestion.get(point.question);
+
+    return {
+      statusLabel: queueItem
+        ? queueItem.status === "now"
+          ? "Due now"
+          : `Due in ${formatDueBadge(queueItem)}`
+        : "Not scheduled",
+      scoreLabel:
+        queueItem?.lastScore === null || queueItem?.lastScore === undefined
+          ? null
+          : `Last score ${queueItem.lastScore}/10`,
+    };
+  }
+
+  function showPoint(point: DeckEmbeddingPlotPoint) {
+    const x = padding + point.x * (width - padding * 2);
+    const y = padding + (1 - point.y) * (height - padding * 2);
+    const metadata = getPointMetadata(point);
+
+    setHoveredPoint({
+      ...point,
+      ...metadata,
+      leftPercent: (x / width) * 100,
+      topPercent: (y / height) * 100,
+    });
+  }
+
+  return (
+    <section className="embedding-plot-panel" aria-label="Deck embedding map">
+      <div className="embedding-plot-header">
+        <div>
+          <h2>Embedding map</h2>
+          <p>
+            {plot.embeddedQuestions}/{plot.totalQuestions} cards
+            {plot.model ? ` · ${plot.model}` : ""}
+          </p>
+        </div>
+      </div>
+
+      {plot.points.length === 0 ? (
+        <div className="embedding-plot-empty">
+          Embeddings will appear here after backfill.
+        </div>
+      ) : (
+        <div
+          className="embedding-plot-canvas"
+          onMouseLeave={() => setHoveredPoint(null)}
+        >
+          <svg
+            className="embedding-plot"
+            role="img"
+            aria-label="Deck questions plotted by embedding similarity"
+            viewBox={`0 0 ${width} ${height}`}
+          >
+            <line
+              className="embedding-plot-grid"
+              x1={padding}
+              x2={width - padding}
+              y1={height / 2}
+              y2={height / 2}
+            />
+            <line
+              className="embedding-plot-grid"
+              x1={width / 2}
+              x2={width / 2}
+              y1={padding}
+              y2={height - padding}
+            />
+            <rect
+              className="embedding-plot-frame"
+              x={padding}
+              y={padding}
+              width={width - padding * 2}
+              height={height - padding * 2}
+              rx="10"
+            />
+            {plot.points.map((point) => {
+              const queueItem = statusByQuestion.get(point.question);
+              const tone =
+                queueItem?.status === "now" ? "now" : "scheduled";
+              const x = padding + point.x * (width - padding * 2);
+              const y = padding + (1 - point.y) * (height - padding * 2);
+
+              return (
+                <g
+                  className={`embedding-plot-point point-${tone}`}
+                  key={point.question}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Show stats for ${point.question}`}
+                  onClick={() => onSelectQuestion(point.question)}
+                  onFocus={() => showPoint(point)}
+                  onBlur={() => setHoveredPoint(null)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onSelectQuestion(point.question);
+                    }
+                  }}
+                  onMouseEnter={() => showPoint(point)}
+                >
+                  <title>{point.question}</title>
+                  <circle cx={x} cy={y} r="7" />
+                  <circle
+                    className="embedding-plot-hit-area"
+                    cx={x}
+                    cy={y}
+                    r="15"
+                  />
+                </g>
+              );
+            })}
+          </svg>
+
+          {hoveredPoint ? (
+            <div
+              className="embedding-tooltip"
+              style={{
+                left: `${hoveredPoint.leftPercent}%`,
+                top: `${hoveredPoint.topPercent}%`,
+              }}
+              role="status"
+            >
+              <p>{hoveredPoint.question}</p>
+              <span>
+                {hoveredPoint.statusLabel}
+                {hoveredPoint.scoreLabel ? ` · ${hoveredPoint.scoreLabel}` : ""}
+              </span>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SubmitIcon() {
   return <ArrowUp aria-hidden="true" />;
 }
@@ -772,6 +952,13 @@ export default function Home() {
   const [queueRemaining, setQueueRemaining] = useState(0);
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>([]);
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
+  const [deckEmbeddingPlot, setDeckEmbeddingPlot] =
+    useState<DeckEmbeddingPlotResponse>({
+      model: null,
+      totalQuestions: 0,
+      embeddedQuestions: 0,
+      points: [],
+    });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>("review");
   const [referenceAnswers, setReferenceAnswers] = useState<
@@ -920,6 +1107,14 @@ export default function Home() {
     setQueueRemaining(data.queueRemaining);
     setEvaluations(data.evaluations);
     setReviewQueue(data.reviewQueue);
+    setDeckEmbeddingPlot(
+      data.deckEmbeddingPlot ?? {
+        model: null,
+        totalQuestions: 0,
+        embeddedQuestions: 0,
+        points: [],
+      },
+    );
   }, []);
 
   const loadStatus = useCallback(async () => {
@@ -944,6 +1139,8 @@ export default function Home() {
   }, [clearPendingSpeechCommand, loadNextQuestion]);
 
   useEffect(() => {
+    void loadStatus();
+
     const events = new EventSource("/api/queue-status/stream");
 
     events.addEventListener("status", (event) => {
@@ -1954,6 +2151,12 @@ export default function Home() {
           role="tabpanel"
           aria-labelledby="queue-tab"
         >
+          <DeckEmbeddingPlot
+            plot={deckEmbeddingPlot}
+            reviewQueue={reviewQueue}
+            onSelectQuestion={setSelectedQuestion}
+          />
+
           {reviewQueue.length === 0 ? (
             <p className="queue-empty">No active cards.</p>
           ) : (
