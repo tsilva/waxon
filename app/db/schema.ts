@@ -33,6 +33,7 @@ export const users = pgTable("users", {
   id: text("id").primaryKey(),
   displayName: text("display_name").notNull(),
   email: text("email").notNull(),
+  avatarUrl: text("avatar_url"),
   createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
 });

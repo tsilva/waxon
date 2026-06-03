@@ -15,6 +15,13 @@
       "when": 1780486959181,
       "tag": "0001_tricky_fallen_one",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780501124123,
+      "tag": "0002_dizzy_wonder_man",
+      "breakpoints": true
     }
   ]
 }
