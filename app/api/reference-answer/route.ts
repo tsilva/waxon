@@ -3,7 +3,7 @@ import { generateReferenceAnswer } from "@/app/lib/referenceAnswer";
 import {
   getStoredReferenceAnswer,
   saveReferenceAnswer,
-} from "@/app/lib/sqliteStore";
+} from "@/app/lib/postgresStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

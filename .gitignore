@@ -1,6 +1,10 @@
 node_modules
 .next
+.vercel
 out
+.env
+.env.*
+!.env.example
 .env*.local
 pnpm-lock.yaml.tmp
 tsconfig.tsbuildinfo
