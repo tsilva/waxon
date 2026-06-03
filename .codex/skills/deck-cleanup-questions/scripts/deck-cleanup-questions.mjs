@@ -135,6 +135,43 @@ function roughTokenCount(text) {
   return text.match(/[A-Za-z0-9]+|[^\sA-Za-z0-9]/g)?.length ?? 0;
 }
 
+function markdownContentText(text) {
+  return text
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/`{1,3}([^`]+?)`{1,3}/g, "$1")
+    .replace(/(\*\*|__)(?=\S)([\s\S]*?\S)\1/g, "$2")
+    .replace(/(^|[^\w])\*(?=\S)([\s\S]*?\S)\*(?=[^\w]|$)/g, "$1$2")
+    .replace(/(^|[^\w])_(?=\S)([\s\S]*?\S)_(?=[^\w]|$)/g, "$1$2")
+    .replace(/~~(?=\S)([\s\S]*?\S)~~/g, "$1")
+    .replace(/\$\$(?=\S)([\s\S]*?\S)\$\$/g, "$1")
+    .replace(/\$(?=\S)([^$\n]*?\S)\$/g, "$1");
+}
+
+function roughContentTokenCount(text) {
+  return roughTokenCount(markdownContentText(text));
+}
+
+function hasMarkdownFormatting(text) {
+  return (
+    /!\[[^\]]*\]\([^)]+\)/.test(text) ||
+    /\[[^\]]+\]\([^)]+\)/.test(text) ||
+    /`{1,3}[^`]+?`{1,3}/.test(text) ||
+    /(\*\*|__)(?=\S)[\s\S]*?\S\1/.test(text) ||
+    /(^|[^\w])\*(?=\S)[\s\S]*?\S\*(?=[^\w]|$)/.test(text) ||
+    /(^|[^\w])_(?=\S)[\s\S]*?\S_(?=[^\w]|$)/.test(text) ||
+    /~~(?=\S)[\s\S]*?\S~~/.test(text) ||
+    /\$\$(?=\S)[\s\S]*?\S\$\$/.test(text) ||
+    /\$(?=\S)[^$\n]*?\S\$/.test(text)
+  );
+}
+
+function markdownFormattingSignature(text) {
+  const pattern =
+    /!\[[^\]]*\]\([^)]+\)|\[[^\]]+\]\([^)]+\)|`{1,3}[^`]+?`{1,3}|(\*\*|__)(?=\S)[\s\S]*?\S\1|(^|[^\w])\*(?=\S)[\s\S]*?\S\*(?=[^\w]|$)|(^|[^\w])_(?=\S)[\s\S]*?\S_(?=[^\w]|$)|~~(?=\S)[\s\S]*?\S~~|\$\$(?=\S)[\s\S]*?\S\$\$|\$(?=\S)[^$\n]*?\S\$/g;
+  return [...text.matchAll(pattern)].map((match) => match[0]).join("\n");
+}
+
 function vectorLiteral(embedding) {
   return `[${embedding.join(",")}]`;
 }
@@ -234,7 +271,8 @@ function printQuestionReport(questions, options) {
   const rows = questions.map((row, index) => ({
     index: options.offset + index + 1,
     question: row.question,
-    roughTokens: roughTokenCount(row.question),
+    rawRoughTokens: roughTokenCount(row.question),
+    roughTokens: roughContentTokenCount(row.question),
     chars: row.question.length,
   }));
 
@@ -260,7 +298,9 @@ function printQuestionReport(questions, options) {
   for (const row of rows) {
     console.log("");
     console.log(`${row.index}. ${row.question}`);
-    console.log(`roughTokens=${row.roughTokens} chars=${row.chars}`);
+    console.log(
+      `roughContentTokens=${row.roughTokens} rawRoughTokens=${row.rawRoughTokens} chars=${row.chars}`,
+    );
   }
 }
 
@@ -281,7 +321,7 @@ async function readChanges(path) {
     const rationale =
       typeof change.rationale === "string" && change.rationale.trim()
         ? change.rationale.trim()
-        : "Shorter equivalent wording by Codex agent judgment.";
+        : "Equivalent question cleanup by Codex agent judgment.";
 
     if (!oldQuestion || !newQuestion) {
       throw new Error(`Change ${index + 1} is missing oldQuestion/newQuestion`);
@@ -323,12 +363,35 @@ function validateChanges(changes, activeRows) {
       throw new Error(`Change ${index + 1} repeats a newQuestion`);
     }
 
-    const oldTokens = roughTokenCount(change.oldQuestion);
-    const newTokens = roughTokenCount(change.newQuestion);
-
-    if (newTokens >= oldTokens) {
+    if (
+      hasMarkdownFormatting(change.oldQuestion) &&
+      !hasMarkdownFormatting(change.newQuestion)
+    ) {
       throw new Error(
-        `Change ${index + 1} is not shorter by rough token count (${oldTokens} -> ${newTokens})`,
+        `Change ${index + 1} removes all Markdown formatting from the question`,
+      );
+    }
+
+    const oldContent = markdownContentText(change.oldQuestion);
+    const newContent = markdownContentText(change.newQuestion);
+    const oldTokens = roughContentTokenCount(change.oldQuestion);
+    const newTokens = roughContentTokenCount(change.newQuestion);
+    const tokensSaved = oldTokens - newTokens;
+    const changesFormatting =
+      markdownFormattingSignature(change.oldQuestion) !==
+      markdownFormattingSignature(change.newQuestion);
+    const isSubstantialWordingCleanup = !changesFormatting && tokensSaved > 5;
+    const isFormattingCleanup = changesFormatting && newTokens <= oldTokens;
+
+    if (!isSubstantialWordingCleanup && !isFormattingCleanup) {
+      throw new Error(
+        `Change ${index + 1} is not a formatting cleanup and does not save more than 5 rough content tokens (${oldTokens} -> ${newTokens})`,
+      );
+    }
+
+    if (changesFormatting && newTokens === oldTokens && oldContent !== newContent) {
+      throw new Error(
+        `Change ${index + 1} changes formatting without preserving visible content`,
       );
     }
 
@@ -486,7 +549,7 @@ async function main() {
     const changes = await readChanges(options.changesPath);
 
     if (changes.length === 0) {
-      console.log("No question rewrites to apply.");
+      console.log("No question cleanups to apply.");
       return;
     }
 
@@ -503,7 +566,7 @@ async function main() {
     );
 
     console.log(
-      `Embedding ${changes.length} rewritten questions with ${options.embeddingModel}.`,
+      `Embedding ${changes.length} cleaned questions with ${options.embeddingModel}.`,
     );
 
     const embeddings = [];
@@ -527,11 +590,11 @@ async function main() {
     );
 
     for (const change of changes) {
-      console.log(`Rewrote: ${change.oldQuestion}`);
+      console.log(`Cleaned: ${change.oldQuestion}`);
       console.log(`      -> ${change.newQuestion}`);
     }
 
-    console.log(`Applied ${changes.length} question rewrites atomically.`);
+    console.log(`Applied ${changes.length} question cleanups atomically.`);
   } finally {
     await pool.end();
   }

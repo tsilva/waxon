@@ -1,4 +1,0 @@
-interface:
-  display_name: "Deck Simplify Questions"
-  short_description: "Shorten equivalent deck questions and refresh embeddings"
-  default_prompt: "Use $deck-simplify-questions to run /deck-simplify-questions for shorter equivalent deck questions."
