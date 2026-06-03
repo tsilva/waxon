@@ -1064,9 +1064,13 @@ button {
 
 .queue-stage {
   width: min(1080px, 100%);
+  min-height: 0;
   margin: 0 auto;
   padding: clamp(28px, 4vh, 48px) 0 32px;
-  overflow: visible;
+  overflow-y: auto;
+  scrollbar-color: rgb(47 139 103 / 50%) transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
 }
 
 .queue-list {
@@ -1074,7 +1078,7 @@ button {
   display: grid;
   gap: 8px;
   margin: 0;
-  padding: 0;
+  padding: 0 4px 0 0;
 }
 
 .queue-row {
