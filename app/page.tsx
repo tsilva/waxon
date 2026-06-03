@@ -196,7 +196,6 @@ type MathParseResult = {
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
-const LOAD_NEXT_QUESTION_TIMEOUT_MS = 4000;
 const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit|skip)[.!?]*$/i;
 
 const mathSymbolMap: Record<string, string> = {
@@ -879,11 +878,6 @@ export default function Home() {
     surfaceError?: boolean;
   }) => {
     const surfaceError = options?.surfaceError ?? true;
-    const abortController = new AbortController();
-    const timeout = setTimeout(
-      () => abortController.abort(),
-      LOAD_NEXT_QUESTION_TIMEOUT_MS,
-    );
 
     setIsLoadingQuestion(true);
     setQuestion(null);
@@ -893,7 +887,6 @@ export default function Home() {
     try {
       const response = await fetch("/api/next-question", {
         cache: "no-store",
-        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -917,7 +910,6 @@ export default function Home() {
         );
       }
     } finally {
-      clearTimeout(timeout);
       setIsLoadingQuestion(false);
     }
   }, [appendQuestion]);
@@ -1773,7 +1765,7 @@ export default function Home() {
                     <button
                       className="resting-secondary"
                       type="button"
-                      onClick={() => void loadNextQuestion({ surfaceError: true })}
+                      onClick={() => void loadNextQuestion({ surfaceError: false })}
                     >
                       Refresh
                     </button>
