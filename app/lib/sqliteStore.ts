@@ -1,9 +1,13 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
+import { getCurrentUser } from "./auth";
 import { appendReview, parseReviews, scheduleNextReview } from "./scheduler";
 
 export type QuestionRow = {
+  deck_id: string;
+  deck_name: string;
+  user_id: string;
   question: string;
   reviews: string;
   next_due: number;
@@ -13,6 +17,8 @@ export type QuestionRow = {
 };
 
 export type DueQuestion = {
+  deckId: string;
+  deckName: string;
   question: string;
   reviews: string;
   nextDue: number;
@@ -23,6 +29,7 @@ export type DueQuestion = {
 
 export type QuestionAttempt = {
   id: number;
+  deckId: string;
   question: string;
   rawAnswer: string;
   answerSummary: string;
@@ -33,6 +40,8 @@ export type QuestionAttempt = {
 };
 
 export type PersistedEvaluation = {
+  deckId: string;
+  deckName: string;
   question: string;
   reviews: string;
   nextDue: number;
@@ -44,6 +53,11 @@ export type PersistedEvaluation = {
 const DATA_DIR = path.join(process.cwd(), "data");
 const QUESTIONS_DB_FILE = path.join(DATA_DIR, "questions.sqlite");
 const LEGACY_QUESTIONS_FILE = path.join(DATA_DIR, "questions.csv");
+const DEFAULT_DECK = {
+  id: "deep-learning",
+  name: "Deep Learning",
+  slug: "deep-learning",
+};
 const BOOTSTRAP_QUESTIONS = Array.from(
   new Set(
     String.raw`
@@ -279,6 +293,9 @@ function readLegacyCsvQuestions(): QuestionRow[] | null {
     .filter((row) => row[questionIndex]?.trim())
     .map((row) => ({
       question: row[questionIndex] ?? "",
+      deck_id: DEFAULT_DECK.id,
+      deck_name: DEFAULT_DECK.name,
+      user_id: getCurrentUser().id,
       reviews: reviewsIndex === -1 ? "" : (row[reviewsIndex] ?? ""),
       next_due: Number(nextDueIndex === -1 ? 0 : row[nextDueIndex]),
       last_answer: "",
@@ -311,13 +328,18 @@ function withWriteTransaction<T>(db: DatabaseSync, work: () => T): T {
 
 function insertSeedRows(db: DatabaseSync, rows: QuestionRow[]): void {
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO questions (question, reviews, next_due)
-    VALUES (?, ?, ?)
+    INSERT OR IGNORE INTO questions (deck_id, question, reviews, next_due)
+    VALUES (?, ?, ?, ?)
   `);
 
   withWriteTransaction(db, () => {
     for (const row of rows) {
-      insert.run(row.question, row.reviews, Math.round(row.next_due));
+      insert.run(
+        row.deck_id || DEFAULT_DECK.id,
+        row.question,
+        row.reviews,
+        Math.round(row.next_due),
+      );
     }
   });
 }
@@ -338,20 +360,100 @@ function ensureColumn(
   }
 }
 
+function currentDeckId(): string {
+  return DEFAULT_DECK.id;
+}
+
+function seedCurrentUserAndDeck(db: DatabaseSync): void {
+  const now = Date.now();
+  const user = getCurrentUser();
+
+  db.prepare(
+    `
+    INSERT OR IGNORE INTO users (id, display_name, email, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+  `,
+  ).run(user.id, user.displayName, user.email, now, now);
+
+  db.prepare(
+    `
+    UPDATE users
+    SET display_name = ?, email = ?, updated_at = ?
+    WHERE id = ?
+  `,
+  ).run(user.displayName, user.email, now, user.id);
+
+  db.prepare(
+    `
+    INSERT OR IGNORE INTO decks (id, user_id, name, slug, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `,
+  ).run(DEFAULT_DECK.id, user.id, DEFAULT_DECK.name, DEFAULT_DECK.slug, now, now);
+
+  db.prepare(
+    `
+    UPDATE decks
+    SET user_id = ?, name = ?, slug = ?, updated_at = ?
+    WHERE id = ?
+  `,
+  ).run(user.id, DEFAULT_DECK.name, DEFAULT_DECK.slug, now, DEFAULT_DECK.id);
+}
+
+function migrateExistingQuestionsToDefaultDeck(db: DatabaseSync): void {
+  db.prepare(
+    `
+    UPDATE questions
+    SET deck_id = ?, updated_at = ?
+    WHERE deck_id IS NULL OR deck_id = ''
+  `,
+  ).run(DEFAULT_DECK.id, Date.now());
+
+  db.prepare(
+    `
+    UPDATE question_attempts
+    SET deck_id = ?
+    WHERE deck_id IS NULL OR deck_id = ''
+  `,
+  ).run(DEFAULT_DECK.id);
+}
+
 function initializeDatabase(db: DatabaseSync): void {
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA busy_timeout = 5000;
 
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000)
+    );
+
+    CREATE TABLE IF NOT EXISTS decks (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS decks_user_slug_idx
+      ON decks (user_id, slug);
+
     CREATE TABLE IF NOT EXISTS questions (
       question TEXT PRIMARY KEY,
+      deck_id TEXT NOT NULL DEFAULT '${DEFAULT_DECK.id}',
       reviews TEXT NOT NULL DEFAULT '',
       next_due INTEGER NOT NULL DEFAULT 0,
       last_answer TEXT NOT NULL DEFAULT '',
       last_answer_summary TEXT NOT NULL DEFAULT '',
       reference_answer TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000),
-      updated_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000)
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch('subsec') * 1000),
+      FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS questions_next_due_idx
@@ -359,6 +461,7 @@ function initializeDatabase(db: DatabaseSync): void {
 
     CREATE TABLE IF NOT EXISTS question_attempts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      deck_id TEXT NOT NULL DEFAULT '${DEFAULT_DECK.id}',
       question TEXT NOT NULL,
       raw_answer TEXT NOT NULL,
       answer_summary TEXT NOT NULL,
@@ -366,12 +469,20 @@ function initializeDatabase(db: DatabaseSync): void {
       justification TEXT NOT NULL,
       submitted_at INTEGER NOT NULL,
       resolved_at INTEGER NOT NULL,
+      FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE,
       FOREIGN KEY (question) REFERENCES questions(question) ON DELETE CASCADE
     );
 
     CREATE INDEX IF NOT EXISTS question_attempts_question_submitted_idx
       ON question_attempts (question, submitted_at DESC);
   `);
+  seedCurrentUserAndDeck(db);
+  ensureColumn(
+    db,
+    "questions",
+    "deck_id",
+    `TEXT NOT NULL DEFAULT '${DEFAULT_DECK.id}'`,
+  );
   ensureColumn(db, "questions", "last_answer", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(
     db,
@@ -380,10 +491,30 @@ function initializeDatabase(db: DatabaseSync): void {
     "TEXT NOT NULL DEFAULT ''",
   );
   ensureColumn(db, "questions", "reference_answer", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(
+    db,
+    "question_attempts",
+    "deck_id",
+    `TEXT NOT NULL DEFAULT '${DEFAULT_DECK.id}'`,
+  );
+  migrateExistingQuestionsToDefaultDeck(db);
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS questions_deck_next_due_idx
+      ON questions (deck_id, next_due);
+
+    CREATE INDEX IF NOT EXISTS question_attempts_deck_question_submitted_idx
+      ON question_attempts (deck_id, question, submitted_at DESC);
+  `);
 
   const countRow = db
-    .prepare("SELECT COUNT(*) AS count FROM questions")
-    .get() as { count?: SQLOutputValue } | undefined;
+    .prepare(
+      `
+      SELECT COUNT(*) AS count
+      FROM questions
+      WHERE deck_id = ?
+    `,
+    )
+    .get(currentDeckId()) as { count?: SQLOutputValue } | undefined;
   const questionCount = Number(countRow?.count ?? 0);
 
   if (questionCount > 0) {
@@ -395,6 +526,9 @@ function initializeDatabase(db: DatabaseSync): void {
     readLegacyCsvQuestions() ??
       BOOTSTRAP_QUESTIONS.map((question) => ({
         question,
+        deck_id: DEFAULT_DECK.id,
+        deck_name: DEFAULT_DECK.name,
+        user_id: getCurrentUser().id,
         reviews: "",
         next_due: 0,
         last_answer: "",
@@ -421,6 +555,9 @@ function getDatabase(): DatabaseSync {
 
 function normalizeRow(row: Record<string, SQLOutputValue>): QuestionRow {
   return {
+    deck_id: String(row.deck_id ?? DEFAULT_DECK.id),
+    deck_name: String(row.deck_name ?? DEFAULT_DECK.name),
+    user_id: String(row.user_id ?? getCurrentUser().id),
     question: String(row.question ?? ""),
     reviews: String(row.reviews ?? ""),
     next_due: Number(row.next_due ?? 0),
@@ -433,6 +570,7 @@ function normalizeRow(row: Record<string, SQLOutputValue>): QuestionRow {
 function normalizeAttemptRow(row: Record<string, SQLOutputValue>): QuestionAttempt {
   return {
     id: Number(row.id ?? 0),
+    deckId: String(row.deck_id ?? DEFAULT_DECK.id),
     question: String(row.question ?? ""),
     rawAnswer: String(row.raw_answer ?? ""),
     answerSummary: String(row.answer_summary ?? ""),
@@ -452,12 +590,23 @@ export async function readQuestions(): Promise<QuestionRow[]> {
   return db
     .prepare(
       `
-      SELECT question, reviews, next_due, last_answer, last_answer_summary, reference_answer
-      FROM questions
-      ORDER BY rowid ASC
+      SELECT
+        q.deck_id,
+        d.name AS deck_name,
+        d.user_id,
+        q.question,
+        q.reviews,
+        q.next_due,
+        q.last_answer,
+        q.last_answer_summary,
+        q.reference_answer
+      FROM questions q
+      JOIN decks d ON d.id = q.deck_id
+      WHERE q.deck_id = ? AND d.user_id = ?
+      ORDER BY q.rowid ASC
     `,
     )
-    .all()
+    .all(currentDeckId(), getCurrentUser().id)
     .map(normalizeRow);
 }
 
@@ -467,15 +616,27 @@ export async function getDueQuestions(now = Date.now()): Promise<DueQuestion[]> 
   return db
     .prepare(
       `
-      SELECT question, reviews, next_due, last_answer, last_answer_summary, reference_answer
-      FROM questions
-      WHERE next_due <= ?
-      ORDER BY next_due ASC
+      SELECT
+        q.deck_id,
+        d.name AS deck_name,
+        d.user_id,
+        q.question,
+        q.reviews,
+        q.next_due,
+        q.last_answer,
+        q.last_answer_summary,
+        q.reference_answer
+      FROM questions q
+      JOIN decks d ON d.id = q.deck_id
+      WHERE q.deck_id = ? AND d.user_id = ? AND q.next_due <= ?
+      ORDER BY q.next_due ASC
     `,
     )
-    .all(Math.round(now))
+    .all(currentDeckId(), getCurrentUser().id, Math.round(now))
     .map(normalizeRow)
     .map((row) => ({
+      deckId: row.deck_id,
+      deckName: row.deck_name,
       question: row.question,
       reviews: row.reviews,
       nextDue: row.next_due,
@@ -493,14 +654,27 @@ export async function getAllQueuedQuestions(): Promise<DueQuestion[]> {
   return db
     .prepare(
       `
-      SELECT question, reviews, next_due, last_answer, last_answer_summary, reference_answer
-      FROM questions
-      ORDER BY next_due ASC
+      SELECT
+        q.deck_id,
+        d.name AS deck_name,
+        d.user_id,
+        q.question,
+        q.reviews,
+        q.next_due,
+        q.last_answer,
+        q.last_answer_summary,
+        q.reference_answer
+      FROM questions q
+      JOIN decks d ON d.id = q.deck_id
+      WHERE q.deck_id = ? AND d.user_id = ?
+      ORDER BY q.next_due ASC
     `,
     )
-    .all()
+    .all(currentDeckId(), getCurrentUser().id)
     .map(normalizeRow)
     .map((row) => ({
+      deckId: row.deck_id,
+      deckName: row.deck_name,
       question: row.question,
       reviews: row.reviews,
       nextDue: row.next_due,
@@ -519,12 +693,22 @@ export async function getQuestionSnapshot(
   const row = db
     .prepare(
       `
-      SELECT question, reviews, next_due, last_answer, last_answer_summary, reference_answer
-      FROM questions
-      WHERE question = ?
+      SELECT
+        q.deck_id,
+        d.name AS deck_name,
+        d.user_id,
+        q.question,
+        q.reviews,
+        q.next_due,
+        q.last_answer,
+        q.last_answer_summary,
+        q.reference_answer
+      FROM questions q
+      JOIN decks d ON d.id = q.deck_id
+      WHERE q.deck_id = ? AND d.user_id = ? AND q.question = ?
     `,
     )
-    .get(question);
+    .get(currentDeckId(), getCurrentUser().id, question);
 
   if (!row) {
     return null;
@@ -533,6 +717,8 @@ export async function getQuestionSnapshot(
   const normalized = normalizeRow(row);
 
   return {
+    deckId: normalized.deck_id,
+    deckName: normalized.deck_name,
     question: normalized.question,
     reviews: normalized.reviews,
     nextDue: normalized.next_due,
@@ -550,13 +736,13 @@ export async function getQuestionAttempts(
   return db
     .prepare(
       `
-      SELECT id, question, raw_answer, answer_summary, score, justification, submitted_at, resolved_at
+      SELECT id, deck_id, question, raw_answer, answer_summary, score, justification, submitted_at, resolved_at
       FROM question_attempts
-      WHERE question = ?
+      WHERE deck_id = ? AND question = ?
       ORDER BY submitted_at ASC, id ASC
     `,
     )
-    .all(question)
+    .all(currentDeckId(), question)
     .map(normalizeAttemptRow)
     .filter(
       (attempt) =>
@@ -575,11 +761,14 @@ export async function getStoredReferenceAnswer(
     .prepare(
       `
       SELECT reference_answer
-      FROM questions
-      WHERE question = ?
+      FROM questions q
+      JOIN decks d ON d.id = q.deck_id
+      WHERE q.deck_id = ? AND d.user_id = ? AND q.question = ?
     `,
     )
-    .get(question) as { reference_answer?: SQLOutputValue } | undefined;
+    .get(currentDeckId(), getCurrentUser().id, question) as
+    | { reference_answer?: SQLOutputValue }
+    | undefined;
   const answer = String(row?.reference_answer ?? "").trim();
 
   return answer || null;
@@ -596,9 +785,9 @@ export async function saveReferenceAnswer(input: {
     `
     UPDATE questions
     SET reference_answer = ?, updated_at = ?
-    WHERE question = ?
+    WHERE deck_id = ? AND question = ?
   `,
-  ).run(input.answer, Math.round(input.now), input.question);
+  ).run(input.answer, Math.round(input.now), currentDeckId(), input.question);
 }
 
 export async function applyEvaluationToSqlite(input: {
@@ -616,12 +805,22 @@ export async function applyEvaluationToSqlite(input: {
     const rawRow = db
       .prepare(
         `
-        SELECT question, reviews, next_due, last_answer, last_answer_summary, reference_answer
-        FROM questions
-        WHERE question = ?
+        SELECT
+          q.deck_id,
+          d.name AS deck_name,
+          d.user_id,
+          q.question,
+          q.reviews,
+          q.next_due,
+          q.last_answer,
+          q.last_answer_summary,
+          q.reference_answer
+        FROM questions q
+        JOIN decks d ON d.id = q.deck_id
+        WHERE q.deck_id = ? AND d.user_id = ? AND q.question = ?
       `,
       )
-      .get(input.question);
+      .get(currentDeckId(), getCurrentUser().id, input.question);
 
     if (!rawRow) {
       return null;
@@ -644,7 +843,7 @@ export async function applyEvaluationToSqlite(input: {
       `
       UPDATE questions
       SET reviews = ?, next_due = ?, last_answer = ?, last_answer_summary = ?, updated_at = ?
-      WHERE question = ?
+      WHERE deck_id = ? AND question = ?
     `,
     ).run(
       reviews,
@@ -652,12 +851,14 @@ export async function applyEvaluationToSqlite(input: {
       input.answer,
       input.answerSummary,
       Math.round(input.now),
+      currentDeckId(),
       input.question,
     );
 
     db.prepare(
       `
       INSERT INTO question_attempts (
+        deck_id,
         question,
         raw_answer,
         answer_summary,
@@ -666,9 +867,10 @@ export async function applyEvaluationToSqlite(input: {
         submitted_at,
         resolved_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `,
     ).run(
+      currentDeckId(),
       input.question,
       input.answer,
       input.answerSummary,
@@ -679,6 +881,8 @@ export async function applyEvaluationToSqlite(input: {
     );
 
     return {
+      deckId: row.deck_id,
+      deckName: row.deck_name,
       question: row.question,
       reviews,
       nextDue: roundedNextDue,
