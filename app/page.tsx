@@ -1,8 +1,17 @@
 "use client";
 
 import Image from "next/image";
-import { ArrowUp, Mic, Settings, Square, User } from "lucide-react";
 import {
+  ArrowUp,
+  Mic,
+  Settings,
+  Square,
+  Trash2,
+  Upload,
+  User,
+} from "lucide-react";
+import {
+  ChangeEvent,
   FormEvent,
   Fragment,
   KeyboardEvent,
@@ -34,6 +43,13 @@ type QueueStatusResponse = {
 
 type ReferenceAnswerResponse = {
   answer: string;
+};
+
+type UserProfileResponse = {
+  id: string;
+  displayName: string;
+  email: string;
+  avatarUrl: string | null;
 };
 
 type ReferenceAnswerState = {
@@ -219,6 +235,7 @@ type MathParseResult = {
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
+const MAX_AVATAR_UPLOAD_BYTES = 512 * 1024;
 const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit|skip)[.!?]*$/i;
 
 const mathSymbolMap: Record<string, string> = {
@@ -695,8 +712,33 @@ function SettingsIcon() {
   return <Settings aria-hidden="true" />;
 }
 
+function UploadIcon() {
+  return <Upload aria-hidden="true" />;
+}
+
+function RemoveIcon() {
+  return <Trash2 aria-hidden="true" />;
+}
+
 function UserIcon() {
   return <User aria-hidden="true" />;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error("Could not read avatar image."));
+    };
+    reader.onerror = () => reject(new Error("Could not read avatar image."));
+    reader.readAsDataURL(file);
+  });
 }
 
 function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
@@ -969,10 +1011,15 @@ export default function Home() {
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<UserProfileResponse | null>(null);
+  const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
+  const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
   const keepListeningRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -992,6 +1039,38 @@ export default function Home() {
   useEffect(() => {
     isSubmittingRef.current = isSubmitting;
   }, [isSubmitting]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadUserProfile() {
+      try {
+        const response = await fetch("/api/user", {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error("Could not load profile.");
+        }
+
+        const data = (await response.json()) as UserProfileResponse;
+
+        if (isActive) {
+          setCurrentUser(data);
+        }
+      } catch {
+        if (isActive) {
+          setAvatarMessage("Could not load profile.");
+        }
+      }
+    }
+
+    void loadUserProfile();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isUserMenuOpen) {
@@ -1026,6 +1105,22 @@ export default function Home() {
       window.removeEventListener("keydown", closeUserMenuOnEscape);
     };
   }, [isUserMenuOpen]);
+
+  useEffect(() => {
+    if (!isSettingsOpen) {
+      return;
+    }
+
+    function closeSettingsOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsSettingsOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeSettingsOnEscape);
+
+    return () => window.removeEventListener("keydown", closeSettingsOnEscape);
+  }, [isSettingsOpen]);
 
   const clearPendingSpeechCommand = useCallback(() => {
     if (pendingSpeechCommandTimerRef.current) {
@@ -1511,6 +1606,73 @@ export default function Home() {
     }
   }
 
+  async function saveAvatar(avatarUrl: string | null) {
+    setIsAvatarUpdating(true);
+    setAvatarMessage(null);
+
+    try {
+      const response = await fetch("/api/user", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ avatarUrl }),
+      });
+      const data = (await response.json()) as
+        | UserProfileResponse
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in data && data.error ? data.error : "Could not update avatar.",
+        );
+      }
+
+      setCurrentUser(data as UserProfileResponse);
+      setAvatarMessage(avatarUrl ? "Avatar updated." : "Avatar removed.");
+    } catch (avatarError) {
+      setAvatarMessage(
+        avatarError instanceof Error
+          ? avatarError.message
+          : "Could not update avatar.",
+      );
+    } finally {
+      setIsAvatarUpdating(false);
+    }
+  }
+
+  async function handleAvatarFileChange(
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) {
+      setAvatarMessage("Choose a PNG, JPEG, WebP, or GIF image.");
+      return;
+    }
+
+    if (file.size > MAX_AVATAR_UPLOAD_BYTES) {
+      setAvatarMessage("Choose an image under 512 KB.");
+      return;
+    }
+
+    try {
+      const avatarUrl = await readFileAsDataUrl(file);
+      await saveAvatar(avatarUrl);
+    } catch (avatarError) {
+      setAvatarMessage(
+        avatarError instanceof Error
+          ? avatarError.message
+          : "Could not read avatar image.",
+      );
+    }
+  }
+
   const sessionPreviousAnswers: PreviousAnswerItem[] = messages
     .filter(
       (message): message is Extract<ChatMessage, { kind: "answer" }> =>
@@ -1879,7 +2041,19 @@ export default function Home() {
                 title="User menu"
                 onClick={() => setIsUserMenuOpen((isOpen) => !isOpen)}
               >
-                <UserIcon />
+                {currentUser?.avatarUrl ? (
+                  <Image
+                    className="user-avatar-image"
+                    src={currentUser.avatarUrl}
+                    alt=""
+                    aria-hidden="true"
+                    width={42}
+                    height={42}
+                    unoptimized
+                  />
+                ) : (
+                  <UserIcon />
+                )}
               </button>
               {isUserMenuOpen ? (
                 <div
@@ -1892,7 +2066,11 @@ export default function Home() {
                     className="user-menu-item"
                     type="button"
                     role="menuitem"
-                    onClick={() => setIsUserMenuOpen(false)}
+                    onClick={() => {
+                      setAvatarMessage(null);
+                      setIsUserMenuOpen(false);
+                      setIsSettingsOpen(true);
+                    }}
                   >
                     <SettingsIcon />
                     <span>Settings</span>
@@ -2212,6 +2390,106 @@ export default function Home() {
           )}
         </section>
       </section>
+
+      {isSettingsOpen ? (
+        <div
+          className="settings-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsSettingsOpen(false);
+            }
+          }}
+        >
+          <section
+            className="settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-modal-title"
+          >
+            <div className="settings-modal-header">
+              <div>
+                <p className="settings-modal-kicker">User settings</p>
+                <h2 className="settings-modal-title" id="settings-modal-title">
+                  Profile
+                </h2>
+              </div>
+              <button
+                className="stats-modal-close"
+                type="button"
+                aria-label="Close settings"
+                onClick={() => setIsSettingsOpen(false)}
+              />
+            </div>
+
+            <div className="settings-profile">
+              <div className="settings-avatar-preview" aria-hidden="true">
+                {currentUser?.avatarUrl ? (
+                  <Image
+                    className="settings-avatar-image"
+                    src={currentUser.avatarUrl}
+                    alt=""
+                    width={88}
+                    height={88}
+                    unoptimized
+                  />
+                ) : (
+                  <UserIcon />
+                )}
+              </div>
+
+              <div className="settings-profile-copy">
+                <dl className="settings-profile-details">
+                  <div>
+                    <dt>Name</dt>
+                    <dd>{currentUser?.displayName ?? "Loading..."}</dd>
+                  </div>
+                  <div>
+                    <dt>Email</dt>
+                    <dd>{currentUser?.email ?? "Loading..."}</dd>
+                  </div>
+                </dl>
+
+                <div className="settings-avatar-actions">
+                  <input
+                    ref={avatarInputRef}
+                    className="settings-avatar-input"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    onChange={(event) => void handleAvatarFileChange(event)}
+                  />
+                  <button
+                    className="settings-action-primary"
+                    type="button"
+                    onClick={() => avatarInputRef.current?.click()}
+                    disabled={isAvatarUpdating}
+                  >
+                    <UploadIcon />
+                    <span>
+                      {isAvatarUpdating ? "Uploading..." : "Upload avatar"}
+                    </span>
+                  </button>
+                  <button
+                    className="settings-action-secondary"
+                    type="button"
+                    onClick={() => void saveAvatar(null)}
+                    disabled={isAvatarUpdating || !currentUser?.avatarUrl}
+                  >
+                    <RemoveIcon />
+                    <span>Remove</span>
+                  </button>
+                </div>
+
+                {avatarMessage ? (
+                  <p className="settings-status" aria-live="polite">
+                    {avatarMessage}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {selectedQuestionStats ? (
         <div
