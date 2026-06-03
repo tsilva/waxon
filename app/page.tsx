@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { ArrowUp, Mic, Square } from "lucide-react";
 import {
   FormEvent,
   Fragment,
@@ -62,11 +63,23 @@ type ReviewQueueItem = {
   lastAnswerSummary: string | null;
   referenceAnswer: string | null;
   lastJustification: string | null;
+  attempts: QuestionAttempt[];
 };
 
 type ReviewHistoryEntry = {
   ts: number;
   score: number;
+};
+
+type QuestionAttempt = {
+  id: number;
+  question: string;
+  rawAnswer: string;
+  answerSummary: string;
+  score: number;
+  justification: string;
+  submittedAt: number;
+  resolvedAt: number;
 };
 
 type ChatMessage =
@@ -81,6 +94,7 @@ type ChatMessage =
       question: string;
       answer: string;
       evaluationId: string;
+      submittedAt: number;
       status: "grading" | "resolved";
       score: number | null;
       justification: string | null;
@@ -149,6 +163,7 @@ type SpeechRecognitionConstructor = new () => SpeechRecognition;
 type QuestionStats = {
   question: string;
   reviewHistory: ReviewHistoryEntry[];
+  answerHistory: AnswerHistoryEntry[];
   attempts: number;
   averageScore: number | null;
   bestScore: number | null;
@@ -162,6 +177,17 @@ type QuestionStats = {
   lastJustification: string | null;
 };
 
+type AnswerHistoryEntry = {
+  id: string;
+  rawAnswer: string;
+  answerSummary: string | null;
+  score: number | null;
+  justification: string | null;
+  submittedAt: number;
+  resolvedAt: number | null;
+  status: "grading" | "resolved";
+};
+
 type MathParseResult = {
   content: string;
   nextIndex: number;
@@ -170,6 +196,7 @@ type MathParseResult = {
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
+const LOAD_NEXT_QUESTION_TIMEOUT_MS = 4000;
 const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit|skip)[.!?]*$/i;
 
 const mathSymbolMap: Record<string, string> = {
@@ -635,22 +662,11 @@ function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null 
 }
 
 function MicrophoneIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M12 14a4 4 0 0 0 4-4V6a4 4 0 0 0-8 0v4a4 4 0 0 0 4 4Z" />
-      <path d="M19 10a7 7 0 0 1-14 0" />
-      <path d="M12 17v4" />
-      <path d="M8 21h8" />
-    </svg>
-  );
+  return <Mic aria-hidden="true" />;
 }
 
 function StopIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <rect height="10" rx="2" width="10" x="7" y="7" />
-    </svg>
-  );
+  return <Square aria-hidden="true" fill="currentColor" />;
 }
 
 function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
@@ -735,12 +751,7 @@ function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
 }
 
 function SubmitIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24">
-      <path d="M12 19V5" />
-      <path d="m6 11 6-6 6 6" />
-    </svg>
-  );
+  return <ArrowUp aria-hidden="true" />;
 }
 
 export default function Home() {
@@ -820,13 +831,25 @@ export default function Home() {
     });
   }, []);
 
-  const loadNextQuestion = useCallback(async () => {
+  const loadNextQuestion = useCallback(async (options?: {
+    surfaceError?: boolean;
+  }) => {
+    const surfaceError = options?.surfaceError ?? true;
+    const abortController = new AbortController();
+    const timeout = setTimeout(
+      () => abortController.abort(),
+      LOAD_NEXT_QUESTION_TIMEOUT_MS,
+    );
+
     setIsLoadingQuestion(true);
+    setQuestion(null);
+    questionRef.current = null;
     setError(null);
 
     try {
       const response = await fetch("/api/next-question", {
         cache: "no-store",
+        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -835,18 +858,22 @@ export default function Home() {
 
       const data = (await response.json()) as NextQuestionResponse;
       setQuestion(data.question);
+      questionRef.current = data.question;
       setQueueRemaining(data.queueRemaining);
 
       if (data.question) {
         appendQuestion(data.question);
       }
     } catch (loadError) {
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "Failed to load the next question.",
-      );
+      if (surfaceError) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load the next question.",
+        );
+      }
     } finally {
+      clearTimeout(timeout);
       setIsLoadingQuestion(false);
     }
   }, [appendQuestion]);
@@ -875,7 +902,7 @@ export default function Home() {
   }, [applyQueueStatus]);
 
   useEffect(() => {
-    void loadNextQuestion();
+    void loadNextQuestion({ surfaceError: false });
   }, [clearPendingSpeechCommand, loadNextQuestion]);
 
   useEffect(() => {
@@ -954,6 +981,7 @@ export default function Home() {
 
     const submittedQuestion = activeQuestion;
     const submittedAnswer = (answerOverride ?? answerRef.current).trim();
+    const submittedAt = Date.now();
 
     setIsSubmitting(true);
     setAnswer("");
@@ -986,6 +1014,7 @@ export default function Home() {
           question: submittedQuestion,
           answer: submittedAnswer || "(blank)",
           evaluationId: data.evaluationId,
+          submittedAt,
           status: "grading",
           score: null,
           justification: null,
@@ -1082,8 +1111,15 @@ export default function Home() {
         return;
       }
 
-      setAnswer(speechCommand.submitAnswer);
-      answerRef.current = speechCommand.submitAnswer;
+      if (speechCommand.command === "submit") {
+        setAnswer("");
+        answerRef.current = "";
+        setSpeechPreview("");
+      } else {
+        setAnswer(speechCommand.submitAnswer);
+        answerRef.current = speechCommand.submitAnswer;
+      }
+
       pendingSpeechCommandRef.current = speechCommand;
       pendingSpeechCommandTimerRef.current = setTimeout(() => {
         const commandToRun = pendingSpeechCommandRef.current;
@@ -1156,6 +1192,18 @@ export default function Home() {
         const pendingCommand = pendingSpeechCommandRef.current;
 
         clearPendingSpeechCommand();
+
+        if (pendingCommand.command === "submit") {
+          const answerToRestore = mergeTranscriptText(
+            pendingCommand.submitAnswer,
+            pendingCommand.heldText,
+          );
+
+          setAnswer(answerToRestore);
+          answerRef.current = answerToRestore;
+          return;
+        }
+
         appendAnswerText(pendingCommand.heldText);
       }
 
@@ -1284,14 +1332,24 @@ export default function Home() {
     ...sessionPreviousAnswers,
     ...historicalPreviousAnswers,
   ];
+  const hasPreviousAnswers = previousAnswers.length > 0;
   const visiblePreviousAnswers = isPreviousExpanded
     ? previousAnswers
     : previousAnswers.slice(0, COLLAPSED_PREVIOUS_ANSWER_LIMIT);
   const hiddenPreviousAnswerCount =
     previousAnswers.length - visiblePreviousAnswers.length;
   const hasHiddenPreviousAnswers = hiddenPreviousAnswerCount > 0;
+  const isReviewResting = !isLoadingQuestion && !question;
+  const scheduledReviewCount = reviewQueue.filter(
+    (item) => item.status === "scheduled",
+  ).length;
+  const nextScheduledReview = reviewQueue.find(
+    (item) => item.status === "scheduled",
+  );
   const previousAnswerPlaceholderCount = isPreviousExpanded
     ? 0
+    : isReviewResting
+      ? 0
     : Math.max(
         0,
         COLLAPSED_PREVIOUS_ANSWER_LIMIT - visiblePreviousAnswers.length,
@@ -1340,10 +1398,58 @@ export default function Home() {
         evaluation.status === "grading",
     ).length;
     const lastScore = scores.at(-1) ?? queueItem?.lastScore ?? null;
+    const persistedAnswerHistory: AnswerHistoryEntry[] =
+      queueItem?.attempts.map((attempt) => ({
+        id: `attempt-${attempt.id}`,
+        rawAnswer: attempt.rawAnswer || "(blank)",
+        answerSummary: attempt.answerSummary || null,
+        score: attempt.score,
+        justification: attempt.justification || null,
+        submittedAt: attempt.submittedAt,
+        resolvedAt: attempt.resolvedAt,
+        status: "resolved",
+      })) ?? [];
+    const sessionAnswerHistory: AnswerHistoryEntry[] = messages
+      .filter(
+        (message): message is Extract<ChatMessage, { kind: "answer" }> =>
+          message.kind === "answer" && message.question === selectedQuestion,
+      )
+      .map((message) => {
+        const evaluation = evaluations.find(
+          (candidate) => candidate.id === message.evaluationId,
+        );
+
+        return {
+          id: `session-${message.evaluationId}`,
+          rawAnswer: message.answer,
+          answerSummary: message.answerSummary,
+          score: message.score,
+          justification: message.justification,
+          submittedAt: evaluation?.submittedAt ?? message.submittedAt,
+          resolvedAt: evaluation?.resolvedAt ?? message.resolvedAt,
+          status: message.status,
+        };
+      })
+      .filter(
+        (messageAttempt) =>
+          !persistedAnswerHistory.some(
+            (persistedAttempt) =>
+              persistedAttempt.rawAnswer === messageAttempt.rawAnswer &&
+              persistedAttempt.score === messageAttempt.score &&
+              Math.abs(
+                persistedAttempt.submittedAt - messageAttempt.submittedAt,
+              ) < 10_000,
+          ),
+      );
+    const answerHistory = [
+      ...persistedAnswerHistory,
+      ...sessionAnswerHistory,
+    ].sort((a, b) => b.submittedAt - a.submittedAt);
 
     return {
       question: selectedQuestion,
       reviewHistory,
+      answerHistory,
       attempts: reviewHistory.length,
       averageScore:
         scores.length > 0
@@ -1362,7 +1468,7 @@ export default function Home() {
         latestResolvedEvaluation?.justification ??
         null,
     };
-  }, [evaluations, reviewQueue, selectedQuestion]);
+  }, [evaluations, messages, reviewQueue, selectedQuestion]);
 
   const selectedReferenceAnswerState = selectedQuestionStats
     ? referenceAnswers[selectedQuestionStats.question]
@@ -1528,14 +1634,21 @@ export default function Home() {
         </header>
 
         <div
-          className="review-stage"
+          className={`review-stage ${
+            !question ? "review-stage-resting" : ""
+          }`}
           hidden={activeTab !== "review"}
           id="review-panel"
           role="tabpanel"
           aria-labelledby="review-tab"
         >
           <section className="question-area" aria-live="polite">
-            <div className="question-copy">
+            <div
+              key={isLoadingQuestion ? "loading" : question ?? "empty"}
+              className={`question-copy ${
+                !isLoadingQuestion && question ? "question-copy-enter" : ""
+              }`}
+            >
               {isLoadingQuestion ? (
                 <h2 className="question-title">Loading next question...</h2>
               ) : question ? (
@@ -1545,67 +1658,117 @@ export default function Home() {
                   text={question}
                 />
               ) : (
-                <h2 className="question-title">No questions due right now.</h2>
+                <div className="resting-state">
+                  <p className="resting-kicker">Review complete</p>
+                  <h2 className="resting-title">You&apos;re caught up.</h2>
+                  <p className="resting-copy">
+                    No questions are due right now.
+                  </p>
+
+                  <dl className="resting-metrics" aria-label="Review status">
+                    <div>
+                      <dt>{queueRemaining}</dt>
+                      <dd>due now</dd>
+                    </div>
+                    <div>
+                      <dt>{scheduledReviewCount}</dt>
+                      <dd>scheduled</dd>
+                    </div>
+                    <div>
+                      <dt>
+                        {nextScheduledReview
+                          ? formatDurationBadge(nextScheduledReview.msUntilDue)
+                          : "none"}
+                      </dt>
+                      <dd>next due</dd>
+                    </div>
+                  </dl>
+
+                  <div className="resting-actions">
+                    <button
+                      className="resting-primary"
+                      type="button"
+                      onClick={() => setActiveTab("queue")}
+                    >
+                      View queue
+                    </button>
+                    <button
+                      className="resting-secondary"
+                      type="button"
+                      onClick={() => void loadNextQuestion({ surfaceError: true })}
+                    >
+                      Refresh
+                    </button>
+                  </div>
+
+                  {error ? (
+                    <p className="resting-error">
+                      Could not refresh the next question.
+                    </p>
+                  ) : null}
+                </div>
               )}
             </div>
           </section>
 
-          <form className="composer" onSubmit={handleSubmit}>
-            <div className="composer-row">
-              <textarea
-                id="answer-input"
-                className="composer-input"
-                value={displayedAnswer}
-                onChange={(event) => {
-                  clearPendingSpeechCommand();
-                  setSpeechPreview("");
-                  setAnswer(event.target.value);
-                  answerRef.current = event.target.value;
-                }}
-                onKeyDown={handleAnswerKeyDown}
-                placeholder="Your answer"
-                aria-label="Your answer"
-                rows={4}
-                autoFocus
-                disabled={isSubmitting || !question}
-              />
-              <button
-                className={`composer-mic ${
-                  isSpeechActive ? "composer-mic-active" : ""
-                }`}
-                type="button"
-                aria-label={
-                  isSpeechActive ? "Stop voice answer" : "Start voice answer"
-                }
-                aria-pressed={isSpeechActive}
-                onClick={isSpeechActive ? stopSpeech : startSpeech}
-                disabled={isSubmitting || !question}
-                title={
-                  isSpeechActive ? "Stop voice answer" : "Start voice answer"
-                }
-              >
-                {isSpeechActive ? <StopIcon /> : <MicrophoneIcon />}
-              </button>
-              <button
-                className="composer-submit"
-                type="submit"
-                disabled={isSubmitting || !question}
-                aria-label="Submit answer"
-              >
-                <SubmitIcon />
-              </button>
-            </div>
-            {speechMessage ? (
-              <p
-                className={`speech-status speech-status-${speechStatus}`}
-                aria-live="polite"
-              >
-                {speechMessage}
-              </p>
-            ) : null}
-          </form>
+          {question ? (
+            <form className="composer" onSubmit={handleSubmit}>
+              <div className="composer-row">
+                <textarea
+                  id="answer-input"
+                  className="composer-input"
+                  value={displayedAnswer}
+                  onChange={(event) => {
+                    clearPendingSpeechCommand();
+                    setSpeechPreview("");
+                    setAnswer(event.target.value);
+                    answerRef.current = event.target.value;
+                  }}
+                  onKeyDown={handleAnswerKeyDown}
+                  placeholder="Your answer"
+                  aria-label="Your answer"
+                  rows={4}
+                  autoFocus
+                  disabled={isSubmitting}
+                />
+                <button
+                  className={`composer-mic ${
+                    isSpeechActive ? "composer-mic-active" : ""
+                  }`}
+                  type="button"
+                  aria-label={
+                    isSpeechActive ? "Stop voice answer" : "Start voice answer"
+                  }
+                  aria-pressed={isSpeechActive}
+                  onClick={isSpeechActive ? stopSpeech : startSpeech}
+                  disabled={isSubmitting}
+                  title={
+                    isSpeechActive ? "Stop voice answer" : "Start voice answer"
+                  }
+                >
+                  {isSpeechActive ? <StopIcon /> : <MicrophoneIcon />}
+                </button>
+                <button
+                  className="composer-submit"
+                  type="submit"
+                  disabled={isSubmitting}
+                  aria-label="Submit answer"
+                >
+                  <SubmitIcon />
+                </button>
+              </div>
+              {speechMessage ? (
+                <p
+                  className={`speech-status speech-status-${speechStatus}`}
+                  aria-live="polite"
+                >
+                  {speechMessage}
+                </p>
+              ) : null}
+            </form>
+          ) : null}
 
-          {error ? <p className="error-message">{error}</p> : null}
+          {error && question ? <p className="error-message">{error}</p> : null}
 
           <section
             className={`previous-panel ${
@@ -1675,6 +1838,12 @@ export default function Home() {
                   </li>
                 );
               })}
+
+              {!hasPreviousAnswers && isReviewResting ? (
+                <li className="previous-row previous-row-empty">
+                  <p>No previous answers yet.</p>
+                </li>
+              ) : null}
 
               {Array.from({ length: previousAnswerPlaceholderCount }).map(
                 (_, index) => (
@@ -1833,22 +2002,41 @@ export default function Home() {
 
             <div className="stats-history-panel">
               <div className="stats-section-heading">
-                <h3>History</h3>
+                <h3>Answer history</h3>
                 <span>{selectedQuestionStats.dueStatus}</span>
               </div>
-              {selectedQuestionStats.reviewHistory.length === 0 ? (
-                <p className="stats-empty">No scored reviews yet.</p>
+              {selectedQuestionStats.answerHistory.length === 0 ? (
+                <p className="stats-empty">No answers recorded yet.</p>
               ) : (
                 <ol className="stats-history-list">
-                  {selectedQuestionStats.reviewHistory
-                    .slice()
-                    .reverse()
-                    .map((entry) => (
-                      <li key={`${entry.ts}-${entry.score}`}>
-                        <span>{formatReviewDate(entry.ts)}</span>
-                        <strong>{entry.score}/10</strong>
+                  {selectedQuestionStats.answerHistory.map((entry) => (
+                    <li key={entry.id}>
+                      <div className="stats-history-row-header">
+                        <span>
+                          {formatReviewDate(entry.resolvedAt ?? entry.submittedAt)}
+                        </span>
+                        <strong>
+                          {entry.status === "grading"
+                            ? "Grading"
+                            : `${entry.score}/10`}
+                        </strong>
+                      </div>
+                      <p className="stats-history-answer">{entry.rawAnswer}</p>
+                      {entry.answerSummary &&
+                      entry.answerSummary !== entry.rawAnswer ? (
+                        <p className="stats-history-summary">
+                          <span>Summary</span>
+                          {entry.answerSummary}
+                        </p>
+                      ) : null}
+                      {entry.justification ? (
+                        <p className="stats-history-summary">
+                          <span>Feedback</span>
+                          {entry.justification}
+                        </p>
+                      ) : null}
                       </li>
-                    ))}
+                  ))}
                 </ol>
               )}
               {selectedQuestionStats.lastJustification ? (

@@ -2,8 +2,10 @@ import {
   applyEvaluationToSqlite,
   getAllQueuedQuestions,
   getDueQuestions,
+  getQuestionAttempts,
   getQuestionSnapshot,
   type DueQuestion,
+  type QuestionAttempt,
 } from "./sqliteStore";
 import { evaluateAnswer, type EvaluationResult } from "./evaluateAnswer";
 import { parseReviews, reinsertionDelay, type ReviewEntry } from "./scheduler";
@@ -43,6 +45,7 @@ export type ReviewQueueItem = {
   lastAnswerSummary: string | null;
   referenceAnswer: string | null;
   lastJustification: string | null;
+  attempts: QuestionAttempt[];
 };
 
 export type QueueStatusSnapshot = {
@@ -191,6 +194,14 @@ function getVisibleEvaluations(now = Date.now()): EvaluationQueueItem[] {
 
 async function getReviewQueueItems(now = Date.now()): Promise<ReviewQueueItem[]> {
   const queuedQuestions = await getAllQueuedQuestions();
+  const attemptsByQuestion = new Map(
+    await Promise.all(
+      queuedQuestions.map(async (item) => [
+        item.question,
+        await getQuestionAttempts(item.question),
+      ] as const),
+    ),
+  );
 
   return queuedQuestions
     .filter((item) => !state.inFlightQuestions.has(item.question))
@@ -213,6 +224,7 @@ async function getReviewQueueItems(now = Date.now()): Promise<ReviewQueueItem[]>
         lastAnswerSummary: latest?.answerSummary ?? item.lastAnswerSummary,
         referenceAnswer: item.referenceAnswer,
         lastJustification: latest?.justification ?? null,
+        attempts: attemptsByQuestion.get(item.question) ?? [],
       } satisfies ReviewQueueItem;
     })
     .sort((a, b) => {
