@@ -4,17 +4,31 @@ export type EvaluateAnswerInput = {
   previousReviews: string;
 };
 
-export type EvaluationResult = {
+export type GradedEvaluationResult = {
+  status: "graded";
   score: number;
   justification: string;
   answerSummary: string;
   probingQuestions: string[];
 };
 
-const INVALID_JSON_RESULT: EvaluationResult = {
-  score: 0,
+export type FailedEvaluationResult = {
+  status: "failed";
+  score: null;
+  justification: string;
+  answerSummary: string;
+  probingQuestions: [];
+};
+
+export type EvaluationResult = GradedEvaluationResult | FailedEvaluationResult;
+
+const FAILED_EVALUATION_RESULT: Omit<
+  FailedEvaluationResult,
+  "answerSummary"
+> = {
+  status: "failed",
+  score: null,
   justification: "LLM evaluation failed or returned invalid JSON.",
-  answerSummary: "Evaluation failed.",
   probingQuestions: [],
 };
 
@@ -25,9 +39,9 @@ const MAX_PROBING_QUESTIONS = 3;
 const MAX_PROBING_QUESTION_CHARS = 220;
 export const PROBING_QUESTION_SCORE_THRESHOLD = 5;
 
-function clampScore(score: unknown): number {
+function parseScore(score: unknown): number | null {
   if (typeof score !== "number" || !Number.isFinite(score)) {
-    return 0;
+    return null;
   }
 
   return Math.max(0, Math.min(10, Math.round(score)));
@@ -95,9 +109,17 @@ function parseEvaluation(rawText: string, fallbackAnswer: string): EvaluationRes
       probingQuestions?: unknown;
       probing_questions?: unknown;
     };
-    const score = clampScore(parsed.score);
+    const score = parseScore(parsed.score);
+
+    if (score === null) {
+      return failedEvaluation(
+        "LLM evaluation failed or returned invalid score.",
+        fallbackAnswer,
+      );
+    }
 
     return {
+      status: "graded",
       score,
       justification: conciseJustification(parsed.justification),
       answerSummary: conciseAnswerSummary(
@@ -112,16 +134,16 @@ function parseEvaluation(rawText: string, fallbackAnswer: string): EvaluationRes
           : [],
     };
   } catch {
-    return {
-      ...INVALID_JSON_RESULT,
-      answerSummary: conciseAnswerSummary(fallbackAnswer, fallbackAnswer),
-    };
+    return failedEvaluation(
+      FAILED_EVALUATION_RESULT.justification,
+      fallbackAnswer,
+    );
   }
 }
 
 function conciseJustification(justification: unknown): string {
   if (typeof justification !== "string" || !justification.trim()) {
-    return INVALID_JSON_RESULT.justification;
+    return FAILED_EVALUATION_RESULT.justification;
   }
 
   const words = justification.trim().replace(/\s+/g, " ").split(" ");
@@ -131,6 +153,17 @@ function conciseJustification(justification: unknown): string {
   }
 
   return `${words.slice(0, MAX_JUSTIFICATION_WORDS).join(" ")}...`;
+}
+
+function failedEvaluation(
+  justification: string,
+  fallbackAnswer: string,
+): FailedEvaluationResult {
+  return {
+    ...FAILED_EVALUATION_RESULT,
+    justification,
+    answerSummary: conciseAnswerSummary(fallbackAnswer, fallbackAnswer),
+  };
 }
 
 function conciseAnswerSummary(summary: unknown, fallbackAnswer: string): string {
@@ -216,12 +249,10 @@ export async function evaluateAnswer(
   const apiKey = process.env.OPENROUTER_API_KEY ?? process.env.LLM_API_KEY;
 
   if (!apiKey) {
-    return {
-      score: 0,
-      justification: "OPENROUTER_API_KEY or LLM_API_KEY is not configured.",
-      answerSummary: conciseAnswerSummary(input.answer, input.answer),
-      probingQuestions: [],
-    };
+    return failedEvaluation(
+      "OPENROUTER_API_KEY or LLM_API_KEY is not configured.",
+      input.answer,
+    );
   }
 
   const controller = new AbortController();
@@ -262,7 +293,10 @@ export async function evaluateAnswer(
         statusText: response.statusText,
         body: errorText.slice(0, 500),
       });
-      return INVALID_JSON_RESULT;
+      return failedEvaluation(
+        "LLM evaluation failed before grading.",
+        input.answer,
+      );
     }
 
     const body: unknown = await response.json();
@@ -273,10 +307,7 @@ export async function evaluateAnswer(
       model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
       error: error instanceof Error ? error.message : "unknown error",
     });
-    return {
-      ...INVALID_JSON_RESULT,
-      answerSummary: conciseAnswerSummary(input.answer, input.answer),
-    };
+    return failedEvaluation(FAILED_EVALUATION_RESULT.justification, input.answer);
   } finally {
     clearTimeout(timeout);
   }
