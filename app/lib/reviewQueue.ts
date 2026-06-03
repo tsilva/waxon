@@ -21,6 +21,7 @@ export const RESOLVED_JUDGING_VISIBLE_MS = 10_000;
 type Submission = {
   evaluationId: string;
   question: string;
+  queuedQuestion: DueQuestion | null;
   answer: string;
   submittedAt: number;
   previousReviews: string;
@@ -194,12 +195,15 @@ function resolveEvaluationItem(
   item.answerSummary = result.answerSummary;
   item.resolvedAt = Date.now();
   item.nextDue = nextDue;
-  state.latestByQuestion[item.question] = {
-    score: result.score,
-    justification: result.justification,
-    answerSummary: result.answerSummary,
-    resolvedAt: item.resolvedAt,
-  };
+
+  if (result.status === "graded") {
+    state.latestByQuestion[item.question] = {
+      score: result.score,
+      justification: result.justification,
+      answerSummary: result.answerSummary,
+      resolvedAt: item.resolvedAt,
+    };
+  }
 }
 
 function getVisibleEvaluations(now = Date.now()): EvaluationQueueItem[] {
@@ -523,6 +527,18 @@ function reinsertQuestion(question: DueQuestion, score: number): void {
   logQueueFlushStatus("reinserted-low-score");
 }
 
+function restoreFailedQuestion(question: DueQuestion | null): void {
+  if (!question) {
+    return;
+  }
+
+  state.queue = [
+    question,
+    ...state.queue.filter((item) => item.question !== question.question),
+  ];
+  logQueueFlushStatus("restored-failed-evaluation-question");
+}
+
 function enqueueProbingQuestions(probingQuestions: DueQuestion[]): void {
   if (probingQuestions.length === 0) {
     return;
@@ -554,6 +570,13 @@ async function processEvaluation(submission: Submission): Promise<void> {
       answer: submission.answer,
       previousReviews: submission.previousReviews,
     });
+
+    if (result.status === "failed") {
+      restoreFailedQuestion(submission.queuedQuestion);
+      resolveEvaluationItem(submission.evaluationId, result, null);
+      return;
+    }
+
     const resolvedAt = Date.now();
     const persisted = await applyEvaluationToPostgres({
       question: submission.question,
@@ -667,6 +690,7 @@ export async function submitAnswer(input: {
   void processEvaluation({
     evaluationId: evaluation.id,
     question: input.question,
+    queuedQuestion: queued,
     answer: input.answer,
     submittedAt,
     previousReviews: snapshot?.reviews ?? "",
