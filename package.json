@@ -11,6 +11,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
+    "deck:dedupe": "node .codex/skills/deck-dedupe/scripts/deck-dedupe.mjs",
+    "deck:simplify-questions": "node .codex/skills/deck-simplify-questions/scripts/deck-simplify-questions.mjs",
+    "embeddings:backfill": "node scripts/backfill-question-embeddings.mjs",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
