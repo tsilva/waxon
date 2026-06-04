@@ -167,7 +167,7 @@ type ActiveTab = "review" | "queue";
 
 type QueueSortKey = "review-date" | "creation-date";
 
-type GeneratedQuestionStatus = "new" | "adding" | "added";
+type GeneratedQuestionStatus = "new" | "selected" | "adding" | "added";
 
 type GeneratedQuestionCandidate = {
   id: string;
@@ -1997,18 +1997,46 @@ export default function Home() {
     }
   }
 
-  async function addGeneratedQuestionToDeck(questionId: string) {
-    const questionToAdd = generatedQuestions.find(
+  function toggleGeneratedQuestionSelection(questionId: string) {
+    const questionToSelect = generatedQuestions.find(
       (item) => item.id === questionId,
     );
 
-    if (!questionToAdd || questionToAdd.status !== "new") {
+    if (
+      !questionToSelect ||
+      (questionToSelect.status !== "new" &&
+        questionToSelect.status !== "selected")
+    ) {
       return;
     }
 
     setGeneratedQuestions((current) =>
       current.map((item) =>
         item.id === questionId
+          ? {
+              ...item,
+              status: item.status === "selected" ? "new" : "selected",
+            }
+          : item,
+      ),
+    );
+    setGeneratorMessage(null);
+  }
+
+  async function addSelectedGeneratedQuestionsToDeck() {
+    const questionsToAdd = generatedQuestions.filter(
+      (item) => item.status === "selected",
+    );
+
+    if (questionsToAdd.length === 0) {
+      return;
+    }
+
+    const questionIdsToAdd = new Set(questionsToAdd.map((item) => item.id));
+
+    setGeneratedQuestions((current) =>
+      current.map((item) =>
+        questionIdsToAdd.has(item.id)
           ? {
               ...item,
               status: "adding",
@@ -2025,7 +2053,7 @@ export default function Home() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          questions: [questionToAdd.question],
+          questions: questionsToAdd.map((item) => item.question),
         }),
       });
       const data = (await response.json()) as
@@ -2038,7 +2066,7 @@ export default function Home() {
 
       setGeneratedQuestions((current) =>
         current.map((item) =>
-          item.id === questionId
+          questionIdsToAdd.has(item.id)
             ? {
                 ...item,
                 status: "added",
@@ -2047,7 +2075,13 @@ export default function Home() {
         ),
       );
       setGeneratorMessage(
-        data.added > 0 ? "Question added to deck." : "Question already exists.",
+        data.added > 0
+          ? `${data.added} ${
+              data.added === 1 ? "question" : "questions"
+            } added to deck.`
+          : questionsToAdd.length === 1
+            ? "Question already exists."
+            : "Questions already exist.",
       );
       await loadStatus();
 
@@ -2062,10 +2096,10 @@ export default function Home() {
       );
       setGeneratedQuestions((current) =>
         current.map((item) =>
-          item.id === questionId
+          questionIdsToAdd.has(item.id)
             ? {
                 ...item,
-                status: "new",
+                status: "selected",
               }
             : item,
         ),
@@ -2317,6 +2351,7 @@ export default function Home() {
     },
     {
       new: 0,
+      selected: 0,
       adding: 0,
       added: 0,
     } satisfies Record<GeneratedQuestionStatus, number>,
@@ -2882,7 +2917,19 @@ export default function Home() {
                   className="queue-row"
                   key={`${item.question}-${item.nextDue}`}
                 >
-                  <div className="queue-row-card">
+                  <div
+                    className="queue-row-card"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open card details for ${item.question}`}
+                    onClick={() => setSelectedQuestion(item.question)}
+                    onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedQuestion(item.question);
+                      }
+                    }}
+                  >
                     <div className="queue-row-main">
                       <MarkdownInline
                         as="p"
@@ -3058,6 +3105,7 @@ export default function Home() {
                     <h3>Review</h3>
                     <p>
                       {generatedQuestionCounts.new} available ·{" "}
+                      {generatedQuestionCounts.selected} selected ·{" "}
                       {generatedQuestionCounts.added} added
                     </p>
                   </div>
@@ -3082,15 +3130,19 @@ export default function Home() {
                           type="button"
                           aria-label={
                             item.status === "new"
-                              ? `Add question: ${item.question}`
-                              : item.status === "adding"
-                                ? "Adding question"
-                                : "Question already added"
+                              ? `Select question for adding: ${item.question}`
+                              : item.status === "selected"
+                                ? `Remove question from add selection: ${item.question}`
+                                : item.status === "adding"
+                                  ? "Adding question"
+                                  : "Question already added"
                           }
-                          disabled={item.status !== "new"}
-                          onClick={() => void addGeneratedQuestionToDeck(item.id)}
+                          disabled={
+                            item.status === "adding" || item.status === "added"
+                          }
+                          onClick={() => toggleGeneratedQuestionSelection(item.id)}
                         >
-                          {item.status === "added" ? (
+                          {item.status === "selected" || item.status === "added" ? (
                             <Check aria-hidden="true" />
                           ) : (
                             <Plus aria-hidden="true" />
@@ -3105,10 +3157,12 @@ export default function Home() {
                           <p className="generator-question-meta">
                             Batch {item.batch} · {item.sourceLabel} ·{" "}
                             {item.status === "new"
-                              ? "Not added"
-                              : item.status === "adding"
-                                ? "Adding"
-                              : item.status}
+                              ? "Not selected"
+                              : item.status === "selected"
+                                ? "Selected"
+                                : item.status === "adding"
+                                  ? "Adding"
+                                  : "Added"}
                           </p>
                         </div>
                       </li>
@@ -3119,16 +3173,22 @@ export default function Home() {
                 <div className="generator-review-footer">
                   <p aria-live="polite">
                     {generatorMessage ??
-                      (generatedQuestionCounts.new > 0
-                        ? "Click + on any question to add it."
+                      (generatedQuestionCounts.selected > 0
+                        ? `${generatedQuestionCounts.selected} selected for add.`
+                        : generatedQuestionCounts.new > 0
+                          ? "Click + on any question to select it."
                         : "Generate more candidates or close this panel.")}
                   </p>
                   <button
                     className="generator-secondary-action"
                     type="button"
-                    onClick={() => setIsQuestionGeneratorOpen(false)}
+                    onClick={() => void addSelectedGeneratedQuestionsToDeck()}
+                    disabled={
+                      generatedQuestionCounts.selected === 0 ||
+                      generatedQuestionCounts.adding > 0
+                    }
                   >
-                    Done
+                    {generatedQuestionCounts.adding > 0 ? "Adding..." : "Add"}
                   </button>
                 </div>
               </section>
