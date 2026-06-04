@@ -19,12 +19,7 @@ npm run deck:dedupe -- --json
 
 3. Decide duplicates only when answering one question makes the other redundant. Keep contrast pairs, complementary questions, and different numeric examples unless they are truly redundant.
 
-4. Choose the question to keep by quality:
-   - concise
-   - asks a single question rather than combining multiple prompts
-   - self-descriptive without extra context
-   - valuable for recall practice
-   - precise and not merely a fragment
+4. Choose the question to keep by quality using the shared reference at [reference/question-quality.md](../../../reference/question-quality.md).
 
 5. Write a decisions JSON file in `/tmp` or another temporary location:
 
@@ -36,7 +31,7 @@ npm run deck:dedupe -- --json
       "keepQuestion": "Question text to keep",
       "discardQuestion": "Question text to move to trash",
       "similarity": 0.9259,
-      "rationale": "Kept the more self-contained version."
+      "rationale": "Kept the version that better follows the shared question-quality reference."
     }
   ]
 }

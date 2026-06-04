@@ -704,6 +704,25 @@ export async function submitAnswer(input: {
   };
 }
 
+export async function addQuestionsToDeck(input: {
+  questions: string[];
+}): Promise<{ added: number }> {
+  await initializeQueue();
+
+  const addedQuestions = await upsertDueQuestions({
+    questions: input.questions,
+    sourceQuestion: null,
+    now: Date.now(),
+  });
+
+  enqueueProbingQuestions(addedQuestions);
+  void broadcastQueueStatus();
+
+  return {
+    added: addedQuestions.length,
+  };
+}
+
 export async function queueStatus(): Promise<QueueStatusSnapshot> {
   await initializeQueue();
   await refreshIfEmpty();

@@ -3,13 +3,18 @@
 import Image from "next/image";
 import {
   ArrowUp,
+  Check,
   ChevronDown,
+  FileText,
   Mic,
+  Plus,
   Settings,
+  Sparkles,
   Square,
   Trash2,
   Upload,
   User,
+  X,
 } from "lucide-react";
 import {
   ChangeEvent,
@@ -161,6 +166,24 @@ type ActiveTab = "review" | "queue";
 
 type QueueSortKey = "review-date" | "creation-date";
 
+type GeneratedQuestionStatus = "new" | "kept" | "rejected" | "added";
+
+type GeneratedQuestionCandidate = {
+  id: string;
+  question: string;
+  sourceLabel: string;
+  coverageLabel: string;
+  batch: number;
+  status: GeneratedQuestionStatus;
+};
+
+type GeneratorContextFile = {
+  id: string;
+  name: string;
+  content: string;
+  status: "ready" | "metadata-only";
+};
+
 type PendingSpeechCommand = {
   command: "skip" | "submit";
   heldText: string;
@@ -245,6 +268,8 @@ const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 const MAX_AVATAR_UPLOAD_BYTES = 512 * 1024;
 const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit|skip)[.!?]*$/i;
+const MAX_GENERATOR_CONTEXT_CHARS = 16_000;
+const MAX_GENERATED_QUESTION_COUNT = 40;
 
 const mathSymbolMap: Record<string, string> = {
   alpha: "\u03b1",
@@ -621,6 +646,27 @@ function scoreTone(score: number | null) {
   return "high";
 }
 
+function PreviousAnswerScore({
+  score,
+  className,
+  label = `Score ${score} out of 10`,
+}: {
+  score: number;
+  className?: string;
+  label?: string;
+}) {
+  return (
+    <span
+      className={`previous-score-shell${className ? ` ${className}` : ""}`}
+      aria-label={label}
+    >
+      <span className={`previous-score score-${scoreTone(score)}`}>
+        {score}
+      </span>
+    </span>
+  );
+}
+
 function formatScore(score: number | null): string {
   return score === null ? "None" : `${score}/10`;
 }
@@ -780,6 +826,142 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error("Could not read avatar image."));
     reader.readAsDataURL(file);
   });
+}
+
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Could not read context file."));
+    reader.readAsText(file);
+  });
+}
+
+function createClientId(prefix: string): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isTextContextFile(file: File): boolean {
+  const lowerName = file.name.toLowerCase();
+
+  return (
+    file.type.startsWith("text/") ||
+    lowerName.endsWith(".md") ||
+    lowerName.endsWith(".markdown") ||
+    lowerName.endsWith(".txt") ||
+    lowerName.endsWith(".csv") ||
+    lowerName.endsWith(".json") ||
+    lowerName.endsWith(".tex")
+  );
+}
+
+function compactCoverageUnit(value: string): string {
+  return value
+    .replace(/\s+/g, " ")
+    .replace(/^[\-*•\d.)\s]+/, "")
+    .replace(/[.;:,]+$/, "")
+    .trim();
+}
+
+function extractCoverageUnits(source: string): string[] {
+  const seen = new Set<string>();
+  const units: string[] = [];
+  const candidates = source
+    .split(/\n+|(?<=[.!?])\s+/)
+    .map(compactCoverageUnit)
+    .filter((unit) => unit.length >= 12);
+
+  for (const candidate of candidates) {
+    const clipped =
+      candidate.length > 120 ? `${candidate.slice(0, 117).trim()}...` : candidate;
+    const key = clipped.toLowerCase();
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    units.push(clipped);
+  }
+
+  return units;
+}
+
+function questionFromCoverageUnit(unit: string, variant: number): string {
+  const templates = [
+    (value: string) => `What is the key idea behind ${value}?`,
+    (value: string) => `How would you explain ${value} from memory?`,
+    (value: string) => `What detail about ${value} is easiest to forget?`,
+    (value: string) => `Why does ${value} matter?`,
+    (value: string) => `What problem does ${value} solve?`,
+    (value: string) => `What is a common mistake when reasoning about ${value}?`,
+    (value: string) => `How can you check whether you understand ${value}?`,
+    (value: string) => `What should you compare ${value} against?`,
+  ];
+  const template = templates[variant % templates.length] ?? templates[0];
+
+  return template(unit).replace(/\?\?+$/, "?");
+}
+
+function buildGeneratedQuestionCandidates(input: {
+  scope: string;
+  files: GeneratorContextFile[];
+  count: number;
+  batch: number;
+  existingQuestions: Set<string>;
+}): GeneratedQuestionCandidate[] {
+  const fileContent = input.files
+    .map((file) => `${file.name}\n${file.content}`)
+    .join("\n\n");
+  const combinedContext = `${input.scope}\n\n${fileContent}`
+    .slice(0, MAX_GENERATOR_CONTEXT_CHARS)
+    .trim();
+  const units = extractCoverageUnits(combinedContext);
+  const fallbackUnits =
+    input.files.length > 0
+      ? input.files.map((file) => `the context in ${file.name}`)
+      : ["the requested topic"];
+  const coverageUnits = units.length > 0 ? units : fallbackUnits;
+  const candidates: GeneratedQuestionCandidate[] = [];
+  let attempts = 0;
+
+  while (
+    candidates.length < input.count &&
+    attempts < input.count * Math.max(coverageUnits.length, 1) * 3
+  ) {
+    const coverageIndex =
+      (input.batch * input.count + attempts) % coverageUnits.length;
+    const coverageLabel = coverageUnits[coverageIndex] ?? "the requested topic";
+    const question = questionFromCoverageUnit(
+      coverageLabel,
+      input.batch + coverageIndex + Math.floor(attempts / coverageUnits.length),
+    );
+    const key = question.toLowerCase();
+
+    if (!input.existingQuestions.has(key)) {
+      input.existingQuestions.add(key);
+      candidates.push({
+        id: createClientId("generated-question"),
+        question,
+        sourceLabel:
+          input.files.length > 0
+            ? input.files[coverageIndex % input.files.length]?.name ?? "Context"
+            : "Prompt",
+        coverageLabel,
+        batch: input.batch,
+        status: "new",
+      });
+    }
+
+    attempts += 1;
+  }
+
+  return candidates;
 }
 
 function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
@@ -1076,15 +1258,28 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isQuestionGeneratorOpen, setIsQuestionGeneratorOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfileResponse | null>(null);
   const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
+  const [generatorScope, setGeneratorScope] = useState("");
+  const [generatorQuestionCount, setGeneratorQuestionCount] = useState("12");
+  const [generatorDifficulty, setGeneratorDifficulty] = useState("Mixed");
+  const [generatorFiles, setGeneratorFiles] = useState<GeneratorContextFile[]>([]);
+  const [generatedQuestions, setGeneratedQuestions] = useState<
+    GeneratedQuestionCandidate[]
+  >([]);
+  const [generatorBatch, setGeneratorBatch] = useState(0);
+  const [generatorMessage, setGeneratorMessage] = useState<string | null>(null);
+  const [isAddingGeneratedQuestions, setIsAddingGeneratedQuestions] =
+    useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const generatorFileInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
   const keepListeningRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -1208,6 +1403,22 @@ export default function Home() {
 
     return () => window.removeEventListener("keydown", closeSettingsOnEscape);
   }, [isSettingsOpen]);
+
+  useEffect(() => {
+    if (!isQuestionGeneratorOpen) {
+      return;
+    }
+
+    function closeGeneratorOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsQuestionGeneratorOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeGeneratorOnEscape);
+
+    return () => window.removeEventListener("keydown", closeGeneratorOnEscape);
+  }, [isQuestionGeneratorOpen]);
 
   const clearPendingSpeechCommand = useCallback(() => {
     if (pendingSpeechCommandTimerRef.current) {
@@ -1760,6 +1971,166 @@ export default function Home() {
     }
   }
 
+  async function handleGeneratorFileChange(
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
+    const selectedFiles = Array.from(event.target.files ?? []);
+    event.target.value = "";
+
+    if (selectedFiles.length === 0) {
+      return;
+    }
+
+    const contextFiles = await Promise.all(
+      selectedFiles.map(async (file) => {
+        if (!isTextContextFile(file)) {
+          return {
+            id: createClientId("context-file"),
+            name: file.name,
+            content: `${file.name} (${file.type || "file"})`,
+            status: "metadata-only" as const,
+          };
+        }
+
+        try {
+          return {
+            id: createClientId("context-file"),
+            name: file.name,
+            content: await readFileAsText(file),
+            status: "ready" as const,
+          };
+        } catch {
+          return {
+            id: createClientId("context-file"),
+            name: file.name,
+            content: file.name,
+            status: "metadata-only" as const,
+          };
+        }
+      }),
+    );
+
+    setGeneratorFiles((current) => [...current, ...contextFiles]);
+    setGeneratorMessage(null);
+  }
+
+  function removeGeneratorFile(fileId: string) {
+    setGeneratorFiles((current) => current.filter((file) => file.id !== fileId));
+  }
+
+  function generateQuestionBatch() {
+    const requestedCount = Number.parseInt(generatorQuestionCount, 10);
+    const count = Math.min(
+      MAX_GENERATED_QUESTION_COUNT,
+      Math.max(1, Number.isFinite(requestedCount) ? requestedCount : 12),
+    );
+    const hasContext =
+      generatorScope.trim().length > 0 || generatorFiles.length > 0;
+
+    if (!hasContext) {
+      setGeneratorMessage("Add a topic or attach context before generating.");
+      return;
+    }
+
+    const existingQuestions = new Set(
+      [
+        ...generatedQuestions.map((item) => item.question),
+        ...reviewQueue.map((item) => item.question),
+      ].map((item) => item.toLowerCase()),
+    );
+    const nextBatch = generatorBatch + 1;
+    const candidates = buildGeneratedQuestionCandidates({
+      scope: generatorScope,
+      files: generatorFiles,
+      count,
+      batch: nextBatch,
+      existingQuestions,
+    });
+
+    setGeneratorBatch(nextBatch);
+    setGeneratedQuestions((current) => [...candidates, ...current]);
+    setGeneratorMessage(
+      candidates.length > 0
+        ? `${candidates.length} new candidates added for review.`
+        : "No new candidates found from this context.",
+    );
+  }
+
+  function setGeneratedQuestionStatus(
+    questionId: string,
+    status: GeneratedQuestionStatus,
+  ) {
+    setGeneratedQuestions((current) =>
+      current.map((item) =>
+        item.id === questionId
+          ? {
+              ...item,
+              status,
+            }
+          : item,
+      ),
+    );
+  }
+
+  async function addKeptQuestionsToDeck() {
+    const keptQuestions = generatedQuestions.filter(
+      (item) => item.status === "kept",
+    );
+
+    if (keptQuestions.length === 0 || isAddingGeneratedQuestions) {
+      return;
+    }
+
+    setIsAddingGeneratedQuestions(true);
+    setGeneratorMessage(null);
+
+    try {
+      const response = await fetch("/api/questions/add", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          questions: keptQuestions.map((item) => item.question),
+        }),
+      });
+      const data = (await response.json()) as
+        | { ok: true; added: number }
+        | { ok: false; error?: string };
+
+      if (!response.ok || !data.ok) {
+        throw new Error(!data.ok && data.error ? data.error : "Could not add questions.");
+      }
+
+      const addedIds = new Set(keptQuestions.map((item) => item.id));
+
+      setGeneratedQuestions((current) =>
+        current.map((item) =>
+          addedIds.has(item.id)
+            ? {
+                ...item,
+                status: "added",
+              }
+            : item,
+        ),
+      );
+      setGeneratorMessage(`${data.added} questions added to deck.`);
+      await loadStatus();
+
+      if (!questionRef.current) {
+        await loadNextQuestion({ surfaceError: false });
+      }
+    } catch (addError) {
+      setGeneratorMessage(
+        addError instanceof Error
+          ? addError.message
+          : "Could not add questions.",
+      );
+    } finally {
+      setIsAddingGeneratedQuestions(false);
+    }
+  }
+
   const sessionPreviousAnswers: PreviousAnswerItem[] = messages
     .filter(
       (message): message is Extract<ChatMessage, { kind: "answer" }> =>
@@ -1997,6 +2368,20 @@ export default function Home() {
     selectedReferenceAnswerState?.status === "error"
       ? selectedReferenceAnswerState.answer
       : null;
+  const generatedQuestionCounts = generatedQuestions.reduce(
+    (counts, item) => {
+      counts[item.status] += 1;
+      return counts;
+    },
+    {
+      new: 0,
+      kept: 0,
+      rejected: 0,
+      added: 0,
+    } satisfies Record<GeneratedQuestionStatus, number>,
+  );
+  const hasGeneratorContext =
+    generatorScope.trim().length > 0 || generatorFiles.length > 0;
 
   useEffect(() => {
     if (!selectedQuestionStats) {
@@ -2374,21 +2759,10 @@ export default function Home() {
                     key={item.id}
                   >
                     <div className="previous-score-slot">
-                      {isPending ? (
+                      {isPending || item.score === null ? (
                         <span className="pending-spinner" aria-hidden="true" />
                       ) : (
-                        <span
-                          className="previous-score-shell"
-                          aria-label={`Score ${item.score} out of 10`}
-                        >
-                          <span
-                            className={`previous-score score-${scoreTone(
-                              item.score,
-                            )}`}
-                          >
-                            {item.score}
-                          </span>
-                        </span>
+                        <PreviousAnswerScore score={item.score} />
                       )}
                     </div>
 
@@ -2528,6 +2902,17 @@ export default function Home() {
           />
 
           <div className="queue-toolbar">
+            <button
+              className="queue-generate-trigger"
+              type="button"
+              onClick={() => {
+                setGeneratorMessage(null);
+                setIsQuestionGeneratorOpen(true);
+              }}
+            >
+              <Sparkles aria-hidden="true" />
+              <span>Generate</span>
+            </button>
             <label className="queue-sort-label">
               Sort by
               <span className="queue-sort-select-shell">
@@ -2579,9 +2964,11 @@ export default function Home() {
                           {formatDueBadge(item)}
                         </span>
                         {item.lastScore !== null ? (
-                          <span className="queue-last-score">
-                            Last score {item.lastScore}/10
-                          </span>
+                          <PreviousAnswerScore
+                            className="queue-last-score"
+                            label={`Last score ${item.lastScore} out of 10`}
+                            score={item.lastScore}
+                          />
                         ) : null}
                       </div>
                     </div>
@@ -2597,6 +2984,257 @@ export default function Home() {
           )}
         </section>
       </section>
+
+      {isQuestionGeneratorOpen ? (
+        <div
+          className="generator-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsQuestionGeneratorOpen(false);
+            }
+          }}
+        >
+          <section
+            className="generator-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="generator-modal-title"
+          >
+            <div className="generator-modal-header">
+              <div>
+                <p className="generator-modal-kicker">Add to deck</p>
+                <h2 className="generator-modal-title" id="generator-modal-title">
+                  Generate questions
+                </h2>
+              </div>
+              <button
+                className="stats-modal-close"
+                type="button"
+                aria-label="Close generator"
+                onClick={() => setIsQuestionGeneratorOpen(false)}
+              />
+            </div>
+
+            <div className="generator-modal-grid">
+              <section className="generator-scope-panel" aria-label="Generation scope">
+                <label className="generator-field">
+                  <span>Cover</span>
+                  <textarea
+                    className="generator-scope-input"
+                    value={generatorScope}
+                    onChange={(event) => {
+                      setGeneratorScope(event.target.value);
+                      setGeneratorMessage(null);
+                    }}
+                    placeholder="Core ideas from the attached lecture notes"
+                    rows={7}
+                  />
+                </label>
+
+                <div className="generator-controls">
+                  <label className="generator-small-field">
+                    <span>Questions</span>
+                    <input
+                      className="generator-number-input"
+                      type="number"
+                      min={1}
+                      max={MAX_GENERATED_QUESTION_COUNT}
+                      value={generatorQuestionCount}
+                      onChange={(event) =>
+                        setGeneratorQuestionCount(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="generator-small-field">
+                    <span>Difficulty</span>
+                    <span className="generator-select-shell">
+                      <select
+                        className="generator-select"
+                        value={generatorDifficulty}
+                        onChange={(event) =>
+                          setGeneratorDifficulty(event.target.value)
+                        }
+                      >
+                        <option>Mixed</option>
+                        <option>Gentle</option>
+                        <option>Hard</option>
+                      </select>
+                      <ChevronDown aria-hidden="true" />
+                    </span>
+                  </label>
+                </div>
+
+                <div className="generator-context">
+                  <div className="generator-context-header">
+                    <span>Context</span>
+                    <button
+                      className="generator-upload-button"
+                      type="button"
+                      onClick={() => generatorFileInputRef.current?.click()}
+                    >
+                      <Upload aria-hidden="true" />
+                      <span>Add files</span>
+                    </button>
+                    <input
+                      ref={generatorFileInputRef}
+                      className="generator-file-input"
+                      type="file"
+                      multiple
+                      onChange={(event) => void handleGeneratorFileChange(event)}
+                    />
+                  </div>
+
+                  {generatorFiles.length === 0 ? (
+                    <p className="generator-context-empty">
+                      Attach notes, markdown, text, or reference files.
+                    </p>
+                  ) : (
+                    <ul className="generator-file-list" aria-label="Context files">
+                      {generatorFiles.map((file) => (
+                        <li className="generator-file-chip" key={file.id}>
+                          <FileText aria-hidden="true" />
+                          <span>{file.name}</span>
+                          {file.status === "metadata-only" ? (
+                            <em>name only</em>
+                          ) : null}
+                          <button
+                            type="button"
+                            aria-label={`Remove ${file.name}`}
+                            onClick={() => removeGeneratorFile(file.id)}
+                          >
+                            <X aria-hidden="true" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="generator-scope-footer">
+                  <button
+                    className="generator-primary-action"
+                    type="button"
+                    onClick={generateQuestionBatch}
+                    disabled={!hasGeneratorContext}
+                  >
+                    <Sparkles aria-hidden="true" />
+                    <span>Generate</span>
+                  </button>
+                </div>
+              </section>
+
+              <section className="generator-review-panel" aria-label="Generated questions">
+                <div className="generator-review-header">
+                  <div>
+                    <h3>Review</h3>
+                    <p>
+                      {generatedQuestionCounts.kept} kept ·{" "}
+                      {generatedQuestionCounts.new} new ·{" "}
+                      {generatedQuestionCounts.rejected} rejected
+                    </p>
+                  </div>
+                  {generatedQuestionCounts.added > 0 ? (
+                    <span>{generatedQuestionCounts.added} added</span>
+                  ) : null}
+                </div>
+
+                {generatedQuestions.length === 0 ? (
+                  <div className="generator-review-empty">
+                    <p>Generated questions will appear here.</p>
+                  </div>
+                ) : (
+                  <ol className="generator-question-list">
+                    {generatedQuestions.map((item) => (
+                      <li
+                        className={`generator-question-row generator-question-${item.status}`}
+                        key={item.id}
+                      >
+                        <div className="generator-question-status" aria-hidden="true">
+                          {item.status === "kept" || item.status === "added" ? (
+                            <Check />
+                          ) : item.status === "rejected" ? (
+                            <X />
+                          ) : (
+                            <Plus />
+                          )}
+                        </div>
+                        <div className="generator-question-copy">
+                          <MarkdownInline
+                            as="p"
+                            className="generator-question-text"
+                            text={item.question}
+                          />
+                          <p className="generator-question-meta">
+                            Batch {item.batch} · {item.sourceLabel} ·{" "}
+                            {item.status === "new"
+                              ? "Needs review"
+                              : item.status}
+                          </p>
+                        </div>
+                        <div className="generator-question-actions">
+                          <button
+                            className="generator-keep-button"
+                            type="button"
+                            aria-pressed={item.status === "kept"}
+                            disabled={item.status === "added"}
+                            onClick={() => setGeneratedQuestionStatus(item.id, "kept")}
+                          >
+                            <Check aria-hidden="true" />
+                            <span>Keep</span>
+                          </button>
+                          <button
+                            className="generator-reject-button"
+                            type="button"
+                            aria-pressed={item.status === "rejected"}
+                            disabled={item.status === "added"}
+                            onClick={() =>
+                              setGeneratedQuestionStatus(item.id, "rejected")
+                            }
+                          >
+                            <X aria-hidden="true" />
+                            <span>Reject</span>
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+
+                <div className="generator-review-footer">
+                  <p aria-live="polite">
+                    {generatorMessage ??
+                      (generatedQuestionCounts.new > 0
+                        ? "Review new candidates before adding."
+                        : "Kept questions are ready to add.")}
+                  </p>
+                  <button
+                    className="generator-secondary-action"
+                    type="button"
+                    onClick={() => setIsQuestionGeneratorOpen(false)}
+                  >
+                    Back
+                  </button>
+                  <button
+                    className="generator-primary-action"
+                    type="button"
+                    onClick={() => void addKeptQuestionsToDeck()}
+                    disabled={
+                      generatedQuestionCounts.kept === 0 ||
+                      isAddingGeneratedQuestions
+                    }
+                  >
+                    <Plus aria-hidden="true" />
+                    <span>
+                      {isAddingGeneratedQuestions ? "Adding..." : "Add to deck"}
+                    </span>
+                  </button>
+                </div>
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {isSettingsOpen ? (
         <div
