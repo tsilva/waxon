@@ -15,6 +15,7 @@ import {
   ChangeEvent,
   FormEvent,
   Fragment,
+  type CSSProperties,
   KeyboardEvent,
   type ReactNode,
   useCallback,
@@ -73,6 +74,7 @@ type EvaluationQueueItem = {
 type ReviewQueueItem = {
   question: string;
   nextDue: number;
+  createdAt: number;
   msUntilDue: number;
   status: "now" | "scheduled";
   generatedFromQuestion: string | null;
@@ -115,8 +117,10 @@ type DeckEmbeddingPlotPoint = {
 };
 
 type HoveredEmbeddingPoint = DeckEmbeddingPlotPoint & {
-  leftPercent: number;
-  topPercent: number;
+  arrowLeftPx: number;
+  tooltipLeftPx: number;
+  tooltipTopPx: number;
+  verticalPlacement: "above" | "below";
   statusLabel: string;
   scoreLabel: string | null;
 };
@@ -154,6 +158,8 @@ type PreviousAnswerItem = {
 };
 
 type ActiveTab = "review" | "queue";
+
+type QueueSortKey = "review-date" | "creation-date";
 
 type PendingSpeechCommand = {
   command: "skip" | "submit";
@@ -860,14 +866,13 @@ function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
 function DeckEmbeddingPlot({
   plot,
   reviewQueue,
-  onSelectQuestion,
 }: {
   plot: DeckEmbeddingPlotResponse;
   reviewQueue: ReviewQueueItem[];
-  onSelectQuestion: (question: string) => void;
 }) {
   const [hoveredPoint, setHoveredPoint] =
     useState<HoveredEmbeddingPoint | null>(null);
+  const plotCanvasRef = useRef<HTMLDivElement | null>(null);
   const width = 720;
   const height = 270;
   const padding = 26;
@@ -897,13 +902,39 @@ function DeckEmbeddingPlot({
   function showPoint(point: DeckEmbeddingPlotPoint) {
     const x = padding + point.x * (width - padding * 2);
     const y = padding + (1 - point.y) * (height - padding * 2);
+    const canvasRect = plotCanvasRef.current?.getBoundingClientRect();
+    const canvasWidth = canvasRect?.width ?? width;
+    const canvasHeight = canvasRect?.height ?? height;
+    const renderedX = (x / width) * canvasWidth;
+    const renderedY = (y / height) * canvasHeight;
+    const isCompact = canvasWidth < 520;
+    const horizontalInset = isCompact ? 10 : 14;
+    const arrowInset = 14;
+    const tooltipWidth = Math.min(
+      isCompact ? 280 : 340,
+      canvasWidth - (isCompact ? 20 : 28),
+    );
+    const minTooltipLeft = horizontalInset;
+    const maxTooltipLeft = Math.max(
+      minTooltipLeft,
+      canvasWidth - tooltipWidth - horizontalInset,
+    );
+    const tooltipLeft = Math.min(
+      Math.max(renderedX - tooltipWidth / 2, minTooltipLeft),
+      maxTooltipLeft,
+    );
     const metadata = getPointMetadata(point);
 
     setHoveredPoint({
       ...point,
       ...metadata,
-      leftPercent: (x / width) * 100,
-      topPercent: (y / height) * 100,
+      arrowLeftPx: Math.min(
+        Math.max(renderedX - tooltipLeft, arrowInset),
+        tooltipWidth - arrowInset,
+      ),
+      tooltipLeftPx: tooltipLeft,
+      tooltipTopPx: renderedY,
+      verticalPlacement: y / height < 0.32 ? "below" : "above",
     });
   }
 
@@ -926,6 +957,7 @@ function DeckEmbeddingPlot({
       ) : (
         <div
           className="embedding-plot-canvas"
+          ref={plotCanvasRef}
           onMouseLeave={() => setHoveredPoint(null)}
         >
           <svg
@@ -967,21 +999,10 @@ function DeckEmbeddingPlot({
                 <g
                   className={`embedding-plot-point point-${tone}`}
                   key={point.question}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Show stats for ${point.question}`}
-                  onClick={() => onSelectQuestion(point.question)}
                   onFocus={() => showPoint(point)}
                   onBlur={() => setHoveredPoint(null)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      onSelectQuestion(point.question);
-                    }
-                  }}
                   onMouseEnter={() => showPoint(point)}
                 >
-                  <title>{point.question}</title>
                   <circle cx={x} cy={y} r="7" />
                   <circle
                     className="embedding-plot-hit-area"
@@ -996,11 +1017,14 @@ function DeckEmbeddingPlot({
 
           {hoveredPoint ? (
             <div
-              className="embedding-tooltip"
-              style={{
-                left: `${hoveredPoint.leftPercent}%`,
-                top: `${hoveredPoint.topPercent}%`,
-              }}
+              className={`embedding-tooltip tooltip-y-${hoveredPoint.verticalPlacement}`}
+              style={
+                {
+                  "--tooltip-arrow-left": `${hoveredPoint.arrowLeftPx}px`,
+                  left: `${hoveredPoint.tooltipLeftPx}px`,
+                  top: `${hoveredPoint.tooltipTopPx}px`,
+                } as CSSProperties
+              }
               role="status"
             >
               <p>{hoveredPoint.question}</p>
@@ -1029,6 +1053,8 @@ export default function Home() {
   const [queueRemaining, setQueueRemaining] = useState(0);
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>([]);
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
+  const [queueSortKey, setQueueSortKey] =
+    useState<QueueSortKey>("review-date");
   const [deckEmbeddingPlot, setDeckEmbeddingPlot] =
     useState<DeckEmbeddingPlotResponse>({
       model: null,
@@ -1822,6 +1848,16 @@ export default function Home() {
   const nextScheduledReview = reviewQueue.find(
     (item) => item.status === "scheduled",
   );
+  const sortedReviewQueue = useMemo(() => {
+    return [...reviewQueue].sort((a, b) => {
+      const dateComparison =
+        queueSortKey === "review-date"
+          ? b.nextDue - a.nextDue
+          : b.createdAt - a.createdAt;
+
+      return dateComparison || a.question.localeCompare(b.question);
+    });
+  }, [queueSortKey, reviewQueue]);
   const previousAnswerPlaceholderCount = isPreviousExpanded
     ? 0
     : isReviewResting
@@ -2341,11 +2377,9 @@ export default function Home() {
                       {isPending ? (
                         <span className="pending-spinner" aria-hidden="true" />
                       ) : (
-                        <button
-                          className="previous-score-button"
-                          type="button"
-                          onClick={() => setSelectedQuestion(item.question)}
-                          aria-label={`Show stats for ${item.question}`}
+                        <span
+                          className="previous-score-shell"
+                          aria-label={`Score ${item.score} out of 10`}
                         >
                           <span
                             className={`previous-score score-${scoreTone(
@@ -2354,7 +2388,7 @@ export default function Home() {
                           >
                             {item.score}
                           </span>
-                        </button>
+                        </span>
                       )}
                     </div>
 
@@ -2432,6 +2466,16 @@ export default function Home() {
                         />
                       </span>
                     </button>
+
+                    {isDetailsExpanded ? (
+                      <button
+                        className="previous-details-link"
+                        type="button"
+                        onClick={() => setSelectedQuestion(item.question)}
+                      >
+                        More details
+                      </button>
+                    ) : null}
                   </li>
                 );
               })}
@@ -2481,24 +2525,38 @@ export default function Home() {
           <DeckEmbeddingPlot
             plot={deckEmbeddingPlot}
             reviewQueue={reviewQueue}
-            onSelectQuestion={setSelectedQuestion}
           />
+
+          <div className="queue-toolbar">
+            <label className="queue-sort-label">
+              Sort by
+              <span className="queue-sort-select-shell">
+                <select
+                  className="queue-sort-select"
+                  value={queueSortKey}
+                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                    setQueueSortKey(event.target.value as QueueSortKey)
+                  }
+                  aria-label="Sort queue"
+                >
+                  <option value="review-date">Review date</option>
+                  <option value="creation-date">Creation date</option>
+                </select>
+                <ChevronDown aria-hidden="true" />
+              </span>
+            </label>
+          </div>
 
           {reviewQueue.length === 0 ? (
             <p className="queue-empty">No active cards.</p>
           ) : (
             <ol className="queue-list">
-              {reviewQueue.map((item) => (
+              {sortedReviewQueue.map((item) => (
                 <li
                   className="queue-row"
                   key={`${item.question}-${item.nextDue}`}
                 >
-                  <button
-                    className="queue-row-button"
-                    type="button"
-                    onClick={() => setSelectedQuestion(item.question)}
-                    aria-label={`Show stats for ${item.question}`}
-                  >
+                  <div className="queue-row-card">
                     <div className="queue-row-main">
                       <MarkdownInline
                         as="p"
@@ -2532,7 +2590,7 @@ export default function Home() {
                         {item.lastJustification}
                       </p>
                     ) : null}
-                  </button>
+                  </div>
                 </li>
               ))}
             </ol>

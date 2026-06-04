@@ -23,6 +23,7 @@ export type QuestionRow = {
   last_answer: string;
   last_answer_summary: string;
   reference_answer: string;
+  created_at: number;
 };
 
 export type DueQuestion = {
@@ -35,6 +36,7 @@ export type DueQuestion = {
   lastAnswer: string | null;
   lastAnswerSummary: string | null;
   referenceAnswer: string | null;
+  createdAt: number;
 };
 
 export type QuestionAttempt = {
@@ -71,6 +73,7 @@ export type PersistedEvaluation = {
   lastAnswer: string | null;
   lastAnswerSummary: string | null;
   referenceAnswer: string | null;
+  createdAt: number;
 } | null;
 
 const LEGACY_QUESTIONS_FILE = path.join(process.cwd(), "data", "questions.csv");
@@ -175,6 +178,7 @@ function toDueQuestion(row: QuestionRow): DueQuestion {
     lastAnswer: row.last_answer || null,
     lastAnswerSummary: row.last_answer_summary || null,
     referenceAnswer: row.reference_answer || null,
+    createdAt: row.created_at,
   };
 }
 
@@ -300,6 +304,7 @@ async function selectQuestionRows(whereClause = sql`true`): Promise<QuestionRow[
       last_answer: questions.lastAnswer,
       last_answer_summary: questions.lastAnswerSummary,
       reference_answer: questions.referenceAnswer,
+      created_at: questions.createdAt,
     })
     .from(questions)
     .innerJoin(decks, eq(decks.id, questions.deckId))
@@ -350,6 +355,7 @@ export async function readQuestionsWithEmbeddings(input: {
       last_answer: questions.lastAnswer,
       last_answer_summary: questions.lastAnswerSummary,
       reference_answer: questions.referenceAnswer,
+      created_at: questions.createdAt,
       embedding_model: questionEmbeddings.embeddingModel,
       embedding: questionEmbeddings.embedding,
       embedding_created_at: questionEmbeddings.createdAt,
@@ -377,9 +383,9 @@ export async function readQuestionsWithEmbeddings(input: {
 
   for (const row of rows) {
     const existing = questionsByText.get(row.question);
-    const questionWithEmbeddings =
+    const questionWithEmbeddings: QuestionWithEmbeddings =
       existing ??
-      ({
+      {
         deck_id: row.deck_id,
         deck_name: row.deck_name,
         user_id: row.user_id,
@@ -390,8 +396,9 @@ export async function readQuestionsWithEmbeddings(input: {
         last_answer: row.last_answer,
         last_answer_summary: row.last_answer_summary,
         reference_answer: row.reference_answer,
+        created_at: row.created_at,
         embeddings: [],
-      } satisfies QuestionWithEmbeddings);
+      };
 
     if (!existing) {
       questionsByText.set(row.question, questionWithEmbeddings);
@@ -736,6 +743,7 @@ export async function applyEvaluationToPostgres(input: {
         last_answer: questions.lastAnswer,
         last_answer_summary: questions.lastAnswerSummary,
         reference_answer: questions.referenceAnswer,
+        created_at: questions.createdAt,
       })
       .from(questions)
       .innerJoin(decks, eq(decks.id, questions.deckId))
@@ -801,6 +809,7 @@ export async function applyEvaluationToPostgres(input: {
       lastAnswer: input.answer || null,
       lastAnswerSummary: input.answerSummary || null,
       referenceAnswer: row.reference_answer || null,
+      createdAt: row.created_at,
     };
   });
 }
