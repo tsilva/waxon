@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
 import { getCurrentUser } from "./auth";
+import { questionSlug } from "./questionSlug";
 import { appendReview, parseReviews, scheduleNextReview } from "./scheduler";
 
 export type QuestionRow = {
@@ -328,8 +329,8 @@ function withWriteTransaction<T>(db: DatabaseSync, work: () => T): T {
 
 function insertSeedRows(db: DatabaseSync, rows: QuestionRow[]): void {
   const insert = db.prepare(`
-    INSERT OR IGNORE INTO questions (deck_id, question, reviews, next_due)
-    VALUES (?, ?, ?, ?)
+    INSERT OR IGNORE INTO questions (deck_id, question, question_slug, reviews, next_due)
+    VALUES (?, ?, ?, ?, ?)
   `);
 
   withWriteTransaction(db, () => {
@@ -337,6 +338,7 @@ function insertSeedRows(db: DatabaseSync, rows: QuestionRow[]): void {
       insert.run(
         row.deck_id || DEFAULT_DECK.id,
         row.question,
+        questionSlug(row.question),
         row.reviews,
         Math.round(row.next_due),
       );
@@ -445,6 +447,7 @@ function initializeDatabase(db: DatabaseSync): void {
 
     CREATE TABLE IF NOT EXISTS questions (
       question TEXT PRIMARY KEY,
+      question_slug TEXT NOT NULL,
       deck_id TEXT NOT NULL DEFAULT '${DEFAULT_DECK.id}',
       reviews TEXT NOT NULL DEFAULT '',
       next_due INTEGER NOT NULL DEFAULT 0,
@@ -483,6 +486,29 @@ function initializeDatabase(db: DatabaseSync): void {
     "deck_id",
     `TEXT NOT NULL DEFAULT '${DEFAULT_DECK.id}'`,
   );
+  ensureColumn(db, "questions", "question_slug", "TEXT NOT NULL DEFAULT ''");
+  const slugRows = db
+    .prepare(
+      `
+      SELECT question
+      FROM questions
+      WHERE question_slug = ''
+    `,
+    )
+    .all() as Array<{ question?: SQLOutputValue }>;
+  const updateQuestionSlug = db.prepare(`
+    UPDATE questions
+    SET question_slug = ?
+    WHERE question = ?
+  `);
+
+  withWriteTransaction(db, () => {
+    for (const row of slugRows) {
+      const question = String(row.question ?? "");
+
+      updateQuestionSlug.run(questionSlug(question), question);
+    }
+  });
   ensureColumn(db, "questions", "last_answer", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(
     db,
@@ -501,6 +527,9 @@ function initializeDatabase(db: DatabaseSync): void {
   db.exec(`
     CREATE INDEX IF NOT EXISTS questions_deck_next_due_idx
       ON questions (deck_id, next_due);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS questions_question_slug_idx
+      ON questions (question_slug);
 
     CREATE INDEX IF NOT EXISTS question_attempts_deck_question_submitted_idx
       ON question_attempts (deck_id, question, submitted_at DESC);

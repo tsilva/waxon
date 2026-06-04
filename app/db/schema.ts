@@ -57,6 +57,7 @@ export const questions = pgTable(
   "questions",
   {
     question: text("question").primaryKey(),
+    questionSlug: text("question_slug").notNull(),
     deckId: text("deck_id")
       .notNull()
       .references(() => decks.id, { onDelete: "cascade" }),
@@ -73,6 +74,7 @@ export const questions = pgTable(
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
   },
   (table) => [
+    uniqueIndex("questions_question_slug_idx").on(table.questionSlug),
     index("questions_next_due_idx").on(table.nextDue),
     index("questions_deck_next_due_idx").on(table.deckId, table.nextDue),
   ],

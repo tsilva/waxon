@@ -232,7 +232,7 @@ textarea {
   z-index: 20;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 24px;
   height: 72px;
   padding: 0 clamp(26px, 3.8vw, 62px);
@@ -286,7 +286,7 @@ textarea {
   align-items: center;
   gap: 8px;
   height: 100%;
-  padding: 0;
+  padding: 3px 0 0;
   background: transparent;
   color: var(--ink-soft);
   cursor: pointer;
@@ -325,13 +325,9 @@ textarea {
 }
 
 .reader-actions {
-  position: absolute;
-  top: 50%;
-  right: clamp(26px, 3.8vw, 62px);
   display: flex;
   align-items: center;
   gap: 16px;
-  transform: translateY(-50%);
 }
 
 .queue-summary {
@@ -1641,12 +1637,20 @@ textarea {
   padding: 15px 18px;
   background: rgb(251 248 240 / 72%);
   color: inherit;
+  cursor: pointer;
+  font-family: inherit;
   text-align: left;
 }
 
-.queue-row-card:hover {
+.queue-row-card:hover,
+.queue-row-card:focus-visible {
   border-color: rgb(166 124 82 / 30%);
   background: #fbf8f0;
+}
+
+.queue-row-card:focus-visible {
+  outline: 2px solid rgb(166 124 82 / 20%);
+  outline-offset: 4px;
 }
 
 .queue-row-main {
@@ -2195,6 +2199,11 @@ textarea {
   background: var(--accent-soft);
 }
 
+.generator-question-selected {
+  border-color: rgb(166 124 82 / 44%);
+  background: rgb(246 239 225 / 82%);
+}
+
 .generator-question-adding {
   border-color: rgb(166 124 82 / 34%);
 }
@@ -2229,6 +2238,12 @@ textarea {
 
 .generator-question-status:disabled {
   cursor: default;
+}
+
+.generator-question-selected .generator-question-status {
+  border-color: rgb(166 124 82 / 52%);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .generator-question-added .generator-question-status {
@@ -2703,7 +2718,6 @@ textarea {
   }
 
   .reader-header {
-    justify-content: space-between;
     height: 58px;
     padding: 0 18px;
   }
@@ -2733,6 +2747,7 @@ textarea {
 
   .reader-tab {
     gap: 6px;
+    padding-top: 2px;
     font-size: 14px;
   }
 
@@ -2742,9 +2757,7 @@ textarea {
   }
 
   .reader-actions {
-    position: static;
     gap: 10px;
-    transform: none;
   }
 
   .queue-summary {

@@ -22,6 +22,13 @@
       "when": 1780501124123,
       "tag": "0002_dizzy_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780571835226,
+      "tag": "0003_new_trish_tilby",
+      "breakpoints": true
     }
   ]
 }

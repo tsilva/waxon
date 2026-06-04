@@ -11,6 +11,7 @@ import {
 } from "@/app/db/schema";
 import { getCurrentUser } from "./auth";
 import { appendReview, parseReviews, scheduleNextReview } from "./scheduler";
+import { questionSlug } from "./questionSlug";
 
 export type QuestionRow = {
   deck_id: string;
@@ -277,6 +278,7 @@ async function ensureSeedData(): Promise<void> {
           seedRows.map((row) => ({
             deckId: currentDeckId(),
             question: row.question,
+            questionSlug: questionSlug(row.question),
             reviews: row.reviews,
             nextDue: row.nextDue,
           })),
@@ -660,7 +662,7 @@ function normalizeGeneratedQuestions(generatedQuestions: string[]): string[] {
 
   for (const question of generatedQuestions) {
     const normalized = question.trim().replace(/\s+/g, " ");
-    const key = normalized.toLowerCase();
+    const key = questionSlug(normalized);
 
     if (!normalized || seen.has(key)) {
       continue;
@@ -694,6 +696,7 @@ export async function upsertDueQuestions(input: {
       generatedQuestions.map((question) => ({
         deckId: currentDeckId(),
         question,
+        questionSlug: questionSlug(question),
         nextDue: now,
         generatedFromQuestion: input.sourceQuestion,
         createdAt: now,
@@ -701,7 +704,7 @@ export async function upsertDueQuestions(input: {
       })),
     )
     .onConflictDoUpdate({
-      target: questions.question,
+      target: questions.questionSlug,
       set: {
         nextDue: now,
         generatedFromQuestion: sql`coalesce(
@@ -713,7 +716,10 @@ export async function upsertDueQuestions(input: {
     });
 
   const rows = await selectQuestionRows(
-    inArray(questions.question, generatedQuestions),
+    inArray(
+      questions.questionSlug,
+      generatedQuestions.map((question) => questionSlug(question)),
+    ),
   );
 
   return rows.map(toDueQuestion);
