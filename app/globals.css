@@ -696,6 +696,37 @@ textarea {
   color: #a89484;
 }
 
+.composer-loading {
+  pointer-events: none;
+}
+
+.composer-loading-row {
+  box-shadow:
+    0 10px 30px rgb(42 24 22 / 3%),
+    inset 0 1px 0 rgb(255 255 255 / 72%);
+}
+
+.composer-loading-input {
+  width: 100%;
+  height: 84px;
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgb(251 248 240 / 72%), rgb(247 241 227 / 42%));
+}
+
+.composer-loading-button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgb(166 124 82 / 18%);
+  border-radius: 999px;
+  background: rgb(245 238 224 / 64%);
+}
+
+.composer-loading-button-accent {
+  border-color: rgb(166 124 82 / 20%);
+  background: rgb(166 124 82 / 38%);
+}
+
 .composer-submit {
   display: grid;
   place-items: center;
@@ -890,10 +921,10 @@ textarea {
 
 .previous-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: 58px minmax(0, 1fr);
   grid-auto-rows: max-content;
-  align-items: stretch;
-  gap: 14px;
+  align-items: start;
+  gap: 20px;
   min-height: 0;
   border: 1px solid rgb(227 218 196 / 74%);
   border-radius: 8px;
@@ -966,7 +997,7 @@ textarea {
 
 .previous-row-main-button {
   display: grid;
-  grid-template-columns: 58px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 20px;
   width: 100%;
@@ -977,6 +1008,11 @@ textarea {
   color: inherit;
   cursor: pointer;
   text-align: left;
+}
+
+.previous-row-main-button:hover .previous-question,
+.previous-row-main-button:focus-visible .previous-question {
+  color: var(--ink);
 }
 
 .previous-row-main-button:hover .previous-summary,
@@ -994,6 +1030,21 @@ textarea {
   place-items: center;
   width: 58px;
   height: 58px;
+}
+
+.previous-score-button {
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.previous-score-button:focus-visible {
+  outline: 2px solid rgb(166 124 82 / 22%);
+  outline-offset: 4px;
 }
 
 .pending-spinner {
@@ -1085,10 +1136,19 @@ textarea {
   border-bottom: 1px solid rgb(227 218 196 / 62%);
 }
 
+.previous-row-collapsed .previous-question-field {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
 .previous-detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 7px;
+}
+
+.previous-detail-grid[hidden] {
+  display: none;
 }
 
 .previous-field-label {
@@ -1143,6 +1203,24 @@ textarea {
   font-size: 15px;
   font-weight: 650;
   white-space: nowrap;
+}
+
+.previous-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.previous-collapse-icon {
+  width: 18px;
+  height: 18px;
+  color: rgb(166 124 82 / 70%);
+  transition: transform 160ms ease;
+}
+
+.previous-row-open .previous-collapse-icon {
+  transform: rotate(180deg);
 }
 
 .markdown-content {
@@ -2078,7 +2156,7 @@ textarea {
   .question-area {
     width: 100%;
     margin-left: 0;
-    min-height: 0;
+    min-height: 148px;
     padding: 0;
   }
 
@@ -2171,7 +2249,7 @@ textarea {
   }
 
   .previous-row {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 46px minmax(0, 1fr);
     gap: 12px;
     min-height: 0;
     padding: 12px;
@@ -2191,7 +2269,7 @@ textarea {
   }
 
   .previous-row-main-button {
-    grid-template-columns: 46px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
   }
 
@@ -2220,6 +2298,10 @@ textarea {
     padding-bottom: 11px;
   }
 
+  .previous-row-collapsed .previous-question-field {
+    padding-bottom: 0;
+  }
+
   .previous-detail-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
@@ -2239,8 +2321,11 @@ textarea {
   }
 
   .previous-time {
-    grid-column: 2;
     font-size: 12px;
+  }
+
+  .previous-row-meta {
+    justify-content: flex-start;
   }
 
   .queue-stage {
