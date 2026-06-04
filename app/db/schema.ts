@@ -75,7 +75,6 @@ export const questions = pgTable(
   },
   (table) => [
     uniqueIndex("questions_question_slug_idx").on(table.questionSlug),
-    index("questions_next_due_idx").on(table.nextDue),
     index("questions_deck_next_due_idx").on(table.deckId, table.nextDue),
   ],
 );
@@ -98,10 +97,6 @@ export const questionAttempts = pgTable(
     resolvedAt: bigint("resolved_at", { mode: "number" }).notNull(),
   },
   (table) => [
-    index("question_attempts_question_submitted_idx").on(
-      table.question,
-      table.submittedAt.desc(),
-    ),
     index("question_attempts_deck_question_submitted_idx").on(
       table.deckId,
       table.question,
@@ -126,10 +121,6 @@ export const questionEmbeddings = pgTable(
     uniqueIndex("question_embeddings_question_model_idx").on(
       table.question,
       table.embeddingModel,
-    ),
-    index("question_embeddings_model_question_idx").on(
-      table.embeddingModel,
-      table.question,
     ),
   ],
 );

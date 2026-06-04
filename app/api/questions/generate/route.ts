@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getQuestionQualityReference } from "@/app/lib/questionQualityReference";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -191,6 +192,7 @@ export async function POST(request: Request) {
   }
 
   const context = buildContext({ scope, files });
+  const questionQualityReference = getQuestionQualityReference();
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -207,12 +209,15 @@ export async function POST(request: Request) {
       messages: [
         {
           role: "system",
-          content:
-            "You generate high-quality spaced-repetition questions for a study deck. " +
-            "Questions must be standalone, specific, concise, and answerable from the provided content. " +
-            "Maximize coverage across the content instead of making variants of the same point. " +
-            "Avoid generic questions such as 'What is the key idea behind the topic?' " +
+          content: [
+            "You generate high-quality spaced-repetition questions for a study deck.",
+            "Every generated question must follow the shared question-quality reference below.",
+            "Maximize coverage across the content instead of making variants of the same point.",
+            "Avoid generic questions such as 'What is the key idea behind the topic?'",
             "Do not include answers, explanations, numbering, or preambles.",
+            "Shared question-quality reference:",
+            questionQualityReference,
+          ].join("\n\n"),
         },
         {
           role: "user",
