@@ -1,3 +1,5 @@
+import { getQuestionQualityReference } from "./questionQualityReference";
+
 export type EvaluateAnswerInput = {
   question: string;
   answer: string;
@@ -48,6 +50,8 @@ function parseScore(score: unknown): number | null {
 }
 
 function buildPrompt(input: EvaluateAnswerInput): string {
+  const questionQualityReference = getQuestionQualityReference();
+
   return `You are grading a free-text recall answer.
 
 Question: ${input.question}
@@ -77,14 +81,14 @@ math symbols or formulas.
 
 Keep justification very concise: one sentence, 12 words maximum.
 
+Shared question-quality reference for probingQuestions:
+${questionQualityReference}
+
 If score is ${PROBING_QUESTION_SCORE_THRESHOLD} or lower, include 1 to 3
 probingQuestions that directly test the specific misconception, missing step,
-or confusion shown in the user's answer. Each probing question must be a
-standalone recall question, not a hint, and must not reveal the corrected
-answer. Format each probing question with Markdown wherever appropriate,
-including **bold**, *italic*, inline code, or math/formula notation such as
-$E = mc^2$ when that improves clarity. If score is above
-${PROBING_QUESTION_SCORE_THRESHOLD}, probingQuestions must be an empty array.
+or confusion shown in the user's answer. Each probing question must follow the
+shared reference. If score is above ${PROBING_QUESTION_SCORE_THRESHOLD},
+probingQuestions must be an empty array.
 
 Return strict JSON only:
 {

@@ -17,7 +17,7 @@ npm run deck:cleanup-questions -- --json
 
 2. Review questions directly as Codex. Do not use another LLM to decide cleanups.
 
-3. Rewrite only when the cleaned question means exactly the same thing and is at least as easy to understand. Prefer shorter wording when possible. Also add useful Markdown formatting such as bold, italic, inline code, or math delimiters when it improves readability, even if the visible content-token count stays the same. Bias strongly toward no change.
+3. Rewrite only when the cleaned question means exactly the same thing and is at least as easy to understand under the shared reference at [reference/question-quality.md](../../../reference/question-quality.md). Prefer shorter wording when possible. Bias strongly toward no change.
 
    Format unformatted technical expressions when doing so improves readability. For this deck, bare math/code expressions such as `exp(x)`, `exp(1)`, and `e` should be formatted consistently instead of left as plain prose.
 
@@ -70,8 +70,7 @@ The apply step bulk-fetches embeddings for all new question texts with OpenRoute
 
 - Preserve exact answer semantics, scope, constraints, examples, and expected level of detail.
 - Preserve existing Markdown formatting unless the underlying text genuinely needs to change. Do not remove Markdown formatting merely to reduce raw token count.
-- Use Markdown formatting for readability when helpful. Formatting markers are not part of the concision target; concision applies to the visible question text.
-- Keep technical terms when removing them would make the question broader or ambiguous.
+- Follow the shared question-quality reference. Formatting markers are not part of the concision target; concision applies to the visible question text.
 - Do not merge multiple questions, split questions, add new requirements, or change recall target.
 - Formatting cleanup is allowed when Markdown improves readability and rough content tokens do not increase.
 - Otherwise, the new question must save more than `5` rough content tokens. Discard wording-only cleanups that save `5` or fewer tokens.

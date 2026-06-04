@@ -675,7 +675,7 @@ function normalizeGeneratedQuestions(generatedQuestions: string[]): string[] {
 
 export async function upsertDueQuestions(input: {
   questions: string[];
-  sourceQuestion: string;
+  sourceQuestion: string | null;
   now: number;
 }): Promise<DueQuestion[]> {
   await ensureSeedData();
