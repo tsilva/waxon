@@ -1,11 +1,9 @@
-import { db } from "@/app/db/client";
-import { llmCalls } from "@/app/db/schema";
-
 export type OpenRouterTraceContext = {
   operation: string;
   userId?: string | null;
   deckId?: string | null;
   question?: string | null;
+  traceId?: string | null;
 };
 
 export type OpenRouterMessage = {
@@ -84,61 +82,6 @@ export function extractChatCompletionText(response: unknown): string {
   return "";
 }
 
-async function logOpenRouterCall(input: {
-  context: OpenRouterTraceContext;
-  requestModel: string;
-  response?: OpenRouterChatResponse | OpenRouterEmbeddingResponse;
-  status: "ok" | "error";
-  httpStatus?: number;
-  latencyMs: number;
-  error?: string;
-}): Promise<void> {
-  const usage = input.response?.usage;
-
-  try {
-    await db.insert(llmCalls).values({
-      operation: input.context.operation,
-      provider: "openrouter",
-      userId: input.context.userId ?? null,
-      deckId: input.context.deckId ?? null,
-      question: input.context.question ?? null,
-      requestedModel: input.requestModel,
-      returnedModel: input.response?.model ?? null,
-      generationId: input.response?.id ?? null,
-      status: input.status,
-      httpStatus: input.httpStatus ?? null,
-      promptTokens: toFiniteInteger(usage?.prompt_tokens),
-      completionTokens: toFiniteInteger(usage?.completion_tokens),
-      totalTokens: toFiniteInteger(usage?.total_tokens),
-      cost: toFiniteNumber(usage?.cost),
-      latencyMs: input.latencyMs,
-      usage: usage ? (usage as Record<string, unknown>) : null,
-      error: input.error?.slice(0, 1_000) ?? null,
-      createdAt: Date.now(),
-    });
-  } catch (error) {
-    console.info("[waxon] llm call trace insert failed", {
-      operation: input.context.operation,
-      userId: input.context.userId,
-      deckId: input.context.deckId,
-      generationId: input.response?.id,
-      error: error instanceof Error ? error.message : "unknown error",
-    });
-  }
-}
-
-function toFiniteInteger(value: unknown): number | null {
-  const number = typeof value === "number" ? value : Number(value);
-
-  return Number.isFinite(number) ? Math.round(number) : null;
-}
-
-function toFiniteNumber(value: unknown): number | null {
-  const number = typeof value === "number" ? value : Number(value);
-
-  return Number.isFinite(number) ? number : null;
-}
-
 function withOpenRouterHeaders(apiKey: string): HeadersInit {
   return {
     Authorization: `Bearer ${apiKey}`,
@@ -168,10 +111,12 @@ export async function openRouterChatCompletion(input: {
   signal?: AbortSignal;
   trace: OpenRouterTraceContext;
 }): Promise<{ response: Response; body: OpenRouterChatResponse }> {
-  const startedAt = Date.now();
+  const traceId = input.trace.traceId ?? crypto.randomUUID();
   const body = {
     ...input.body,
     user: input.body.user ?? input.trace.userId ?? undefined,
+    session_id: input.trace.deckId ?? undefined,
+    trace: buildTraceMetadata(input.trace, traceId),
   };
 
   const response = await fetch(OPENROUTER_CHAT_URL, {
@@ -182,18 +127,6 @@ export async function openRouterChatCompletion(input: {
   });
   const parsed = (await parseOpenRouterJson(response)) as OpenRouterChatResponse;
 
-  await logOpenRouterCall({
-    context: input.trace,
-    requestModel: input.body.model,
-    response: parsed,
-    status: response.ok ? "ok" : "error",
-    httpStatus: response.status,
-    latencyMs: Date.now() - startedAt,
-    error: response.ok
-      ? undefined
-      : extractOpenRouterError(parsed) || response.statusText,
-  });
-
   return { response, body: parsed };
 }
 
@@ -203,10 +136,12 @@ export async function openRouterEmbeddings(input: {
   signal?: AbortSignal;
   trace: OpenRouterTraceContext;
 }): Promise<{ response: Response; body: OpenRouterEmbeddingResponse }> {
-  const startedAt = Date.now();
+  const traceId = input.trace.traceId ?? crypto.randomUUID();
   const body = {
     ...input.body,
     user: input.body.user ?? input.trace.userId ?? undefined,
+    session_id: input.trace.deckId ?? undefined,
+    trace: buildTraceMetadata(input.trace, traceId),
   };
 
   const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
@@ -217,37 +152,40 @@ export async function openRouterEmbeddings(input: {
   });
   const parsed = (await parseOpenRouterJson(response)) as OpenRouterEmbeddingResponse;
 
-  await logOpenRouterCall({
-    context: input.trace,
-    requestModel: input.body.model,
-    response: parsed,
-    status: response.ok ? "ok" : "error",
-    httpStatus: response.status,
-    latencyMs: Date.now() - startedAt,
-    error: response.ok
-      ? undefined
-      : extractOpenRouterError(parsed) || response.statusText,
-  });
-
   return { response, body: parsed };
 }
 
-function extractOpenRouterError(body: unknown): string {
-  if (!body || typeof body !== "object") {
-    return "";
+function buildTraceMetadata(
+  trace: OpenRouterTraceContext,
+  traceId: string,
+): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {
+    trace_id: traceId,
+    trace_name: "waxon",
+    span_name: trace.operation,
+    generation_name: trace.operation,
+    environment:
+      process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "development",
+    release:
+      process.env.VERCEL_GIT_COMMIT_SHA ??
+      process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ??
+      undefined,
+    operation: trace.operation,
+  };
+
+  if (trace.userId) {
+    metadata.user_id = trace.userId;
   }
 
-  const record = body as Record<string, unknown>;
-  const error = record.error;
-
-  if (typeof error === "string") {
-    return error;
+  if (trace.deckId) {
+    metadata.deck_id = trace.deckId;
   }
 
-  if (error && typeof error === "object") {
-    const message = (error as Record<string, unknown>).message;
-    return typeof message === "string" ? message : "";
+  if (trace.question) {
+    metadata.question_preview = trace.question.slice(0, 160);
   }
 
-  return "";
+  return Object.fromEntries(
+    Object.entries(metadata).filter(([, value]) => value !== undefined),
+  );
 }

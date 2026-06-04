@@ -1,19 +1,21 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { and, asc, count, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import {
   decks,
   questionAttempts,
   questionEmbeddings,
+  questionReviews,
   questions,
   users,
 } from "@/app/db/schema";
 import { getCurrentUser } from "./auth";
-import { appendReview, parseReviews, scheduleNextReview } from "./scheduler";
+import { scheduleNextReview, serializeReviews } from "./scheduler";
 import { questionSlug } from "./questionSlug";
 
 export type QuestionRow = {
+  question_id: string;
   deck_id: string;
   deck_name: string;
   user_id: string;
@@ -315,6 +317,7 @@ async function selectQuestionRows(whereClause = sql`true`): Promise<QuestionRow[
   const user = getCurrentUser();
   const rows = await db
     .select({
+      question_id: questions.id,
       deck_id: questions.deckId,
       deck_name: decks.name,
       user_id: decks.userId,
@@ -368,6 +371,7 @@ export async function readQuestionsWithEmbeddings(input: {
   const rows = await db
     .select({
       deck_id: questions.deckId,
+      question_id: questions.id,
       deck_name: decks.name,
       user_id: decks.userId,
       question: questions.question,
@@ -393,7 +397,7 @@ export async function readQuestionsWithEmbeddings(input: {
     .leftJoin(
       questionEmbeddings,
       and(
-        eq(questionEmbeddings.question, questions.question),
+        eq(questionEmbeddings.questionId, questions.id),
         eq(questionEmbeddings.deckId, questions.deckId),
         model === null
           ? sql`true`
@@ -414,6 +418,7 @@ export async function readQuestionsWithEmbeddings(input: {
     const questionWithEmbeddings: QuestionWithEmbeddings =
       existing ??
       {
+        question_id: row.question_id,
         deck_id: row.deck_id,
         deck_name: row.deck_name,
         user_id: row.user_id,
@@ -487,7 +492,7 @@ export async function getQuestionEmbedding(input: {
       updatedAt: questionEmbeddings.updatedAt,
     })
     .from(questionEmbeddings)
-    .innerJoin(questions, eq(questions.question, questionEmbeddings.question))
+    .innerJoin(questions, eq(questions.id, questionEmbeddings.questionId))
     .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(
       and(
@@ -551,6 +556,7 @@ export async function upsertQuestionEmbeddings(input: {
     string,
     {
       deckId: string;
+      questionId: string;
       question: string;
       embeddingModel: string;
       embeddingKind: string;
@@ -577,18 +583,22 @@ export async function upsertQuestionEmbeddings(input: {
     const embeddingKind = item.embeddingKind?.trim() || "question_only";
     const sourceVersion = item.sourceVersion ?? 1;
 
-    valuesByKey.set(`${item.question}\0${model}\0${embeddingKind}\0${sourceVersion}`, {
-      deckId: currentDeckId(),
-      question: item.question,
-      embeddingModel: model,
-      embeddingKind,
-      sourceVersion,
-      sourceHash: item.sourceHash?.trim() ?? "",
-      isCurrent: true,
-      embedding: normalizeEmbedding(item.embedding),
-      createdAt: now,
-      updatedAt: now,
-    });
+    valuesByKey.set(
+      `${item.question}\0${model}\0${embeddingKind}\0${sourceVersion}`,
+      {
+        deckId: currentDeckId(),
+        questionId: "",
+        question: item.question,
+        embeddingModel: model,
+        embeddingKind,
+        sourceVersion,
+        sourceHash: item.sourceHash?.trim() ?? "",
+        isCurrent: true,
+        embedding: normalizeEmbedding(item.embedding),
+        createdAt: now,
+        updatedAt: now,
+      },
+    );
   }
 
   const values = Array.from(valuesByKey.values());
@@ -599,9 +609,11 @@ export async function upsertQuestionEmbeddings(input: {
       Array.from(new Set(values.map((item) => item.question))),
     ),
   );
-  const ownedQuestionSet = new Set(ownedQuestions.map((row) => row.question));
+  const ownedQuestionByText = new Map(
+    ownedQuestions.map((row) => [row.question, row.question_id]),
+  );
   const missingQuestion = values.find(
-    (item) => !ownedQuestionSet.has(item.question),
+    (item) => !ownedQuestionByText.has(item.question),
   );
 
   if (missingQuestion) {
@@ -610,11 +622,16 @@ export async function upsertQuestionEmbeddings(input: {
 
   const rows = await db
     .insert(questionEmbeddings)
-    .values(values)
+    .values(
+      values.map((value) => ({
+        ...value,
+        questionId: ownedQuestionByText.get(value.question) ?? "",
+      })),
+    )
     .onConflictDoUpdate({
       target: [
         questionEmbeddings.deckId,
-        questionEmbeddings.question,
+        questionEmbeddings.questionId,
         questionEmbeddings.embeddingModel,
         questionEmbeddings.embeddingKind,
         questionEmbeddings.sourceVersion,
@@ -794,8 +811,8 @@ export async function upsertDueQuestions(input: {
         updatedAt: now,
       })),
     )
-    .onConflictDoUpdate({
-      target: questions.questionSlug,
+	    .onConflictDoUpdate({
+	      target: [questions.deckId, questions.questionSlug],
       set: {
         nextDue: now,
         generatedFromQuestion: sql`coalesce(
@@ -831,6 +848,7 @@ export async function applyEvaluationToPostgres(input: {
   return db.transaction(async (tx) => {
     const [row] = await tx
       .select({
+        question_id: questions.id,
         deck_id: questions.deckId,
         deck_name: decks.name,
         user_id: decks.userId,
@@ -859,11 +877,34 @@ export async function applyEvaluationToPostgres(input: {
       return null;
     }
 
-    const previousReviews = parseReviews(row.reviews);
-    const reviews = appendReview(row.reviews, {
-      ts: input.now,
-      score: input.score,
-    });
+    const previousReviewRows = await tx
+      .select({
+        ts: questionReviews.resolvedAt,
+        score: questionReviews.score,
+      })
+      .from(questionReviews)
+      .where(eq(questionReviews.questionId, row.question_id))
+      .orderBy(desc(questionReviews.resolvedAt), desc(questionReviews.id))
+      .limit(10);
+    const previousReviews = previousReviewRows
+      .reverse()
+      .filter(
+        (entry) =>
+          Number.isFinite(entry.ts) &&
+          Number.isFinite(entry.score) &&
+          entry.ts > 0 &&
+          entry.score >= 0 &&
+          entry.score <= 10,
+      );
+    const reviews = serializeReviews(
+      [
+        ...previousReviews,
+        {
+          ts: Math.round(input.now),
+          score: input.score,
+        },
+      ].slice(-10),
+    );
     const nextDue = scheduleNextReview({
       previousReviews,
       newScore: input.score,
@@ -887,15 +928,34 @@ export async function applyEvaluationToPostgres(input: {
         ),
       );
 
-    await tx.insert(questionAttempts).values({
+    const [attempt] = await tx
+      .insert(questionAttempts)
+      .values({
+        deckId: currentDeckId(),
+        questionId: row.question_id,
+        question: input.question,
+        rawAnswer: input.answer,
+        answerSummary: input.answerSummary,
+        score: input.score,
+        justification: input.justification,
+        submittedAt: Math.round(input.submittedAt),
+        resolvedAt: Math.round(input.now),
+      })
+      .returning({ id: questionAttempts.id });
+
+    if (!attempt) {
+      throw new Error("Question attempt was not saved");
+    }
+
+    await tx.insert(questionReviews).values({
+      attemptId: attempt.id,
       deckId: currentDeckId(),
+      questionId: row.question_id,
       question: input.question,
-      rawAnswer: input.answer,
-      answerSummary: input.answerSummary,
       score: input.score,
-      justification: input.justification,
       submittedAt: Math.round(input.submittedAt),
       resolvedAt: Math.round(input.now),
+      createdAt: Math.round(input.now),
     });
 
     return {

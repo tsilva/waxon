@@ -21,7 +21,9 @@ npm run deck:dedupe -- --json
 
 4. Choose the question to keep by quality using the shared reference at [reference/question-quality.md](../../../reference/question-quality.md).
 
-5. Write a decisions JSON file in `/tmp` or another temporary location:
+5. Before applying anything, present the proposed duplicate decisions to the user as a Markdown table first. Include at least: keep question, discard question, similarity, and rationale. Ask for explicit confirmation before running the apply command.
+
+6. After the user confirms, write a decisions JSON file in `/tmp` or another temporary location:
 
 ```json
 {
@@ -37,7 +39,7 @@ npm run deck:dedupe -- --json
 }
 ```
 
-6. Apply only after reviewing the proposed decisions:
+7. Apply only after the user has reviewed and confirmed the proposed decisions:
 
 ```bash
 npm run deck:dedupe -- --apply --decisions /tmp/waxon-dedupe-decisions.json
@@ -57,6 +59,8 @@ npm run deck:dedupe -- --apply --decisions /tmp/waxon-dedupe-decisions.json
 ## Safety Rules
 
 - Always generate candidates first; never apply without reviewing the pairs.
+- Always present the proposed dedupe table to the user before applying.
+- Never run the apply command until the user explicitly confirms the table.
 - Do not treat high embedding similarity alone as a duplicate.
 - Do not discard both sides of a pair.
 - If a question appears in multiple duplicate decisions, keep one canonical question and discard each duplicate at most once.
