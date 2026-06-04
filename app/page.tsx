@@ -3,6 +3,7 @@
 import Image from "next/image";
 import {
   ArrowUp,
+  ChevronDown,
   Mic,
   Settings,
   Square,
@@ -1041,6 +1042,9 @@ export default function Home() {
     Record<string, ReferenceAnswerState>
   >({});
   const [isPreviousExpanded, setIsPreviousExpanded] = useState(false);
+  const [expandedPreviousAnswerIds, setExpandedPreviousAnswerIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [selectedQuestion, setSelectedQuestion] = useState<string | null>(null);
   const [isLoadingQuestion, setIsLoadingQuestion] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1062,6 +1066,20 @@ export default function Home() {
   const pendingSpeechCommandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+
+  const togglePreviousAnswerDetails = useCallback((id: string) => {
+    setExpandedPreviousAnswerIds((currentIds) => {
+      const nextIds = new Set(currentIds);
+
+      if (nextIds.has(id)) {
+        nextIds.delete(id);
+      } else {
+        nextIds.add(id);
+      }
+
+      return nextIds;
+    });
+  }, []);
 
   useEffect(() => {
     answerRef.current = answer;
@@ -2144,7 +2162,7 @@ export default function Home() {
 
         <div
           className={`review-stage ${
-            !question ? "review-stage-resting" : ""
+            !isLoadingQuestion && !question ? "review-stage-resting" : ""
           }`}
           hidden={activeTab !== "review"}
           id="review-panel"
@@ -2220,7 +2238,15 @@ export default function Home() {
             </div>
           </section>
 
-          {question ? (
+          {isLoadingQuestion ? (
+            <div className="composer composer-loading" aria-hidden="true">
+              <div className="composer-row composer-loading-row">
+                <div className="composer-loading-input" />
+                <div className="composer-loading-button" />
+                <div className="composer-loading-button composer-loading-button-accent" />
+              </div>
+            </div>
+          ) : question ? (
             <form className="composer" onSubmit={handleSubmit}>
               <div className="composer-row">
                 <textarea
@@ -2290,8 +2316,13 @@ export default function Home() {
             </div>
 
             <ol className="previous-list">
-              {visiblePreviousAnswers.map((item) => {
+              {visiblePreviousAnswers.map((item, index) => {
                 const isPending = item.status === "grading";
+                const isDetailsExpanded = expandedPreviousAnswerIds.has(item.id);
+                const detailId = `previous-answer-details-${index}-${item.id.replace(
+                  /[^A-Za-z0-9_-]/g,
+                  "-",
+                )}`;
 
                 return (
                   <li
@@ -2299,19 +2330,23 @@ export default function Home() {
                       isPending
                         ? "previous-row-pending"
                         : "previous-row-resolved"
+                    } ${
+                      isDetailsExpanded
+                        ? "previous-row-open"
+                        : "previous-row-collapsed"
                     }`}
                     key={item.id}
                   >
-                    <button
-                      className="previous-row-main-button"
-                      type="button"
-                      onClick={() => setSelectedQuestion(item.question)}
-                      aria-label={`Show stats for ${item.question}`}
-                    >
-                      <div className="previous-score-slot" aria-hidden="true">
-                        {isPending ? (
-                          <span className="pending-spinner" />
-                        ) : (
+                    <div className="previous-score-slot">
+                      {isPending ? (
+                        <span className="pending-spinner" aria-hidden="true" />
+                      ) : (
+                        <button
+                          className="previous-score-button"
+                          type="button"
+                          onClick={() => setSelectedQuestion(item.question)}
+                          aria-label={`Show stats for ${item.question}`}
+                        >
                           <span
                             className={`previous-score score-${scoreTone(
                               item.score,
@@ -2319,9 +2354,17 @@ export default function Home() {
                           >
                             {item.score}
                           </span>
-                        )}
-                      </div>
+                        </button>
+                      )}
+                    </div>
 
+                    <button
+                      className="previous-row-main-button"
+                      type="button"
+                      onClick={() => togglePreviousAnswerDetails(item.id)}
+                      aria-expanded={isDetailsExpanded}
+                      aria-controls={detailId}
+                    >
                       <div className="previous-copy">
                         <div className="previous-field previous-question-field">
                           <span className="previous-field-label">Question</span>
@@ -2332,7 +2375,11 @@ export default function Home() {
                           />
                         </div>
 
-                        <div className="previous-detail-grid">
+                        <div
+                          className="previous-detail-grid"
+                          hidden={!isDetailsExpanded}
+                          id={detailId}
+                        >
                           <div className="previous-field">
                             <span className="previous-field-label">Answer</span>
                             {item.answer ? (
@@ -2368,16 +2415,22 @@ export default function Home() {
                         </div>
                       </div>
 
-                      <time
-                        className="previous-time"
-                        dateTime={
-                          item.timestamp
-                            ? new Date(item.timestamp).toISOString()
-                            : undefined
-                        }
-                      >
-                        {item.timeLabel}
-                      </time>
+                      <span className="previous-row-meta">
+                        <time
+                          className="previous-time"
+                          dateTime={
+                            item.timestamp
+                              ? new Date(item.timestamp).toISOString()
+                              : undefined
+                          }
+                        >
+                          {item.timeLabel}
+                        </time>
+                        <ChevronDown
+                          className="previous-collapse-icon"
+                          aria-hidden="true"
+                        />
+                      </span>
                     </button>
                   </li>
                 );
