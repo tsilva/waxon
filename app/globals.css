@@ -216,7 +216,7 @@ textarea {
   width: min(1200px, 100%);
   min-height: max(760px, calc(100svh - (clamp(16px, 1.6vw, 24px) * 2)));
   margin: 0 auto;
-  overflow: visible;
+  overflow: hidden;
   border: 1px solid rgb(227 218 196 / 76%);
   border-radius: 28px;
   background: rgb(251 248 240 / 82%);
@@ -1121,7 +1121,7 @@ textarea {
 .previous-score.score-neutral {
   border-color: rgb(227 218 196 / 88%);
   background: var(--accent-soft);
-  color: transparent;
+  color: var(--muted-strong);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 70%),
     0 8px 18px rgb(166 124 82 / 7%);
@@ -1811,10 +1811,14 @@ textarea {
 
 .generator-modal-grid {
   display: grid;
-  grid-template-columns: minmax(280px, 0.88fr) minmax(360px, 1.12fr);
   gap: 18px;
   min-height: 0;
   padding-top: 20px;
+}
+
+.generator-modal-grid-scope,
+.generator-modal-grid-review {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .generator-scope-panel,
@@ -2076,8 +2080,14 @@ textarea {
 
 .generator-scope-footer {
   display: flex;
+  align-items: center;
+  gap: 12px;
   justify-content: flex-end;
   margin-top: 2px;
+}
+
+.generator-scope-footer p {
+  flex: 1 1 auto;
 }
 
 .generator-scope-footer p,
@@ -2283,6 +2293,12 @@ textarea {
   border-top: 1px solid rgb(227 218 196 / 72%);
   padding: 12px;
   background: rgb(251 248 240 / 94%);
+}
+
+.generator-review-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .settings-profile {

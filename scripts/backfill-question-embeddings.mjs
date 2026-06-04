@@ -1,4 +1,5 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
+import { createHash } from "node:crypto";
 
 for (const envFile of [".env", ".env.local"]) {
   try {
@@ -15,13 +16,17 @@ if (typeof WebSocket !== "undefined") {
 const OPENROUTER_EMBEDDINGS_URL =
   "https://openrouter.ai/api/v1/embeddings";
 const DEFAULT_MODEL = "google/gemini-embedding-2";
+const DEFAULT_KIND = "dedupe_v1";
+const DEFAULT_SOURCE_VERSION = 1;
 const DEFAULT_BATCH_SIZE = 32;
 
 function parseArgs(argv) {
   const options = {
     batchSize: DEFAULT_BATCH_SIZE,
     force: false,
+    kind: DEFAULT_KIND,
     model: DEFAULT_MODEL,
+    sourceVersion: DEFAULT_SOURCE_VERSION,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -38,6 +43,18 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === "--kind") {
+      options.kind = argv[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--source-version") {
+      options.sourceVersion = Number(argv[index + 1] ?? "");
+      index += 1;
+      continue;
+    }
+
     if (arg === "--batch-size") {
       options.batchSize = Number(argv[index + 1] ?? "");
       index += 1;
@@ -48,9 +65,18 @@ function parseArgs(argv) {
   }
 
   options.model = options.model.trim();
+  options.kind = options.kind.trim();
 
   if (!options.model) {
     throw new Error("--model must not be empty");
+  }
+
+  if (!options.kind) {
+    throw new Error("--kind must not be empty");
+  }
+
+  if (!Number.isInteger(options.sourceVersion) || options.sourceVersion < 1) {
+    throw new Error("--source-version must be a positive integer");
   }
 
   if (
@@ -80,6 +106,41 @@ function requireEnv(name, fallbackName) {
 
 function vectorLiteral(embedding) {
   return `[${embedding.join(",")}]`;
+}
+
+function normalizeEmbeddingText(value) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function buildEmbeddingSource(row, kind, sourceVersion) {
+  if (kind === "question_only") {
+    return [
+      `version: ${sourceVersion}`,
+      "kind: question_only",
+      `Question: ${normalizeEmbeddingText(row.question)}`,
+    ].join("\n");
+  }
+
+  if (kind === "dedupe_v1") {
+    if (!row.concise_answer?.trim()) {
+      throw new Error(
+        `Question is missing concise_answer for dedupe_v1: ${row.question}`,
+      );
+    }
+
+    return [
+      `version: ${sourceVersion}`,
+      "kind: dedupe_v1",
+      `Question: ${normalizeEmbeddingText(row.question)}`,
+      `Expected answer: ${normalizeEmbeddingText(row.concise_answer)}`,
+    ].join("\n");
+  }
+
+  throw new Error(`Unsupported embedding kind: ${kind}`);
+}
+
+function sourceHash(source) {
+  return createHash("sha256").update(source).digest("hex");
 }
 
 function chunks(items, size) {
@@ -142,47 +203,85 @@ async function fetchEmbeddings(input, model, apiKey) {
   });
 }
 
-async function loadQuestions(pool, model, force) {
+async function loadQuestions(pool, options) {
   const result = await pool.query(
     `
-      SELECT q.question
+      SELECT
+        q.deck_id,
+        q.question,
+        q.concise_answer,
+        qe.source_hash AS existing_source_hash
       FROM questions q
-      WHERE
-        $2::boolean
-        OR NOT EXISTS (
-          SELECT 1
-          FROM question_embeddings qe
-          WHERE qe.question = q.question
-            AND qe.embedding_model = $1
-        )
+      LEFT JOIN question_embeddings qe
+        ON qe.question = q.question
+       AND qe.deck_id = q.deck_id
+       AND qe.embedding_model = $1
+       AND qe.embedding_kind = $2
+       AND qe.source_version = $3
+       AND qe.is_current = true
       ORDER BY q.created_at ASC, q.question ASC
     `,
-    [model, force],
+    [options.model, options.kind, options.sourceVersion],
   );
 
-  return result.rows.map((row) => row.question);
+  return result.rows
+    .map((row) => {
+      const source = buildEmbeddingSource(row, options.kind, options.sourceVersion);
+
+      return {
+        ...row,
+        source,
+        source_hash: sourceHash(source),
+      };
+    })
+    .filter(
+      (row) =>
+        options.force || String(row.existing_source_hash ?? "") !== row.source_hash,
+    );
 }
 
-async function saveEmbeddings(pool, rows, model) {
+async function saveEmbeddings(pool, rows, options) {
   const now = Date.now();
 
   for (const row of rows) {
     await pool.query(
       `
         INSERT INTO question_embeddings (
+          deck_id,
           question,
           embedding_model,
+          embedding_kind,
+          source_version,
+          source_hash,
+          is_current,
           embedding,
           created_at,
           updated_at
         )
-        VALUES ($1, $2, $3::vector, $4, $4)
-        ON CONFLICT (question, embedding_model)
+        VALUES ($1, $2, $3, $4, $5, $6, true, $7::vector, $8, $8)
+        ON CONFLICT (
+          deck_id,
+          question,
+          embedding_model,
+          embedding_kind,
+          source_version
+        )
         DO UPDATE SET
           embedding = excluded.embedding,
+          source_hash = excluded.source_hash,
+          is_current = true,
           updated_at = excluded.updated_at
       `,
-      [row.question, model, vectorLiteral(row.embedding), now],
+      [
+        row.deck_id,
+        row.question,
+        options.model,
+        options.kind,
+        options.sourceVersion,
+        row.source_hash,
+        vectorLiteral(row.embedding),
+        now,
+      ],
     );
   }
 }
@@ -194,7 +293,7 @@ async function main() {
   const pool = new Pool({ connectionString });
 
   try {
-    const questions = await loadQuestions(pool, options.model, options.force);
+    const questions = await loadQuestions(pool, options);
 
     if (questions.length === 0) {
       console.log(`No questions need embeddings for ${options.model}.`);
@@ -202,26 +301,32 @@ async function main() {
     }
 
     console.log(
-      `Embedding ${questions.length} questions with ${options.model} in batches of ${options.batchSize}.`,
+      `Embedding ${questions.length} ${options.kind} sources with ${options.model} in batches of ${options.batchSize}.`,
     );
 
     let saved = 0;
 
     for (const batch of chunks(questions, options.batchSize)) {
-      const embeddings = await fetchEmbeddings(batch, options.model, apiKey);
+      const embeddings = await fetchEmbeddings(
+        batch.map((row) => row.source),
+        options.model,
+        apiKey,
+      );
       await saveEmbeddings(
         pool,
-        batch.map((question, index) => ({
-          question,
+        batch.map((row, index) => ({
+          ...row,
           embedding: embeddings[index],
         })),
-        options.model,
+        options,
       );
       saved += batch.length;
       console.log(`Saved ${saved}/${questions.length}`);
     }
 
-    console.log(`Saved ${saved} question embeddings for ${options.model}.`);
+    console.log(
+      `Saved ${saved} ${options.kind} question embeddings for ${options.model}.`,
+    );
   } finally {
     await pool.end();
   }

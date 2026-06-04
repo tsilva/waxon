@@ -2,9 +2,12 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   bigint,
+  boolean,
   customType,
   index,
   integer,
+  jsonb,
+  numeric,
   pgTable,
   serial,
   text,
@@ -69,6 +72,7 @@ export const questions = pgTable(
     ),
     lastAnswer: text("last_answer").notNull().default(""),
     lastAnswerSummary: text("last_answer_summary").notNull().default(""),
+    conciseAnswer: text("concise_answer").notNull().default(""),
     referenceAnswer: text("reference_answer").notNull().default(""),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
@@ -109,18 +113,74 @@ export const questionEmbeddings = pgTable(
   "question_embeddings",
   {
     id: serial("id").primaryKey(),
+    deckId: text("deck_id")
+      .notNull()
+      .references(() => decks.id, { onDelete: "cascade" }),
     question: text("question")
       .notNull()
       .references(() => questions.question, { onDelete: "cascade" }),
     embeddingModel: text("embedding_model").notNull(),
+    embeddingKind: text("embedding_kind").notNull().default("question_only"),
+    sourceVersion: integer("source_version").notNull().default(1),
+    sourceHash: text("source_hash").notNull().default(""),
+    isCurrent: boolean("is_current").notNull().default(true),
     embedding: vector("embedding").notNull(),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
   },
   (table) => [
-    uniqueIndex("question_embeddings_question_model_idx").on(
+    uniqueIndex("question_embeddings_current_source_idx").on(
+      table.deckId,
       table.question,
       table.embeddingModel,
+      table.embeddingKind,
+      table.sourceVersion,
+    ),
+    index("question_embeddings_lookup_idx").on(
+      table.deckId,
+      table.embeddingModel,
+      table.embeddingKind,
+      table.sourceVersion,
+      table.isCurrent,
+    ),
+    index("question_embeddings_question_lookup_idx").on(
+      table.question,
+      table.embeddingModel,
+      table.embeddingKind,
+    ),
+  ],
+);
+
+export const llmCalls = pgTable(
+  "llm_calls",
+  {
+    id: serial("id").primaryKey(),
+    operation: text("operation").notNull(),
+    provider: text("provider").notNull().default("openrouter"),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
+    deckId: text("deck_id").references(() => decks.id, { onDelete: "set null" }),
+    question: text("question"),
+    requestedModel: text("requested_model").notNull(),
+    returnedModel: text("returned_model"),
+    generationId: text("generation_id"),
+    status: text("status").notNull(),
+    httpStatus: integer("http_status"),
+    promptTokens: integer("prompt_tokens"),
+    completionTokens: integer("completion_tokens"),
+    totalTokens: integer("total_tokens"),
+    cost: numeric("cost", { mode: "number" }),
+    latencyMs: integer("latency_ms").notNull(),
+    usage: jsonb("usage").$type<Record<string, unknown> | null>(),
+    error: text("error"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => [
+    uniqueIndex("llm_calls_generation_idx").on(table.generationId),
+    index("llm_calls_user_created_idx").on(table.userId, table.createdAt),
+    index("llm_calls_deck_created_idx").on(table.deckId, table.createdAt),
+    index("llm_calls_operation_created_idx").on(
+      table.operation,
+      table.createdAt,
     ),
   ],
 );

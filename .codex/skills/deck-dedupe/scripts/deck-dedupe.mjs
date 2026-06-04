@@ -15,6 +15,8 @@ if (typeof WebSocket !== "undefined") {
 
 const DEFAULT_DECK_ID = "deep-learning";
 const DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-2";
+const DEFAULT_EMBEDDING_KIND = "dedupe_v1";
+const DEFAULT_SOURCE_VERSION = 1;
 const DEFAULT_THRESHOLD = 0.9;
 const DEFAULT_MAX_PAIRS = 80;
 const AGENT_JUDGE_LABEL = "codex-agent-native";
@@ -24,9 +26,11 @@ function parseArgs(argv) {
     apply: false,
     deckId: DEFAULT_DECK_ID,
     decisionsPath: null,
+    embeddingKind: DEFAULT_EMBEDDING_KIND,
     embeddingModel: DEFAULT_EMBEDDING_MODEL,
     json: false,
     maxPairs: DEFAULT_MAX_PAIRS,
+    sourceVersion: DEFAULT_SOURCE_VERSION,
     threshold: DEFAULT_THRESHOLD,
   };
 
@@ -61,6 +65,18 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === "--embedding-kind") {
+      options.embeddingKind = argv[index + 1] ?? "";
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--source-version") {
+      options.sourceVersion = Number(argv[index + 1] ?? "");
+      index += 1;
+      continue;
+    }
+
     if (arg === "--threshold") {
       options.threshold = Number(argv[index + 1] ?? "");
       index += 1;
@@ -78,6 +94,7 @@ function parseArgs(argv) {
 
   options.deckId = options.deckId.trim();
   options.embeddingModel = options.embeddingModel.trim();
+  options.embeddingKind = options.embeddingKind.trim();
   options.decisionsPath = options.decisionsPath?.trim() || null;
 
   if (!options.deckId) {
@@ -86,6 +103,14 @@ function parseArgs(argv) {
 
   if (!options.embeddingModel) {
     throw new Error("--embedding-model must not be empty");
+  }
+
+  if (!options.embeddingKind) {
+    throw new Error("--embedding-kind must not be empty");
+  }
+
+  if (!Number.isInteger(options.sourceVersion) || options.sourceVersion < 1) {
+    throw new Error("--source-version must be a positive integer");
   }
 
   if (
@@ -154,6 +179,7 @@ async function loadQuestions(pool, options) {
         q.generated_from_question,
         q.last_answer,
         q.last_answer_summary,
+        q.concise_answer,
         q.reference_answer,
         q.created_at,
         q.updated_at,
@@ -162,9 +188,18 @@ async function loadQuestions(pool, options) {
       JOIN question_embeddings qe ON qe.question = q.question
       WHERE q.deck_id = $1
         AND qe.embedding_model = $2
+        AND qe.embedding_kind = $3
+        AND qe.source_version = $4
+        AND qe.is_current = true
+        AND qe.source_hash <> ''
       ORDER BY q.created_at ASC, q.question ASC
     `,
-    [options.deckId, options.embeddingModel],
+    [
+      options.deckId,
+      options.embeddingModel,
+      options.embeddingKind,
+      options.sourceVersion,
+    ],
   );
 
   return result.rows.map((row) => ({
@@ -211,6 +246,8 @@ function printCandidateReport(questions, pairs, options) {
         {
           deckId: options.deckId,
           embeddingModel: options.embeddingModel,
+          embeddingKind: options.embeddingKind,
+          sourceVersion: options.sourceVersion,
           questionCount: questions.length,
           threshold: options.threshold,
           candidates: pairs,
@@ -300,6 +337,7 @@ async function ensureTrashTable(pool) {
       generated_from_question text,
       last_answer text NOT NULL DEFAULT '',
       last_answer_summary text NOT NULL DEFAULT '',
+      concise_answer text NOT NULL DEFAULT '',
       reference_answer text NOT NULL DEFAULT '',
       created_at bigint NOT NULL,
       updated_at bigint NOT NULL,
@@ -310,6 +348,10 @@ async function ensureTrashTable(pool) {
       duplicate_judge_model text NOT NULL,
       duplicate_rationale text NOT NULL
     )
+  `);
+  await pool.query(`
+    ALTER TABLE questions_trash
+    ADD COLUMN IF NOT EXISTS concise_answer text NOT NULL DEFAULT ''
   `);
 }
 
@@ -354,6 +396,7 @@ async function moveToTrash(pool, decision, questionByText, options) {
           generated_from_question,
           last_answer,
           last_answer_summary,
+          concise_answer,
           reference_answer,
           created_at,
           updated_at,
@@ -366,7 +409,7 @@ async function moveToTrash(pool, decision, questionByText, options) {
         )
         VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8,
-          $9, $10, $11, $12, $13, $14, $15, $16
+          $9, $10, $11, $12, $13, $14, $15, $16, $17
         )
         ON CONFLICT (question)
         DO UPDATE SET
@@ -385,6 +428,7 @@ async function moveToTrash(pool, decision, questionByText, options) {
         discard.generated_from_question,
         discard.last_answer,
         discard.last_answer_summary,
+        discard.concise_answer,
         discard.reference_answer,
         discard.created_at,
         discard.updated_at,

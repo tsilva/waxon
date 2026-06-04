@@ -11,6 +11,7 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - Question-row geometry mismatch: the implemented target icon and question text were too close together, which made the corrected serif still read unlike the design. Fixed by widening the desktop icon-to-question gap so the question begins at the same visual column as the approved desktop panel.
 - Header alignment mismatch: the brand/title group was slightly too far right. Fixed by tightening desktop header horizontal padding.
 - Header tab vertical alignment mismatch: the Review/Queue labels sat slightly high relative to the brand group. Fixed by nudging tab label content down while keeping the underline anchored to the header bottom.
+- Desktop shell corner drift: child backgrounds were painting through the 28px app-frame radius. Fixed by clipping `.review-shell` content to its existing radius while preserving the square mobile shell.
 
 ## Remaining Comparison Notes
 

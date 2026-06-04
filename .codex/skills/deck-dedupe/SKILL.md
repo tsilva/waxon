@@ -47,6 +47,8 @@ npm run deck:dedupe -- --apply --decisions /tmp/waxon-dedupe-decisions.json
 
 - `--deck-id deep-learning`: deck to process. Defaults to `deep-learning`.
 - `--embedding-model google/gemini-embedding-2`: embedding model to read. Defaults to `google/gemini-embedding-2`.
+- `--embedding-kind dedupe_v1`: embedding kind to read. Defaults to `dedupe_v1`, built from question + concise answer.
+- `--source-version 1`: dedupe embedding source format version. Defaults to `1`.
 - `--threshold 0.9`: cosine-similarity threshold for candidate pairs.
 - `--max-pairs 80`: cap candidate pairs printed for Codex review.
 - `--json`: print machine-readable candidates for easier review.

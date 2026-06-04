@@ -4,7 +4,7 @@ import {
   hasReferenceAnswerExplanation,
 } from "@/app/lib/referenceAnswer";
 import {
-  getStoredReferenceAnswer,
+  getQuestionSnapshot,
   saveReferenceAnswer,
 } from "@/app/lib/postgresStore";
 
@@ -25,7 +25,8 @@ export async function POST(request: Request) {
   }
 
   const question = payload.question.trim();
-  const cachedAnswer = await getStoredReferenceAnswer(question);
+  const snapshot = await getQuestionSnapshot(question);
+  const cachedAnswer = snapshot?.referenceAnswer?.trim() ?? "";
 
   if (cachedAnswer && hasReferenceAnswerExplanation(cachedAnswer)) {
     return NextResponse.json({ answer: cachedAnswer });
@@ -33,6 +34,8 @@ export async function POST(request: Request) {
 
   const answer = await generateReferenceAnswer({
     question,
+    userId: snapshot?.userId ?? null,
+    deckId: snapshot?.deckId ?? null,
   });
 
   if (!answer.startsWith("Reference answer is unavailable")) {
