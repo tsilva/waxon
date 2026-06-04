@@ -1,0 +1,4 @@
+interface:
+  display_name: "Waxon Design System"
+  short_description: "Guide Waxon UI and visual changes"
+  default_prompt: "Use $waxon-design-system to make a Waxon UI design change."

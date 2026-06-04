@@ -166,7 +166,7 @@ type ActiveTab = "review" | "queue";
 
 type QueueSortKey = "review-date" | "creation-date";
 
-type GeneratedQuestionStatus = "new" | "kept" | "rejected" | "added";
+type GeneratedQuestionStatus = "new" | "adding" | "added";
 
 type GeneratedQuestionCandidate = {
   id: string;
@@ -183,6 +183,21 @@ type GeneratorContextFile = {
   content: string;
   status: "ready" | "metadata-only";
 };
+
+type GenerateQuestionsResponse =
+  | {
+      ok: true;
+      model: string;
+      questions: Array<{
+        question: string;
+        sourceLabel?: string;
+        coverageLabel?: string;
+      }>;
+    }
+  | {
+      ok: false;
+      error?: string;
+    };
 
 type PendingSpeechCommand = {
   command: "skip" | "submit";
@@ -268,7 +283,6 @@ const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 const MAX_AVATAR_UPLOAD_BYTES = 512 * 1024;
 const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit|skip)[.!?]*$/i;
-const MAX_GENERATOR_CONTEXT_CHARS = 16_000;
 const MAX_GENERATED_QUESTION_COUNT = 40;
 
 const mathSymbolMap: Record<string, string> = {
@@ -860,110 +874,6 @@ function isTextContextFile(file: File): boolean {
   );
 }
 
-function compactCoverageUnit(value: string): string {
-  return value
-    .replace(/\s+/g, " ")
-    .replace(/^[\-*•\d.)\s]+/, "")
-    .replace(/[.;:,]+$/, "")
-    .trim();
-}
-
-function extractCoverageUnits(source: string): string[] {
-  const seen = new Set<string>();
-  const units: string[] = [];
-  const candidates = source
-    .split(/\n+|(?<=[.!?])\s+/)
-    .map(compactCoverageUnit)
-    .filter((unit) => unit.length >= 12);
-
-  for (const candidate of candidates) {
-    const clipped =
-      candidate.length > 120 ? `${candidate.slice(0, 117).trim()}...` : candidate;
-    const key = clipped.toLowerCase();
-
-    if (seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    units.push(clipped);
-  }
-
-  return units;
-}
-
-function questionFromCoverageUnit(unit: string, variant: number): string {
-  const templates = [
-    (value: string) => `What is the key idea behind ${value}?`,
-    (value: string) => `How would you explain ${value} from memory?`,
-    (value: string) => `What detail about ${value} is easiest to forget?`,
-    (value: string) => `Why does ${value} matter?`,
-    (value: string) => `What problem does ${value} solve?`,
-    (value: string) => `What is a common mistake when reasoning about ${value}?`,
-    (value: string) => `How can you check whether you understand ${value}?`,
-    (value: string) => `What should you compare ${value} against?`,
-  ];
-  const template = templates[variant % templates.length] ?? templates[0];
-
-  return template(unit).replace(/\?\?+$/, "?");
-}
-
-function buildGeneratedQuestionCandidates(input: {
-  scope: string;
-  files: GeneratorContextFile[];
-  count: number;
-  batch: number;
-  existingQuestions: Set<string>;
-}): GeneratedQuestionCandidate[] {
-  const fileContent = input.files
-    .map((file) => `${file.name}\n${file.content}`)
-    .join("\n\n");
-  const combinedContext = `${input.scope}\n\n${fileContent}`
-    .slice(0, MAX_GENERATOR_CONTEXT_CHARS)
-    .trim();
-  const units = extractCoverageUnits(combinedContext);
-  const fallbackUnits =
-    input.files.length > 0
-      ? input.files.map((file) => `the context in ${file.name}`)
-      : ["the requested topic"];
-  const coverageUnits = units.length > 0 ? units : fallbackUnits;
-  const candidates: GeneratedQuestionCandidate[] = [];
-  let attempts = 0;
-
-  while (
-    candidates.length < input.count &&
-    attempts < input.count * Math.max(coverageUnits.length, 1) * 3
-  ) {
-    const coverageIndex =
-      (input.batch * input.count + attempts) % coverageUnits.length;
-    const coverageLabel = coverageUnits[coverageIndex] ?? "the requested topic";
-    const question = questionFromCoverageUnit(
-      coverageLabel,
-      input.batch + coverageIndex + Math.floor(attempts / coverageUnits.length),
-    );
-    const key = question.toLowerCase();
-
-    if (!input.existingQuestions.has(key)) {
-      input.existingQuestions.add(key);
-      candidates.push({
-        id: createClientId("generated-question"),
-        question,
-        sourceLabel:
-          input.files.length > 0
-            ? input.files[coverageIndex % input.files.length]?.name ?? "Context"
-            : "Prompt",
-        coverageLabel,
-        batch: input.batch,
-        status: "new",
-      });
-    }
-
-    attempts += 1;
-  }
-
-  return candidates;
-}
-
 function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
   const width = 520;
   const height = 190;
@@ -1271,8 +1181,7 @@ export default function Home() {
   >([]);
   const [generatorBatch, setGeneratorBatch] = useState(0);
   const [generatorMessage, setGeneratorMessage] = useState<string | null>(null);
-  const [isAddingGeneratedQuestions, setIsAddingGeneratedQuestions] =
-    useState(false);
+  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const answerRef = useRef(answer);
@@ -2018,7 +1927,7 @@ export default function Home() {
     setGeneratorFiles((current) => current.filter((file) => file.id !== fileId));
   }
 
-  function generateQuestionBatch() {
+  async function generateQuestionBatch() {
     const requestedCount = Number.parseInt(generatorQuestionCount, 10);
     const count = Math.min(
       MAX_GENERATED_QUESTION_COUNT,
@@ -2032,56 +1941,82 @@ export default function Home() {
       return;
     }
 
-    const existingQuestions = new Set(
-      [
-        ...generatedQuestions.map((item) => item.question),
-        ...reviewQueue.map((item) => item.question),
-      ].map((item) => item.toLowerCase()),
-    );
     const nextBatch = generatorBatch + 1;
-    const candidates = buildGeneratedQuestionCandidates({
-      scope: generatorScope,
-      files: generatorFiles,
-      count,
-      batch: nextBatch,
-      existingQuestions,
-    });
 
-    setGeneratorBatch(nextBatch);
-    setGeneratedQuestions((current) => [...candidates, ...current]);
-    setGeneratorMessage(
-      candidates.length > 0
-        ? `${candidates.length} new candidates added for review.`
-        : "No new candidates found from this context.",
-    );
+    setIsGeneratingQuestions(true);
+    setGeneratorMessage("Generating with OpenRouter...");
+
+    try {
+      const response = await fetch("/api/questions/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          scope: generatorScope,
+          files: generatorFiles,
+          count,
+          difficulty: generatorDifficulty,
+          existingQuestions: [
+            ...generatedQuestions.map((item) => item.question),
+            ...reviewQueue.map((item) => item.question),
+          ],
+        }),
+      });
+      const data = (await response.json()) as GenerateQuestionsResponse;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          !data.ok && data.error ? data.error : "Could not generate questions.",
+        );
+      }
+
+      const candidates = data.questions.map((item) => ({
+        id: createClientId("generated-question"),
+        question: item.question,
+        sourceLabel: item.sourceLabel || "OpenRouter",
+        coverageLabel: item.coverageLabel || item.question,
+        batch: nextBatch,
+        status: "new" as const,
+      }));
+
+      setGeneratorBatch(nextBatch);
+      setGeneratedQuestions((current) => [...candidates, ...current]);
+      setGeneratorMessage(
+        candidates.length > 0
+          ? `${candidates.length} generated by ${data.model}.`
+          : "OpenRouter returned no new questions.",
+      );
+    } catch (generateError) {
+      setGeneratorMessage(
+        generateError instanceof Error
+          ? generateError.message
+          : "Could not generate questions.",
+      );
+    } finally {
+      setIsGeneratingQuestions(false);
+    }
   }
 
-  function setGeneratedQuestionStatus(
-    questionId: string,
-    status: GeneratedQuestionStatus,
-  ) {
+  async function addGeneratedQuestionToDeck(questionId: string) {
+    const questionToAdd = generatedQuestions.find(
+      (item) => item.id === questionId,
+    );
+
+    if (!questionToAdd || questionToAdd.status !== "new") {
+      return;
+    }
+
     setGeneratedQuestions((current) =>
       current.map((item) =>
         item.id === questionId
           ? {
               ...item,
-              status,
+              status: "adding",
             }
           : item,
       ),
     );
-  }
-
-  async function addKeptQuestionsToDeck() {
-    const keptQuestions = generatedQuestions.filter(
-      (item) => item.status === "kept",
-    );
-
-    if (keptQuestions.length === 0 || isAddingGeneratedQuestions) {
-      return;
-    }
-
-    setIsAddingGeneratedQuestions(true);
     setGeneratorMessage(null);
 
     try {
@@ -2091,7 +2026,7 @@ export default function Home() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          questions: keptQuestions.map((item) => item.question),
+          questions: [questionToAdd.question],
         }),
       });
       const data = (await response.json()) as
@@ -2102,11 +2037,9 @@ export default function Home() {
         throw new Error(!data.ok && data.error ? data.error : "Could not add questions.");
       }
 
-      const addedIds = new Set(keptQuestions.map((item) => item.id));
-
       setGeneratedQuestions((current) =>
         current.map((item) =>
-          addedIds.has(item.id)
+          item.id === questionId
             ? {
                 ...item,
                 status: "added",
@@ -2114,7 +2047,9 @@ export default function Home() {
             : item,
         ),
       );
-      setGeneratorMessage(`${data.added} questions added to deck.`);
+      setGeneratorMessage(
+        data.added > 0 ? "Question added to deck." : "Question already exists.",
+      );
       await loadStatus();
 
       if (!questionRef.current) {
@@ -2126,8 +2061,16 @@ export default function Home() {
           ? addError.message
           : "Could not add questions.",
       );
-    } finally {
-      setIsAddingGeneratedQuestions(false);
+      setGeneratedQuestions((current) =>
+        current.map((item) =>
+          item.id === questionId
+            ? {
+                ...item,
+                status: "new",
+              }
+            : item,
+        ),
+      );
     }
   }
 
@@ -2223,7 +2166,7 @@ export default function Home() {
     return [...reviewQueue].sort((a, b) => {
       const dateComparison =
         queueSortKey === "review-date"
-          ? b.nextDue - a.nextDue
+          ? a.nextDue - b.nextDue
           : b.createdAt - a.createdAt;
 
       return dateComparison || a.question.localeCompare(b.question);
@@ -2375,8 +2318,7 @@ export default function Home() {
     },
     {
       new: 0,
-      kept: 0,
-      rejected: 0,
+      adding: 0,
       added: 0,
     } satisfies Record<GeneratedQuestionStatus, number>,
   );
@@ -2956,6 +2898,20 @@ export default function Home() {
                         />
                       ) : null}
                       <div className="queue-metrics" aria-label="Card metrics">
+                        {item.lastScore !== null ? (
+                          <PreviousAnswerScore
+                            className="queue-last-score"
+                            label={`Last score ${item.lastScore} out of 10`}
+                            score={item.lastScore}
+                          />
+                        ) : (
+                          <span
+                            className="previous-score-shell queue-score-placeholder"
+                            aria-hidden="true"
+                          >
+                            <span className="previous-score score-neutral" />
+                          </span>
+                        )}
                         <span
                           className={`due-badge ${
                             item.status === "now" ? "now" : "scheduled"
@@ -2963,13 +2919,6 @@ export default function Home() {
                         >
                           {formatDueBadge(item)}
                         </span>
-                        {item.lastScore !== null ? (
-                          <PreviousAnswerScore
-                            className="queue-last-score"
-                            label={`Last score ${item.lastScore} out of 10`}
-                            score={item.lastScore}
-                          />
-                        ) : null}
                       </div>
                     </div>
                     {item.lastJustification ? (
@@ -3115,11 +3064,11 @@ export default function Home() {
                   <button
                     className="generator-primary-action"
                     type="button"
-                    onClick={generateQuestionBatch}
-                    disabled={!hasGeneratorContext}
+                    onClick={() => void generateQuestionBatch()}
+                    disabled={!hasGeneratorContext || isGeneratingQuestions}
                   >
                     <Sparkles aria-hidden="true" />
-                    <span>Generate</span>
+                    <span>{isGeneratingQuestions ? "Generating..." : "Generate"}</span>
                   </button>
                 </div>
               </section>
@@ -3129,13 +3078,12 @@ export default function Home() {
                   <div>
                     <h3>Review</h3>
                     <p>
-                      {generatedQuestionCounts.kept} kept ·{" "}
-                      {generatedQuestionCounts.new} new ·{" "}
-                      {generatedQuestionCounts.rejected} rejected
+                      {generatedQuestionCounts.new} available ·{" "}
+                      {generatedQuestionCounts.added} added
                     </p>
                   </div>
-                  {generatedQuestionCounts.added > 0 ? (
-                    <span>{generatedQuestionCounts.added} added</span>
+                  {generatedQuestionCounts.adding > 0 ? (
+                    <span>{generatedQuestionCounts.adding} adding</span>
                   ) : null}
                 </div>
 
@@ -3151,10 +3099,8 @@ export default function Home() {
                         key={item.id}
                       >
                         <div className="generator-question-status" aria-hidden="true">
-                          {item.status === "kept" || item.status === "added" ? (
+                          {item.status === "added" ? (
                             <Check />
-                          ) : item.status === "rejected" ? (
-                            <X />
                           ) : (
                             <Plus />
                           )}
@@ -3168,32 +3114,31 @@ export default function Home() {
                           <p className="generator-question-meta">
                             Batch {item.batch} · {item.sourceLabel} ·{" "}
                             {item.status === "new"
-                              ? "Needs review"
+                              ? "Not added"
+                              : item.status === "adding"
+                                ? "Adding"
                               : item.status}
                           </p>
                         </div>
                         <div className="generator-question-actions">
                           <button
-                            className="generator-keep-button"
+                            className="generator-add-question-button"
                             type="button"
-                            aria-pressed={item.status === "kept"}
-                            disabled={item.status === "added"}
-                            onClick={() => setGeneratedQuestionStatus(item.id, "kept")}
+                            disabled={item.status !== "new"}
+                            onClick={() => void addGeneratedQuestionToDeck(item.id)}
                           >
-                            <Check aria-hidden="true" />
-                            <span>Keep</span>
-                          </button>
-                          <button
-                            className="generator-reject-button"
-                            type="button"
-                            aria-pressed={item.status === "rejected"}
-                            disabled={item.status === "added"}
-                            onClick={() =>
-                              setGeneratedQuestionStatus(item.id, "rejected")
-                            }
-                          >
-                            <X aria-hidden="true" />
-                            <span>Reject</span>
+                            {item.status === "added" ? (
+                              <Check aria-hidden="true" />
+                            ) : (
+                              <Plus aria-hidden="true" />
+                            )}
+                            <span>
+                              {item.status === "added"
+                                ? "Added"
+                                : item.status === "adding"
+                                  ? "Adding"
+                                  : "Add"}
+                            </span>
                           </button>
                         </div>
                       </li>
@@ -3205,29 +3150,15 @@ export default function Home() {
                   <p aria-live="polite">
                     {generatorMessage ??
                       (generatedQuestionCounts.new > 0
-                        ? "Review new candidates before adding."
-                        : "Kept questions are ready to add.")}
+                        ? "Click + on any question to add it."
+                        : "Generate more candidates or close this panel.")}
                   </p>
                   <button
                     className="generator-secondary-action"
                     type="button"
                     onClick={() => setIsQuestionGeneratorOpen(false)}
                   >
-                    Back
-                  </button>
-                  <button
-                    className="generator-primary-action"
-                    type="button"
-                    onClick={() => void addKeptQuestionsToDeck()}
-                    disabled={
-                      generatedQuestionCounts.kept === 0 ||
-                      isAddingGeneratedQuestions
-                    }
-                  >
-                    <Plus aria-hidden="true" />
-                    <span>
-                      {isAddingGeneratedQuestions ? "Adding..." : "Add to deck"}
-                    </span>
+                    Done
                   </button>
                 </div>
               </section>
