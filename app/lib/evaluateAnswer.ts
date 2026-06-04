@@ -1,9 +1,16 @@
 import { getQuestionQualityReference } from "./questionQualityReference";
+import {
+  extractChatCompletionText,
+  getOpenRouterApiKey,
+  openRouterChatCompletion,
+} from "./openRouter";
 
 export type EvaluateAnswerInput = {
   question: string;
   answer: string;
   previousReviews: string;
+  userId?: string | null;
+  deckId?: string | null;
 };
 
 export type GradedEvaluationResult = {
@@ -222,37 +229,10 @@ function sanitizeProbingQuestions(questions: unknown): string[] {
   return sanitized;
 }
 
-function extractChatCompletionText(response: unknown): string {
-  const body = response as {
-    choices?: Array<{
-      message?: {
-        content?: unknown;
-      };
-    }>;
-  };
-  const content = body.choices?.[0]?.message?.content;
-
-  if (typeof content === "string") {
-    return content.trim();
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        const candidate = part as { text?: unknown };
-        return typeof candidate.text === "string" ? candidate.text : "";
-      })
-      .join("")
-      .trim();
-  }
-
-  return "";
-}
-
 export async function evaluateAnswer(
   input: EvaluateAnswerInput,
 ): Promise<EvaluationResult> {
-  const apiKey = process.env.OPENROUTER_API_KEY ?? process.env.LLM_API_KEY;
+  const apiKey = getOpenRouterApiKey();
 
   if (!apiKey) {
     return failedEvaluation(
@@ -265,16 +245,16 @@ export async function evaluateAnswer(
   const timeout = setTimeout(() => controller.abort(), EVALUATION_TIMEOUT_MS);
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
+    const { response, body } = await openRouterChatCompletion({
+      apiKey,
       signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:3000",
-        "X-Title": "waxon",
+      trace: {
+        operation: "evaluate_answer",
+        userId: input.userId,
+        deckId: input.deckId,
+        question: input.question,
       },
-      body: JSON.stringify({
+      body: {
         model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
         messages: [
           {
@@ -287,17 +267,15 @@ export async function evaluateAnswer(
         },
         temperature: 0,
         max_tokens: 500,
-      }),
+      },
     });
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
       console.info("[waxon] llm evaluation failed", {
         provider: "openrouter",
         model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
         status: response.status,
         statusText: response.statusText,
-        body: errorText.slice(0, 500),
       });
       return failedEvaluation(
         "LLM evaluation failed before grading.",
@@ -305,7 +283,6 @@ export async function evaluateAnswer(
       );
     }
 
-    const body: unknown = await response.json();
     return parseEvaluation(extractChatCompletionText(body), input.answer);
   } catch (error) {
     console.info("[waxon] llm evaluation failed", {

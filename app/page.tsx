@@ -88,6 +88,7 @@ type ReviewQueueItem = {
   lastScore: number | null;
   lastAnswer: string | null;
   lastAnswerSummary: string | null;
+  conciseAnswer: string | null;
   referenceAnswer: string | null;
   lastJustification: string | null;
   attempts: QuestionAttempt[];
@@ -172,6 +173,7 @@ type GeneratedQuestionStatus = "new" | "selected" | "adding" | "added";
 type GeneratedQuestionCandidate = {
   id: string;
   question: string;
+  conciseAnswer: string;
   sourceLabel: string;
   coverageLabel: string;
   batch: number;
@@ -191,6 +193,7 @@ type GenerateQuestionsResponse =
       model: string;
       questions: Array<{
         question: string;
+        conciseAnswer?: string;
         sourceLabel?: string;
         coverageLabel?: string;
       }>;
@@ -259,6 +262,7 @@ type QuestionStats = {
   dueStatus: "now" | "scheduled" | "unknown";
   pendingCount: number;
   generatedFromQuestion: string | null;
+  conciseAnswer: string | null;
   referenceAnswer: string | null;
   lastJustification: string | null;
 };
@@ -647,7 +651,7 @@ function formatDurationBadge(msUntilDue: number): string {
 
 function scoreTone(score: number | null) {
   if (score === null) {
-    return "pending";
+    return "neutral";
   }
 
   if (score <= 3) {
@@ -664,19 +668,24 @@ function scoreTone(score: number | null) {
 function PreviousAnswerScore({
   score,
   className,
-  label = `Score ${score} out of 10`,
+  label,
 }: {
-  score: number;
+  score: number | null;
   className?: string;
   label?: string;
 }) {
+  const displayScore = score === null ? "-" : score;
+  const accessibleLabel = label ?? (
+    score === null ? "No score" : `Score ${score} out of 10`
+  );
+
   return (
     <span
       className={`previous-score-shell${className ? ` ${className}` : ""}`}
-      aria-label={label}
+      aria-label={accessibleLabel}
     >
       <span className={`previous-score score-${scoreTone(score)}`}>
-        {score}
+        {displayScore}
       </span>
     </span>
   );
@@ -1928,6 +1937,11 @@ export default function Home() {
   }
 
   async function generateQuestionBatch() {
+    if (generatedQuestions.length > 0) {
+      setGeneratorMessage("Clear the review queue before generating again.");
+      return;
+    }
+
     const count = Math.min(
       MAX_GENERATED_QUESTION_COUNT,
       Math.max(1, generatorQuestionCount),
@@ -1957,7 +1971,6 @@ export default function Home() {
           count,
           difficulty: "Mixed",
           existingQuestions: [
-            ...generatedQuestions.map((item) => item.question),
             ...reviewQueue.map((item) => item.question),
           ],
         }),
@@ -1973,6 +1986,7 @@ export default function Home() {
       const candidates = data.questions.map((item) => ({
         id: createClientId("generated-question"),
         question: item.question,
+        conciseAnswer: item.conciseAnswer || "",
         sourceLabel: item.sourceLabel || "OpenRouter",
         coverageLabel: item.coverageLabel || item.question,
         batch: nextBatch,
@@ -2023,6 +2037,15 @@ export default function Home() {
     setGeneratorMessage(null);
   }
 
+  function clearGeneratedQuestionQueue() {
+    if (isGeneratingQuestions || generatedQuestionCounts.adding > 0) {
+      return;
+    }
+
+    setGeneratedQuestions([]);
+    setGeneratorMessage(null);
+  }
+
   async function addSelectedGeneratedQuestionsToDeck() {
     const questionsToAdd = generatedQuestions.filter(
       (item) => item.status === "selected",
@@ -2053,11 +2076,14 @@ export default function Home() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          questions: questionsToAdd.map((item) => item.question),
+          questions: questionsToAdd.map((item) => ({
+            question: item.question,
+            conciseAnswer: item.conciseAnswer,
+          })),
         }),
       });
       const data = (await response.json()) as
-        | { ok: true; added: number }
+        | { ok: true; added: number; rejected?: number }
         | { ok: false; error?: string };
 
       if (!response.ok || !data.ok) {
@@ -2065,23 +2091,18 @@ export default function Home() {
       }
 
       setGeneratedQuestions((current) =>
-        current.map((item) =>
-          questionIdsToAdd.has(item.id)
-            ? {
-                ...item,
-                status: "added",
-              }
-            : item,
-        ),
+        current.filter((item) => !questionIdsToAdd.has(item.id)),
       );
       setGeneratorMessage(
         data.added > 0
           ? `${data.added} ${
               data.added === 1 ? "question" : "questions"
-            } added to deck.`
+            } added to deck${
+              data.rejected ? `, ${data.rejected} semantic duplicates rejected` : ""
+            }.`
           : questionsToAdd.length === 1
-            ? "Question already exists."
-            : "Questions already exist.",
+            ? "Question already exists or was rejected as a duplicate."
+            : "Questions already exist or were rejected as duplicates.",
       );
       await loadStatus();
 
@@ -2322,6 +2343,7 @@ export default function Home() {
       dueStatus: queueItem?.status ?? "unknown",
       pendingCount,
       generatedFromQuestion: queueItem?.generatedFromQuestion ?? null,
+      conciseAnswer: queueItem?.conciseAnswer ?? null,
       referenceAnswer: queueItem?.referenceAnswer ?? null,
       lastJustification:
         queueItem?.lastJustification ??
@@ -2358,6 +2380,7 @@ export default function Home() {
   );
   const hasGeneratorContext =
     generatorScope.trim().length > 0 || generatorFiles.length > 0;
+  const isGeneratorReviewStep = generatedQuestions.length > 0;
 
   useEffect(() => {
     if (!selectedQuestionStats) {
@@ -2735,7 +2758,7 @@ export default function Home() {
                     key={item.id}
                   >
                     <div className="previous-score-slot">
-                      {isPending || item.score === null ? (
+                      {isPending ? (
                         <span className="pending-spinner" aria-hidden="true" />
                       ) : (
                         <PreviousAnswerScore score={item.score} />
@@ -2944,20 +2967,15 @@ export default function Home() {
                         />
                       ) : null}
                       <div className="queue-metrics" aria-label="Card metrics">
-                        {item.lastScore !== null ? (
-                          <PreviousAnswerScore
-                            className="queue-last-score"
-                            label={`Last score ${item.lastScore} out of 10`}
-                            score={item.lastScore}
-                          />
-                        ) : (
-                          <span
-                            className="previous-score-shell queue-score-placeholder"
-                            aria-hidden="true"
-                          >
-                            <span className="previous-score score-neutral" />
-                          </span>
-                        )}
+                        <PreviousAnswerScore
+                          className="queue-last-score"
+                          label={
+                            item.lastScore === null
+                              ? "No previous score"
+                              : `Last score ${item.lastScore} out of 10`
+                          }
+                          score={item.lastScore}
+                        />
                         <span
                           className={`due-badge ${
                             item.status === "now" ? "now" : "scheduled"
@@ -2998,9 +3016,11 @@ export default function Home() {
           >
             <div className="generator-modal-header">
               <div>
-                <p className="generator-modal-kicker">Add to deck</p>
+                <p className="generator-modal-kicker">
+                  {isGeneratorReviewStep ? "Step 2 of 2" : "Step 1 of 2"}
+                </p>
                 <h2 className="generator-modal-title" id="generator-modal-title">
-                  Generate questions
+                  {isGeneratorReviewStep ? "Review questions" : "Generate questions"}
                 </h2>
               </div>
               <button
@@ -3011,102 +3031,109 @@ export default function Home() {
               />
             </div>
 
-            <div className="generator-modal-grid">
-              <section className="generator-scope-panel" aria-label="Generation scope">
-                <div className="generator-field">
-                  <label htmlFor="generator-scope-input">Cover</label>
-                  <div
-                    className="generator-scope-shell"
-                    onDragOver={(event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "copy";
-                    }}
-                    onDrop={(event) => void handleGeneratorFileDrop(event)}
-                  >
-                    <textarea
-                      id="generator-scope-input"
-                      className="generator-scope-input"
-                      value={generatorScope}
-                      onChange={(event) => {
-                        setGeneratorScope(event.target.value);
-                        setGeneratorMessage(null);
+            <div
+              className={`generator-modal-grid ${
+                isGeneratorReviewStep
+                  ? "generator-modal-grid-review"
+                  : "generator-modal-grid-scope"
+              }`}
+            >
+              {!isGeneratorReviewStep ? (
+                <section className="generator-scope-panel" aria-label="Generation scope">
+                  <div className="generator-field">
+                    <label htmlFor="generator-scope-input">Cover</label>
+                    <div
+                      className="generator-scope-shell"
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "copy";
                       }}
-                      placeholder="Core ideas from the attached lecture notes"
-                      rows={7}
-                    />
-                    <p className="generator-drop-hint">
-                      Drop files here to add them as context.
-                    </p>
-                    {generatorFiles.length > 0 ? (
-                      <ul className="generator-file-list" aria-label="Context files">
-                        {generatorFiles.map((file) => (
-                          <li className="generator-file-chip" key={file.id}>
-                            <FileText aria-hidden="true" />
-                            <span>{file.name}</span>
-                            {file.status === "metadata-only" ? (
-                              <em>name only</em>
-                            ) : null}
-                            <button
-                              type="button"
-                              aria-label={`Remove ${file.name}`}
-                              onClick={() => removeGeneratorFile(file.id)}
-                            >
-                              <X aria-hidden="true" />
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
+                      onDrop={(event) => void handleGeneratorFileDrop(event)}
+                    >
+                      <textarea
+                        id="generator-scope-input"
+                        className="generator-scope-input"
+                        value={generatorScope}
+                        onChange={(event) => {
+                          setGeneratorScope(event.target.value);
+                          setGeneratorMessage(null);
+                        }}
+                        placeholder="Core ideas from the attached lecture notes"
+                        rows={7}
+                      />
+                      <p className="generator-drop-hint">
+                        Drop files here to add them as context.
+                      </p>
+                      {generatorFiles.length > 0 ? (
+                        <ul className="generator-file-list" aria-label="Context files">
+                          {generatorFiles.map((file) => (
+                            <li className="generator-file-chip" key={file.id}>
+                              <FileText aria-hidden="true" />
+                              <span>{file.name}</span>
+                              {file.status === "metadata-only" ? (
+                                <em>name only</em>
+                              ) : null}
+                              <button
+                                type="button"
+                                aria-label={`Remove ${file.name}`}
+                                onClick={() => removeGeneratorFile(file.id)}
+                              >
+                                <X aria-hidden="true" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
 
-                <div className="generator-controls">
-                  <label className="generator-slider-field">
-                    <span className="generator-slider-header">
-                      <span>Questions</span>
-                      <output>{generatorQuestionCount}</output>
-                    </span>
-                    <input
-                      className="generator-count-slider"
-                      type="range"
-                      min={1}
-                      max={MAX_GENERATED_QUESTION_COUNT}
-                      step={1}
-                      value={generatorQuestionCount}
-                      onChange={(event) =>
-                        setGeneratorQuestionCount(
-                          Number.parseInt(event.target.value, 10),
-                        )
-                      }
-                    />
-                    <span className="generator-slider-scale" aria-hidden="true">
-                      <span>1</span>
-                      <span>{MAX_GENERATED_QUESTION_COUNT}</span>
-                    </span>
-                  </label>
-                </div>
+                  <div className="generator-controls">
+                    <label className="generator-slider-field">
+                      <span className="generator-slider-header">
+                        <span>Questions</span>
+                        <output>{generatorQuestionCount}</output>
+                      </span>
+                      <input
+                        className="generator-count-slider"
+                        type="range"
+                        min={1}
+                        max={MAX_GENERATED_QUESTION_COUNT}
+                        step={1}
+                        value={generatorQuestionCount}
+                        onChange={(event) =>
+                          setGeneratorQuestionCount(
+                            Number.parseInt(event.target.value, 10),
+                          )
+                        }
+                      />
+                      <span className="generator-slider-scale" aria-hidden="true">
+                        <span>1</span>
+                        <span>{MAX_GENERATED_QUESTION_COUNT}</span>
+                      </span>
+                    </label>
+                  </div>
 
-                <div className="generator-scope-footer">
-                  <button
-                    className="generator-primary-action"
-                    type="button"
-                    onClick={() => void generateQuestionBatch()}
-                    disabled={!hasGeneratorContext || isGeneratingQuestions}
-                  >
-                    <Sparkles aria-hidden="true" />
-                    <span>{isGeneratingQuestions ? "Generating..." : "Generate"}</span>
-                  </button>
-                </div>
-              </section>
-
-              <section className="generator-review-panel" aria-label="Generated questions">
+                  <div className="generator-scope-footer">
+                    <p aria-live="polite">{generatorMessage}</p>
+                    <button
+                      className="generator-primary-action"
+                      type="button"
+                      onClick={() => void generateQuestionBatch()}
+                      disabled={!hasGeneratorContext || isGeneratingQuestions}
+                    >
+                      <Sparkles aria-hidden="true" />
+                      <span>{isGeneratingQuestions ? "Generating..." : "Generate"}</span>
+                    </button>
+                  </div>
+                </section>
+              ) : (
+                <section className="generator-review-panel" aria-label="Generated questions">
                 <div className="generator-review-header">
                   <div>
                     <h3>Review</h3>
                     <p>
                       {generatedQuestionCounts.new} available ·{" "}
-                      {generatedQuestionCounts.selected} selected ·{" "}
-                      {generatedQuestionCounts.added} added
+                      {generatedQuestionCounts.selected} selected
                     </p>
                   </div>
                   {generatedQuestionCounts.adding > 0 ? (
@@ -3114,61 +3141,49 @@ export default function Home() {
                   ) : null}
                 </div>
 
-                {generatedQuestions.length === 0 ? (
-                  <div className="generator-review-empty">
-                    <p>Generated questions will appear here.</p>
-                  </div>
-                ) : (
-                  <ol className="generator-question-list">
-                    {generatedQuestions.map((item) => (
-                      <li
-                        className={`generator-question-row generator-question-${item.status}`}
-                        key={item.id}
+                <ol className="generator-question-list">
+                  {generatedQuestions.map((item) => (
+                    <li
+                      className={`generator-question-row generator-question-${item.status}`}
+                      key={item.id}
+                    >
+                      <button
+                        className="generator-question-status"
+                        type="button"
+                        aria-label={
+                          item.status === "new"
+                            ? `Select question for adding: ${item.question}`
+                            : item.status === "selected"
+                              ? `Remove question from add selection: ${item.question}`
+                              : "Adding question"
+                        }
+                        disabled={item.status === "adding"}
+                        onClick={() => toggleGeneratedQuestionSelection(item.id)}
                       >
-                        <button
-                          className="generator-question-status"
-                          type="button"
-                          aria-label={
-                            item.status === "new"
-                              ? `Select question for adding: ${item.question}`
-                              : item.status === "selected"
-                                ? `Remove question from add selection: ${item.question}`
-                                : item.status === "adding"
-                                  ? "Adding question"
-                                  : "Question already added"
-                          }
-                          disabled={
-                            item.status === "adding" || item.status === "added"
-                          }
-                          onClick={() => toggleGeneratedQuestionSelection(item.id)}
-                        >
-                          {item.status === "selected" || item.status === "added" ? (
-                            <Check aria-hidden="true" />
-                          ) : (
-                            <Plus aria-hidden="true" />
-                          )}
-                        </button>
-                        <div className="generator-question-copy">
-                          <MarkdownInline
-                            as="p"
-                            className="generator-question-text"
-                            text={item.question}
-                          />
-                          <p className="generator-question-meta">
-                            Batch {item.batch} · {item.sourceLabel} ·{" "}
-                            {item.status === "new"
-                              ? "Not selected"
-                              : item.status === "selected"
-                                ? "Selected"
-                                : item.status === "adding"
-                                  ? "Adding"
-                                  : "Added"}
-                          </p>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                )}
+                        {item.status === "selected" ? (
+                          <Check aria-hidden="true" />
+                        ) : (
+                          <Plus aria-hidden="true" />
+                        )}
+                      </button>
+                      <div className="generator-question-copy">
+                        <MarkdownInline
+                          as="p"
+                          className="generator-question-text"
+                          text={item.question}
+                        />
+                        <p className="generator-question-meta">
+                          Batch {item.batch} · {item.sourceLabel} ·{" "}
+                          {item.status === "new"
+                            ? "Not selected"
+                            : item.status === "selected"
+                              ? "Selected"
+                              : "Adding"}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
 
                 <div className="generator-review-footer">
                   <p aria-live="polite">
@@ -3177,21 +3192,33 @@ export default function Home() {
                         ? `${generatedQuestionCounts.selected} selected for add.`
                         : generatedQuestionCounts.new > 0
                           ? "Click + on any question to select it."
-                        : "Generate more candidates or close this panel.")}
+                          : "Add selected questions or discard the queue.")}
                   </p>
-                  <button
-                    className="generator-secondary-action"
-                    type="button"
-                    onClick={() => void addSelectedGeneratedQuestionsToDeck()}
-                    disabled={
-                      generatedQuestionCounts.selected === 0 ||
-                      generatedQuestionCounts.adding > 0
-                    }
-                  >
-                    {generatedQuestionCounts.adding > 0 ? "Adding..." : "Add"}
-                  </button>
+                  <div className="generator-review-actions">
+                    <button
+                      className="generator-secondary-action"
+                      type="button"
+                      onClick={clearGeneratedQuestionQueue}
+                      disabled={generatedQuestionCounts.adding > 0}
+                    >
+                      <Trash2 aria-hidden="true" />
+                      <span>Discard</span>
+                    </button>
+                    <button
+                      className="generator-primary-action"
+                      type="button"
+                      onClick={() => void addSelectedGeneratedQuestionsToDeck()}
+                      disabled={
+                        generatedQuestionCounts.selected === 0 ||
+                        generatedQuestionCounts.adding > 0
+                      }
+                    >
+                      {generatedQuestionCounts.adding > 0 ? "Adding..." : "Add"}
+                    </button>
+                  </div>
                 </div>
               </section>
+              )}
             </div>
           </section>
         </div>

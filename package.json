@@ -14,6 +14,7 @@
     "deck:dedupe": "node .codex/skills/deck-dedupe/scripts/deck-dedupe.mjs",
     "deck:cleanup-questions": "node .codex/skills/deck-cleanup-questions/scripts/deck-cleanup-questions.mjs",
     "deck:simplify-questions": "node .codex/skills/deck-cleanup-questions/scripts/deck-cleanup-questions.mjs",
+    "answers:backfill-concise": "node scripts/backfill-concise-answers.mjs",
     "embeddings:backfill": "node scripts/backfill-question-embeddings.mjs",
     "start": "next start",
     "lint": "eslint .",

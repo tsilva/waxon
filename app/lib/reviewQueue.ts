@@ -6,7 +6,9 @@ import {
   getQuestionSnapshot,
   readQuestionsWithEmbeddings,
   upsertDueQuestions,
+  upsertQuestionEmbeddings,
   type DueQuestion,
+  type QuestionInput,
   type QuestionAttempt,
 } from "./postgresStore";
 import {
@@ -15,13 +17,23 @@ import {
   type EvaluationResult,
 } from "./evaluateAnswer";
 import { parseReviews, reinsertionDelay, type ReviewEntry } from "./scheduler";
+import {
+  DEDUPE_EMBEDDING_KIND,
+  DEDUPE_SOURCE_VERSION,
+  DEFAULT_EMBEDDING_MODEL,
+} from "./embeddingSource";
+import { getCurrentUser } from "./auth";
+import { gateNovelQuestions } from "./semanticDedupe";
 
 export const RESOLVED_JUDGING_VISIBLE_MS = 10_000;
+const DEFAULT_DECK_ID = "deep-learning";
 
 type Submission = {
   evaluationId: string;
   question: string;
   queuedQuestion: DueQuestion | null;
+  userId: string | null;
+  deckId: string | null;
   answer: string;
   submittedAt: number;
   previousReviews: string;
@@ -52,6 +64,7 @@ export type ReviewQueueItem = {
   lastScore: number | null;
   lastAnswer: string | null;
   lastAnswerSummary: string | null;
+  conciseAnswer: string | null;
   referenceAnswer: string | null;
   lastJustification: string | null;
   attempts: QuestionAttempt[];
@@ -363,14 +376,22 @@ async function getDeckEmbeddingPlot(): Promise<DeckEmbeddingPlot> {
   const questions = await readQuestionsWithEmbeddings();
   const totalQuestions = questions.length;
   const modelCounts = new Map<string, number>();
+  const preferredEmbeddings = questions.flatMap((question) =>
+    question.embeddings.filter(
+      (candidate) =>
+        candidate.embeddingKind === DEDUPE_EMBEDDING_KIND && candidate.isCurrent,
+    ),
+  );
+  const embeddingsForModelSelection =
+    preferredEmbeddings.length > 0
+      ? preferredEmbeddings
+      : questions.flatMap((question) => question.embeddings);
 
-  for (const question of questions) {
-    for (const embedding of question.embeddings) {
-      modelCounts.set(
-        embedding.embeddingModel,
-        (modelCounts.get(embedding.embeddingModel) ?? 0) + 1,
-      );
-    }
+  for (const embedding of embeddingsForModelSelection) {
+    modelCounts.set(
+      embedding.embeddingModel,
+      (modelCounts.get(embedding.embeddingModel) ?? 0) + 1,
+    );
   }
 
   const model = Array.from(modelCounts.entries()).sort(
@@ -388,9 +409,16 @@ async function getDeckEmbeddingPlot(): Promise<DeckEmbeddingPlot> {
 
   const selectedEmbeddings = questions
     .map((question) => {
-      const embedding = question.embeddings.find(
-        (candidate) => candidate.embeddingModel === model,
-      );
+      const embedding =
+        question.embeddings.find(
+          (candidate) =>
+            candidate.embeddingModel === model &&
+            candidate.embeddingKind === DEDUPE_EMBEDDING_KIND &&
+            candidate.isCurrent,
+        ) ??
+        question.embeddings.find(
+          (candidate) => candidate.embeddingModel === model,
+        );
 
       return embedding
         ? {
@@ -462,6 +490,7 @@ async function getReviewQueueItems(now = Date.now()): Promise<ReviewQueueItem[]>
         lastScore: latest?.score ?? lastReview?.score ?? null,
         lastAnswer: item.lastAnswer,
         lastAnswerSummary: latest?.answerSummary ?? item.lastAnswerSummary,
+        conciseAnswer: item.conciseAnswer,
         referenceAnswer: item.referenceAnswer,
         lastJustification: latest?.justification ?? null,
         attempts: attemptsByQuestion.get(item.question) ?? [],
@@ -571,6 +600,8 @@ async function processEvaluation(submission: Submission): Promise<void> {
       question: submission.question,
       answer: submission.answer,
       previousReviews: submission.previousReviews,
+      userId: submission.userId,
+      deckId: submission.deckId,
     });
 
     if (result.status === "failed") {
@@ -597,12 +628,36 @@ async function processEvaluation(submission: Submission): Promise<void> {
       ) {
         try {
           const sourceQuestionKey = submission.question.trim().toLowerCase();
-          const probingQuestions = await upsertDueQuestions({
-            questions: result.probingQuestions.filter(
+          const gateResult = await gateNovelQuestions(
+            result.probingQuestions.filter(
               (question) => question.trim().toLowerCase() !== sourceQuestionKey,
             ),
+            {
+              operation: "probing_question_gate",
+              userId: persisted.userId,
+              deckId: persisted.deckId,
+              question: submission.question,
+            },
+          );
+          const probingQuestions = await upsertDueQuestions({
+            questions: gateResult.accepted.map((candidate) => ({
+              question: candidate.question,
+              conciseAnswer: candidate.conciseAnswer,
+            })),
             sourceQuestion: submission.question,
             now: resolvedAt,
+          });
+
+          await upsertQuestionEmbeddings({
+            embeddings: gateResult.accepted.map((candidate) => ({
+              question: candidate.question,
+              embeddingModel:
+                process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+              embeddingKind: DEDUPE_EMBEDDING_KIND,
+              sourceVersion: DEDUPE_SOURCE_VERSION,
+              sourceHash: candidate.sourceHash,
+              embedding: candidate.embedding,
+            })),
           });
 
           enqueueProbingQuestions(probingQuestions);
@@ -618,6 +673,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
         {
           deckId: persisted.deckId,
           deckName: persisted.deckName,
+          userId: persisted.userId,
           question: persisted.question,
           reviews: persisted.reviews,
           nextDue: persisted.nextDue,
@@ -625,6 +681,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
           generatedFromQuestion: persisted.generatedFromQuestion,
           lastAnswer: persisted.lastAnswer,
           lastAnswerSummary: persisted.lastAnswerSummary,
+          conciseAnswer: persisted.conciseAnswer,
           referenceAnswer: persisted.referenceAnswer,
         },
         result.score,
@@ -694,6 +751,8 @@ export async function submitAnswer(input: {
     evaluationId: evaluation.id,
     question: input.question,
     queuedQuestion: queued,
+    userId: snapshot?.userId ?? null,
+    deckId: snapshot?.deckId ?? null,
     answer: input.answer,
     submittedAt,
     previousReviews: snapshot?.reviews ?? "",
@@ -705,14 +764,35 @@ export async function submitAnswer(input: {
 }
 
 export async function addQuestionsToDeck(input: {
-  questions: string[];
-}): Promise<{ added: number }> {
+  questions: Array<string | QuestionInput>;
+}): Promise<{ added: number; rejected: number }> {
   await initializeQueue();
 
+  const user = getCurrentUser();
+  const gateResult = await gateNovelQuestions(input.questions, {
+    operation: "add_questions_gate",
+    userId: user.id,
+    deckId: DEFAULT_DECK_ID,
+  });
+
   const addedQuestions = await upsertDueQuestions({
-    questions: input.questions,
+    questions: gateResult.accepted.map((candidate) => ({
+      question: candidate.question,
+      conciseAnswer: candidate.conciseAnswer,
+    })),
     sourceQuestion: null,
     now: Date.now(),
+  });
+
+  await upsertQuestionEmbeddings({
+    embeddings: gateResult.accepted.map((candidate) => ({
+      question: candidate.question,
+      embeddingModel: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+      embeddingKind: DEDUPE_EMBEDDING_KIND,
+      sourceVersion: DEDUPE_SOURCE_VERSION,
+      sourceHash: candidate.sourceHash,
+      embedding: candidate.embedding,
+    })),
   });
 
   enqueueProbingQuestions(addedQuestions);
@@ -720,6 +800,7 @@ export async function addQuestionsToDeck(input: {
 
   return {
     added: addedQuestions.length,
+    rejected: gateResult.rejected.length,
   };
 }
 

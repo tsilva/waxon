@@ -36,6 +36,20 @@
       "when": 1780582567749,
       "tag": "0004_thick_groot",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780590000000,
+      "tag": "0005_semantic_dedupe_gate",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780590000001,
+      "tag": "0006_quick_johnny_blaze",
+      "breakpoints": true
     }
   ]
 }

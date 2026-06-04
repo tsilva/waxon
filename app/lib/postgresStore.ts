@@ -23,6 +23,7 @@ export type QuestionRow = {
   generated_from_question: string | null;
   last_answer: string;
   last_answer_summary: string;
+  concise_answer: string;
   reference_answer: string;
   created_at: number;
 };
@@ -30,12 +31,14 @@ export type QuestionRow = {
 export type DueQuestion = {
   deckId: string;
   deckName: string;
+  userId: string;
   question: string;
   reviews: string;
   nextDue: number;
   generatedFromQuestion: string | null;
   lastAnswer: string | null;
   lastAnswerSummary: string | null;
+  conciseAnswer: string | null;
   referenceAnswer: string | null;
   createdAt: number;
 };
@@ -55,6 +58,10 @@ export type QuestionAttempt = {
 export type QuestionEmbedding = {
   question: string;
   embeddingModel: string;
+  embeddingKind: string;
+  sourceVersion: number;
+  sourceHash: string;
+  isCurrent: boolean;
   embedding: number[];
   createdAt: number;
   updatedAt: number;
@@ -67,12 +74,14 @@ export type QuestionWithEmbeddings = QuestionRow & {
 export type PersistedEvaluation = {
   deckId: string;
   deckName: string;
+  userId: string;
   question: string;
   reviews: string;
   nextDue: number;
   generatedFromQuestion: string | null;
   lastAnswer: string | null;
   lastAnswerSummary: string | null;
+  conciseAnswer: string | null;
   referenceAnswer: string | null;
   createdAt: number;
 } | null;
@@ -172,12 +181,14 @@ function toDueQuestion(row: QuestionRow): DueQuestion {
   return {
     deckId: row.deck_id,
     deckName: row.deck_name,
+    userId: row.user_id,
     question: row.question,
     reviews: row.reviews,
     nextDue: row.next_due,
     generatedFromQuestion: row.generated_from_question || null,
     lastAnswer: row.last_answer || null,
     lastAnswerSummary: row.last_answer_summary || null,
+    conciseAnswer: row.concise_answer || null,
     referenceAnswer: row.reference_answer || null,
     createdAt: row.created_at,
   };
@@ -200,6 +211,10 @@ function normalizeEmbedding(embedding: number[]): number[] {
 function toQuestionEmbedding(row: {
   question: string;
   embeddingModel: string;
+  embeddingKind: string;
+  sourceVersion: number;
+  sourceHash: string;
+  isCurrent: boolean;
   embedding: number[];
   createdAt: number;
   updatedAt: number;
@@ -207,6 +222,10 @@ function toQuestionEmbedding(row: {
   return {
     question: row.question,
     embeddingModel: row.embeddingModel,
+    embeddingKind: row.embeddingKind,
+    sourceVersion: row.sourceVersion,
+    sourceHash: row.sourceHash,
+    isCurrent: row.isCurrent,
     embedding: row.embedding,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -305,6 +324,7 @@ async function selectQuestionRows(whereClause = sql`true`): Promise<QuestionRow[
       generated_from_question: questions.generatedFromQuestion,
       last_answer: questions.lastAnswer,
       last_answer_summary: questions.lastAnswerSummary,
+      concise_answer: questions.conciseAnswer,
       reference_answer: questions.referenceAnswer,
       created_at: questions.createdAt,
     })
@@ -356,9 +376,14 @@ export async function readQuestionsWithEmbeddings(input: {
       generated_from_question: questions.generatedFromQuestion,
       last_answer: questions.lastAnswer,
       last_answer_summary: questions.lastAnswerSummary,
+      concise_answer: questions.conciseAnswer,
       reference_answer: questions.referenceAnswer,
       created_at: questions.createdAt,
       embedding_model: questionEmbeddings.embeddingModel,
+      embedding_kind: questionEmbeddings.embeddingKind,
+      source_version: questionEmbeddings.sourceVersion,
+      source_hash: questionEmbeddings.sourceHash,
+      is_current: questionEmbeddings.isCurrent,
       embedding: questionEmbeddings.embedding,
       embedding_created_at: questionEmbeddings.createdAt,
       embedding_updated_at: questionEmbeddings.updatedAt,
@@ -369,6 +394,7 @@ export async function readQuestionsWithEmbeddings(input: {
       questionEmbeddings,
       and(
         eq(questionEmbeddings.question, questions.question),
+        eq(questionEmbeddings.deckId, questions.deckId),
         model === null
           ? sql`true`
           : eq(questionEmbeddings.embeddingModel, model),
@@ -397,6 +423,7 @@ export async function readQuestionsWithEmbeddings(input: {
         generated_from_question: row.generated_from_question,
         last_answer: row.last_answer,
         last_answer_summary: row.last_answer_summary,
+        concise_answer: row.concise_answer,
         reference_answer: row.reference_answer,
         created_at: row.created_at,
         embeddings: [],
@@ -408,13 +435,21 @@ export async function readQuestionsWithEmbeddings(input: {
 
     if (
       row.embedding_model &&
+      row.embedding_kind &&
       row.embedding &&
+      row.source_version !== null &&
+      row.source_hash !== null &&
+      row.is_current !== null &&
       row.embedding_created_at !== null &&
       row.embedding_updated_at !== null
     ) {
       questionWithEmbeddings.embeddings.push({
         question: row.question,
         embeddingModel: row.embedding_model,
+        embeddingKind: row.embedding_kind,
+        sourceVersion: row.source_version,
+        sourceHash: row.source_hash,
+        isCurrent: row.is_current,
         embedding: row.embedding,
         createdAt: row.embedding_created_at,
         updatedAt: row.embedding_updated_at,
@@ -428,6 +463,8 @@ export async function readQuestionsWithEmbeddings(input: {
 export async function getQuestionEmbedding(input: {
   question: string;
   embeddingModel: string;
+  embeddingKind?: string;
+  sourceVersion?: number;
 }): Promise<QuestionEmbedding | null> {
   await ensureSeedData();
 
@@ -441,6 +478,10 @@ export async function getQuestionEmbedding(input: {
     .select({
       question: questionEmbeddings.question,
       embeddingModel: questionEmbeddings.embeddingModel,
+      embeddingKind: questionEmbeddings.embeddingKind,
+      sourceVersion: questionEmbeddings.sourceVersion,
+      sourceHash: questionEmbeddings.sourceHash,
+      isCurrent: questionEmbeddings.isCurrent,
       embedding: questionEmbeddings.embedding,
       createdAt: questionEmbeddings.createdAt,
       updatedAt: questionEmbeddings.updatedAt,
@@ -452,8 +493,15 @@ export async function getQuestionEmbedding(input: {
       and(
         eq(questions.deckId, currentDeckId()),
         eq(decks.userId, getCurrentUser().id),
+        eq(questionEmbeddings.deckId, questions.deckId),
         eq(questionEmbeddings.question, input.question),
         eq(questionEmbeddings.embeddingModel, model),
+        input.embeddingKind === undefined
+          ? sql`true`
+          : eq(questionEmbeddings.embeddingKind, input.embeddingKind),
+        input.sourceVersion === undefined
+          ? sql`true`
+          : eq(questionEmbeddings.sourceVersion, input.sourceVersion),
       ),
     );
 
@@ -463,6 +511,9 @@ export async function getQuestionEmbedding(input: {
 export async function upsertQuestionEmbedding(input: {
   question: string;
   embeddingModel: string;
+  embeddingKind?: string;
+  sourceVersion?: number;
+  sourceHash?: string;
   embedding: number[];
   now?: number;
 }): Promise<QuestionEmbedding> {
@@ -482,6 +533,9 @@ export async function upsertQuestionEmbeddings(input: {
   embeddings: Array<{
     question: string;
     embeddingModel: string;
+    embeddingKind?: string;
+    sourceVersion?: number;
+    sourceHash?: string;
     embedding: number[];
   }>;
   now?: number;
@@ -496,8 +550,13 @@ export async function upsertQuestionEmbeddings(input: {
   const valuesByKey = new Map<
     string,
     {
+      deckId: string;
       question: string;
       embeddingModel: string;
+      embeddingKind: string;
+      sourceVersion: number;
+      sourceHash: string;
+      isCurrent: boolean;
       embedding: number[];
       createdAt: number;
       updatedAt: number;
@@ -515,9 +574,17 @@ export async function upsertQuestionEmbeddings(input: {
       throw new Error("Embedding must have at least one component");
     }
 
-    valuesByKey.set(`${item.question}\0${model}`, {
+    const embeddingKind = item.embeddingKind?.trim() || "question_only";
+    const sourceVersion = item.sourceVersion ?? 1;
+
+    valuesByKey.set(`${item.question}\0${model}\0${embeddingKind}\0${sourceVersion}`, {
+      deckId: currentDeckId(),
       question: item.question,
       embeddingModel: model,
+      embeddingKind,
+      sourceVersion,
+      sourceHash: item.sourceHash?.trim() ?? "",
+      isCurrent: true,
       embedding: normalizeEmbedding(item.embedding),
       createdAt: now,
       updatedAt: now,
@@ -546,17 +613,26 @@ export async function upsertQuestionEmbeddings(input: {
     .values(values)
     .onConflictDoUpdate({
       target: [
+        questionEmbeddings.deckId,
         questionEmbeddings.question,
         questionEmbeddings.embeddingModel,
+        questionEmbeddings.embeddingKind,
+        questionEmbeddings.sourceVersion,
       ],
       set: {
         embedding: sql`excluded.embedding`,
+        sourceHash: sql`excluded.source_hash`,
+        isCurrent: true,
         updatedAt: now,
       },
     })
     .returning({
       question: questionEmbeddings.question,
       embeddingModel: questionEmbeddings.embeddingModel,
+      embeddingKind: questionEmbeddings.embeddingKind,
+      sourceVersion: questionEmbeddings.sourceVersion,
+      sourceHash: questionEmbeddings.sourceHash,
+      isCurrent: questionEmbeddings.isCurrent,
       embedding: questionEmbeddings.embedding,
       createdAt: questionEmbeddings.createdAt,
       updatedAt: questionEmbeddings.updatedAt,
@@ -656,11 +732,19 @@ export async function saveReferenceAnswer(input: {
     );
 }
 
-function normalizeGeneratedQuestions(generatedQuestions: string[]): string[] {
-  const seen = new Set<string>();
-  const normalizedQuestions: string[] = [];
+export type QuestionInput = {
+  question: string;
+  conciseAnswer?: string | null;
+};
 
-  for (const question of generatedQuestions) {
+function normalizeGeneratedQuestions(
+  generatedQuestions: Array<string | QuestionInput>,
+): QuestionInput[] {
+  const seen = new Set<string>();
+  const normalizedQuestions: QuestionInput[] = [];
+
+  for (const item of generatedQuestions) {
+    const question = typeof item === "string" ? item : item.question;
     const normalized = question.trim().replace(/\s+/g, " ");
     const key = questionSlug(normalized);
 
@@ -669,14 +753,20 @@ function normalizeGeneratedQuestions(generatedQuestions: string[]): string[] {
     }
 
     seen.add(key);
-    normalizedQuestions.push(normalized);
+    normalizedQuestions.push({
+      question: normalized,
+      conciseAnswer:
+        typeof item === "string"
+          ? ""
+          : (item.conciseAnswer ?? "").trim().replace(/\s+/g, " "),
+    });
   }
 
   return normalizedQuestions;
 }
 
 export async function upsertDueQuestions(input: {
-  questions: string[];
+  questions: Array<string | QuestionInput>;
   sourceQuestion: string | null;
   now: number;
 }): Promise<DueQuestion[]> {
@@ -695,10 +785,11 @@ export async function upsertDueQuestions(input: {
     .values(
       generatedQuestions.map((question) => ({
         deckId: currentDeckId(),
-        question,
-        questionSlug: questionSlug(question),
+        question: question.question,
+        questionSlug: questionSlug(question.question),
         nextDue: now,
         generatedFromQuestion: input.sourceQuestion,
+        conciseAnswer: question.conciseAnswer ?? "",
         createdAt: now,
         updatedAt: now,
       })),
@@ -711,6 +802,7 @@ export async function upsertDueQuestions(input: {
           ${questions.generatedFromQuestion},
           excluded.generated_from_question
         )`,
+        conciseAnswer: sql`coalesce(nullif(${questions.conciseAnswer}, ''), excluded.concise_answer)`,
         updatedAt: now,
       },
     });
@@ -718,7 +810,7 @@ export async function upsertDueQuestions(input: {
   const rows = await selectQuestionRows(
     inArray(
       questions.questionSlug,
-      generatedQuestions.map((question) => questionSlug(question)),
+      generatedQuestions.map((question) => questionSlug(question.question)),
     ),
   );
 
@@ -748,6 +840,7 @@ export async function applyEvaluationToPostgres(input: {
         generated_from_question: questions.generatedFromQuestion,
         last_answer: questions.lastAnswer,
         last_answer_summary: questions.lastAnswerSummary,
+        concise_answer: questions.conciseAnswer,
         reference_answer: questions.referenceAnswer,
         created_at: questions.createdAt,
       })
@@ -808,6 +901,7 @@ export async function applyEvaluationToPostgres(input: {
     return {
       deckId: row.deck_id,
       deckName: row.deck_name,
+      userId: row.user_id,
       question: row.question,
       reviews,
       nextDue: roundedNextDue,
@@ -815,6 +909,7 @@ export async function applyEvaluationToPostgres(input: {
       lastAnswer: input.answer || null,
       lastAnswerSummary: input.answerSummary || null,
       referenceAnswer: row.reference_answer || null,
+      conciseAnswer: row.concise_answer || null,
       createdAt: row.created_at,
     };
   });

@@ -1,5 +1,13 @@
+import {
+  extractChatCompletionText,
+  getOpenRouterApiKey,
+  openRouterChatCompletion,
+} from "./openRouter";
+
 export type ReferenceAnswerInput = {
   question: string;
+  userId?: string | null;
+  deckId?: string | null;
 };
 
 const REFERENCE_ANSWER_TIMEOUT_MS = 25_000;
@@ -23,37 +31,10 @@ Keep the total response direct, accurate, and no longer than five sentences.
 Use Markdown when it improves readability. Use inline math as $...$ and display equations as $$...$$.`;
 }
 
-function extractChatCompletionText(response: unknown): string {
-  const body = response as {
-    choices?: Array<{
-      message?: {
-        content?: unknown;
-      };
-    }>;
-  };
-  const content = body.choices?.[0]?.message?.content;
-
-  if (typeof content === "string") {
-    return content.trim();
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        const candidate = part as { text?: unknown };
-        return typeof candidate.text === "string" ? candidate.text : "";
-      })
-      .join("")
-      .trim();
-  }
-
-  return "";
-}
-
 export async function generateReferenceAnswer(
   input: ReferenceAnswerInput,
 ): Promise<string> {
-  const apiKey = process.env.OPENROUTER_API_KEY ?? process.env.LLM_API_KEY;
+  const apiKey = getOpenRouterApiKey();
 
   if (!apiKey) {
     return "Reference answer is unavailable because no LLM API key is configured.";
@@ -66,16 +47,16 @@ export async function generateReferenceAnswer(
   );
 
   try {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
+    const { response, body } = await openRouterChatCompletion({
+      apiKey,
       signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:3000",
-        "X-Title": "waxon",
+      trace: {
+        operation: "reference_answer",
+        userId: input.userId,
+        deckId: input.deckId,
+        question: input.question,
       },
-      body: JSON.stringify({
+      body: {
         model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
         messages: [
           {
@@ -85,14 +66,14 @@ export async function generateReferenceAnswer(
         ],
         temperature: 0,
         max_tokens: 420,
-      }),
+      },
     });
 
     if (!response.ok) {
       return "Reference answer is unavailable right now.";
     }
 
-    const answer = extractChatCompletionText(await response.json());
+    const answer = extractChatCompletionText(body);
     return answer || "Reference answer is unavailable right now.";
   } catch {
     return "Reference answer is unavailable right now.";
