@@ -208,13 +208,14 @@ async function loadQuestions(pool, options) {
     `
       SELECT
         q.deck_id,
+        q.id AS question_id,
         q.question,
         q.concise_answer,
         qe.source_hash AS existing_source_hash
-      FROM questions q
-      LEFT JOIN question_embeddings qe
-        ON qe.question = q.question
-       AND qe.deck_id = q.deck_id
+	      FROM questions q
+	      LEFT JOIN question_embeddings qe
+	        ON qe.question_id = q.id
+	       AND qe.deck_id = q.deck_id
        AND qe.embedding_model = $1
        AND qe.embedding_kind = $2
        AND qe.source_version = $3
@@ -248,6 +249,7 @@ async function saveEmbeddings(pool, rows, options) {
       `
         INSERT INTO question_embeddings (
           deck_id,
+          question_id,
           question,
           embedding_model,
           embedding_kind,
@@ -258,10 +260,10 @@ async function saveEmbeddings(pool, rows, options) {
           created_at,
           updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, true, $7::vector, $8, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8::vector, $9, $9)
         ON CONFLICT (
           deck_id,
-          question,
+          question_id,
           embedding_model,
           embedding_kind,
           source_version
@@ -274,6 +276,7 @@ async function saveEmbeddings(pool, rows, options) {
       `,
       [
         row.deck_id,
+        row.question_id,
         row.question,
         options.model,
         options.kind,

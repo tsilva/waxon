@@ -337,7 +337,7 @@ async function loadGenerationNeighbors(input: {
         qe.embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
           <=> $1::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS}) AS distance
       FROM question_embeddings qe
-      JOIN questions q ON q.question = qe.question
+      JOIN questions q ON q.id = qe.question_id
       WHERE qe.deck_id = $2
         AND qe.embedding_model = $3
         AND qe.embedding_kind = $4

@@ -285,7 +285,7 @@ async function loadExternalNeighbors(
           <=> c.embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS}) AS distance
       FROM candidates c
       CROSS JOIN LATERAL (
-        SELECT qe.question, qe.embedding
+        SELECT qe.question_id, qe.question, qe.embedding
         FROM question_embeddings qe
         WHERE qe.deck_id = $${deckParam}
           AND qe.embedding_model = $${modelParam}
@@ -297,7 +297,7 @@ async function loadExternalNeighbors(
           <=> c.embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
         LIMIT $${limitParam}
       ) qe
-      JOIN questions q ON q.question = qe.question
+      JOIN questions q ON q.id = qe.question_id
       ORDER BY c.candidate_id ASC, distance ASC
     `,
     params,
