@@ -3403,34 +3403,81 @@ export default function Home() {
                 <p className="stats-empty">No answers recorded yet.</p>
               ) : (
                 <ol className="stats-history-list">
-                  {selectedQuestionStats.answerHistory.map((entry) => (
-                    <li key={entry.id}>
-                      <div className="stats-history-row-header">
-                        <span>
-                          {formatReviewDate(entry.resolvedAt ?? entry.submittedAt)}
-                        </span>
-                        <strong>
-                          {entry.status === "grading"
-                            ? "Grading"
-                            : `${entry.score}/10`}
-                        </strong>
-                      </div>
-                      <p className="stats-history-answer">{entry.rawAnswer}</p>
-                      {entry.answerSummary &&
-                      entry.answerSummary !== entry.rawAnswer ? (
-                        <p className="stats-history-summary">
-                          <span>Summary</span>
-                          {entry.answerSummary}
-                        </p>
-                      ) : null}
-                      {entry.justification ? (
-                        <p className="stats-history-summary">
-                          <span>Feedback</span>
-                          {entry.justification}
-                        </p>
-                      ) : null}
+                  {selectedQuestionStats.answerHistory.map((entry) => {
+                    const isPending = entry.status === "grading";
+
+                    return (
+                      <li
+                        className={`stats-history-row ${
+                          isPending
+                            ? "stats-history-row-pending"
+                            : "stats-history-row-resolved"
+                        }`}
+                        key={entry.id}
+                      >
+                        <div className="stats-history-score-slot">
+                          {isPending ? (
+                            <span className="pending-spinner" aria-hidden="true" />
+                          ) : (
+                            <PreviousAnswerScore score={entry.score} />
+                          )}
+                        </div>
+
+                        <div className="stats-history-copy">
+                          <div className="previous-field stats-history-answer-field">
+                            <span className="previous-field-label">Answer</span>
+                            <p className="stats-history-answer">
+                              {entry.rawAnswer}
+                            </p>
+                          </div>
+
+                          {entry.answerSummary &&
+                          entry.answerSummary !== entry.rawAnswer ? (
+                            <div className="previous-field">
+                              <span className="previous-field-label">
+                                Summary
+                              </span>
+                              <p className="stats-history-summary">
+                                {entry.answerSummary}
+                              </p>
+                            </div>
+                          ) : null}
+                          <div className="previous-field">
+                            <span className="previous-field-label">
+                              Evaluation
+                            </span>
+                            {entry.justification ? (
+                              <p className="stats-history-summary">
+                                {entry.justification}
+                              </p>
+                            ) : (
+                              <p className="stats-history-summary stats-history-summary-muted">
+                                {isPending
+                                  ? "Evaluating in background..."
+                                  : "No feedback returned."}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="stats-history-row-meta">
+                          <time
+                            className="previous-time"
+                            dateTime={new Date(
+                              entry.resolvedAt ?? entry.submittedAt,
+                            ).toISOString()}
+                          >
+                            {formatReviewDate(
+                              entry.resolvedAt ?? entry.submittedAt,
+                            )}
+                          </time>
+                          <span className="stats-history-status">
+                            {isPending ? "Grading" : "Resolved"}
+                          </span>
+                        </div>
                       </li>
-                  ))}
+                    );
+                  })}
                 </ol>
               )}
               {selectedQuestionStats.lastJustification ? (
