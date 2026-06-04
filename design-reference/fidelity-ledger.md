@@ -10,6 +10,7 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - Verified computed mobile question font after fix: same Baskerville-first stack; `font-weight: 400`.
 - Question-row geometry mismatch: the implemented target icon and question text were too close together, which made the corrected serif still read unlike the design. Fixed by widening the desktop icon-to-question gap so the question begins at the same visual column as the approved desktop panel.
 - Header alignment mismatch: the brand/title group was slightly too far right. Fixed by tightening desktop header horizontal padding.
+- Header navigation alignment mismatch: the brand and Review/Queue labels were centered within the left header area instead of the shell. Fixed by centering the brand/tab group in the header and anchoring the status/user actions separately on desktop.
 
 ## Remaining Comparison Notes
 

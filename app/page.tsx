@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import {
   ChangeEvent,
+  DragEvent,
   FormEvent,
   Fragment,
   type CSSProperties,
@@ -1173,8 +1174,7 @@ export default function Home() {
   const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
   const [generatorScope, setGeneratorScope] = useState("");
-  const [generatorQuestionCount, setGeneratorQuestionCount] = useState("12");
-  const [generatorDifficulty, setGeneratorDifficulty] = useState("Mixed");
+  const [generatorQuestionCount, setGeneratorQuestionCount] = useState(12);
   const [generatorFiles, setGeneratorFiles] = useState<GeneratorContextFile[]>([]);
   const [generatedQuestions, setGeneratedQuestions] = useState<
     GeneratedQuestionCandidate[]
@@ -1188,7 +1188,6 @@ export default function Home() {
   const questionRef = useRef(question);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
-  const generatorFileInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
   const keepListeningRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -1880,12 +1879,7 @@ export default function Home() {
     }
   }
 
-  async function handleGeneratorFileChange(
-    event: ChangeEvent<HTMLInputElement>,
-  ) {
-    const selectedFiles = Array.from(event.target.files ?? []);
-    event.target.value = "";
-
+  async function addGeneratorContextFiles(selectedFiles: File[]) {
     if (selectedFiles.length === 0) {
       return;
     }
@@ -1923,15 +1917,20 @@ export default function Home() {
     setGeneratorMessage(null);
   }
 
+  async function handleGeneratorFileDrop(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    await addGeneratorContextFiles(Array.from(event.dataTransfer.files ?? []));
+  }
+
   function removeGeneratorFile(fileId: string) {
     setGeneratorFiles((current) => current.filter((file) => file.id !== fileId));
   }
 
   async function generateQuestionBatch() {
-    const requestedCount = Number.parseInt(generatorQuestionCount, 10);
     const count = Math.min(
       MAX_GENERATED_QUESTION_COUNT,
-      Math.max(1, Number.isFinite(requestedCount) ? requestedCount : 12),
+      Math.max(1, generatorQuestionCount),
     );
     const hasContext =
       generatorScope.trim().length > 0 || generatorFiles.length > 0;
@@ -1956,7 +1955,7 @@ export default function Home() {
           scope: generatorScope,
           files: generatorFiles,
           count,
-          difficulty: generatorDifficulty,
+          difficulty: "Mixed",
           existingQuestions: [
             ...generatedQuestions.map((item) => item.question),
             ...reviewQueue.map((item) => item.question),
@@ -2967,97 +2966,77 @@ export default function Home() {
 
             <div className="generator-modal-grid">
               <section className="generator-scope-panel" aria-label="Generation scope">
-                <label className="generator-field">
-                  <span>Cover</span>
-                  <textarea
-                    className="generator-scope-input"
-                    value={generatorScope}
-                    onChange={(event) => {
-                      setGeneratorScope(event.target.value);
-                      setGeneratorMessage(null);
+                <div className="generator-field">
+                  <label htmlFor="generator-scope-input">Cover</label>
+                  <div
+                    className="generator-scope-shell"
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "copy";
                     }}
-                    placeholder="Core ideas from the attached lecture notes"
-                    rows={7}
-                  />
-                </label>
-
-                <div className="generator-controls">
-                  <label className="generator-small-field">
-                    <span>Questions</span>
-                    <input
-                      className="generator-number-input"
-                      type="number"
-                      min={1}
-                      max={MAX_GENERATED_QUESTION_COUNT}
-                      value={generatorQuestionCount}
-                      onChange={(event) =>
-                        setGeneratorQuestionCount(event.target.value)
-                      }
+                    onDrop={(event) => void handleGeneratorFileDrop(event)}
+                  >
+                    <textarea
+                      id="generator-scope-input"
+                      className="generator-scope-input"
+                      value={generatorScope}
+                      onChange={(event) => {
+                        setGeneratorScope(event.target.value);
+                        setGeneratorMessage(null);
+                      }}
+                      placeholder="Core ideas from the attached lecture notes"
+                      rows={7}
                     />
-                  </label>
-                  <label className="generator-small-field">
-                    <span>Difficulty</span>
-                    <span className="generator-select-shell">
-                      <select
-                        className="generator-select"
-                        value={generatorDifficulty}
-                        onChange={(event) =>
-                          setGeneratorDifficulty(event.target.value)
-                        }
-                      >
-                        <option>Mixed</option>
-                        <option>Gentle</option>
-                        <option>Hard</option>
-                      </select>
-                      <ChevronDown aria-hidden="true" />
-                    </span>
-                  </label>
+                    <p className="generator-drop-hint">
+                      Drop files here to add them as context.
+                    </p>
+                    {generatorFiles.length > 0 ? (
+                      <ul className="generator-file-list" aria-label="Context files">
+                        {generatorFiles.map((file) => (
+                          <li className="generator-file-chip" key={file.id}>
+                            <FileText aria-hidden="true" />
+                            <span>{file.name}</span>
+                            {file.status === "metadata-only" ? (
+                              <em>name only</em>
+                            ) : null}
+                            <button
+                              type="button"
+                              aria-label={`Remove ${file.name}`}
+                              onClick={() => removeGeneratorFile(file.id)}
+                            >
+                              <X aria-hidden="true" />
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
                 </div>
 
-                <div className="generator-context">
-                  <div className="generator-context-header">
-                    <span>Context</span>
-                    <button
-                      className="generator-upload-button"
-                      type="button"
-                      onClick={() => generatorFileInputRef.current?.click()}
-                    >
-                      <Upload aria-hidden="true" />
-                      <span>Add files</span>
-                    </button>
+                <div className="generator-controls">
+                  <label className="generator-slider-field">
+                    <span className="generator-slider-header">
+                      <span>Questions</span>
+                      <output>{generatorQuestionCount}</output>
+                    </span>
                     <input
-                      ref={generatorFileInputRef}
-                      className="generator-file-input"
-                      type="file"
-                      multiple
-                      onChange={(event) => void handleGeneratorFileChange(event)}
+                      className="generator-count-slider"
+                      type="range"
+                      min={1}
+                      max={MAX_GENERATED_QUESTION_COUNT}
+                      step={1}
+                      value={generatorQuestionCount}
+                      onChange={(event) =>
+                        setGeneratorQuestionCount(
+                          Number.parseInt(event.target.value, 10),
+                        )
+                      }
                     />
-                  </div>
-
-                  {generatorFiles.length === 0 ? (
-                    <p className="generator-context-empty">
-                      Attach notes, markdown, text, or reference files.
-                    </p>
-                  ) : (
-                    <ul className="generator-file-list" aria-label="Context files">
-                      {generatorFiles.map((file) => (
-                        <li className="generator-file-chip" key={file.id}>
-                          <FileText aria-hidden="true" />
-                          <span>{file.name}</span>
-                          {file.status === "metadata-only" ? (
-                            <em>name only</em>
-                          ) : null}
-                          <button
-                            type="button"
-                            aria-label={`Remove ${file.name}`}
-                            onClick={() => removeGeneratorFile(file.id)}
-                          >
-                            <X aria-hidden="true" />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                    <span className="generator-slider-scale" aria-hidden="true">
+                      <span>1</span>
+                      <span>{MAX_GENERATED_QUESTION_COUNT}</span>
+                    </span>
+                  </label>
                 </div>
 
                 <div className="generator-scope-footer">
@@ -3098,13 +3077,25 @@ export default function Home() {
                         className={`generator-question-row generator-question-${item.status}`}
                         key={item.id}
                       >
-                        <div className="generator-question-status" aria-hidden="true">
+                        <button
+                          className="generator-question-status"
+                          type="button"
+                          aria-label={
+                            item.status === "new"
+                              ? `Add question: ${item.question}`
+                              : item.status === "adding"
+                                ? "Adding question"
+                                : "Question already added"
+                          }
+                          disabled={item.status !== "new"}
+                          onClick={() => void addGeneratedQuestionToDeck(item.id)}
+                        >
                           {item.status === "added" ? (
-                            <Check />
+                            <Check aria-hidden="true" />
                           ) : (
-                            <Plus />
+                            <Plus aria-hidden="true" />
                           )}
-                        </div>
+                        </button>
                         <div className="generator-question-copy">
                           <MarkdownInline
                             as="p"
@@ -3119,27 +3110,6 @@ export default function Home() {
                                 ? "Adding"
                               : item.status}
                           </p>
-                        </div>
-                        <div className="generator-question-actions">
-                          <button
-                            className="generator-add-question-button"
-                            type="button"
-                            disabled={item.status !== "new"}
-                            onClick={() => void addGeneratedQuestionToDeck(item.id)}
-                          >
-                            {item.status === "added" ? (
-                              <Check aria-hidden="true" />
-                            ) : (
-                              <Plus aria-hidden="true" />
-                            )}
-                            <span>
-                              {item.status === "added"
-                                ? "Added"
-                                : item.status === "adding"
-                                  ? "Adding"
-                                  : "Add"}
-                            </span>
-                          </button>
                         </div>
                       </li>
                     ))}
