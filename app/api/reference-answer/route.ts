@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { generateReferenceAnswer } from "@/app/lib/referenceAnswer";
+import {
+  generateReferenceAnswer,
+  hasReferenceAnswerExplanation,
+} from "@/app/lib/referenceAnswer";
 import {
   getStoredReferenceAnswer,
   saveReferenceAnswer,
@@ -24,7 +27,7 @@ export async function POST(request: Request) {
   const question = payload.question.trim();
   const cachedAnswer = await getStoredReferenceAnswer(question);
 
-  if (cachedAnswer) {
+  if (cachedAnswer && hasReferenceAnswerExplanation(cachedAnswer)) {
     return NextResponse.json({ answer: cachedAnswer });
   }
 

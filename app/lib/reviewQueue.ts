@@ -44,6 +44,7 @@ export type ReviewQueueItem = {
   deckName: string;
   question: string;
   nextDue: number;
+  createdAt: number;
   msUntilDue: number;
   status: "now" | "scheduled";
   generatedFromQuestion: string | null;
@@ -453,6 +454,7 @@ async function getReviewQueueItems(now = Date.now()): Promise<ReviewQueueItem[]>
         deckName: item.deckName,
         question: item.question,
         nextDue: item.nextDue,
+        createdAt: item.createdAt,
         msUntilDue,
         status: msUntilDue <= 0 ? "now" : "scheduled",
         generatedFromQuestion: item.generatedFromQuestion,
@@ -619,6 +621,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
           question: persisted.question,
           reviews: persisted.reviews,
           nextDue: persisted.nextDue,
+          createdAt: persisted.createdAt,
           generatedFromQuestion: persisted.generatedFromQuestion,
           lastAnswer: persisted.lastAnswer,
           lastAnswerSummary: persisted.lastAnswerSummary,

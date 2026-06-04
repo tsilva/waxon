@@ -3,13 +3,23 @@ export type ReferenceAnswerInput = {
 };
 
 const REFERENCE_ANSWER_TIMEOUT_MS = 25_000;
+const REFERENCE_ANSWER_EXPLANATION_PATTERN =
+  /(^|\n)\s*(?:[-*]\s*)?(?:\*\*)?Why(?:\*\*)?\s*:/i;
+
+export function hasReferenceAnswerExplanation(answer: string): boolean {
+  return REFERENCE_ANSWER_EXPLANATION_PATTERN.test(answer);
+}
 
 function buildPrompt(input: ReferenceAnswerInput): string {
-  return `Answer this flashcard as a concise reference answer.
+  return `Answer this flashcard as a concise reference answer with a brief explanation.
 
 Question: ${input.question}
 
-Return only the answer. Keep it direct, accurate, and no longer than three sentences.
+Return both sections using exactly these Markdown labels:
+- **Answer:** the direct answer.
+- **Why:** a brief explanation of why the answer is correct.
+
+Keep the total response direct, accurate, and no longer than five sentences.
 Use Markdown when it improves readability. Use inline math as $...$ and display equations as $$...$$.`;
 }
 
@@ -74,7 +84,7 @@ export async function generateReferenceAnswer(
           },
         ],
         temperature: 0,
-        max_tokens: 260,
+        max_tokens: 420,
       }),
     });
 
