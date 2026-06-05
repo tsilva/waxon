@@ -1,5 +1,5 @@
-import ReviewApp from "../review/ReviewApp";
+import { redirect } from "next/navigation";
 
 export default function QueuePage() {
-  return <ReviewApp initialActiveTab="queue" />;
+  redirect("/decks");
 }

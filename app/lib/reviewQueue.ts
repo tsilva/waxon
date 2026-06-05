@@ -6,6 +6,7 @@ import {
   getRecentQuestionAttempts,
   getQuestionSnapshot,
   readQuestionsWithEmbeddings,
+  resolveOwnedDeckId,
   upsertDueQuestions,
   upsertQuestionEmbeddings,
   type DueQuestion,
@@ -33,7 +34,7 @@ import {
 } from "./auth";
 import { gateNovelQuestions } from "./semanticDedupe";
 
-export const RESOLVED_JUDGING_VISIBLE_MS = 10_000;
+export const RESOLVED_JUDGING_VISIBLE_MS = 5 * 60_000;
 const EVALUATION_PROCESSING_TIMEOUT_MS = EVALUATION_TIMEOUT_MS;
 
 type EvaluationPhase =
@@ -865,6 +866,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
             })),
             sourceQuestion: submission.question,
             now: resolvedAt,
+            deckId: persisted.deckId,
             userId: persisted.userId,
           });
 
@@ -882,6 +884,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
               sourceHash: candidate.sourceHash,
               embedding: candidate.embedding,
             })),
+            deckId: persisted.deckId,
             userId: persisted.userId,
           });
 
@@ -1033,9 +1036,13 @@ export async function submitAnswer(input: {
 
 export async function addQuestionsToDeck(input: {
   questions: Array<string | QuestionInput>;
+  deckId?: string;
 }): Promise<{ added: number; rejected: number }> {
   const user = await initializeQueue();
-  const deckId = getDeckIdForUser(user.id);
+  const deckId = await resolveOwnedDeckId({
+    userId: user.id,
+    deckId: input.deckId,
+  });
 
   const gateResult = await gateNovelQuestions(input.questions, {
     operation: "add_questions_gate",
@@ -1050,6 +1057,7 @@ export async function addQuestionsToDeck(input: {
     })),
     sourceQuestion: null,
     now: Date.now(),
+    deckId,
     userId: user.id,
   });
 
@@ -1062,6 +1070,7 @@ export async function addQuestionsToDeck(input: {
       sourceHash: candidate.sourceHash,
       embedding: candidate.embedding,
     })),
+    deckId,
     userId: user.id,
   });
 

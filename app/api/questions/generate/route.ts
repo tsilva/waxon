@@ -6,8 +6,11 @@ import {
   DEDUPE_SOURCE_VERSION,
   DEFAULT_EMBEDDING_MODEL,
 } from "@/app/lib/embeddingSource";
-import { getCurrentUser, getDeckIdForUser } from "@/app/lib/auth";
-import { ensureQuestionsDatabase } from "@/app/lib/postgresStore";
+import { getCurrentUser } from "@/app/lib/auth";
+import {
+  ensureQuestionsDatabase,
+  resolveOwnedDeckId,
+} from "@/app/lib/postgresStore";
 import {
   extractChatCompletionText,
   getOpenRouterApiKey,
@@ -377,8 +380,8 @@ export async function POST(request: Request) {
 
   const body: unknown = await request.json().catch(() => null);
   const user = await getCurrentUser();
-  const deckId = getDeckIdForUser(user.id);
   const payload = body as Record<string, unknown>;
+  const requestedDeckId = normalizeText(payload.deckId);
   const scope = normalizeText(payload.scope);
   const files = normalizeFiles(payload.files);
   const difficulty = normalizeText(payload.difficulty) || "Mixed";
@@ -394,6 +397,21 @@ export async function POST(request: Request) {
   }
 
   await ensureQuestionsDatabase();
+  let deckId: string;
+
+  try {
+    deckId = await resolveOwnedDeckId({
+      userId: user.id,
+      deckId: requestedDeckId || undefined,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Deck not found.";
+
+    return NextResponse.json(
+      { ok: false, error: message },
+      { status: message === "Deck not found." ? 404 : 500 },
+    );
+  }
 
   const context = buildContext({ scope, files });
   const contextSummary = await summarizeGenerationContext({
