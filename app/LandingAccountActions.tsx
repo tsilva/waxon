@@ -2,6 +2,7 @@
 
 import { Show, SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
 import Link from "next/link";
+import { AccountWidgetsUserProfilePage } from "@/app/AccountProfileWidgets";
 
 export function LandingAccountActions() {
   return (
@@ -32,7 +33,9 @@ export function LandingAccountActions() {
                 userButtonTrigger: "landing-user-button-trigger",
               },
             }}
-          />
+          >
+            <AccountWidgetsUserProfilePage />
+          </UserButton>
         </div>
       </Show>
     </div>

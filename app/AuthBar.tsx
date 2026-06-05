@@ -7,6 +7,7 @@ import {
   UserButton,
 } from "@clerk/nextjs";
 import { usePathname } from "next/navigation";
+import { AccountWidgetsUserProfilePage } from "@/app/AccountProfileWidgets";
 
 const authRoutes = ["/sign-in", "/sign-up"];
 const reviewShellRoutes = ["/review", "/queue", "/admin"];
@@ -40,7 +41,9 @@ export function AuthBar() {
         </div>
       </Show>
       <Show when="signed-in">
-        <UserButton />
+        <UserButton>
+          <AccountWidgetsUserProfilePage />
+        </UserButton>
       </Show>
     </header>
   );

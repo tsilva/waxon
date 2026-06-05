@@ -270,6 +270,10 @@ function deckIdForSlug(userId: string, slug: string): string {
   return userId === "tsilva" ? slug : `${userId}:${slug}`;
 }
 
+function normalizedDeckName(input: string): string {
+  return input.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 async function uniqueDeckSlug(userId: string, preferredSlug: string): Promise<string> {
   const rows = await db
     .select({ slug: decks.slug })
@@ -290,6 +294,27 @@ async function uniqueDeckSlug(userId: string, preferredSlug: string): Promise<st
   }
 
   throw new Error("Could not create a unique deck slug.");
+}
+
+async function assertDeckNameAvailable(input: {
+  userId: string;
+  name: string;
+  excludeDeckId?: string;
+}) {
+  const nameKey = normalizedDeckName(input.name);
+  const rows = await db
+    .select({ id: decks.id, name: decks.name })
+    .from(decks)
+    .where(and(eq(decks.userId, input.userId), isNull(decks.archivedAt)));
+
+  if (
+    rows.some(
+      (row) =>
+        row.id !== input.excludeDeckId && normalizedDeckName(row.name) === nameKey,
+    )
+  ) {
+    throw new Error("Deck name already exists.");
+  }
 }
 
 function normalizeEmbeddingModel(embeddingModel: string): string {
@@ -543,7 +568,14 @@ export async function createDeck(input: {
   userId?: string;
 }): Promise<DeckSummary> {
   const context = await ensureSeedData(input);
-  const name = input.name.trim() || "Untitled deck";
+  const name = input.name.trim();
+
+  if (!name) {
+    throw new Error("Deck name is required.");
+  }
+
+  await assertDeckNameAvailable({ userId: context.userId, name });
+
   const slug = await uniqueDeckSlug(context.userId, deckSlug(name));
   const now = Math.round(Date.now());
   const deckId = deckIdForSlug(context.userId, slug);
@@ -584,7 +616,21 @@ export async function updateDeck(input: {
     throw new Error("Deck not found.");
   }
 
+  const hasNameUpdate = input.name !== undefined;
   const nextName = input.name?.trim();
+
+  if (hasNameUpdate && !nextName) {
+    throw new Error("Deck name is required.");
+  }
+
+  if (nextName) {
+    await assertDeckNameAvailable({
+      userId: context.userId,
+      name: nextName,
+      excludeDeckId: input.deckId,
+    });
+  }
+
   const now = Math.round(Date.now());
 
   await db
@@ -645,6 +691,7 @@ export async function readQuestions(
 }
 
 export async function readQuestionsWithEmbeddings(input: {
+  deckId?: string;
   embeddingModel?: string;
   questions?: string[];
   userId?: string;
@@ -1013,7 +1060,9 @@ export async function getQueuedQuestionsPage(
   ).filter(Boolean);
   const whereClause = and(
     eq(decks.userId, context.userId),
-    eq(decks.inReviewRotation, true),
+    input.deckId
+      ? eq(questions.deckId, input.deckId)
+      : eq(decks.inReviewRotation, true),
     isNull(decks.archivedAt),
     excludeQuestions.length > 0
       ? notInArray(questions.question, excludeQuestions)

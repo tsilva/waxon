@@ -3,6 +3,7 @@
 import { useClerk, useUser } from "@clerk/nextjs";
 import Image from "next/image";
 import Link from "next/link";
+import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import {
   ArrowUp,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import {
   ChangeEvent,
+  CSSProperties,
   DragEvent,
   FormEvent,
   Fragment,
@@ -56,6 +58,7 @@ type NextQuestionPrefetch = {
 type SubmitAnswerResponse = {
   ok: boolean;
   evaluationId: string;
+  traceId: string;
 };
 
 type QueueStatusResponse = {
@@ -97,6 +100,7 @@ type ReferenceAnswerState = {
 
 type EvaluationQueueItem = {
   id: string;
+  traceId: string;
   question: string;
   answer: string | null;
   status: "grading" | "resolved";
@@ -156,6 +160,15 @@ type DeckEmbeddingPlotPoint = {
   y: number;
 };
 
+type HoveredEmbeddingPoint = DeckEmbeddingPlotPoint & {
+  arrowLeftPx: number;
+  tooltipLeftPx: number;
+  tooltipTopPx: number;
+  verticalPlacement: "above" | "below";
+  statusLabel: string;
+  scoreLabel: string | null;
+};
+
 type ChatMessage =
   | {
       id: string;
@@ -168,6 +181,7 @@ type ChatMessage =
       question: string;
       answer: string;
       evaluationId: string;
+      traceId: string;
       submittedAt: number;
       status: "grading" | "resolved";
       phase: EvaluationPhase | null;
@@ -186,6 +200,7 @@ type PreviousAnswerItem = {
   phase: EvaluationPhase | null;
   score: number | null;
   justification: string | null;
+  traceId: string | null;
   timestamp: number | null;
   timeLabel: string;
 };
@@ -214,6 +229,8 @@ type ReviewSessionSnapshot = {
   selectedDeckId: string;
   deckSearchQuery: string;
   deckSortKey: DeckSortKey;
+  selectedDeckDetailId: string | null;
+  isCreatingDeck: boolean;
   editingDeckId: string | null;
   deckDraftName: string;
   deckEmbeddingPlot: DeckEmbeddingPlotResponse;
@@ -422,6 +439,9 @@ type MathParseResult = {
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
 const QUEUE_PAGE_SIZE = 48;
+const QUEUE_PAGE_GROWTH_FACTOR = 1.75;
+const QUEUE_ROW_ESTIMATED_HEIGHT = 132;
+const QUEUE_ROW_OVERSCAN = 14;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 
 function createEmptyDeckEmbeddingPlot(): DeckEmbeddingPlotResponse {
@@ -792,6 +812,14 @@ function formatDurationBadge(msUntilDue: number): string {
   return `${days}d ${remainingHours}h`;
 }
 
+function normalizeDeckNameForComparison(input: string): string {
+  return input.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function formatDueBadge(item: ReviewQueueItem): string {
+  return formatDurationBadge(item.msUntilDue);
+}
+
 function scoreTone(score: number | null) {
   if (score === null) {
     return "neutral";
@@ -1131,6 +1159,191 @@ function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
   );
 }
 
+function DeckEmbeddingPlot({
+  plot,
+  reviewQueue,
+}: {
+  plot: DeckEmbeddingPlotResponse;
+  reviewQueue: ReviewQueueItem[];
+}) {
+  const [hoveredPoint, setHoveredPoint] =
+    useState<HoveredEmbeddingPoint | null>(null);
+  const plotCanvasRef = useRef<HTMLDivElement | null>(null);
+  const width = 720;
+  const height = 270;
+  const padding = 26;
+  const statusByQuestion = useMemo(
+    () => new Map(reviewQueue.map((item) => [item.question, item])),
+    [reviewQueue],
+  );
+
+  function getPointMetadata(
+    point: DeckEmbeddingPlotPoint,
+  ): Pick<HoveredEmbeddingPoint, "statusLabel" | "scoreLabel"> {
+    const queueItem = statusByQuestion.get(point.question);
+
+    return {
+      statusLabel: queueItem
+        ? queueItem.status === "now"
+          ? "Due now"
+          : `Due in ${formatDueBadge(queueItem)}`
+        : "Not scheduled",
+      scoreLabel:
+        queueItem?.lastScore === null || queueItem?.lastScore === undefined
+          ? null
+          : `Last score ${queueItem.lastScore}/10`,
+    };
+  }
+
+  function showPoint(point: DeckEmbeddingPlotPoint) {
+    const x = padding + point.x * (width - padding * 2);
+    const y = padding + (1 - point.y) * (height - padding * 2);
+    const canvasRect = plotCanvasRef.current?.getBoundingClientRect();
+    const canvasWidth = canvasRect?.width ?? width;
+    const canvasHeight = canvasRect?.height ?? height;
+    const renderedX = (x / width) * canvasWidth;
+    const renderedY = (y / height) * canvasHeight;
+    const isCompact = canvasWidth < 520;
+    const horizontalInset = isCompact ? 10 : 14;
+    const arrowInset = 14;
+    const tooltipWidth = Math.min(
+      isCompact ? 280 : 340,
+      canvasWidth - (isCompact ? 20 : 28),
+    );
+    const minTooltipLeft = horizontalInset;
+    const maxTooltipLeft = Math.max(
+      minTooltipLeft,
+      canvasWidth - tooltipWidth - horizontalInset,
+    );
+    const tooltipLeft = Math.min(
+      Math.max(renderedX - tooltipWidth / 2, minTooltipLeft),
+      maxTooltipLeft,
+    );
+    const metadata = getPointMetadata(point);
+
+    setHoveredPoint({
+      ...point,
+      ...metadata,
+      arrowLeftPx: Math.min(
+        Math.max(renderedX - tooltipLeft, arrowInset),
+        tooltipWidth - arrowInset,
+      ),
+      tooltipLeftPx: tooltipLeft,
+      tooltipTopPx: renderedY,
+      verticalPlacement: y / height < 0.32 ? "below" : "above",
+    });
+  }
+
+  return (
+    <section className="embedding-plot-panel" aria-label="Deck embedding map">
+      <div className="embedding-plot-header">
+        <div>
+          <h2>Embedding map</h2>
+          <p>
+            {plot.embeddedQuestions}/{plot.totalQuestions} cards
+            {plot.model ? ` · ${plot.model}` : ""}
+          </p>
+        </div>
+      </div>
+
+      {plot.points.length === 0 ? (
+        <div className="embedding-plot-empty">
+          Embeddings will appear here after backfill.
+        </div>
+      ) : (
+        <div
+          className="embedding-plot-canvas"
+          ref={plotCanvasRef}
+          onMouseLeave={() => setHoveredPoint(null)}
+        >
+          <svg
+            className="embedding-plot"
+            role="img"
+            aria-label="Deck questions plotted by embedding similarity"
+            viewBox={`0 0 ${width} ${height}`}
+          >
+            <line
+              className="embedding-plot-grid"
+              x1={padding}
+              x2={width - padding}
+              y1={height / 2}
+              y2={height / 2}
+            />
+            <line
+              className="embedding-plot-grid"
+              x1={width / 2}
+              x2={width / 2}
+              y1={padding}
+              y2={height - padding}
+            />
+            <rect
+              className="embedding-plot-frame"
+              x={padding}
+              y={padding}
+              width={width - padding * 2}
+              height={height - padding * 2}
+              rx="10"
+            />
+            {plot.points.map((point) => {
+              const queueItem = statusByQuestion.get(point.question);
+              const tone =
+                point.lastScore === null
+                  ? "unanswered"
+                  : queueItem?.status === "now"
+                    ? "now"
+                    : "scheduled";
+              const x = padding + point.x * (width - padding * 2);
+              const y = padding + (1 - point.y) * (height - padding * 2);
+
+              return (
+                <g
+                  className={`embedding-plot-point point-${tone}`}
+                  key={point.question}
+                  onFocus={() => showPoint(point)}
+                  onBlur={() => setHoveredPoint(null)}
+                  onMouseEnter={() => showPoint(point)}
+                >
+                  <circle cx={x} cy={y} r="7" />
+                  <circle
+                    className="embedding-plot-hit-area"
+                    cx={x}
+                    cy={y}
+                    r="15"
+                  />
+                </g>
+              );
+            })}
+          </svg>
+
+          {hoveredPoint ? (
+            <div
+              className={`embedding-tooltip tooltip-y-${hoveredPoint.verticalPlacement}`}
+              style={
+                {
+                  "--tooltip-arrow-left": `${hoveredPoint.arrowLeftPx}px`,
+                  left: `${hoveredPoint.tooltipLeftPx}px`,
+                  top: `${hoveredPoint.tooltipTopPx}px`,
+                } as CSSProperties
+              }
+              role="status"
+            >
+              <MarkdownInline
+                as="p"
+                className="embedding-tooltip-question"
+                text={hoveredPoint.question}
+              />
+              <span>
+                {hoveredPoint.statusLabel}
+                {hoveredPoint.scoreLabel ? ` · ${hoveredPoint.scoreLabel}` : ""}
+              </span>
+            </div>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function SubmitIcon() {
   return <ArrowUp aria-hidden="true" />;
 }
@@ -1140,6 +1353,10 @@ export default function ReviewApp({
 }: ReviewAppProps) {
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
+  const accountWidgetsCustomPages = useMemo(
+    () => createAccountWidgetsCustomPages(),
+    [],
+  );
   const cachedSessionRef = useRef(reviewSessionSnapshot);
   const hasLoadedQuestionRef = useRef(
     cachedSessionRef.current?.hasLoadedQuestion ?? false,
@@ -1184,7 +1401,7 @@ export default function ReviewApp({
     start: cachedSessionRef.current?.queueVirtualRange.start ?? 0,
     end: cachedSessionRef.current?.queueVirtualRange.end ?? QUEUE_PAGE_SIZE,
   });
-  const [queueSortKey] = useState<QueueSortKey>(
+  const [queueSortKey, setQueueSortKey] = useState<QueueSortKey>(
     () => cachedSessionRef.current?.queueSortKey ?? "review-date",
   );
   const [decks, setDecks] = useState<DeckManagementItem[]>(
@@ -1199,6 +1416,12 @@ export default function ReviewApp({
   const [deckSortKey, setDeckSortKey] = useState<DeckSortKey>(
     () => cachedSessionRef.current?.deckSortKey ?? "updated",
   );
+  const [selectedDeckDetailId, setSelectedDeckDetailId] = useState<
+    string | null
+  >(() => cachedSessionRef.current?.selectedDeckDetailId ?? null);
+  const [isCreatingDeck, setIsCreatingDeck] = useState(
+    () => cachedSessionRef.current?.isCreatingDeck ?? false,
+  );
   const [editingDeckId, setEditingDeckId] = useState<string | null>(
     () => cachedSessionRef.current?.editingDeckId ?? null,
   );
@@ -1206,7 +1429,9 @@ export default function ReviewApp({
     () => cachedSessionRef.current?.deckDraftName ?? "",
   );
   const [isDecksLoading, setIsDecksLoading] = useState(false);
+  const [isDeckSaving, setIsDeckSaving] = useState(false);
   const [deckPageMessage, setDeckPageMessage] = useState<string | null>(null);
+  const [deckEditorMessage, setDeckEditorMessage] = useState<string | null>(null);
   const [deckEmbeddingPlot, setDeckEmbeddingPlot] =
     useState<DeckEmbeddingPlotResponse>(
       () => cachedSessionRef.current?.deckEmbeddingPlot ?? createEmptyDeckEmbeddingPlot(),
@@ -1376,6 +1601,8 @@ export default function ReviewApp({
       selectedDeckId,
       deckSearchQuery,
       deckSortKey,
+      selectedDeckDetailId,
+      isCreatingDeck,
       editingDeckId,
       deckDraftName,
       deckEmbeddingPlot,
@@ -1407,6 +1634,7 @@ export default function ReviewApp({
     editingDeckId,
     evaluations,
     expandedPreviousAnswerIds,
+    isCreatingDeck,
     generatedQuestions,
     generatorFiles,
     generatorMessage,
@@ -1423,6 +1651,7 @@ export default function ReviewApp({
     reviewQueue,
     reviewQueueTotal,
     selectedDeckId,
+    selectedDeckDetailId,
     selectedQuestion,
     speechPreview,
   ]);
@@ -1437,10 +1666,31 @@ export default function ReviewApp({
     setGeneratorMessage(null);
   }, [isGeneratingQuestions]);
 
+  const openQuestionGenerator = useCallback(() => {
+    setGeneratedQuestions([]);
+    setGeneratorMessage(null);
+    setIsQuestionGeneratorOpen(true);
+  }, []);
+
   const selectedDeck =
     decks.find((deck) => deck.id === selectedDeckId) ?? decks[0] ?? null;
+  const selectedDeckDetail =
+    decks.find((deck) => deck.id === selectedDeckDetailId) ?? null;
   const editingDeck =
     decks.find((deck) => deck.id === editingDeckId) ?? null;
+  const deckDraftNameKey = normalizeDeckNameForComparison(deckDraftName);
+  const isDeckDraftNameDuplicate =
+    deckDraftNameKey.length > 0 &&
+    decks.some(
+      (deck) =>
+        deck.id !== editingDeckId &&
+        normalizeDeckNameForComparison(deck.name) === deckDraftNameKey,
+    );
+  const deckDraftNameMessage = isDeckDraftNameDuplicate
+    ? "Deck name already exists."
+    : deckEditorMessage;
+  const canSaveDeckDraft =
+    !isDeckSaving && deckDraftNameKey.length > 0 && !isDeckDraftNameDuplicate;
   const visibleDecks = useMemo(() => {
     const normalizedQuery = deckSearchQuery.trim().toLowerCase();
     const filteredDecks = normalizedQuery
@@ -1506,84 +1756,99 @@ export default function ReviewApp({
   const openDeckEditor = useCallback((deck: DeckManagementItem) => {
     setSelectedDeckId(deck.id);
     setDeckDraftName(deck.name);
+    setDeckEditorMessage(null);
+    setIsCreatingDeck(false);
     setEditingDeckId(deck.id);
   }, []);
 
-  const createDeck = useCallback(async () => {
+  const createDeck = useCallback(() => {
     setDeckPageMessage(null);
-
-    try {
-      const response = await fetch("/api/decks", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: "Untitled deck",
-          inReviewRotation: false,
-        }),
-      });
-      const data = (await response.json()) as DeckMutationResponse;
-
-      if (!response.ok || !data.ok || !data.deck) {
-        throw new Error(data.error ?? "Could not create deck.");
-      }
-
-      setDecks((currentDecks) => [data.deck as DeckManagementItem, ...currentDecks]);
-      setSelectedDeckId(data.deck.id);
-      setDeckDraftName(data.deck.name);
-      setEditingDeckId(data.deck.id);
-    } catch (createError) {
-      setDeckPageMessage(
-        createError instanceof Error
-          ? createError.message
-          : "Could not create deck.",
-      );
-    }
+    setDeckEditorMessage(null);
+    setDeckDraftName("");
+    setEditingDeckId(null);
+    setIsCreatingDeck(true);
   }, []);
 
   const saveDeckDraft = useCallback(async () => {
-    if (!editingDeckId) {
+    if ((!editingDeckId && !isCreatingDeck) || isDeckSaving) {
       return;
     }
 
     const nextName = deckDraftName.trim();
 
     if (!nextName) {
-      setDeckPageMessage("Deck name is required.");
+      setDeckEditorMessage("Deck name is required.");
       return;
     }
 
+    if (isDeckDraftNameDuplicate) {
+      setDeckEditorMessage("Deck name already exists.");
+      return;
+    }
+
+    setDeckEditorMessage(null);
+    setDeckPageMessage(null);
+    setIsDeckSaving(true);
+
     try {
-      const response = await fetch(`/api/decks/${encodeURIComponent(editingDeckId)}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
+      const response = await fetch(
+        isCreatingDeck
+          ? "/api/decks"
+          : `/api/decks/${encodeURIComponent(editingDeckId as string)}`,
+        {
+          method: isCreatingDeck ? "POST" : "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: nextName,
+            ...(isCreatingDeck ? { inReviewRotation: false } : {}),
+          }),
         },
-        body: JSON.stringify({
-          name: nextName,
-        }),
-      });
+      );
       const data = (await response.json()) as DeckMutationResponse;
 
       if (!response.ok || !data.ok || !data.deck) {
-        throw new Error(data.error ?? "Could not update deck.");
+        throw new Error(
+          data.error ??
+            (isCreatingDeck ? "Could not create deck." : "Could not update deck."),
+        );
       }
 
-      setDecks((currentDecks) =>
-        currentDecks.map((deck) =>
-          deck.id === editingDeckId ? (data.deck as DeckManagementItem) : deck,
-        ),
-      );
+      if (isCreatingDeck) {
+        setDecks((currentDecks) => [
+          data.deck as DeckManagementItem,
+          ...currentDecks,
+        ]);
+        setSelectedDeckId(data.deck.id);
+      } else {
+        setDecks((currentDecks) =>
+          currentDecks.map((deck) =>
+            deck.id === editingDeckId ? (data.deck as DeckManagementItem) : deck,
+          ),
+        );
+      }
+
+      setIsCreatingDeck(false);
       setEditingDeckId(null);
     } catch (updateError) {
-      setDeckPageMessage(
+      setDeckEditorMessage(
         updateError instanceof Error
           ? updateError.message
-          : "Could not update deck.",
+          : isCreatingDeck
+            ? "Could not create deck."
+            : "Could not update deck.",
       );
+    } finally {
+      setIsDeckSaving(false);
     }
-  }, [deckDraftName, editingDeckId]);
+  }, [
+    deckDraftName,
+    editingDeckId,
+    isCreatingDeck,
+    isDeckDraftNameDuplicate,
+    isDeckSaving,
+  ]);
 
   const archiveDeck = useCallback(
     async (deckId: string) => {
@@ -1654,6 +1919,41 @@ export default function ReviewApp({
           : "Could not update rotation.",
       );
     }
+  }, []);
+
+  const openDeckQueue = useCallback(
+    (deck: DeckManagementItem) => {
+      setSelectedDeckId(deck.id);
+      setSelectedDeckDetailId(deck.id);
+      queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
+      hasLoadedQueueStatusRef.current = false;
+      loadedQueueSortKeyRef.current = null;
+      setReviewQueue([]);
+      setRecentAttempts([]);
+      setReviewQueueTotal(0);
+      setDeckEmbeddingPlot(createEmptyDeckEmbeddingPlot());
+      setQueueVirtualRange({
+        start: 0,
+        end: QUEUE_PAGE_SIZE,
+      });
+      navigateToTab("queue");
+    },
+    [navigateToTab],
+  );
+
+  const closeDeckQueue = useCallback(() => {
+    setSelectedDeckDetailId(null);
+    queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
+    hasLoadedQueueStatusRef.current = false;
+    loadedQueueSortKeyRef.current = null;
+    setReviewQueue([]);
+    setRecentAttempts([]);
+    setReviewQueueTotal(0);
+    setDeckEmbeddingPlot(createEmptyDeckEmbeddingPlot());
+    setQueueVirtualRange({
+      start: 0,
+      end: QUEUE_PAGE_SIZE,
+    });
   }, []);
 
   useEffect(() => {
@@ -1958,8 +2258,12 @@ export default function ReviewApp({
       sort: queueSortKey,
     });
 
+    if (selectedDeckDetailId) {
+      params.set("deckId", selectedDeckDetailId);
+    }
+
     return `/api/queue-status?${params.toString()}`;
-  }, [queueSortKey]);
+  }, [queueSortKey, selectedDeckDetailId]);
 
   const applyQueueStatus = useCallback((data: QueueStatusResponse) => {
     setQueueRemaining(data.queueRemaining);
@@ -2064,7 +2368,7 @@ export default function ReviewApp({
     };
 
     return () => events.close();
-  }, [loadStatus, queueSortKey]);
+  }, [loadStatus, queueSortKey, selectedDeckDetailId]);
 
   useEffect(() => {
     setMessages((current) => {
@@ -2090,7 +2394,8 @@ export default function ReviewApp({
           message.justification === evaluation.justification &&
           message.answerSummary === evaluation.answerSummary &&
           message.nextDue === evaluation.nextDue &&
-          message.resolvedAt === evaluation.resolvedAt
+          message.resolvedAt === evaluation.resolvedAt &&
+          message.traceId === evaluation.traceId
         ) {
           return message;
         }
@@ -2106,6 +2411,7 @@ export default function ReviewApp({
           answerSummary: evaluation.answerSummary,
           nextDue: evaluation.nextDue,
           resolvedAt: evaluation.resolvedAt,
+          traceId: evaluation.traceId,
         };
       });
 
@@ -2156,6 +2462,7 @@ export default function ReviewApp({
           question: submittedQuestion,
           answer: submittedAnswer || "(blank)",
           evaluationId: data.evaluationId,
+          traceId: data.traceId,
           submittedAt,
           status: "grading",
           phase: "queued",
@@ -2756,6 +3063,7 @@ export default function ReviewApp({
         phase: message.phase,
         score: message.score,
         justification: message.justification,
+        traceId: message.traceId,
         timestamp,
         timeLabel:
           message.status === "grading"
@@ -2792,6 +3100,7 @@ export default function ReviewApp({
         phase: evaluation.phase,
         score: evaluation.score,
         justification: evaluation.justification,
+        traceId: evaluation.traceId,
         timestamp,
         timeLabel:
           evaluation.status === "grading"
@@ -2834,6 +3143,7 @@ export default function ReviewApp({
       phase: null,
       score: attempt.score,
       justification: attempt.justification,
+      traceId: null,
       timestamp: attempt.resolvedAt || attempt.submittedAt,
       timeLabel: formatRelativeTime(
         attempt.resolvedAt || attempt.submittedAt,
@@ -2882,6 +3192,7 @@ export default function ReviewApp({
         justification:
           item.lastJustification ??
           "Covers the core idea; a few details could be sharper.",
+        traceId: null,
         timestamp,
         timeLabel: formatRelativeTime(timestamp, currentTime),
       };
@@ -2906,6 +3217,88 @@ export default function ReviewApp({
   const nextScheduledReview = reviewQueue.find(
     (item) => item.status === "scheduled",
   );
+  const sortedReviewQueue = useMemo(() => {
+    return [...reviewQueue].sort((a, b) => {
+      const dateComparison =
+        queueSortKey === "review-date"
+          ? a.nextDue - b.nextDue
+          : b.createdAt - a.createdAt;
+
+      return dateComparison || a.question.localeCompare(b.question);
+    });
+  }, [queueSortKey, reviewQueue]);
+  const hasMoreReviewQueue = reviewQueue.length < reviewQueueTotal;
+  const loadMoreQueueRows = useCallback(() => {
+    if (isQueuePageLoadingRef.current || !hasMoreReviewQueue) {
+      return;
+    }
+
+    const nextLimit = Math.min(
+      reviewQueueTotal,
+      Math.max(
+        reviewQueue.length + QUEUE_PAGE_SIZE,
+        Math.ceil(
+          Math.max(reviewQueue.length, QUEUE_PAGE_SIZE) *
+            QUEUE_PAGE_GROWTH_FACTOR,
+        ),
+      ),
+    );
+
+    if (nextLimit <= reviewQueue.length) {
+      return;
+    }
+
+    void loadStatus(nextLimit);
+  }, [
+    hasMoreReviewQueue,
+    loadStatus,
+    reviewQueue.length,
+    reviewQueueTotal,
+  ]);
+  const updateQueueVirtualRange = useCallback(() => {
+    const totalRows = sortedReviewQueue.length;
+    const scroller = queueStageRef.current;
+    const list = queueListRef.current;
+
+    if (!scroller || !list || totalRows === 0) {
+      setQueueVirtualRange({
+        start: 0,
+        end: Math.min(totalRows, QUEUE_PAGE_SIZE),
+      });
+      return;
+    }
+
+    const listTop = list.offsetTop;
+    const visibleTop = Math.max(0, scroller.scrollTop - listTop);
+    const visibleBottom = visibleTop + scroller.clientHeight;
+    const nextStart = Math.max(
+      0,
+      Math.floor(visibleTop / QUEUE_ROW_ESTIMATED_HEIGHT) - QUEUE_ROW_OVERSCAN,
+    );
+    const nextEnd = Math.min(
+      totalRows,
+      Math.ceil(visibleBottom / QUEUE_ROW_ESTIMATED_HEIGHT) +
+        QUEUE_ROW_OVERSCAN,
+    );
+
+    setQueueVirtualRange((currentRange) =>
+      currentRange.start === nextStart && currentRange.end === nextEnd
+        ? currentRange
+        : {
+            start: nextStart,
+            end: nextEnd,
+          },
+    );
+  }, [sortedReviewQueue.length]);
+  const visibleQueueRows = sortedReviewQueue.slice(
+    queueVirtualRange.start,
+    queueVirtualRange.end,
+  );
+  const queueTopSpacerHeight =
+    queueVirtualRange.start * QUEUE_ROW_ESTIMATED_HEIGHT;
+  const queueBottomSpacerHeight =
+    Math.max(0, sortedReviewQueue.length - queueVirtualRange.end) *
+    QUEUE_ROW_ESTIMATED_HEIGHT;
   const previousAnswerPlaceholderCount = isPreviousExpanded
     ? 0
     : isReviewResting
@@ -3122,6 +3515,62 @@ export default function ReviewApp({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [selectedQuestionStats]);
 
+  useEffect(() => {
+    if (activeTab !== "queue" || !selectedDeckDetailId) {
+      return;
+    }
+
+    const stage = queueStageRef.current;
+
+    updateQueueVirtualRange();
+
+    if (!stage) {
+      return;
+    }
+
+    stage.addEventListener("scroll", updateQueueVirtualRange, { passive: true });
+    window.addEventListener("resize", updateQueueVirtualRange);
+
+    return () => {
+      stage.removeEventListener("scroll", updateQueueVirtualRange);
+      window.removeEventListener("resize", updateQueueVirtualRange);
+    };
+  }, [
+    activeTab,
+    selectedDeckDetailId,
+    sortedReviewQueue.length,
+    updateQueueVirtualRange,
+  ]);
+
+  useEffect(() => {
+    if (
+      activeTab !== "queue" ||
+      !selectedDeckDetailId ||
+      isQueuePageLoadingRef.current
+    ) {
+      return;
+    }
+
+    const stage = queueStageRef.current;
+
+    if (!stage || !hasMoreReviewQueue) {
+      return;
+    }
+
+    const distanceToBottom =
+      stage.scrollHeight - stage.scrollTop - stage.clientHeight;
+
+    if (distanceToBottom < QUEUE_ROW_ESTIMATED_HEIGHT * 4) {
+      loadMoreQueueRows();
+    }
+  }, [
+    activeTab,
+    hasMoreReviewQueue,
+    loadMoreQueueRows,
+    queueVirtualRange.end,
+    selectedDeckDetailId,
+  ]);
+
   async function generateReferenceAnswer(questionToAnswer: string) {
     const storedAnswer =
       reviewQueue.find((item) => item.question === questionToAnswer)
@@ -3240,7 +3689,10 @@ export default function ReviewApp({
                 id="queue-tab"
                 aria-selected={activeTab === "queue"}
                 aria-controls="queue-panel"
-                onClick={(event) => navigateToTab("queue", event)}
+                onClick={(event) => {
+                  closeDeckQueue();
+                  navigateToTab("queue", event);
+                }}
               >
                 Decks
               </Link>
@@ -3314,7 +3766,9 @@ export default function ReviewApp({
                     role="menuitem"
                     onClick={() => {
                       setIsUserMenuOpen(false);
-                      clerk.openUserProfile();
+                      clerk.openUserProfile({
+                        customPages: accountWidgetsCustomPages,
+                      });
                     }}
                   >
                     <ManageAccountIcon />
@@ -3599,13 +4053,24 @@ export default function ReviewApp({
                     </button>
 
                     {isDetailsExpanded ? (
-                      <button
-                        className="previous-details-link"
-                        type="button"
-                        onClick={() => setSelectedQuestion(item.question)}
-                      >
-                        More details
-                      </button>
+                      canViewAdmin && item.traceId ? (
+                        <Link
+                          className="previous-details-link"
+                          href={`/admin/traces/${encodeURIComponent(
+                            item.traceId,
+                          )}`}
+                        >
+                          More details
+                        </Link>
+                      ) : (
+                        <button
+                          className="previous-details-link"
+                          type="button"
+                          onClick={() => setSelectedQuestion(item.question)}
+                        >
+                          More details
+                        </button>
+                      )
                     ) : null}
                   </li>
                 );
@@ -3646,199 +4111,359 @@ export default function ReviewApp({
         </div>
 
         <section
-          className="queue-stage deck-stage"
+          className={`queue-stage ${
+            selectedDeckDetailId ? "" : "deck-stage"
+          }`}
           ref={queueStageRef}
           hidden={activeTab !== "queue"}
           id="queue-panel"
           role="tabpanel"
           aria-labelledby="queue-tab"
         >
-          <div className="queue-toolbar deck-toolbar">
-            <button
-              className="queue-generate-trigger"
-              type="button"
-              onClick={createDeck}
-            >
-              <Plus aria-hidden="true" />
-              <span>Create deck</span>
-            </button>
-            <label className="deck-search-label">
-              <span className="sr-only">Search decks</span>
-              <span className="deck-search-shell">
-                <Search aria-hidden="true" />
-                <input
-                  className="deck-search-input"
-                  type="search"
-                  value={deckSearchQuery}
-                  onChange={(event) => setDeckSearchQuery(event.target.value)}
-                  placeholder="Search decks"
-                />
-              </span>
-            </label>
-            <label className="queue-sort-label">
-              Sort by
-              <span className="queue-sort-select-shell">
-                <select
-                  className="queue-sort-select"
-                  value={deckSortKey}
-                  onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                    setDeckSortKey(event.target.value as DeckSortKey)
-                  }
-                  aria-label="Sort decks"
+          {selectedDeckDetailId ? (
+            <>
+              <div className="queue-detail-header">
+                <button
+                  className="queue-back-button"
+                  type="button"
+                  onClick={closeDeckQueue}
                 >
-                  <option value="updated">Updated</option>
-                  <option value="due">Due count</option>
-                  <option value="name">Name</option>
-                </select>
-                <ChevronDown aria-hidden="true" />
-              </span>
-            </label>
-          </div>
+                  Decks
+                </button>
+                <div>
+                  <h2>{selectedDeckDetail?.name ?? "Deck"}</h2>
+                  {selectedDeckDetail?.slug ? (
+                    <p>{selectedDeckDetail.slug}</p>
+                  ) : null}
+                </div>
+              </div>
 
-          {deckPageMessage ? (
-            <p className="queue-empty" role="status">
-              {deckPageMessage}
-            </p>
-          ) : null}
+              <DeckEmbeddingPlot
+                plot={deckEmbeddingPlot}
+                reviewQueue={reviewQueue}
+              />
 
-          {isDecksLoading ? (
-            <p className="queue-empty">Loading decks...</p>
-          ) : decks.length === 0 ? (
-            <p className="queue-empty">No decks yet.</p>
-          ) : visibleDecks.length === 0 ? (
-            <p className="queue-empty">No matching decks.</p>
-          ) : (
-            <ol className="queue-list deck-list" ref={queueListRef}>
-              {visibleDecks.map((deck) => {
-                const isSelected = selectedDeck?.id === deck.id;
-
-                return (
-                  <li className="queue-row deck-row" key={deck.id}>
-                    <div
-                      className={`queue-row-card deck-row-card ${
-                        isSelected ? "deck-row-card-selected" : ""
-                      }`}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`Select ${deck.name}`}
-                      aria-pressed={isSelected}
-                      onClick={() => setSelectedDeckId(deck.id)}
-                      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          setSelectedDeckId(deck.id);
-                        }
-                      }}
+              <div className="queue-toolbar">
+                <button
+                  className="queue-generate-trigger"
+                  type="button"
+                  onClick={openQuestionGenerator}
+                >
+                  <Sparkles aria-hidden="true" />
+                  <span>Generate</span>
+                </button>
+                <label className="queue-sort-label">
+                  Sort by
+                  <span className="queue-sort-select-shell">
+                    <select
+                      className="queue-sort-select"
+                      value={queueSortKey}
+                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                        setQueueSortKey(event.target.value as QueueSortKey)
+                      }
+                      aria-label="Sort queue"
                     >
-                      <div className="deck-row-main">
-                        <div className="deck-row-copy">
-                          <p className="queue-question deck-name">{deck.name}</p>
-                          {deck.slug ? (
-                            <p className="queue-origin deck-description">
-                              {deck.slug}
-                            </p>
-                          ) : null}
-                        </div>
-                        <div className="deck-row-meta" aria-label="Deck details">
-                          <span
-                            className={`due-badge ${
-                              deck.dueCount > 0 ? "now" : "scheduled"
-                            }`}
-                          >
-                            {deck.dueCount} due
-                          </span>
-                          <span>{deck.cardCount} cards</span>
-                          <span>{formatReviewDate(deck.lastReviewedAt)}</span>
-                        </div>
-                      </div>
-                      <div className="deck-row-actions">
-                        <button
-                          className={`deck-rotation-toggle ${
-                            deck.inReviewRotation
-                              ? "deck-rotation-toggle-on"
-                              : ""
-                          }`}
-                          type="button"
-                          aria-label={
-                            deck.inReviewRotation
-                              ? `Remove ${deck.name} from review rotation`
-                              : `Add ${deck.name} to review rotation`
-                          }
-                          aria-pressed={deck.inReviewRotation}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void toggleDeckRotation(deck);
-                          }}
-                        >
-                          <span />
-                        </button>
-                        <button
-                          className="deck-icon-button"
-                          type="button"
-                          aria-label={`Edit ${deck.name}`}
-                          title="Edit"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openDeckEditor(deck);
-                          }}
-                        >
-                          <PencilLine aria-hidden="true" />
-                        </button>
-                        <button
-                          className="deck-icon-button deck-icon-button-danger"
-                          type="button"
-                          aria-label={`Archive ${deck.name}`}
-                          title="Archive"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void archiveDeck(deck.id);
-                          }}
-                        >
-                          <Trash2 aria-hidden="true" />
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
-          )}
+                      <option value="review-date">Review date</option>
+                      <option value="creation-date">Creation date</option>
+                    </select>
+                    <ChevronDown aria-hidden="true" />
+                  </span>
+                </label>
+              </div>
 
-          <div className="deck-summary-strip" aria-label="Deck summary">
-            <span>{decks.length} decks</span>
-            <span>{rotationDeckCount} in rotation</span>
-            <span>{rotationDueCount} due in rotation</span>
-            <span>{totalCardCount} cards</span>
-          </div>
+              {reviewQueue.length === 0 ? (
+                <p className="queue-empty">
+                  {isQueuePageLoading ? "Loading queue..." : "No active cards."}
+                </p>
+              ) : (
+                <ol className="queue-list" ref={queueListRef}>
+                  {queueTopSpacerHeight > 0 ? (
+                    <li
+                      className="queue-spacer"
+                      style={{ height: queueTopSpacerHeight }}
+                      aria-hidden="true"
+                    />
+                  ) : null}
+
+                  {visibleQueueRows.map((item) => (
+                    <li
+                      className="queue-row"
+                      key={`${item.question}-${item.nextDue}`}
+                    >
+                      <div
+                        className="queue-row-card"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Open card details for ${item.question}`}
+                        onClick={() => setSelectedQuestion(item.question)}
+                        onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedQuestion(item.question);
+                          }
+                        }}
+                      >
+                        <div className="queue-row-main">
+                          <MarkdownInline
+                            as="p"
+                            className="queue-question"
+                            text={item.question}
+                          />
+                          {item.generatedFromQuestion ? (
+                            <MarkdownInline
+                              as="p"
+                              className="queue-origin"
+                              text={`Generated from: ${item.generatedFromQuestion}`}
+                            />
+                          ) : null}
+                          <div className="queue-metrics" aria-label="Card metrics">
+                            <PreviousAnswerScore
+                              className="queue-last-score"
+                              label={
+                                item.lastScore === null
+                                  ? "No previous score"
+                                  : `Last score ${item.lastScore} out of 10`
+                              }
+                              score={item.lastScore}
+                            />
+                            <span
+                              className={`due-badge ${
+                                item.status === "now" ? "now" : "scheduled"
+                              }`}
+                            >
+                              {formatDueBadge(item)}
+                            </span>
+                          </div>
+                        </div>
+                        {item.lastJustification ? (
+                          <p className="queue-justification">
+                            {item.lastJustification}
+                          </p>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+
+                  {queueBottomSpacerHeight > 0 ? (
+                    <li
+                      className="queue-spacer"
+                      style={{ height: queueBottomSpacerHeight }}
+                      aria-hidden="true"
+                    />
+                  ) : null}
+
+                  {hasMoreReviewQueue || isQueuePageLoading ? (
+                    <li className="queue-loading-row" aria-live="polite">
+                      {isQueuePageLoading
+                        ? "Loading more cards..."
+                        : `${reviewQueue.length}/${reviewQueueTotal} loaded`}
+                    </li>
+                  ) : null}
+                </ol>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="queue-toolbar deck-toolbar">
+                <button
+                  className="queue-generate-trigger"
+                  type="button"
+                  onClick={createDeck}
+                >
+                  <Plus aria-hidden="true" />
+                  <span>Create deck</span>
+                </button>
+                <label className="deck-search-label">
+                  <span className="sr-only">Search decks</span>
+                  <span className="deck-search-shell">
+                    <Search aria-hidden="true" />
+                    <input
+                      className="deck-search-input"
+                      type="search"
+                      value={deckSearchQuery}
+                      onChange={(event) => setDeckSearchQuery(event.target.value)}
+                      placeholder="Search decks"
+                    />
+                  </span>
+                </label>
+                <label className="queue-sort-label">
+                  Sort by
+                  <span className="queue-sort-select-shell">
+                    <select
+                      className="queue-sort-select"
+                      value={deckSortKey}
+                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                        setDeckSortKey(event.target.value as DeckSortKey)
+                      }
+                      aria-label="Sort decks"
+                    >
+                      <option value="updated">Updated</option>
+                      <option value="due">Due count</option>
+                      <option value="name">Name</option>
+                    </select>
+                    <ChevronDown aria-hidden="true" />
+                  </span>
+                </label>
+              </div>
+
+              {deckPageMessage ? (
+                <p className="queue-empty" role="status">
+                  {deckPageMessage}
+                </p>
+              ) : null}
+
+              {isDecksLoading ? (
+                <p className="queue-empty">Loading decks...</p>
+              ) : decks.length === 0 ? (
+                <p className="queue-empty">No decks yet.</p>
+              ) : visibleDecks.length === 0 ? (
+                <p className="queue-empty">No matching decks.</p>
+              ) : (
+                <ol className="queue-list deck-list" ref={queueListRef}>
+                  {visibleDecks.map((deck) => {
+                    const isSelected = selectedDeck?.id === deck.id;
+
+                    return (
+                      <li className="queue-row deck-row" key={deck.id}>
+                        <div
+                          className={`queue-row-card deck-row-card ${
+                            isSelected ? "deck-row-card-selected" : ""
+                          }`}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Open ${deck.name}`}
+                          aria-pressed={isSelected}
+                          onClick={() => openDeckQueue(deck)}
+                          onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              openDeckQueue(deck);
+                            }
+                          }}
+                        >
+                          <div className="deck-row-main">
+                            <div className="deck-row-copy">
+                              <p className="queue-question deck-name">{deck.name}</p>
+                              {deck.slug ? (
+                                <p className="queue-origin deck-description">
+                                  {deck.slug}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className="deck-row-meta" aria-label="Deck details">
+                              <span
+                                className={`due-badge ${
+                                  deck.dueCount > 0 ? "now" : "scheduled"
+                                }`}
+                              >
+                                {deck.dueCount} due
+                              </span>
+                              <span>{deck.cardCount} cards</span>
+                              <span>{formatReviewDate(deck.lastReviewedAt)}</span>
+                            </div>
+                          </div>
+                          <div className="deck-row-actions">
+                            <button
+                              className={`deck-rotation-toggle ${
+                                deck.inReviewRotation
+                                  ? "deck-rotation-toggle-on"
+                                  : ""
+                              }`}
+                              type="button"
+                              aria-label={
+                                deck.inReviewRotation
+                                  ? `Remove ${deck.name} from review rotation`
+                                  : `Add ${deck.name} to review rotation`
+                              }
+                              aria-pressed={deck.inReviewRotation}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void toggleDeckRotation(deck);
+                              }}
+                            >
+                              <span />
+                            </button>
+                            <button
+                              className="deck-icon-button"
+                              type="button"
+                              aria-label={`Edit ${deck.name}`}
+                              title="Edit"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openDeckEditor(deck);
+                              }}
+                            >
+                              <PencilLine aria-hidden="true" />
+                            </button>
+                            <button
+                              className="deck-icon-button deck-icon-button-danger"
+                              type="button"
+                              aria-label={`Archive ${deck.name}`}
+                              title="Archive"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void archiveDeck(deck.id);
+                              }}
+                            >
+                              <Trash2 aria-hidden="true" />
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+
+              <div className="deck-summary-strip" aria-label="Deck summary">
+                <span>{decks.length} decks</span>
+                <span>{rotationDeckCount} in rotation</span>
+                <span>{rotationDueCount} due in rotation</span>
+                <span>{totalCardCount} cards</span>
+              </div>
+            </>
+          )}
         </section>
       </section>
 
-      {editingDeck ? (
+      {isCreatingDeck || editingDeck ? (
         <div
           className="deck-editor-modal-backdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
+            if (!isDeckSaving && event.target === event.currentTarget) {
+              setIsCreatingDeck(false);
               setEditingDeckId(null);
             }
           }}
         >
-          <section
+          <form
             className="deck-editor-modal"
             role="dialog"
             aria-modal="true"
+            aria-busy={isDeckSaving}
             aria-labelledby="deck-editor-title"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveDeckDraft();
+            }}
           >
             <div className="deck-editor-header">
               <div>
                 <p className="previous-field-label">Deck</p>
-                <h2 id="deck-editor-title">{editingDeck.name}</h2>
+                <h2 id="deck-editor-title">
+                  {isCreatingDeck ? "New deck" : editingDeck?.name}
+                </h2>
               </div>
               <button
                 className="user-menu-trigger"
                 type="button"
                 aria-label="Close deck editor"
-                onClick={() => setEditingDeckId(null)}
+                disabled={isDeckSaving}
+                onClick={() => {
+                  setIsCreatingDeck(false);
+                  setEditingDeckId(null);
+                }}
               >
                 <X aria-hidden="true" />
               </button>
@@ -3850,22 +4475,40 @@ export default function ReviewApp({
                 <input
                   className="settings-input"
                   value={deckDraftName}
-                  onChange={(event) => setDeckDraftName(event.target.value)}
+                  onChange={(event) => {
+                    setDeckDraftName(event.target.value);
+                    setDeckEditorMessage(null);
+                  }}
+                  placeholder="Deck name"
+                  aria-describedby={
+                    deckDraftNameMessage ? "deck-editor-message" : undefined
+                  }
+                  disabled={isDeckSaving}
                 />
               </label>
             </div>
 
+            {deckDraftNameMessage ? (
+              <p
+                className="deck-editor-status"
+                id="deck-editor-message"
+                role="alert"
+              >
+                {deckDraftNameMessage}
+              </p>
+            ) : null}
+
             <div className="deck-editor-stats" aria-label="Deck question summary">
               <div>
-                <dt>{editingDeck.cardCount}</dt>
+                <dt>{editingDeck?.cardCount ?? 0}</dt>
                 <dd>questions</dd>
               </div>
               <div>
-                <dt>{editingDeck.dueCount}</dt>
+                <dt>{editingDeck?.dueCount ?? 0}</dt>
                 <dd>due</dd>
               </div>
               <div>
-                <dt>{editingDeck.inReviewRotation ? "on" : "off"}</dt>
+                <dt>{editingDeck?.inReviewRotation ? "on" : "off"}</dt>
                 <dd>rotation</dd>
               </div>
             </div>
@@ -3874,19 +4517,23 @@ export default function ReviewApp({
               <button
                 className="resting-secondary"
                 type="button"
-                onClick={() => setEditingDeckId(null)}
+                disabled={isDeckSaving}
+                onClick={() => {
+                  setIsCreatingDeck(false);
+                  setEditingDeckId(null);
+                }}
               >
                 Cancel
               </button>
               <button
                 className="resting-primary"
-                type="button"
-                onClick={saveDeckDraft}
+                type="submit"
+                disabled={!canSaveDeckDraft}
               >
-                Save
+                {isDeckSaving ? "Saving..." : "Save"}
               </button>
             </div>
-          </section>
+          </form>
         </div>
       ) : null}
 

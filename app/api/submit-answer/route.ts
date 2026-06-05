@@ -27,5 +27,9 @@ export async function POST(request: Request) {
     answer: payload.answer,
   });
 
-  return NextResponse.json({ ok: true, evaluationId: result.evaluationId });
+  return NextResponse.json({
+    ok: true,
+    evaluationId: result.evaluationId,
+    traceId: result.traceId,
+  });
 }

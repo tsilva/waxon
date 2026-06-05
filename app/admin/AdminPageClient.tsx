@@ -3,6 +3,7 @@
 import { useUser } from "@clerk/nextjs";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowDownUp,
   CheckCircle2,
@@ -13,7 +14,7 @@ import {
   SlidersHorizontal,
   User,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuthenticatedUser } from "@/app/lib/auth";
 
 type CallType =
@@ -54,6 +55,8 @@ type DatePreset = "7d" | "30d" | "custom";
 
 type AdminPageClientProps = {
   currentUser: Pick<AuthenticatedUser, "displayName" | "email" | "avatarUrl">;
+  initialInteractions: TraceInteraction[];
+  selectedTraceId?: string | null;
 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -72,7 +75,7 @@ const callTypeColors: Record<CallType, string> = {
   summarization: "#8c5462",
 };
 
-const traceInteractions: TraceInteraction[] = [
+const demoTraceInteractions: TraceInteraction[] = [
   {
     id: "int-2039",
     title: "Answer submitted: data augmentation",
@@ -737,8 +740,20 @@ function CostChart({ interactions }: { interactions: TraceInteraction[] }) {
   );
 }
 
-export function AdminPageClient({ currentUser }: AdminPageClientProps) {
+export function AdminPageClient({
+  currentUser,
+  initialInteractions,
+  selectedTraceId = null,
+}: AdminPageClientProps) {
+  const router = useRouter();
   const { user: clerkUser } = useUser();
+  const traceInteractions = useMemo(
+    () =>
+      initialInteractions.length > 0
+        ? initialInteractions
+        : demoTraceInteractions.slice(0, 0),
+    [initialInteractions],
+  );
   const menuAvatarUrl = clerkUser?.imageUrl || currentUser.avatarUrl;
   const menuLabel =
     clerkUser?.fullName ||
@@ -747,14 +762,16 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
     currentUser.email;
   const latestDate = useMemo(
     () =>
-      new Date(
-        Math.max(
-          ...traceInteractions.map((interaction) =>
-            new Date(interaction.startedAt).getTime(),
-          ),
-        ),
-      ),
-    [],
+      traceInteractions.length > 0
+        ? new Date(
+            Math.max(
+              ...traceInteractions.map((interaction) =>
+                new Date(interaction.startedAt).getTime(),
+              ),
+            ),
+          )
+        : new Date(),
+    [traceInteractions],
   );
   const [preset, setPreset] = useState<DatePreset>("7d");
   const [fromDate, setFromDate] = useState(
@@ -766,8 +783,17 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("startedAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [expandedInteractionId, setExpandedInteractionId] = useState("int-2039");
-  const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
+  const [expandedInteractionId, setExpandedInteractionId] = useState(
+    () => selectedTraceId ?? traceInteractions[0]?.id ?? "",
+  );
+  const [selectedCallId, setSelectedCallId] = useState<string | null>(
+    selectedTraceId,
+  );
+
+  const closeTracePanel = useCallback(() => {
+    setSelectedCallId(null);
+    router.push("/admin");
+  }, [router]);
 
   function setPresetRange(nextPreset: DatePreset) {
     setPreset(nextPreset);
@@ -838,7 +864,7 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
 
         return sortValue * direction;
       });
-  }, [fromDate, searchTerm, sortDirection, sortKey, statusFilter, toDate, typeFilter]);
+  }, [fromDate, searchTerm, sortDirection, sortKey, statusFilter, toDate, traceInteractions, typeFilter]);
 
   const selectedCallContext = useMemo(() => {
     if (!selectedCallId) {
@@ -854,7 +880,14 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
     }
 
     return null;
-  }, [selectedCallId]);
+  }, [selectedCallId, traceInteractions]);
+
+  useEffect(() => {
+    setSelectedCallId(selectedTraceId);
+    if (selectedTraceId) {
+      setExpandedInteractionId(selectedTraceId);
+    }
+  }, [selectedTraceId]);
 
   useEffect(() => {
     if (!selectedCallContext) {
@@ -863,13 +896,13 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setSelectedCallId(null);
+        closeTracePanel();
       }
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedCallContext]);
+  }, [closeTracePanel, selectedCallContext]);
 
   const totals = filteredInteractions.reduce(
     (current, interaction) => {
@@ -910,7 +943,7 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
                 Review
               </Link>
               <Link className="reader-tab" href="/queue" role="tab" aria-selected="false">
-                Queue
+                Decks
               </Link>
               <span className="reader-tab reader-tab-active" role="tab" aria-selected="true">
                 Admin
@@ -1141,12 +1174,11 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
                     {isExpanded ? (
                       <div className="admin-call-list">
                         {interaction.calls.map((call) => (
-                          <button
+                          <Link
                             className="admin-call-row"
                             key={call.id}
-                            type="button"
+                            href={`/admin/traces/${encodeURIComponent(call.id)}`}
                             aria-label={`Open LLM call details for ${call.operation}`}
-                            onClick={() => setSelectedCallId(call.id)}
                           >
                             <span className="admin-call-name">
                               <strong>{call.operation}</strong>
@@ -1158,7 +1190,7 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
                             <span>{formatCurrency(call.cost)}</span>
                             <span>{(call.latencyMs / 1000).toFixed(1)}s</span>
                             <StatusPill status={call.status} />
-                          </button>
+                          </Link>
                         ))}
                       </div>
                     ) : null}
@@ -1174,7 +1206,7 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
         <div
           className="admin-call-modal-backdrop"
           role="presentation"
-          onClick={() => setSelectedCallId(null)}
+          onClick={closeTracePanel}
         >
           <section
             className="admin-call-modal"
@@ -1200,7 +1232,7 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
                 className="stats-modal-close"
                 type="button"
                 aria-label="Close LLM call details"
-                onClick={() => setSelectedCallId(null)}
+                onClick={closeTracePanel}
               />
             </header>
 
