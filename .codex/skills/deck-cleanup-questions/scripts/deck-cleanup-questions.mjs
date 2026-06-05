@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 
 for (const envFile of [".env", ".env.local"]) {
@@ -202,6 +203,41 @@ function vectorLiteral(embedding) {
   return `[${embedding.join(",")}]`;
 }
 
+function questionSlug(question) {
+  const slug = question
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\x00-\x7F]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (slug) {
+    return slug;
+  }
+
+  return `question-${createHash("sha256")
+    .update(question)
+    .digest("hex")
+    .slice(0, 16)}`;
+}
+
+function normalizeEmbeddingText(value) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function buildQuestionOnlyEmbeddingSource(question) {
+  return [
+    "version: 1",
+    "kind: question_only",
+    `Question: ${normalizeEmbeddingText(question)}`,
+  ].join("\n");
+}
+
+function sourceHash(source) {
+  return createHash("sha256").update(source).digest("hex");
+}
+
 function chunks(items, size) {
   const result = [];
 
@@ -272,13 +308,16 @@ async function loadQuestions(pool, options) {
   const result = await pool.query(
     `
       SELECT
+        q.id,
         q.deck_id,
         q.question,
+        q.question_slug,
         q.reviews,
         q.next_due,
         q.generated_from_question,
         q.last_answer,
         q.last_answer_summary,
+        q.concise_answer,
         q.reference_answer,
         q.created_at,
         q.updated_at
@@ -472,6 +511,7 @@ async function saveAtomicChanges(pool, rowsByOldQuestion, changes, embeddings, m
   const questionMap = new Map(
     changes.map((change) => [change.oldQuestion, change.newQuestion]),
   );
+  const replacementRows = new Map();
 
   await pool.query("BEGIN");
 
@@ -483,47 +523,83 @@ async function saveAtomicChanges(pool, rowsByOldQuestion, changes, embeddings, m
         throw new Error(`Question disappeared before apply: ${change.oldQuestion}`);
       }
 
-      await pool.query(
+      const insertResult = await pool.query(
         `
           INSERT INTO questions (
             question,
+            question_slug,
             deck_id,
             reviews,
             next_due,
             generated_from_question,
             last_answer,
             last_answer_summary,
+            concise_answer,
             reference_answer,
             created_at,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9)
+          VALUES ($1, $2, $3, $4, $5, NULL, $6, $7, $8, $9, $10, $11)
+          RETURNING id, deck_id, question
         `,
         [
           change.newQuestion,
+          questionSlug(change.newQuestion),
           row.deck_id,
           row.reviews,
           row.next_due,
           row.last_answer,
           row.last_answer_summary,
+          row.concise_answer,
           row.reference_answer,
           row.created_at,
           now,
         ],
       );
+
+      replacementRows.set(change.oldQuestion, insertResult.rows[0]);
     }
 
     for (const change of changes) {
       const row = rowsByOldQuestion.get(change.oldQuestion);
+      const replacement = replacementRows.get(change.oldQuestion);
 
       await pool.query(
         `
           UPDATE question_attempts
-          SET question = $1
-          WHERE deck_id = $2
-            AND question = $3
+          SET
+            question_id = $1,
+            question = $2
+          WHERE deck_id = $3
+            AND question_id = $4
         `,
-        [change.newQuestion, row.deck_id, change.oldQuestion],
+        [replacement.id, change.newQuestion, row.deck_id, row.id],
+      );
+
+      await pool.query(
+        `
+          UPDATE question_reviews
+          SET
+            question_id = $1,
+            question = $2
+          WHERE deck_id = $3
+            AND question_id = $4
+        `,
+        [replacement.id, change.newQuestion, row.deck_id, row.id],
+      );
+
+      await pool.query(
+        `
+          UPDATE question_embeddings
+          SET
+            question_id = $1,
+            question = $2,
+            is_current = false,
+            updated_at = $3
+          WHERE deck_id = $4
+            AND question_id = $5
+        `,
+        [replacement.id, change.newQuestion, now, row.deck_id, row.id],
       );
 
       await pool.query(
@@ -532,14 +608,16 @@ async function saveAtomicChanges(pool, rowsByOldQuestion, changes, embeddings, m
           SET
             generated_from_question = $1,
             updated_at = $2
-          WHERE generated_from_question = $3
+          WHERE deck_id = $3
+            AND generated_from_question = $4
         `,
-        [change.newQuestion, now, change.oldQuestion],
+        [change.newQuestion, now, row.deck_id, change.oldQuestion],
       );
     }
 
     for (const change of changes) {
       const row = rowsByOldQuestion.get(change.oldQuestion);
+      const replacement = replacementRows.get(change.oldQuestion);
       const generatedFromQuestion = row.generated_from_question
         ? questionMap.get(row.generated_from_question) ?? row.generated_from_question
         : null;
@@ -550,9 +628,9 @@ async function saveAtomicChanges(pool, rowsByOldQuestion, changes, embeddings, m
           SET
             generated_from_question = $1,
             updated_at = $2
-          WHERE question = $3
+          WHERE id = $3
         `,
-        [generatedFromQuestion, now, change.newQuestion],
+        [generatedFromQuestion, now, replacement.id],
       );
     }
 
@@ -562,9 +640,9 @@ async function saveAtomicChanges(pool, rowsByOldQuestion, changes, embeddings, m
         `
           DELETE FROM questions
           WHERE deck_id = $1
-            AND question = $2
+            AND id = $2
         `,
-        [row.deck_id, change.oldQuestion],
+        [row.deck_id, row.id],
       );
 
       if (deleteResult.rowCount !== 1) {
@@ -575,22 +653,48 @@ async function saveAtomicChanges(pool, rowsByOldQuestion, changes, embeddings, m
     }
 
     for (const [index, change] of changes.entries()) {
+      const replacement = replacementRows.get(change.oldQuestion);
+      const source = buildQuestionOnlyEmbeddingSource(change.newQuestion);
+
       await pool.query(
         `
           INSERT INTO question_embeddings (
+            deck_id,
+            question_id,
             question,
             embedding_model,
+            embedding_kind,
+            source_version,
+            source_hash,
+            is_current,
             embedding,
             created_at,
             updated_at
           )
-          VALUES ($1, $2, $3::vector, $4, $4)
-          ON CONFLICT (question, embedding_model)
+          VALUES ($1, $2, $3, $4, 'question_only', 1, $5, true, $6::vector, $7, $7)
+          ON CONFLICT (
+            deck_id,
+            question_id,
+            embedding_model,
+            embedding_kind,
+            source_version
+          )
           DO UPDATE SET
+            question = excluded.question,
             embedding = excluded.embedding,
+            source_hash = excluded.source_hash,
+            is_current = true,
             updated_at = excluded.updated_at
         `,
-        [change.newQuestion, model, vectorLiteral(embeddings[index]), now],
+        [
+          replacement.deck_id,
+          replacement.id,
+          change.newQuestion,
+          model,
+          sourceHash(source),
+          vectorLiteral(embeddings[index]),
+          now,
+        ],
       );
     }
 
@@ -651,7 +755,7 @@ async function main() {
 
     for (const batch of chunks(changes, options.batchSize)) {
       const batchEmbeddings = await fetchEmbeddings(
-        batch.map((change) => change.newQuestion),
+        batch.map((change) => buildQuestionOnlyEmbeddingSource(change.newQuestion)),
         options.embeddingModel,
         apiKey,
       );

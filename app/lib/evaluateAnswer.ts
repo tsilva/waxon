@@ -4,6 +4,7 @@ import {
   getOpenRouterApiKey,
   openRouterChatCompletion,
 } from "./openRouter";
+import type { ExistingQuestionNeighbor } from "./questionNeighbors";
 
 export type EvaluateAnswerInput = {
   question: string;
@@ -46,6 +47,7 @@ const MAX_JUSTIFICATION_WORDS = 12;
 const MAX_ANSWER_SUMMARY_WORDS = 12;
 const MAX_PROBING_QUESTIONS = 3;
 const MAX_PROBING_QUESTION_CHARS = 220;
+const MAX_CONTEXT_TEXT_CHARS = 220;
 export const PROBING_QUESTION_SCORE_THRESHOLD = 5;
 
 function parseScore(score: unknown): number | null {
@@ -56,7 +58,40 @@ function parseScore(score: unknown): number | null {
   return Math.max(0, Math.min(10, Math.round(score)));
 }
 
-function buildPrompt(input: EvaluateAnswerInput): string {
+function truncateContextText(value: string): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+
+  if (normalized.length <= MAX_CONTEXT_TEXT_CHARS) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, MAX_CONTEXT_TEXT_CHARS - 3).trim()}...`;
+}
+
+function formatNeighborContext(neighbors: ExistingQuestionNeighbor[]): string {
+  if (neighbors.length === 0) {
+    return "No similar existing questions were available.";
+  }
+
+  return neighbors
+    .map((neighbor, index) =>
+      [
+        `${index + 1}. Question: ${truncateContextText(neighbor.question)}`,
+        `   Expected answer: ${
+          neighbor.conciseAnswer
+            ? truncateContextText(neighbor.conciseAnswer)
+            : "(not available)"
+        }`,
+        `   Similarity: ${neighbor.similarity.toFixed(4)}`,
+      ].join("\n"),
+    )
+    .join("\n");
+}
+
+function buildPrompt(
+  input: EvaluateAnswerInput,
+  similarExistingQuestions: ExistingQuestionNeighbor[],
+): string {
   const questionQualityReference = getQuestionQualityReference();
 
   return `You are grading a free-text recall answer.
@@ -66,6 +101,9 @@ Question: ${input.question}
 User answer: ${input.answer}
 
 Previous review history: ${input.previousReviews}
+
+Similar existing questions near the source question:
+${formatNeighborContext(similarExistingQuestions)}
 
 Grade the answer from 0 to 10. In the same response, generate extra
 probingQuestions only when the score is ${PROBING_QUESTION_SCORE_THRESHOLD} or
@@ -94,7 +132,10 @@ ${questionQualityReference}
 If score is ${PROBING_QUESTION_SCORE_THRESHOLD} or lower, include 1 to 3
 probingQuestions that directly test the specific misconception, missing step,
 or confusion shown in the user's answer. Each probing question must follow the
-shared reference. If score is above ${PROBING_QUESTION_SCORE_THRESHOLD},
+shared reference. Consider the similar existing questions as nearby recall
+targets: avoid repeating an existing question verbatim, and avoid generating a
+probe that tests the same atomic recall target unless the user's weak answer
+specifically shows that gap. If score is above ${PROBING_QUESTION_SCORE_THRESHOLD},
 probingQuestions must be an empty array.
 
 Return strict JSON only:
@@ -229,6 +270,25 @@ function sanitizeProbingQuestions(questions: unknown): string[] {
   return sanitized;
 }
 
+async function loadSimilarExistingQuestionContext(
+  input: EvaluateAnswerInput,
+): Promise<ExistingQuestionNeighbor[]> {
+  try {
+    const { loadExistingQuestionNeighbors } = await import("./questionNeighbors");
+
+    return await loadExistingQuestionNeighbors({
+      question: input.question,
+      deckId: input.deckId,
+    });
+  } catch (error) {
+    console.info("[waxon] probing question neighbor retrieval skipped", {
+      question: input.question,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+    return [];
+  }
+}
+
 export async function evaluateAnswer(
   input: EvaluateAnswerInput,
 ): Promise<EvaluationResult> {
@@ -240,6 +300,8 @@ export async function evaluateAnswer(
       input.answer,
     );
   }
+
+  const similarExistingQuestions = await loadSimilarExistingQuestionContext(input);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), EVALUATION_TIMEOUT_MS);
@@ -259,7 +321,7 @@ export async function evaluateAnswer(
         messages: [
           {
             role: "user",
-            content: buildPrompt(input),
+            content: buildPrompt(input, similarExistingQuestions),
           },
         ],
         response_format: {
