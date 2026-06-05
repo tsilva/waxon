@@ -50,6 +50,7 @@ type LlmTraceState = {
 };
 
 const MAX_TRACE_INTERACTIONS = 200;
+const MAX_PERSISTED_TRACE_PAYLOAD_CHARS = 12_000;
 
 const globalForTraceStore = globalThis as typeof globalThis & {
   waxonLlmTraces?: LlmTraceState;
@@ -200,10 +201,12 @@ export async function finishLlmTrace(
 
   interaction.status = call.status;
 
-  await persistTraceInteraction(interaction);
+  void persistTraceInteraction(interaction);
 }
 
 export async function listLlmTraceInteractions(): Promise<LlmTraceInteraction[]> {
+  const localInteractions = listLocalTraceInteractions();
+
   if (process.env.DATABASE_URL) {
     try {
       const { db } = await import("../db/client");
@@ -216,18 +219,47 @@ export async function listLlmTraceInteractions(): Promise<LlmTraceInteraction[]>
         .orderBy(desc(llmTraceInteractionsTable.startedAt))
         .limit(MAX_TRACE_INTERACTIONS);
 
-      return rows.map(rowToTraceInteraction).filter(isTraceInteraction);
+      return mergeTraceInteractions(
+        rows.map(rowToTraceInteraction).filter(isTraceInteraction),
+        localInteractions,
+      );
     } catch (error) {
-      console.info("[waxon] llm trace db read skipped", {
+      console.error("[waxon] llm trace db read skipped", {
         error: error instanceof Error ? error.message : "unknown error",
       });
     }
   }
 
+  return localInteractions;
+}
+
+function listLocalTraceInteractions(): LlmTraceInteraction[] {
   return state.interactions.map((interaction) => ({
     ...interaction,
     calls: interaction.calls.map((call) => ({ ...call })),
   }));
+}
+
+function mergeTraceInteractions(
+  persistedInteractions: LlmTraceInteraction[],
+  localInteractions: LlmTraceInteraction[],
+): LlmTraceInteraction[] {
+  const byId = new Map<string, LlmTraceInteraction>();
+
+  for (const interaction of persistedInteractions) {
+    byId.set(interaction.id, interaction);
+  }
+
+  for (const interaction of localInteractions) {
+    byId.set(interaction.id, interaction);
+  }
+
+  return [...byId.values()]
+    .sort(
+      (left, right) =>
+        new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime(),
+    )
+    .slice(0, MAX_TRACE_INTERACTIONS);
 }
 
 async function persistTraceInteraction(
@@ -259,7 +291,7 @@ async function persistTraceInteraction(
         },
       });
   } catch (error) {
-    console.info("[waxon] llm trace db write skipped", {
+    console.error("[waxon] llm trace db write skipped", {
       traceId: interaction.id,
       error: error instanceof Error ? error.message : "unknown error",
     });
@@ -277,9 +309,25 @@ function traceInteractionToRow(
     kind: interaction.kind,
     startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
     status: interaction.status,
-    calls: JSON.stringify(interaction.calls),
+    calls: JSON.stringify(interaction.calls.map(compactTraceCallForPersistence)),
     updatedAt: Date.now(),
   };
+}
+
+export function compactTraceCallForPersistence(call: LlmTraceCall): LlmTraceCall {
+  return {
+    ...call,
+    requestPayload: truncateTracePayload(call.requestPayload),
+    responsePayload: truncateTracePayload(call.responsePayload),
+  };
+}
+
+function truncateTracePayload(value: string | undefined): string | undefined {
+  if (value === undefined || value.length <= MAX_PERSISTED_TRACE_PAYLOAD_CHARS) {
+    return value;
+  }
+
+  return `${value.slice(0, MAX_PERSISTED_TRACE_PAYLOAD_CHARS)}\n... [truncated ${value.length - MAX_PERSISTED_TRACE_PAYLOAD_CHARS} chars for trace persistence]`;
 }
 
 function rowToTraceInteraction(
