@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { LandingAccountActions } from "./LandingAccountActions";
 
 const howItWorksSteps = [
   {
@@ -70,6 +71,7 @@ export default function LandingPage() {
           <a href="#how-it-works">How it works</a>
           <a href="#features">Features</a>
         </nav>
+        <LandingAccountActions />
       </header>
 
       <section
@@ -201,6 +203,9 @@ export default function LandingPage() {
 
       <footer className="landing-footer">
         <Link href="/privacy-policy">Privacy policy</Link>
+        <span className="landing-origin">
+          Named for the Karate Kid rhythm: &quot;wax on, wax off.&quot;
+        </span>
         <Link href="/terms-and-conditions">Terms and conditions</Link>
       </footer>
     </main>

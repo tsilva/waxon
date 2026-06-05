@@ -112,11 +112,15 @@ export async function openRouterChatCompletion(input: {
   trace: OpenRouterTraceContext;
 }): Promise<{ response: Response; body: OpenRouterChatResponse }> {
   const traceId = input.trace.traceId ?? crypto.randomUUID();
+  const trace = {
+    ...input.trace,
+    userId: input.trace.userId ?? input.body.user ?? null,
+  };
   const body = {
     ...input.body,
-    user: input.body.user ?? input.trace.userId ?? undefined,
-    session_id: input.trace.deckId ?? undefined,
-    trace: buildTraceMetadata(input.trace, traceId),
+    user: input.body.user ?? trace.userId ?? undefined,
+    session_id: trace.deckId ?? undefined,
+    trace: buildTraceMetadata(trace, traceId),
   };
 
   const response = await fetch(OPENROUTER_CHAT_URL, {
@@ -137,11 +141,15 @@ export async function openRouterEmbeddings(input: {
   trace: OpenRouterTraceContext;
 }): Promise<{ response: Response; body: OpenRouterEmbeddingResponse }> {
   const traceId = input.trace.traceId ?? crypto.randomUUID();
+  const trace = {
+    ...input.trace,
+    userId: input.trace.userId ?? input.body.user ?? null,
+  };
   const body = {
     ...input.body,
-    user: input.body.user ?? input.trace.userId ?? undefined,
-    session_id: input.trace.deckId ?? undefined,
-    trace: buildTraceMetadata(input.trace, traceId),
+    user: input.body.user ?? trace.userId ?? undefined,
+    session_id: trace.deckId ?? undefined,
+    trace: buildTraceMetadata(trace, traceId),
   };
 
   const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {

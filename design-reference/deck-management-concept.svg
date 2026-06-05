@@ -1,0 +1,235 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="950" viewBox="0 0 1600 950">
+  <defs>
+    <filter id="shellShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#184233" flood-opacity="0.11"/>
+    </filter>
+    <style>
+      .ui { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif; }
+      .mono { font-family: "Red Hat Mono", "SF Mono", Menlo, Consolas, monospace; }
+      .serif { font-family: Baskerville, "Iowan Old Style", Palatino, Georgia, serif; }
+      .brand { fill: #07553f; font-weight: 760; letter-spacing: 0; }
+      .ink { fill: #0e2821; }
+      .soft { fill: #60736c; }
+      .muted { fill: #8a9691; }
+      .line { stroke: #ddd8ce; }
+      .line2 { stroke: #ebe6dc; }
+      .accent { fill: #118763; }
+      .accentStroke { stroke: #118763; }
+      .surface { fill: #fffdf8; }
+      .surfaceSoft { fill: #f7f3ea; }
+      .activeSoft { fill: #edf7f0; }
+      .danger { fill: #a24335; }
+      .tiny { font-size: 13px; }
+      .small { font-size: 15px; }
+      .body { font-size: 18px; }
+      .title { font-size: 24px; font-weight: 650; }
+      .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0; font-weight: 650; }
+      .chipText { font-size: 13px; font-weight: 620; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="950" fill="#f4f0e7"/>
+  <rect x="28" y="28" width="1544" height="894" rx="30" class="surface" filter="url(#shellShadow)" stroke="#e3ded4"/>
+
+  <!-- Header -->
+  <rect x="28" y="28" width="1544" height="84" rx="30" fill="#fffefa"/>
+  <path d="M28 84 H1572" stroke="#e3ded4"/>
+  <text x="78" y="76" class="ui brand" font-size="34">waxon</text>
+  <text x="243" y="74" class="ui ink" font-size="19">Review</text>
+  <text x="346" y="74" class="ui ink" font-size="19" font-weight="650">Decks</text>
+  <rect x="336" y="105" width="64" height="4" rx="2" class="accent"/>
+
+  <circle cx="1268" cy="70" r="18" fill="none" stroke="#d8e1db" stroke-width="5"/>
+  <path d="M1268 52 A18 18 0 1 1 1254 81" fill="none" stroke="#118763" stroke-width="5" stroke-linecap="round"/>
+  <text x="1298" y="77" class="ui ink" font-size="20" font-weight="650">149 due</text>
+  <rect x="1430" y="47" width="48" height="44" rx="12" fill="#fffefa" stroke="#dfdbd2"/>
+  <circle cx="1446" cy="69" r="3" fill="#0e2821"/>
+  <circle cx="1454" cy="69" r="3" fill="#0e2821"/>
+  <circle cx="1462" cy="69" r="3" fill="#0e2821"/>
+
+  <!-- Left deck management rail -->
+  <rect x="58" y="142" width="315" height="742" rx="16" fill="#fbf8f0" stroke="#e1dcd2"/>
+  <text x="84" y="183" class="ui ink title">Decks</text>
+  <rect x="326" y="154" width="32" height="32" rx="16" fill="#118763"/>
+  <path d="M342 163 V177 M335 170 H349" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>
+  <rect x="84" y="210" width="248" height="40" rx="10" fill="#fffdf8" stroke="#ded9cf"/>
+  <circle cx="105" cy="230" r="6" fill="none" stroke="#73837c" stroke-width="1.8"/>
+  <path d="M110 235 L116 241" stroke="#73837c" stroke-width="1.8" stroke-linecap="round"/>
+  <text x="128" y="236" class="ui muted small">Search decks</text>
+
+  <g transform="translate(84 274)">
+    <rect width="248" height="92" rx="10" class="activeSoft" stroke="#9fcdb7"/>
+    <rect x="0" y="0" width="4" height="92" rx="2" class="accent"/>
+    <text x="18" y="29" class="ui ink body" font-weight="650">ML Foundations</text>
+    <text x="18" y="55" class="mono soft tiny">64 due / 312 cards</text>
+    <text x="18" y="77" class="mono muted tiny">reviewed 12m ago</text>
+    <rect x="190" y="20" width="38" height="22" rx="11" fill="#118763"/>
+    <circle cx="217" cy="31" r="8" fill="#fff"/>
+    <path d="M195 65 L205 55 M205 55 L211 61" stroke="#60736c" stroke-width="1.6" stroke-linecap="round"/>
+    <path d="M223 55 L235 67 M235 55 L223 67" stroke="#a24335" stroke-width="1.6" stroke-linecap="round"/>
+  </g>
+
+  <g transform="translate(84 380)">
+    <rect width="248" height="78" rx="10" fill="#fffdf8" stroke="#e3ded4"/>
+    <text x="18" y="28" class="ui ink body" font-weight="620">Systems Design</text>
+    <text x="18" y="53" class="mono soft tiny">41 due / 205 cards</text>
+    <rect x="190" y="20" width="38" height="22" rx="11" fill="#118763"/>
+    <circle cx="217" cy="31" r="8" fill="#fff"/>
+  </g>
+
+  <g transform="translate(84 472)">
+    <rect width="248" height="78" rx="10" fill="#fffdf8" stroke="#e3ded4"/>
+    <text x="18" y="28" class="ui ink body" font-weight="620">Math Review</text>
+    <text x="18" y="53" class="mono soft tiny">44 due / 178 cards</text>
+    <rect x="190" y="20" width="38" height="22" rx="11" fill="#118763"/>
+    <circle cx="217" cy="31" r="8" fill="#fff"/>
+  </g>
+
+  <g transform="translate(84 564)" opacity="0.62">
+    <rect width="248" height="78" rx="10" fill="#fffdf8" stroke="#e3ded4"/>
+    <text x="18" y="28" class="ui ink body" font-weight="620">Research Papers</text>
+    <text x="18" y="53" class="mono soft tiny">0 due / 96 cards</text>
+    <rect x="190" y="20" width="38" height="22" rx="11" fill="#d8d2c7"/>
+    <circle cx="201" cy="31" r="8" fill="#fff"/>
+  </g>
+
+  <g transform="translate(84 696)">
+    <text x="0" y="0" class="mono soft label">Deck actions</text>
+    <rect x="0" y="20" width="114" height="38" rx="10" fill="#fffdf8" stroke="#ded9cf"/>
+    <path d="M22 30 V44 M15 37 H29" stroke="#118763" stroke-width="2" stroke-linecap="round"/>
+    <text x="44" y="45" class="ui ink small">Create</text>
+    <rect x="130" y="20" width="118" height="38" rx="10" fill="#fffdf8" stroke="#ded9cf"/>
+    <path d="M151 36 H167 M151 42 H162" stroke="#118763" stroke-width="2" stroke-linecap="round"/>
+    <text x="181" y="45" class="ui ink small">Import</text>
+  </g>
+
+  <!-- Center selected deck queue -->
+  <g transform="translate(405 142)">
+    <text x="0" y="38" class="ui ink title">ML Foundations</text>
+    <rect x="0" y="58" width="72" height="28" rx="14" fill="#edf7f0" stroke="#b8d8c8"/>
+    <text x="16" y="77" class="mono chipText" fill="#0b6f51">64 due</text>
+    <rect x="84" y="58" width="92" height="28" rx="14" fill="#f7f3ea" stroke="#dfd8ce"/>
+    <text x="100" y="77" class="mono chipText soft">312 cards</text>
+    <rect x="188" y="58" width="104" height="28" rx="14" fill="#f7f3ea" stroke="#dfd8ce"/>
+    <circle cx="208" cy="72" r="5" class="accent"/>
+    <text x="220" y="77" class="mono chipText soft">In rotation</text>
+    <rect x="540" y="50" width="42" height="38" rx="10" fill="#fffdf8" stroke="#ded9cf"/>
+    <path d="M554 72 L569 57 L575 63 L560 78 H554 Z" fill="none" stroke="#60736c" stroke-width="1.7"/>
+    <rect x="594" y="50" width="42" height="38" rx="10" fill="#fffdf8" stroke="#ded9cf"/>
+    <path d="M606 61 H624 M610 61 V79 M620 61 V79 M606 79 H624" fill="none" stroke="#a24335" stroke-width="1.6" stroke-linecap="round"/>
+
+    <path d="M0 116 H670" stroke="#e3ded4"/>
+    <text x="0" y="154" class="mono soft label">Due now</text>
+
+    <g transform="translate(0 176)">
+      <rect width="670" height="92" rx="10" fill="#fffaf1" stroke="#e4cfaa"/>
+      <circle cx="32" cy="46" r="17" fill="#fff" stroke="#e46b28" stroke-width="3" stroke-dasharray="3 5"/>
+      <text x="66" y="32" class="serif ink" font-size="21">Why can data augmentation improve generalization?</text>
+      <text x="66" y="60" class="ui soft small">Due 8m ago · last score 6/10 · new answer pending</text>
+      <rect x="557" y="28" width="86" height="34" rx="8" fill="#fffdf8" stroke="#ddd8ce"/>
+      <text x="575" y="50" class="ui ink small">Review</text>
+    </g>
+
+    <g transform="translate(0 284)">
+      <rect width="670" height="84" rx="10" fill="#fffdf8" stroke="#e3ded4"/>
+      <circle cx="32" cy="42" r="17" fill="#fff" stroke="#118763" stroke-width="2.4"/>
+      <text x="22" y="47" class="mono" font-size="12" fill="#118763" font-weight="700">8/10</text>
+      <text x="66" y="31" class="serif ink" font-size="20">Explain bias-variance tradeoff under regularization.</text>
+      <text x="66" y="58" class="ui soft small">Due now · last reviewed 2d ago · ML Foundations</text>
+      <text x="596" y="48" class="mono muted tiny">#2</text>
+    </g>
+
+    <text x="0" y="410" class="mono soft label">Later today</text>
+    <g transform="translate(0 432)">
+      <rect width="670" height="84" rx="10" fill="#fffdf8" stroke="#e3ded4"/>
+      <circle cx="32" cy="42" r="17" fill="#fff" stroke="#87968e" stroke-width="2"/>
+      <text x="66" y="31" class="serif ink" font-size="20">When does batch normalization leak validation signal?</text>
+      <text x="66" y="58" class="ui soft small">Due in 3h · source: validation protocols</text>
+      <rect x="552" y="25" width="92" height="34" rx="8" fill="#f7f3ea" stroke="#ddd8ce"/>
+      <text x="570" y="47" class="ui soft small">Details</text>
+    </g>
+
+    <g transform="translate(0 530)">
+      <rect width="670" height="84" rx="10" fill="#fffdf8" stroke="#e3ded4"/>
+      <circle cx="32" cy="42" r="17" fill="#fff" stroke="#87968e" stroke-width="2"/>
+      <text x="66" y="31" class="serif ink" font-size="20">Describe invariances learned by convolutional models.</text>
+      <text x="66" y="58" class="ui soft small">Due in 5h · deck: ML Foundations</text>
+      <text x="596" y="48" class="mono muted tiny">#7</text>
+    </g>
+
+    <path d="M0 658 H670" stroke="#e3ded4"/>
+    <text x="0" y="700" class="ui soft small">Selected deck shows the familiar queue surface; rotation decides which decks feed Review.</text>
+  </g>
+
+  <!-- Right review rotation panel -->
+  <rect x="1112" y="142" width="420" height="742" rx="16" fill="#fbf8f0" stroke="#e1dcd2"/>
+  <text x="1142" y="183" class="ui ink title">Review rotation</text>
+  <text x="1142" y="212" class="mono soft small">3 decks active · ordered by due priority</text>
+
+  <g transform="translate(1142 246)">
+    <rect width="360" height="58" rx="10" fill="#edf7f0" stroke="#b8d8c8"/>
+    <circle cx="24" cy="29" r="7" fill="#118763"/>
+    <text x="44" y="26" class="ui ink small" font-weight="650">ML Foundations</text>
+    <text x="44" y="45" class="mono soft tiny">64 due · weight normal</text>
+    <rect x="304" y="18" width="38" height="22" rx="11" fill="#118763"/>
+    <circle cx="331" cy="29" r="8" fill="#fff"/>
+  </g>
+
+  <g transform="translate(1142 316)">
+    <rect width="360" height="58" rx="10" fill="#fffdf8" stroke="#e3ded4"/>
+    <circle cx="24" cy="29" r="7" fill="#356f91"/>
+    <text x="44" y="26" class="ui ink small" font-weight="650">Systems Design</text>
+    <text x="44" y="45" class="mono soft tiny">41 due · priority high</text>
+    <rect x="304" y="18" width="38" height="22" rx="11" fill="#118763"/>
+    <circle cx="331" cy="29" r="8" fill="#fff"/>
+  </g>
+
+  <g transform="translate(1142 386)">
+    <rect width="360" height="58" rx="10" fill="#fffdf8" stroke="#e3ded4"/>
+    <circle cx="24" cy="29" r="7" fill="#8a6d35"/>
+    <text x="44" y="26" class="ui ink small" font-weight="650">Math Review</text>
+    <text x="44" y="45" class="mono soft tiny">44 due · weight normal</text>
+    <rect x="304" y="18" width="38" height="22" rx="11" fill="#118763"/>
+    <circle cx="331" cy="29" r="8" fill="#fff"/>
+  </g>
+
+  <g transform="translate(1142 456)" opacity="0.62">
+    <rect width="360" height="58" rx="10" fill="#fffdf8" stroke="#e3ded4"/>
+    <circle cx="24" cy="29" r="7" fill="#9a9a9a"/>
+    <text x="44" y="26" class="ui ink small" font-weight="650">Research Papers</text>
+    <text x="44" y="45" class="mono soft tiny">not in rotation</text>
+    <rect x="304" y="18" width="38" height="22" rx="11" fill="#d8d2c7"/>
+    <circle cx="315" cy="29" r="8" fill="#fff"/>
+  </g>
+
+  <path d="M1142 550 H1502" stroke="#e3ded4"/>
+  <text x="1142" y="590" class="mono soft label">Upcoming review order</text>
+
+  <g transform="translate(1142 616)">
+    <text x="0" y="20" class="mono muted tiny">01</text>
+    <circle cx="42" cy="15" r="6" fill="#356f91"/>
+    <text x="60" y="20" class="ui ink small">Rate limiter backoff strategy</text>
+    <text x="296" y="20" class="mono soft tiny">now</text>
+    <path d="M0 42 H360" stroke="#ece6dc"/>
+  </g>
+  <g transform="translate(1142 668)">
+    <text x="0" y="20" class="mono muted tiny">02</text>
+    <circle cx="42" cy="15" r="6" fill="#118763"/>
+    <text x="60" y="20" class="ui ink small">Augmentation and invariance</text>
+    <text x="296" y="20" class="mono soft tiny">8m</text>
+    <path d="M0 42 H360" stroke="#ece6dc"/>
+  </g>
+  <g transform="translate(1142 720)">
+    <text x="0" y="20" class="mono muted tiny">03</text>
+    <circle cx="42" cy="15" r="6" fill="#8a6d35"/>
+    <text x="60" y="20" class="ui ink small">Eigenvalues of covariance</text>
+    <text x="296" y="20" class="mono soft tiny">18m</text>
+    <path d="M0 42 H360" stroke="#ece6dc"/>
+  </g>
+
+  <rect x="1142" y="804" width="292" height="48" rx="24" fill="#118763"/>
+  <text x="1237" y="835" class="ui" font-size="17" fill="#fff" font-weight="700">Start review</text>
+  <rect x="1450" y="804" width="52" height="48" rx="14" fill="#fffdf8" stroke="#ded9cf"/>
+  <circle cx="1476" cy="828" r="10" fill="none" stroke="#60736c" stroke-width="2"/>
+  <path d="M1476 812 V818 M1476 838 V844 M1460 828 H1466 M1486 828 H1492" stroke="#60736c" stroke-width="2" stroke-linecap="round"/>
+</svg>

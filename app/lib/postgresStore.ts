@@ -1,6 +1,16 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { and, asc, count, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  lte,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import { db } from "@/app/db/client";
 import {
   decks,
@@ -91,6 +101,13 @@ export type PersistedEvaluation = {
   referenceAnswer: string | null;
   createdAt: number;
 } | null;
+
+export type QueuedQuestionsSortKey = "review-date" | "creation-date";
+
+export type QueuedQuestionsPage = {
+  items: DueQuestion[];
+  total: number;
+};
 
 const LEGACY_QUESTIONS_FILE = path.join(process.cwd(), "data", "questions.csv");
 const DEFAULT_DECK = {
@@ -387,15 +404,23 @@ export async function ensureQuestionsDatabase(): Promise<void> {
   await ensureSeedData();
 }
 
-export async function readQuestions(): Promise<QuestionRow[]> {
-  return selectQuestionRows();
+export async function readQuestions(
+  input: UserContextInput = {},
+): Promise<QuestionRow[]> {
+  return selectQuestionRows(sql`true`, input);
 }
 
 export async function readQuestionsWithEmbeddings(input: {
   embeddingModel?: string;
+  questions?: string[];
   userId?: string;
 } = {}): Promise<QuestionWithEmbeddings[]> {
   const context = await ensureSeedData(input);
+  const questionFilter =
+    input.questions === undefined
+      ? null
+      : Array.from(new Set(input.questions.map((question) => question.trim())))
+          .filter(Boolean);
 
   const model =
     input.embeddingModel === undefined
@@ -404,6 +429,10 @@ export async function readQuestionsWithEmbeddings(input: {
 
   if (model !== null && !model) {
     throw new Error("Embedding model is required");
+  }
+
+  if (questionFilter?.length === 0) {
+    return [];
   }
 
   const rows = await db
@@ -446,6 +475,9 @@ export async function readQuestionsWithEmbeddings(input: {
       and(
         eq(questions.deckId, context.deckId),
         eq(decks.userId, context.userId),
+        questionFilter === null
+          ? sql`true`
+          : inArray(questions.question, questionFilter),
       ),
     )
     .orderBy(
@@ -728,6 +760,64 @@ export async function getAllQueuedQuestions(
     .map(toDueQuestion)
     .filter((row) => Number.isFinite(row.nextDue))
     .sort((a, b) => a.nextDue - b.nextDue);
+}
+
+export async function getQueuedQuestionsPage(
+  input: UserContextInput & {
+    excludeQuestions?: string[];
+    limit: number;
+    offset: number;
+    sortKey: QueuedQuestionsSortKey;
+  },
+): Promise<QueuedQuestionsPage> {
+  const context = await ensureSeedData(input);
+  const excludeQuestions = Array.from(
+    new Set(input.excludeQuestions ?? []),
+  ).filter(Boolean);
+  const whereClause = and(
+    eq(questions.deckId, context.deckId),
+    eq(decks.userId, context.userId),
+    excludeQuestions.length > 0
+      ? notInArray(questions.question, excludeQuestions)
+      : sql`true`,
+  );
+  const orderBy =
+    input.sortKey === "creation-date"
+      ? [desc(questions.createdAt), asc(questions.question)]
+      : [asc(questions.nextDue), asc(questions.question)];
+  const [{ value: total = 0 } = { value: 0 }] = await db
+    .select({ value: count() })
+    .from(questions)
+    .innerJoin(decks, eq(decks.id, questions.deckId))
+    .where(whereClause);
+
+  const rows = await db
+    .select({
+      question_id: questions.id,
+      deck_id: questions.deckId,
+      deck_name: decks.name,
+      user_id: decks.userId,
+      question: questions.question,
+      reviews: questions.reviews,
+      next_due: questions.nextDue,
+      generated_from_question: questions.generatedFromQuestion,
+      last_answer: questions.lastAnswer,
+      last_answer_summary: questions.lastAnswerSummary,
+      concise_answer: questions.conciseAnswer,
+      reference_answer: questions.referenceAnswer,
+      created_at: questions.createdAt,
+    })
+    .from(questions)
+    .innerJoin(decks, eq(decks.id, questions.deckId))
+    .where(whereClause)
+    .orderBy(...orderBy)
+    .limit(Math.max(0, Math.floor(input.limit)))
+    .offset(Math.max(0, Math.floor(input.offset)));
+
+  return {
+    items: rows.map(toDueQuestion).filter((row) => Number.isFinite(row.nextDue)),
+    total,
+  };
 }
 
 export async function getQuestionSnapshot(

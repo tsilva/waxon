@@ -893,10 +893,10 @@ export function AdminPageClient() {
               <span>waxon</span>
             </Link>
             <div className="reader-tabs" role="tablist" aria-label="Waxon views">
-              <Link className="reader-tab" href="/" role="tab" aria-selected="false">
+              <Link className="reader-tab" href="/review" role="tab" aria-selected="false">
                 Review
               </Link>
-              <Link className="reader-tab" href="/" role="tab" aria-selected="false">
+              <Link className="reader-tab" href="/queue" role="tab" aria-selected="false">
                 Queue
               </Link>
               <span className="reader-tab reader-tab-active" role="tab" aria-selected="true">

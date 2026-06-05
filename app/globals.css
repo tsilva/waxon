@@ -182,7 +182,6 @@ textarea {
 .generator-scope-footer,
 .generator-review-header p,
 .generator-review-header span,
-.generator-question-meta,
 .generator-review-footer,
 .stats-modal-kicker,
 .stats-tile span,
@@ -277,7 +276,7 @@ textarea {
 
 .landing-nav {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: clamp(20px, 4vw, 56px);
   min-height: 76px;
@@ -288,6 +287,7 @@ textarea {
 .landing-links a,
 .landing-links,
 .landing-primary,
+.landing-account,
 .landing-hero-actions span,
 .landing-paper span,
 .landing-score span,
@@ -327,6 +327,86 @@ textarea {
 .landing-brand:focus-visible {
   color: var(--accent);
   outline: 0;
+}
+
+.landing-account {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.landing-account-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.landing-account-primary,
+.landing-account-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  border: 1px solid rgb(227 218 196 / 86%);
+  border-radius: 8px;
+  padding: 0 13px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1;
+  text-decoration: none;
+  white-space: nowrap;
+  box-shadow:
+    0 10px 24px rgb(42 24 22 / 5%),
+    inset 0 1px 0 rgb(255 255 255 / 90%);
+}
+
+.landing-account-primary {
+  border-color: rgb(8 51 45 / 82%);
+  background: #073d35;
+  color: #fffaf0;
+}
+
+.landing-account-secondary {
+  background: rgb(255 255 255 / 56%);
+  color: #1d312d;
+}
+
+.landing-account-primary:hover,
+.landing-account-primary:focus-visible,
+.landing-account-secondary:hover,
+.landing-account-secondary:focus-visible {
+  border-color: rgb(166 124 82 / 42%);
+  color: var(--accent);
+  outline: 3px solid rgb(166 124 82 / 12%);
+  outline-offset: 3px;
+}
+
+.landing-account-primary:hover,
+.landing-account-primary:focus-visible {
+  background: #0b5148;
+  color: #fffaf0;
+}
+
+.landing-user-button-trigger {
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgb(227 218 196 / 86%);
+  border-radius: 999px;
+  box-shadow:
+    0 10px 24px rgb(42 24 22 / 5%),
+    inset 0 1px 0 rgb(255 255 255 / 90%);
+}
+
+.landing-user-button-trigger:focus-visible {
+  outline: 3px solid rgb(166 124 82 / 12%);
+  outline-offset: 3px;
+}
+
+.landing-user-button-avatar {
+  width: 100%;
+  height: 100%;
 }
 
 .landing-primary {
@@ -794,6 +874,11 @@ textarea {
   text-decoration: none;
 }
 
+.landing-origin {
+  color: rgb(49 73 67 / 72%);
+  text-align: center;
+}
+
 .landing-footer a:hover,
 .landing-footer a:focus-visible {
   color: var(--accent);
@@ -864,6 +949,10 @@ textarea {
   .landing-nav {
     grid-template-columns: auto auto;
     justify-content: space-between;
+  }
+
+  .landing-account {
+    justify-self: end;
   }
 
   .landing-links {
@@ -997,6 +1086,7 @@ textarea {
   font-size: 18px;
   font-weight: 760;
   line-height: 1.1;
+  text-decoration: none;
 }
 
 .reader-tab::after {
@@ -1684,13 +1774,6 @@ textarea {
   outline-offset: 2px;
 }
 
-.previous-panel:not(.previous-panel-expanded) .load-more-answers {
-  position: absolute;
-  top: 16px;
-  right: 4px;
-  margin: 0;
-}
-
 .previous-row {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
@@ -1837,6 +1920,10 @@ textarea {
 
 @media (prefers-reduced-motion: reduce) {
   .pending-spinner {
+    animation: none;
+  }
+
+  .generator-progress-card svg {
     animation: none;
   }
 
@@ -2394,6 +2481,24 @@ textarea {
   display: block;
 }
 
+.queue-spacer {
+  display: block;
+  min-height: 1px;
+  pointer-events: none;
+}
+
+.queue-loading-row {
+  display: grid;
+  place-items: center;
+  min-height: 48px;
+  border: 1px dashed rgb(227 218 196 / 80%);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
 .queue-row-card {
   display: grid;
   gap: 9px;
@@ -2545,7 +2650,60 @@ textarea {
 .generator-modal {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  position: relative;
   width: min(1040px, 100%);
+}
+
+.generator-progress-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  padding: 24px;
+  background: rgb(246 241 231 / 70%);
+  backdrop-filter: blur(7px);
+  cursor: wait;
+}
+
+.generator-progress-card {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  max-width: min(320px, 100%);
+  border: 1px solid rgb(227 218 196 / 90%);
+  border-radius: 8px;
+  padding: 18px 20px;
+  background: rgb(255 253 248 / 92%);
+  box-shadow: 0 18px 46px rgb(42 24 22 / 16%);
+  text-align: center;
+}
+
+.generator-progress-card svg {
+  width: 24px;
+  height: 24px;
+  animation: pending-spin 1.2s linear infinite;
+  color: var(--accent);
+  stroke-width: 2.3;
+}
+
+.generator-progress-card strong,
+.generator-progress-card span {
+  font-family: var(--font-ui);
+  line-height: 1.25;
+}
+
+.generator-progress-card strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 820;
+}
+
+.generator-progress-card span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 680;
 }
 
 .generator-modal-header,
@@ -2666,6 +2824,15 @@ textarea {
 
 .generator-scope-input:focus {
   outline: 0;
+}
+
+.generator-scope-input:disabled,
+.generator-count-slider:disabled {
+  cursor: wait;
+}
+
+.generator-scope-input:disabled {
+  color: var(--ink-soft);
 }
 
 .generator-scope-shell:focus-within,
@@ -2908,6 +3075,11 @@ textarea {
   opacity: 0.52;
 }
 
+.stats-modal-close:disabled {
+  cursor: wait;
+  opacity: 0.52;
+}
+
 .generator-review-panel {
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
@@ -3049,15 +3221,6 @@ textarea {
   font-size: 15px;
   font-weight: 700;
   line-height: 1.36;
-}
-
-.generator-question-meta {
-  margin: 0;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
-  line-height: 1.3;
-  text-transform: uppercase;
 }
 
 .generator-review-footer {
@@ -4186,6 +4349,7 @@ textarea {
   }
 
   .landing-nav {
+    column-gap: 14px;
     min-height: 64px;
   }
 
@@ -4200,6 +4364,22 @@ textarea {
 
   .landing-links a {
     font-size: 13px;
+  }
+
+  .landing-account-actions {
+    gap: 8px;
+  }
+
+  .landing-account-primary,
+  .landing-account-secondary {
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
+  .landing-user-button-trigger {
+    width: 36px;
+    height: 36px;
   }
 
   .landing-hero {

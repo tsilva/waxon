@@ -9,16 +9,17 @@ import {
 import { usePathname } from "next/navigation";
 
 const authRoutes = ["/sign-in", "/sign-up"];
-const reviewShellRoutes = ["/review", "/queue"];
+const reviewShellRoutes = ["/review", "/queue", "/admin"];
 
 export function AuthBar() {
   const pathname = usePathname();
+  const isLandingRoute = pathname === "/";
   const isAuthRoute = authRoutes.some((route) => pathname.startsWith(route));
   const isReviewShellRoute = reviewShellRoutes.some((route) =>
     pathname.startsWith(route),
   );
 
-  if (isAuthRoute || isReviewShellRoute) {
+  if (isLandingRoute || isAuthRoute || isReviewShellRoute) {
     return null;
   }
 

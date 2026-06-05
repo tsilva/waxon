@@ -22,7 +22,8 @@ export const dynamic = "force-dynamic";
 const OPENROUTER_MODEL = process.env.LLM_MODEL || "openai/gpt-5.5";
 const MAX_CONTEXT_CHARS = 32_000;
 const MAX_SUMMARY_CHARS = 1_600;
-const MAX_QUESTION_COUNT = 40;
+const DEFAULT_QUESTION_COUNT = 5;
+const MAX_QUESTION_COUNT = 10;
 const GENERATION_NEIGHBOR_COUNT = 32;
 
 type ContextFilePayload = {
@@ -50,10 +51,10 @@ function normalizeQuestionCount(value: unknown): number {
       ? value
       : typeof value === "string"
         ? Number.parseInt(value, 10)
-        : 12;
+        : DEFAULT_QUESTION_COUNT;
 
   if (!Number.isFinite(numericValue)) {
-    return 12;
+    return DEFAULT_QUESTION_COUNT;
   }
 
   return Math.min(MAX_QUESTION_COUNT, Math.max(1, Math.round(numericValue)));

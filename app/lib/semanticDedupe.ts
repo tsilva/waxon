@@ -244,11 +244,13 @@ async function buildCandidateEmbeddings(
 
 async function loadExternalNeighbors(
   candidates: CandidateWithEmbedding[],
+  trace: Partial<OpenRouterTraceContext>,
 ): Promise<Map<string, Neighbor[]>> {
   if (candidates.length === 0) {
     return new Map();
   }
 
+  const deckId = trace.deckId?.trim() || DEFAULT_DECK_ID;
   const valuesSql = candidates
     .map((_, index) => `($${index * 2 + 1}, $${index * 2 + 2}::vector)`)
     .join(", ");
@@ -259,7 +261,7 @@ async function loadExternalNeighbors(
   }
 
   params.push(
-    DEFAULT_DECK_ID,
+    deckId,
     process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
     DEDUPE_EMBEDDING_KIND,
     DEDUPE_SOURCE_VERSION,
@@ -507,7 +509,9 @@ export async function gateNovelQuestions(
     return { accepted: [], rejected };
   }
 
-  const existingQuestions = await readQuestions();
+  const existingQuestions = await readQuestions(
+    trace.userId ? { userId: trace.userId } : {},
+  );
   const existingBySlug = new Map(
     existingQuestions.map((row) => [questionSlug(row.question), row.question]),
   );
@@ -527,7 +531,7 @@ export async function gateNovelQuestions(
   });
 
   const embeddedCandidates = await buildCandidateEmbeddings(candidatesToCheck, trace);
-  const externalNeighbors = await loadExternalNeighbors(embeddedCandidates);
+  const externalNeighbors = await loadExternalNeighbors(embeddedCandidates, trace);
   const candidatesForJudgment = addBatchNeighbors(
     embeddedCandidates.map((candidate) => ({
       ...candidate,
