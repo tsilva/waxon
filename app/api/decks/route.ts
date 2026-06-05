@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createDeck, listDecks } from "@/app/lib/postgresStore";
+import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,10 @@ export async function POST(request: Request) {
           ? payload.inReviewRotation
           : false,
     });
+
+    if (deck.inReviewRotation) {
+      invalidateReviewQueue();
+    }
 
     return NextResponse.json({
       ok: true,

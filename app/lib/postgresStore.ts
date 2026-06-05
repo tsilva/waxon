@@ -400,6 +400,64 @@ async function seedCurrentUserAndDeck(context: UserContext): Promise<void> {
     });
 }
 
+async function copyDefaultDeckEmbeddingsToUserDeck(
+  context: UserContext,
+  now = Math.round(Date.now()),
+): Promise<void> {
+  if (context.deckId === DEFAULT_DECK.id) {
+    return;
+  }
+
+  await db.execute(sql`
+    INSERT INTO question_embeddings (
+      deck_id,
+      question_id,
+      question,
+      embedding_model,
+      embedding_kind,
+      source_version,
+      source_hash,
+      is_current,
+      embedding,
+      created_at,
+      updated_at
+    )
+    SELECT
+      ${context.deckId},
+      target_question.id,
+      target_question.question,
+      source_embedding.embedding_model,
+      source_embedding.embedding_kind,
+      source_embedding.source_version,
+      source_embedding.source_hash,
+      source_embedding.is_current,
+      source_embedding.embedding,
+      source_embedding.created_at,
+      ${now}
+    FROM question_embeddings source_embedding
+    INNER JOIN questions source_question
+      ON source_question.id = source_embedding.question_id
+      AND source_question.deck_id = source_embedding.deck_id
+    INNER JOIN questions target_question
+      ON target_question.deck_id = ${context.deckId}
+      AND target_question.question = source_question.question
+    WHERE source_embedding.deck_id = ${DEFAULT_DECK.id}
+    ON CONFLICT (
+      deck_id,
+      question_id,
+      embedding_model,
+      embedding_kind,
+      source_version
+    )
+    DO UPDATE SET
+      question = excluded.question,
+      source_hash = excluded.source_hash,
+      is_current = excluded.is_current,
+      embedding = excluded.embedding,
+      updated_at = excluded.updated_at
+  `);
+}
+
 async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext> {
   const context = await resolveUserContext(input);
 
@@ -415,6 +473,7 @@ async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext
     .where(eq(questions.deckId, context.deckId));
 
   if (questionCount > 0) {
+    await copyDefaultDeckEmbeddingsToUserDeck(context);
     seededUserIds.add(context.userId);
     return context;
   }
@@ -438,6 +497,8 @@ async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext
       })),
     )
     .onConflictDoNothing();
+
+  await copyDefaultDeckEmbeddingsToUserDeck(context);
 
   seededUserIds.add(context.userId);
   return context;

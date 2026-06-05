@@ -5,6 +5,7 @@ import {
   getQueuedQuestionsPage,
   getRecentQuestionAttempts,
   getQuestionSnapshot,
+  listDecks,
   readQuestionsWithEmbeddings,
   resolveOwnedDeckId,
   upsertDueQuestions,
@@ -171,6 +172,14 @@ function resetQueueStateForUser(userId: string): void {
   state.inFlightQuestions = new Set();
   state.evaluations = [];
   state.latestByQuestion = {};
+}
+
+export function invalidateReviewQueue(): void {
+  state.initialized = false;
+  state.initializing = null;
+  state.queue = [];
+  logQueueFlushStatus("invalidated-review-queue");
+  void broadcastQueueStatus();
 }
 
 async function ensureQueueUser(): Promise<AuthenticatedUser> {
@@ -945,18 +954,21 @@ async function processEvaluation(submission: Submission): Promise<void> {
 
 export async function peekNextQuestion(): Promise<{
   question: string | null;
+  deckName: string | null;
   queueRemaining: number;
 }>;
 export async function peekNextQuestion(input: {
   excludeQuestion?: string | null;
 }): Promise<{
   question: string | null;
+  deckName: string | null;
   queueRemaining: number;
 }>;
 export async function peekNextQuestion(input: {
   excludeQuestion?: string | null;
 } = {}): Promise<{
   question: string | null;
+  deckName: string | null;
   queueRemaining: number;
 }> {
   const user = await initializeQueue();
@@ -971,13 +983,18 @@ export async function peekNextQuestion(input: {
 
   return {
     question: nextQuestion?.question ?? null,
+    deckName: nextQuestion?.deckName ?? null,
     queueRemaining: state.queue.length,
   };
 }
 
 export async function skipQuestion(input: {
   question: string;
-}): Promise<{ question: string | null; queueRemaining: number }> {
+}): Promise<{
+  question: string | null;
+  deckName: string | null;
+  queueRemaining: number;
+}> {
   const user = await initializeQueue();
   await refreshIfEmpty(user.id);
 
@@ -1074,7 +1091,16 @@ export async function addQuestionsToDeck(input: {
     userId: user.id,
   });
 
-  enqueueProbingQuestions(addedQuestions);
+  const targetDeck = (await listDecks({ userId: user.id })).find(
+    (deck) => deck.id === deckId,
+  );
+
+  if (targetDeck?.inReviewRotation) {
+    enqueueProbingQuestions(addedQuestions);
+  } else {
+    invalidateReviewQueue();
+  }
+
   void broadcastQueueStatus();
 
   return {
