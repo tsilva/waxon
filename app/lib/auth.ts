@@ -1,4 +1,5 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
+import * as Sentry from "@sentry/nextjs";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import { authAccounts, users } from "@/app/db/schema";
@@ -71,6 +72,25 @@ export function getDeckIdForUser(userId: string): string {
   return userId === "tsilva" ? "deep-learning" : `${userId}:deep-learning`;
 }
 
+function setTraceIdentity(input: {
+  userId: string;
+  deckId: string;
+  email: string;
+  displayName: string;
+}): void {
+  Sentry.setUser({
+    id: input.userId,
+    email: input.email,
+    username: input.displayName,
+  });
+  Sentry.setTag("user_id", input.userId);
+  Sentry.setTag("deck_id", input.deckId);
+  Sentry.setContext("waxon", {
+    userId: input.userId,
+    deckId: input.deckId,
+  });
+}
+
 export async function getCurrentUser(): Promise<AuthenticatedUser> {
   const authObject = await auth.protect();
   const clerkUserId = authObject.userId;
@@ -104,6 +124,9 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
     existingAccount?.userId ??
     (await findLegacyClaimUserId(email)) ??
     appUserIdForClerkUser(clerkUserId);
+  const deckId = getDeckIdForUser(userId);
+
+  setTraceIdentity({ userId, deckId, email, displayName });
 
   const [row] = await db
     .insert(users)

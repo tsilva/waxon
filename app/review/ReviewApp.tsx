@@ -42,6 +42,17 @@ type NextQuestionResponse = {
   queueRemaining: number;
 };
 
+type PrefetchedNextQuestion = {
+  excludeQuestion: string;
+  data: NextQuestionResponse;
+};
+
+type NextQuestionPrefetch = {
+  excludeQuestion: string;
+  abortController: AbortController;
+  promise: Promise<PrefetchedNextQuestion | null>;
+};
+
 type SubmitAnswerResponse = {
   ok: boolean;
   evaluationId: string;
@@ -52,6 +63,10 @@ type QueueStatusResponse = {
   pendingEvaluations: number;
   evaluations: EvaluationQueueItem[];
   reviewQueue: ReviewQueueItem[];
+  reviewQueueTotal?: number;
+  reviewQueueOffset?: number;
+  reviewQueueLimit?: number;
+  reviewQueueHasMore?: boolean;
   deckEmbeddingPlot: DeckEmbeddingPlotResponse;
 };
 
@@ -74,6 +89,7 @@ type ReferenceAnswerState = {
 type EvaluationQueueItem = {
   id: string;
   question: string;
+  answer: string | null;
   status: "grading" | "resolved";
   submittedAt: number;
   score: number | null;
@@ -185,9 +201,7 @@ type GeneratedQuestionCandidate = {
   id: string;
   question: string;
   conciseAnswer: string;
-  sourceLabel: string;
   coverageLabel: string;
-  batch: number;
   status: GeneratedQuestionStatus;
 };
 
@@ -205,7 +219,6 @@ type GenerateQuestionsResponse =
       questions: Array<{
         question: string;
         conciseAnswer?: string;
-        sourceLabel?: string;
         coverageLabel?: string;
       }>;
     }
@@ -219,6 +232,34 @@ type PendingSpeechCommand = {
   heldText: string;
   submitAnswer: string;
 };
+
+function nextQuestionUrl(excludeQuestion?: string | null) {
+  const params = new URLSearchParams();
+
+  if (excludeQuestion) {
+    params.set("excludeQuestion", excludeQuestion);
+  }
+
+  return params.size > 0
+    ? `/api/next-question?${params.toString()}`
+    : "/api/next-question";
+}
+
+async function fetchNextQuestionData(input: {
+  excludeQuestion?: string | null;
+  signal?: AbortSignal;
+} = {}): Promise<NextQuestionResponse> {
+  const response = await fetch(nextQuestionUrl(input.excludeQuestion), {
+    cache: "no-store",
+    signal: input.signal,
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to load the next question.");
+  }
+
+  return (await response.json()) as NextQuestionResponse;
+}
 
 type SpeechStatus =
   | "idle"
@@ -296,10 +337,15 @@ type MathParseResult = {
 
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
+const QUEUE_PAGE_SIZE = 24;
+const QUEUE_ROW_ESTIMATED_HEIGHT = 132;
+const QUEUE_ROW_OVERSCAN = 10;
+const QUEUE_LOAD_AHEAD_PX = 720;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 const MAX_AVATAR_UPLOAD_BYTES = 512 * 1024;
 const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit|skip)[.!?]*$/i;
-const MAX_GENERATED_QUESTION_COUNT = 40;
+const DEFAULT_GENERATED_QUESTION_COUNT = 5;
+const MAX_GENERATED_QUESTION_COUNT = 10;
 
 const mathSymbolMap: Record<string, string> = {
   alpha: "\u03b1",
@@ -703,11 +749,11 @@ function PreviousAnswerScore({
 }
 
 function formatScore(score: number | null): string {
-  return score === null ? "None" : `${score}/10`;
+  return score === null ? "N/A" : `${score}/10`;
 }
 
 function formatAverageScore(score: number | null): string {
-  return score === null ? "None" : `${score.toFixed(1)}/10`;
+  return score === null ? "N/A" : `${score.toFixed(1)}/10`;
 }
 
 function formatReviewDate(timestamp: number | null): string {
@@ -1187,6 +1233,13 @@ export default function ReviewApp({
   const [queueRemaining, setQueueRemaining] = useState(0);
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>([]);
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
+  const [reviewQueueTotal, setReviewQueueTotal] = useState(0);
+  const [isQueuePageLoading, setIsQueuePageLoading] = useState(false);
+  const [queuePageError, setQueuePageError] = useState<string | null>(null);
+  const [queueVirtualRange, setQueueVirtualRange] = useState({
+    start: 0,
+    end: QUEUE_PAGE_SIZE,
+  });
   const [queueSortKey, setQueueSortKey] =
     useState<QueueSortKey>("review-date");
   const [deckEmbeddingPlot, setDeckEmbeddingPlot] =
@@ -1224,18 +1277,23 @@ export default function ReviewApp({
   const menuEmail =
     clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
   const [generatorScope, setGeneratorScope] = useState("");
-  const [generatorQuestionCount, setGeneratorQuestionCount] = useState(12);
+  const [generatorQuestionCount, setGeneratorQuestionCount] = useState(
+    DEFAULT_GENERATED_QUESTION_COUNT,
+  );
   const [generatorFiles, setGeneratorFiles] = useState<GeneratorContextFile[]>([]);
   const [generatedQuestions, setGeneratedQuestions] = useState<
     GeneratedQuestionCandidate[]
   >([]);
-  const [generatorBatch, setGeneratorBatch] = useState(0);
   const [generatorMessage, setGeneratorMessage] = useState<string | null>(null);
   const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
+  const queueStageRef = useRef<HTMLElement | null>(null);
+  const queueListRef = useRef<HTMLOListElement | null>(null);
+  const queueLoadedLimitRef = useRef(QUEUE_PAGE_SIZE);
+  const isQueuePageLoadingRef = useRef(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
@@ -1245,6 +1303,8 @@ export default function ReviewApp({
   const pendingSpeechCommandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const prefetchedNextQuestionRef = useRef<PrefetchedNextQuestion | null>(null);
+  const nextQuestionPrefetchRef = useRef<NextQuestionPrefetch | null>(null);
 
   const togglePreviousAnswerDetails = useCallback((id: string) => {
     setExpandedPreviousAnswerIds((currentIds) => {
@@ -1280,6 +1340,26 @@ export default function ReviewApp({
   useEffect(() => {
     isSubmittingRef.current = isSubmitting;
   }, [isSubmitting]);
+
+  useEffect(() => {
+    isQueuePageLoadingRef.current = isQueuePageLoading;
+  }, [isQueuePageLoading]);
+
+  const closeQuestionGenerator = useCallback(() => {
+    if (isGeneratingQuestions) {
+      return;
+    }
+
+    setIsQuestionGeneratorOpen(false);
+    setGeneratedQuestions([]);
+    setGeneratorMessage(null);
+  }, [isGeneratingQuestions]);
+
+  const openQuestionGenerator = useCallback(() => {
+    setGeneratedQuestions([]);
+    setGeneratorMessage(null);
+    setIsQuestionGeneratorOpen(true);
+  }, []);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1378,14 +1458,20 @@ export default function ReviewApp({
 
     function closeGeneratorOnEscape(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
-        setIsQuestionGeneratorOpen(false);
+        if (isGeneratingQuestions) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+
+        closeQuestionGenerator();
       }
     }
 
     window.addEventListener("keydown", closeGeneratorOnEscape);
 
     return () => window.removeEventListener("keydown", closeGeneratorOnEscape);
-  }, [isQuestionGeneratorOpen]);
+  }, [closeQuestionGenerator, isGeneratingQuestions, isQuestionGeneratorOpen]);
 
   const clearPendingSpeechCommand = useCallback(() => {
     if (pendingSpeechCommandTimerRef.current) {
@@ -1423,7 +1509,112 @@ export default function ReviewApp({
     });
   }, []);
 
+  const applyNextQuestion = useCallback((data: NextQuestionResponse) => {
+    setQuestion(data.question);
+    questionRef.current = data.question;
+    setQueueRemaining(data.queueRemaining);
+
+    if (data.question) {
+      appendQuestion(data.question);
+    }
+  }, [appendQuestion]);
+
+  const prefetchNextQuestion = useCallback((excludeQuestion: string | null) => {
+    const normalizedQuestion = excludeQuestion?.trim();
+
+    if (!normalizedQuestion) {
+      return;
+    }
+
+    if (prefetchedNextQuestionRef.current?.excludeQuestion === normalizedQuestion) {
+      return;
+    }
+
+    if (nextQuestionPrefetchRef.current?.excludeQuestion === normalizedQuestion) {
+      return;
+    }
+
+    prefetchedNextQuestionRef.current = null;
+    nextQuestionPrefetchRef.current?.abortController.abort();
+
+    const abortController = new AbortController();
+    const promise = fetchNextQuestionData({
+      excludeQuestion: normalizedQuestion,
+      signal: abortController.signal,
+    })
+      .then((data): PrefetchedNextQuestion => ({
+        excludeQuestion: normalizedQuestion,
+        data,
+      }))
+      .catch((prefetchError): null => {
+        if (
+          prefetchError instanceof DOMException &&
+          prefetchError.name === "AbortError"
+        ) {
+          return null;
+        }
+
+        return null;
+      });
+
+    const request: NextQuestionPrefetch = {
+      excludeQuestion: normalizedQuestion,
+      abortController,
+      promise,
+    };
+
+    nextQuestionPrefetchRef.current = request;
+
+    void promise.then((prefetched) => {
+      if (nextQuestionPrefetchRef.current !== request) {
+        return;
+      }
+
+      nextQuestionPrefetchRef.current = null;
+
+      if (
+        prefetched &&
+        questionRef.current === prefetched.excludeQuestion
+      ) {
+        prefetchedNextQuestionRef.current = prefetched;
+      }
+    });
+  }, []);
+
+  const takePrefetchedNextQuestion = useCallback(
+    async (excludeQuestion: string) => {
+      const normalizedQuestion = excludeQuestion.trim();
+      const cachedQuestion = prefetchedNextQuestionRef.current;
+
+      if (cachedQuestion?.excludeQuestion === normalizedQuestion) {
+        prefetchedNextQuestionRef.current = null;
+        return cachedQuestion.data;
+      }
+
+      const pendingPrefetch = nextQuestionPrefetchRef.current;
+
+      if (pendingPrefetch?.excludeQuestion !== normalizedQuestion) {
+        return null;
+      }
+
+      const prefetched = await pendingPrefetch.promise;
+
+      if (nextQuestionPrefetchRef.current === pendingPrefetch) {
+        nextQuestionPrefetchRef.current = null;
+      }
+
+      if (prefetched?.excludeQuestion !== normalizedQuestion) {
+        return null;
+      }
+
+      prefetchedNextQuestionRef.current = null;
+      return prefetched.data;
+    },
+    [],
+  );
+
   const loadNextQuestion = useCallback(async (options?: {
+    excludeQuestion?: string | null;
     surfaceError?: boolean;
   }) => {
     const surfaceError = options?.surfaceError ?? true;
@@ -1434,22 +1625,10 @@ export default function ReviewApp({
     setError(null);
 
     try {
-      const response = await fetch("/api/next-question", {
-        cache: "no-store",
+      const data = await fetchNextQuestionData({
+        excludeQuestion: options?.excludeQuestion,
       });
-
-      if (!response.ok) {
-        throw new Error("Failed to load the next question.");
-      }
-
-      const data = (await response.json()) as NextQuestionResponse;
-      setQuestion(data.question);
-      questionRef.current = data.question;
-      setQueueRemaining(data.queueRemaining);
-
-      if (data.question) {
-        appendQuestion(data.question);
-      }
+      applyNextQuestion(data);
     } catch (loadError) {
       if (surfaceError) {
         setError(
@@ -1461,12 +1640,27 @@ export default function ReviewApp({
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [appendQuestion]);
+  }, [applyNextQuestion]);
+
+  const queueStatusUrl = useCallback((limit: number) => {
+    const params = new URLSearchParams({
+      limit: String(Math.max(0, Math.floor(limit))),
+      offset: "0",
+      sort: queueSortKey,
+    });
+
+    return `/api/queue-status?${params.toString()}`;
+  }, [queueSortKey]);
 
   const applyQueueStatus = useCallback((data: QueueStatusResponse) => {
     setQueueRemaining(data.queueRemaining);
     setEvaluations(data.evaluations);
     setReviewQueue(data.reviewQueue);
+    setReviewQueueTotal(data.reviewQueueTotal ?? data.reviewQueue.length);
+    queueLoadedLimitRef.current = Math.max(
+      QUEUE_PAGE_SIZE,
+      data.reviewQueueLimit ?? data.reviewQueue.length,
+    );
     setDeckEmbeddingPlot(
       data.deckEmbeddingPlot ?? {
         model: null,
@@ -1475,15 +1669,24 @@ export default function ReviewApp({
         points: [],
       },
     );
+    setQueuePageError(null);
   }, []);
 
-  const loadStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (limit = QUEUE_PAGE_SIZE) => {
+    if (isQueuePageLoadingRef.current) {
+      return;
+    }
+
+    isQueuePageLoadingRef.current = true;
+    setIsQueuePageLoading(true);
+
     try {
-      const response = await fetch("/api/queue-status", {
+      const response = await fetch(queueStatusUrl(limit), {
         cache: "no-store",
       });
 
       if (!response.ok) {
+        setQueuePageError("Could not load queue.");
         return;
       }
 
@@ -1491,23 +1694,50 @@ export default function ReviewApp({
       applyQueueStatus(data);
     } catch {
       // Status is informational; keep the review loop usable if polling fails.
+      setQueuePageError("Could not load queue.");
+    } finally {
+      isQueuePageLoadingRef.current = false;
+      setIsQueuePageLoading(false);
     }
-  }, [applyQueueStatus]);
+  }, [applyQueueStatus, queueStatusUrl]);
 
   useEffect(() => {
     void loadNextQuestion({ surfaceError: false });
   }, [clearPendingSpeechCommand, loadNextQuestion]);
 
   useEffect(() => {
-    void loadStatus();
+    if (!question) {
+      prefetchedNextQuestionRef.current = null;
+      nextQuestionPrefetchRef.current?.abortController.abort();
+      nextQuestionPrefetchRef.current = null;
+      return;
+    }
+
+    prefetchNextQuestion(question);
+  }, [prefetchNextQuestion, question]);
+
+  useEffect(() => {
+    return () => {
+      nextQuestionPrefetchRef.current?.abortController.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
+    setReviewQueue([]);
+    setReviewQueueTotal(0);
+    setQueueVirtualRange({
+      start: 0,
+      end: QUEUE_PAGE_SIZE,
+    });
+    void loadStatus(QUEUE_PAGE_SIZE);
 
     const events = new EventSource("/api/queue-status/stream");
 
     events.addEventListener("status", (event) => {
       try {
-        applyQueueStatus(
-          JSON.parse((event as MessageEvent<string>).data) as QueueStatusResponse,
-        );
+        JSON.parse((event as MessageEvent<string>).data) as QueueStatusResponse;
+        void loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
       } catch {
         // Ignore malformed stream events; the connection can continue.
       }
@@ -1515,11 +1745,11 @@ export default function ReviewApp({
 
     events.onerror = () => {
       events.close();
-      void loadStatus();
+      void loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
     };
 
     return () => events.close();
-  }, [applyQueueStatus, loadStatus]);
+  }, [loadStatus]);
 
   useEffect(() => {
     setMessages((current) => {
@@ -1619,7 +1849,18 @@ export default function ReviewApp({
         },
       ]);
 
-      await loadNextQuestion();
+      const prefetchedQuestion =
+        await takePrefetchedNextQuestion(submittedQuestion);
+
+      if (prefetchedQuestion) {
+        applyNextQuestion({
+          ...prefetchedQuestion,
+          queueRemaining: Math.max(0, prefetchedQuestion.queueRemaining - 1),
+        });
+      } else {
+        await loadNextQuestion({ excludeQuestion: submittedQuestion });
+      }
+
       return true;
     } catch (submitError) {
       setQuestion(submittedQuestion);
@@ -1633,7 +1874,12 @@ export default function ReviewApp({
     } finally {
       setIsSubmitting(false);
     }
-  }, [clearPendingSpeechCommand, loadNextQuestion]);
+  }, [
+    applyNextQuestion,
+    clearPendingSpeechCommand,
+    loadNextQuestion,
+    takePrefetchedNextQuestion,
+  ]);
 
   const skipCurrentQuestion = useCallback(async () => {
     clearPendingSpeechCommand();
@@ -1979,6 +2225,11 @@ export default function ReviewApp({
   async function handleGeneratorFileDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     event.stopPropagation();
+
+    if (isGeneratingQuestions) {
+      return;
+    }
+
     await addGeneratorContextFiles(Array.from(event.dataTransfer.files ?? []));
   }
 
@@ -2004,10 +2255,8 @@ export default function ReviewApp({
       return;
     }
 
-    const nextBatch = generatorBatch + 1;
-
     setIsGeneratingQuestions(true);
-    setGeneratorMessage("Generating with OpenRouter...");
+    setGeneratorMessage(null);
 
     try {
       const response = await fetch("/api/questions/generate", {
@@ -2037,13 +2286,10 @@ export default function ReviewApp({
         id: createClientId("generated-question"),
         question: item.question,
         conciseAnswer: item.conciseAnswer || "",
-        sourceLabel: item.sourceLabel || "OpenRouter",
         coverageLabel: item.coverageLabel || item.question,
-        batch: nextBatch,
         status: "new" as const,
       }));
 
-      setGeneratorBatch(nextBatch);
       setGeneratedQuestions((current) => [...candidates, ...current]);
       setGeneratorMessage(
         candidates.length > 0
@@ -2084,15 +2330,6 @@ export default function ReviewApp({
           : item,
       ),
     );
-    setGeneratorMessage(null);
-  }
-
-  function clearGeneratedQuestionQueue() {
-    if (isGeneratingQuestions || generatedQuestionCounts.adding > 0) {
-      return;
-    }
-
-    setGeneratedQuestions([]);
     setGeneratorMessage(null);
   }
 
@@ -2203,9 +2440,45 @@ export default function ReviewApp({
       };
     });
 
-  const sessionPreviousQuestions = new Set(
-    sessionPreviousAnswers.map((previousItem) => previousItem.question),
+  const sessionPreviousEvaluationIds = new Set(
+    messages
+      .filter(
+        (message): message is Extract<ChatMessage, { kind: "answer" }> =>
+          message.kind === "answer",
+      )
+      .map((message) => message.evaluationId),
   );
+
+  const evaluationPreviousAnswers: PreviousAnswerItem[] = evaluations
+    .filter(
+      (evaluation) =>
+        !sessionPreviousEvaluationIds.has(evaluation.id) &&
+        evaluation.answer !== null,
+    )
+    .slice()
+    .reverse()
+    .map((evaluation) => {
+      const timestamp = evaluation.resolvedAt ?? evaluation.submittedAt;
+
+      return {
+        id: `evaluation-${evaluation.id}`,
+        question: evaluation.question,
+        answer: evaluation.answer || "(blank)",
+        status: evaluation.status,
+        score: evaluation.score,
+        justification: evaluation.justification,
+        timestamp,
+        timeLabel:
+          evaluation.status === "grading"
+            ? "Just now"
+            : formatRelativeTime(timestamp, currentTime),
+      };
+    });
+
+  const livePreviousQuestions = new Set([
+    ...sessionPreviousAnswers.map((previousItem) => previousItem.question),
+    ...evaluationPreviousAnswers.map((previousItem) => previousItem.question),
+  ]);
 
   const historicalPreviousAnswers: PreviousAnswerItem[] = reviewQueue
     .filter(
@@ -2213,7 +2486,7 @@ export default function ReviewApp({
         item.lastScore !== null &&
         item.lastAnswer !== null &&
         item.question !== question &&
-        !sessionPreviousQuestions.has(item.question),
+        !livePreviousQuestions.has(item.question),
     )
     .sort((a, b) => {
       const aScore = a.lastScore ?? -1;
@@ -2250,15 +2523,15 @@ export default function ReviewApp({
 
   const previousAnswers = [
     ...sessionPreviousAnswers,
+    ...evaluationPreviousAnswers,
     ...historicalPreviousAnswers,
   ];
   const hasPreviousAnswers = previousAnswers.length > 0;
   const visiblePreviousAnswers = isPreviousExpanded
     ? previousAnswers
     : previousAnswers.slice(0, COLLAPSED_PREVIOUS_ANSWER_LIMIT);
-  const hiddenPreviousAnswerCount =
-    previousAnswers.length - visiblePreviousAnswers.length;
-  const hasHiddenPreviousAnswers = hiddenPreviousAnswerCount > 0;
+  const hasHiddenPreviousAnswers =
+    previousAnswers.length > visiblePreviousAnswers.length;
   const isReviewResting = !isLoadingQuestion && !question;
   const scheduledReviewCount = reviewQueue.filter(
     (item) => item.status === "scheduled",
@@ -2276,6 +2549,72 @@ export default function ReviewApp({
       return dateComparison || a.question.localeCompare(b.question);
     });
   }, [queueSortKey, reviewQueue]);
+  const hasMoreReviewQueue = reviewQueue.length < reviewQueueTotal;
+  const loadMoreQueueRows = useCallback(() => {
+    if (isQueuePageLoadingRef.current || !hasMoreReviewQueue) {
+      return;
+    }
+
+    const nextLimit = Math.min(
+      reviewQueueTotal,
+      Math.max(QUEUE_PAGE_SIZE, reviewQueue.length + QUEUE_PAGE_SIZE),
+    );
+
+    if (nextLimit <= reviewQueue.length) {
+      return;
+    }
+
+    void loadStatus(nextLimit);
+  }, [
+    hasMoreReviewQueue,
+    loadStatus,
+    reviewQueue.length,
+    reviewQueueTotal,
+  ]);
+  const updateQueueVirtualRange = useCallback(() => {
+    const totalRows = sortedReviewQueue.length;
+    const scroller = queueStageRef.current;
+    const list = queueListRef.current;
+
+    if (!scroller || !list || totalRows === 0) {
+      setQueueVirtualRange({
+        start: 0,
+        end: Math.min(totalRows, QUEUE_PAGE_SIZE),
+      });
+      return;
+    }
+
+    const listTop = list.offsetTop;
+    const visibleTop = Math.max(0, scroller.scrollTop - listTop);
+    const visibleBottom = visibleTop + scroller.clientHeight;
+    const nextStart = Math.max(
+      0,
+      Math.floor(visibleTop / QUEUE_ROW_ESTIMATED_HEIGHT) - QUEUE_ROW_OVERSCAN,
+    );
+    const nextEnd = Math.min(
+      totalRows,
+      Math.ceil(visibleBottom / QUEUE_ROW_ESTIMATED_HEIGHT) +
+        QUEUE_ROW_OVERSCAN,
+    );
+
+    setQueueVirtualRange((currentRange) =>
+      currentRange.start === nextStart && currentRange.end === nextEnd
+        ? currentRange
+        : {
+            start: nextStart,
+            end: nextEnd,
+          },
+    );
+  }, [sortedReviewQueue.length]);
+  const visibleQueueRows = sortedReviewQueue.slice(
+    queueVirtualRange.start,
+    queueVirtualRange.end,
+  );
+  const queueTopSpacerHeight =
+    queueVirtualRange.start * QUEUE_ROW_ESTIMATED_HEIGHT;
+  const queueBottomSpacerHeight =
+    Math.max(0, sortedReviewQueue.length - queueVirtualRange.end) *
+    QUEUE_ROW_ESTIMATED_HEIGHT;
   const previousAnswerPlaceholderCount = isPreviousExpanded
     ? 0
     : isReviewResting
@@ -2433,6 +2772,68 @@ export default function ReviewApp({
   const isGeneratorReviewStep = generatedQuestions.length > 0;
 
   useEffect(() => {
+    updateQueueVirtualRange();
+  }, [activeTab, sortedReviewQueue.length, updateQueueVirtualRange]);
+
+  useEffect(() => {
+    const scroller = queueStageRef.current;
+
+    if (!scroller) {
+      return;
+    }
+
+    const queueScroller = scroller;
+
+    function handleQueueScroll() {
+      updateQueueVirtualRange();
+
+      if (
+        activeTab === "queue" &&
+        queueScroller.scrollTop + queueScroller.clientHeight >=
+          queueScroller.scrollHeight - QUEUE_LOAD_AHEAD_PX
+      ) {
+        loadMoreQueueRows();
+      }
+    }
+
+    queueScroller.addEventListener("scroll", handleQueueScroll, {
+      passive: true,
+    });
+    window.addEventListener("resize", handleQueueScroll);
+    handleQueueScroll();
+
+    return () => {
+      queueScroller.removeEventListener("scroll", handleQueueScroll);
+      window.removeEventListener("resize", handleQueueScroll);
+    };
+  }, [
+    activeTab,
+    loadMoreQueueRows,
+    sortedReviewQueue.length,
+    updateQueueVirtualRange,
+  ]);
+
+  useEffect(() => {
+    const scroller = queueStageRef.current;
+
+    if (
+      activeTab === "queue" &&
+      scroller &&
+      hasMoreReviewQueue &&
+      !isQueuePageLoading &&
+      scroller.scrollHeight <= scroller.clientHeight + QUEUE_LOAD_AHEAD_PX
+    ) {
+      loadMoreQueueRows();
+    }
+  }, [
+    activeTab,
+    hasMoreReviewQueue,
+    isQueuePageLoading,
+    loadMoreQueueRows,
+    sortedReviewQueue.length,
+  ]);
+
+  useEffect(() => {
     if (!selectedQuestionStats) {
       return;
     }
@@ -2532,7 +2933,7 @@ export default function ReviewApp({
       <section className="review-shell" aria-label="Flashcard review">
         <header className="reader-header">
           <div className="reader-heading">
-            <p className="reader-brand">
+            <Link className="reader-brand admin-brand-link" href="/">
               <Image
                 className="reader-brand-mark"
                 src="/brand/icon/header-mark.svg"
@@ -2542,7 +2943,7 @@ export default function ReviewApp({
                 height={34}
               />
               <span>waxon</span>
-            </p>
+            </Link>
             <div className="reader-tabs" role="tablist" aria-label="Review views">
               <Link
                 className={`reader-tab ${
@@ -2979,7 +3380,6 @@ export default function ReviewApp({
                 onClick={() => setIsPreviousExpanded(true)}
               >
                 Load more
-                <span>{hiddenPreviousAnswerCount} more</span>
               </button>
             ) : null}
           </section>
@@ -2987,6 +3387,7 @@ export default function ReviewApp({
 
         <section
           className="queue-stage"
+          ref={queueStageRef}
           hidden={activeTab !== "queue"}
           id="queue-panel"
           role="tabpanel"
@@ -3001,10 +3402,7 @@ export default function ReviewApp({
             <button
               className="queue-generate-trigger"
               type="button"
-              onClick={() => {
-                setGeneratorMessage(null);
-                setIsQuestionGeneratorOpen(true);
-              }}
+              onClick={openQuestionGenerator}
             >
               <Sparkles aria-hidden="true" />
               <span>Generate</span>
@@ -3029,10 +3427,20 @@ export default function ReviewApp({
           </div>
 
           {reviewQueue.length === 0 ? (
-            <p className="queue-empty">No active cards.</p>
+            <p className="queue-empty">
+              {isQueuePageLoading ? "Loading queue..." : "No active cards."}
+            </p>
           ) : (
-            <ol className="queue-list">
-              {sortedReviewQueue.map((item) => (
+            <ol className="queue-list" ref={queueListRef}>
+              {queueTopSpacerHeight > 0 ? (
+                <li
+                  className="queue-spacer"
+                  style={{ height: queueTopSpacerHeight }}
+                  aria-hidden="true"
+                />
+              ) : null}
+
+              {visibleQueueRows.map((item) => (
                 <li
                   className="queue-row"
                   key={`${item.question}-${item.nextDue}`}
@@ -3090,8 +3498,30 @@ export default function ReviewApp({
                   </div>
                 </li>
               ))}
+
+              {queueBottomSpacerHeight > 0 ? (
+                <li
+                  className="queue-spacer"
+                  style={{ height: queueBottomSpacerHeight }}
+                  aria-hidden="true"
+                />
+              ) : null}
+
+              {hasMoreReviewQueue || isQueuePageLoading ? (
+                <li className="queue-loading-row" aria-live="polite">
+                  {isQueuePageLoading
+                    ? "Loading more cards..."
+                    : `${reviewQueue.length}/${reviewQueueTotal} loaded`}
+                </li>
+              ) : null}
             </ol>
           )}
+
+          {queuePageError ? (
+            <p className="queue-empty" role="status">
+              {queuePageError}
+            </p>
+          ) : null}
         </section>
       </section>
 
@@ -3100,8 +3530,8 @@ export default function ReviewApp({
           className="generator-modal-backdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setIsQuestionGeneratorOpen(false);
+            if (event.target === event.currentTarget && !isGeneratingQuestions) {
+              closeQuestionGenerator();
             }
           }}
         >
@@ -3109,8 +3539,19 @@ export default function ReviewApp({
             className="generator-modal"
             role="dialog"
             aria-modal="true"
+            aria-busy={isGeneratingQuestions}
             aria-labelledby="generator-modal-title"
           >
+            {isGeneratingQuestions ? (
+              <div className="generator-progress-mask" role="status">
+                <div className="generator-progress-card">
+                  <Sparkles aria-hidden="true" />
+                  <strong>Generating questions</strong>
+                  <span>Please wait...</span>
+                </div>
+              </div>
+            ) : null}
+
             <div className="generator-modal-header">
               <div>
                 <p className="generator-modal-kicker">
@@ -3124,7 +3565,8 @@ export default function ReviewApp({
                 className="stats-modal-close"
                 type="button"
                 aria-label="Close generator"
-                onClick={() => setIsQuestionGeneratorOpen(false)}
+                disabled={isGeneratingQuestions}
+                onClick={closeQuestionGenerator}
               />
             </div>
 
@@ -3143,7 +3585,9 @@ export default function ReviewApp({
                       className="generator-scope-shell"
                       onDragOver={(event) => {
                         event.preventDefault();
-                        event.dataTransfer.dropEffect = "copy";
+                        event.dataTransfer.dropEffect = isGeneratingQuestions
+                          ? "none"
+                          : "copy";
                       }}
                       onDrop={(event) => void handleGeneratorFileDrop(event)}
                     >
@@ -3151,6 +3595,7 @@ export default function ReviewApp({
                         id="generator-scope-input"
                         className="generator-scope-input"
                         value={generatorScope}
+                        disabled={isGeneratingQuestions}
                         onChange={(event) => {
                           setGeneratorScope(event.target.value);
                           setGeneratorMessage(null);
@@ -3173,6 +3618,7 @@ export default function ReviewApp({
                               <button
                                 type="button"
                                 aria-label={`Remove ${file.name}`}
+                                disabled={isGeneratingQuestions}
                                 onClick={() => removeGeneratorFile(file.id)}
                               >
                                 <X aria-hidden="true" />
@@ -3197,6 +3643,7 @@ export default function ReviewApp({
                         max={MAX_GENERATED_QUESTION_COUNT}
                         step={1}
                         value={generatorQuestionCount}
+                        disabled={isGeneratingQuestions}
                         onChange={(event) =>
                           setGeneratorQuestionCount(
                             Number.parseInt(event.target.value, 10),
@@ -3269,14 +3716,6 @@ export default function ReviewApp({
                           className="generator-question-text"
                           text={item.question}
                         />
-                        <p className="generator-question-meta">
-                          Batch {item.batch} · {item.sourceLabel} ·{" "}
-                          {item.status === "new"
-                            ? "Not selected"
-                            : item.status === "selected"
-                              ? "Selected"
-                              : "Adding"}
-                        </p>
                       </div>
                     </li>
                   ))}
@@ -3289,18 +3728,9 @@ export default function ReviewApp({
                         ? `${generatedQuestionCounts.selected} selected for add.`
                         : generatedQuestionCounts.new > 0
                           ? "Click + on any question to select it."
-                          : "Add selected questions or discard the queue.")}
+                          : "Add selected questions to the deck.")}
                   </p>
                   <div className="generator-review-actions">
-                    <button
-                      className="generator-secondary-action"
-                      type="button"
-                      onClick={clearGeneratedQuestionQueue}
-                      disabled={generatedQuestionCounts.adding > 0}
-                    >
-                      <Trash2 aria-hidden="true" />
-                      <span>Discard</span>
-                    </button>
                     <button
                       className="generator-primary-action"
                       type="button"
@@ -3310,7 +3740,7 @@ export default function ReviewApp({
                         generatedQuestionCounts.adding > 0
                       }
                     >
-                      {generatedQuestionCounts.adding > 0 ? "Adding..." : "Add"}
+                      {generatedQuestionCounts.adding > 0 ? "Adding..." : "Add to Deck"}
                     </button>
                   </div>
                 </div>

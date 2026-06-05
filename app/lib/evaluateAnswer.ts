@@ -102,14 +102,17 @@ Keep justification very concise: one sentence, 12 words maximum.
 Shared question-quality reference for probingQuestions:
 ${questionQualityReference}
 
-If score is ${PROBING_QUESTION_SCORE_THRESHOLD} or lower, include 1 to 3
-probingQuestions that directly test the specific misconception, missing step,
-or confusion shown in the user's answer. Each probing question must follow the
-shared reference. Consider the similar existing questions as nearby recall
-targets: avoid repeating an existing question verbatim, and avoid generating a
-probe that tests the same atomic recall target unless the user's weak answer
-specifically shows that gap. If score is above ${PROBING_QUESTION_SCORE_THRESHOLD},
-probingQuestions must be an empty array.
+If score is ${PROBING_QUESTION_SCORE_THRESHOLD} or lower, include 0 to 3
+probingQuestions. Generate a probing question only when both gates pass:
+1. The user's answer directly demonstrates the specific misconception, missing
+   step, gap, or confusion being tested.
+2. The nearby existing deck questions do not already cover the same atomic
+   recall target.
+Do not generate prerequisite, adjacent, boundary-case, or "deeper" questions
+unless the user's answer specifically demonstrates that uncovered gap. Each
+probing question must follow the shared reference. If no candidate passes both
+gates, probingQuestions must be an empty array. If score is above
+${PROBING_QUESTION_SCORE_THRESHOLD}, probingQuestions must be an empty array.
 
 Return strict JSON only:
 {

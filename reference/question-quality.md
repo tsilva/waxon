@@ -14,6 +14,9 @@ An optimal waxon question is:
 
 For probing questions generated after a weak answer, also follow these rules:
 
+- Generate a probing question only for a gap, misconception, missing step, or confusion that the user's answer directly demonstrates.
+- Do not generate a probing question for a recall target already covered by the current deck.
+- Do not add prerequisite, adjacent, or boundary-case questions unless the user's answer specifically shows that uncovered gap.
 - Test the specific misconception, missing step, or confusion shown in the answer.
 - Do not reveal the corrected answer.
 - Do not turn the question into a hint.
