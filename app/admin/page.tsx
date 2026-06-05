@@ -12,5 +12,5 @@ export default async function AdminPage() {
     notFound();
   }
 
-  return <AdminPageClient />;
+  return <AdminPageClient currentUser={currentUser} />;
 }

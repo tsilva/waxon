@@ -7,12 +7,13 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
-  MoreHorizontal,
   RefreshCw,
   Search,
   SlidersHorizontal,
+  User,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { AuthenticatedUser } from "@/app/lib/auth";
 
 type CallType =
   | "answer_eval"
@@ -49,6 +50,10 @@ type TraceInteraction = {
 type SortKey = "startedAt" | "calls" | "tokens" | "cost" | "latency" | "status";
 type SortDirection = "asc" | "desc";
 type DatePreset = "7d" | "30d" | "custom";
+
+type AdminPageClientProps = {
+  currentUser: Pick<AuthenticatedUser, "displayName" | "email" | "avatarUrl">;
+};
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -731,7 +736,8 @@ function CostChart({ interactions }: { interactions: TraceInteraction[] }) {
   );
 }
 
-export function AdminPageClient() {
+export function AdminPageClient({ currentUser }: AdminPageClientProps) {
+  const menuAvatarUrl = currentUser.avatarUrl;
   const latestDate = useMemo(
     () =>
       new Date(
@@ -908,8 +914,21 @@ export function AdminPageClient() {
           <div className="reader-actions">
             <span className="queue-summary">149 due</span>
             <div className="user-menu">
-              <button className="user-menu-trigger" type="button" aria-label="More options">
-                <MoreHorizontal aria-hidden="true" />
+              <button
+                className="user-menu-trigger"
+                type="button"
+                aria-label="User menu"
+                title={currentUser.displayName || currentUser.email}
+              >
+                {menuAvatarUrl ? (
+                  <span
+                    className="user-avatar-image"
+                    aria-hidden="true"
+                    style={{ backgroundImage: `url("${menuAvatarUrl}")` }}
+                  />
+                ) : (
+                  <User aria-hidden="true" />
+                )}
               </button>
             </div>
           </div>
