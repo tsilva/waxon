@@ -4,7 +4,10 @@ import {
   openRouterChatCompletion,
   openRouterEmbeddings,
 } from "../app/lib/openRouter.ts";
-import { listLlmTraceInteractions } from "../app/lib/llmTraceStore.ts";
+import {
+  listLlmTraceInteractions,
+  recordFailedLlmTrace,
+} from "../app/lib/llmTraceStore.ts";
 
 test("openRouterChatCompletion sends user and deck trace identifiers", async () => {
   const originalFetch = globalThis.fetch;
@@ -223,6 +226,32 @@ test("listLlmTraceInteractions falls back to local traces when db read is unavai
       process.env.DATABASE_URL = originalDatabaseUrl;
     }
   }
+});
+
+test("recordFailedLlmTrace records an error trace for configuration failures", async () => {
+  const traceId = `trace-missing-key-${Date.now()}`;
+
+  await recordFailedLlmTrace({
+    traceId,
+    operation: "evaluate_answer",
+    model: "test-model",
+    question: "What should admin show for missing LLM configuration?",
+    requestBody: {
+      question: "What should admin show for missing LLM configuration?",
+      answer: "an error trace",
+      configured: false,
+    },
+    error: new Error("OPENROUTER_API_KEY or LLM_API_KEY is not configured."),
+  });
+
+  const trace = (await listLlmTraceInteractions()).find(
+    (candidate) => candidate.id === traceId,
+  );
+
+  assert.ok(trace);
+  assert.equal(trace.status, "error");
+  assert.equal(trace.calls[0]?.operation, "evaluate_answer");
+  assert.match(trace.calls[0]?.responsePayload ?? "", /not configured/);
 });
 
 test("openRouterChatCompletion streams text chunks and reports activity", async () => {

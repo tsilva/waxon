@@ -1,5 +1,9 @@
 import { getQuestionQualityReference } from "./questionQualityReference";
-import { beginLlmTrace, finishLlmTrace } from "./llmTraceStore";
+import {
+  beginLlmTrace,
+  finishLlmTrace,
+  recordFailedLlmTrace,
+} from "./llmTraceStore";
 import {
   extractChatCompletionText,
   getOpenRouterApiKey,
@@ -207,8 +211,24 @@ export async function evaluateAnswer(
   const apiKey = getOpenRouterApiKey();
 
   if (!apiKey) {
+    const traceId = input.traceId ?? crypto.randomUUID();
+    const error = new Error("OPENROUTER_API_KEY or LLM_API_KEY is not configured.");
+    await recordFailedLlmTrace({
+      traceId,
+      operation: "evaluate_answer",
+      model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+      question: input.question,
+      requestBody: {
+        question: input.question,
+        answer: input.answer,
+        previousReviews: input.previousReviews,
+        configured: false,
+      },
+      error,
+    });
+
     return failedEvaluation(
-      "OPENROUTER_API_KEY or LLM_API_KEY is not configured.",
+      error.message,
       input.answer,
     );
   }
