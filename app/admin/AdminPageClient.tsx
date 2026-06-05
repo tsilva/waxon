@@ -12,19 +12,28 @@ import {
   Search,
   SlidersHorizontal,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import type { AuthenticatedUser } from "@/app/lib/auth";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
+import {
+  ADMIN_VIEW_STATE_COOKIE,
+  type AdminCachedViewState,
+} from "./adminViewStateCookie";
 
-type CallType =
+export type CallType =
   | "answer_eval"
   | "question_generation"
   | "embedding"
   | "summarization";
 
-type TraceStatus = "ok" | "pending" | "error";
+export type TraceStatus = "ok" | "pending" | "error";
 
 type LlmCall = {
   id: string;
@@ -50,18 +59,31 @@ type TraceInteraction = {
   calls: LlmCall[];
 };
 
-type SortKey = "startedAt" | "calls" | "tokens" | "cost" | "latency" | "status";
-type SortDirection = "asc" | "desc";
-type DatePreset = "7d" | "30d" | "custom";
+export type SortKey =
+  | "startedAt"
+  | "calls"
+  | "tokens"
+  | "cost"
+  | "latency"
+  | "status";
+export type SortDirection = "asc" | "desc";
+export type DatePreset = "7d" | "30d" | "custom";
 
 type AdminPageClientProps = {
   currentUser: Pick<AuthenticatedUser, "displayName" | "email" | "avatarUrl">;
   initialInteractions: TraceInteraction[];
   initialDueCount: number;
+  initialViewState?: AdminCachedViewState | null;
   selectedTraceId?: string | null;
 };
 
+type AdminTracesResponse = {
+  interactions: TraceInteraction[];
+  dueCount: number;
+};
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const MAX_TRACE_INTERACTIONS = 200;
 
 const callTypeLabels: Record<CallType, string> = {
   answer_eval: "answer eval",
@@ -368,6 +390,119 @@ function formatStartedAt(value: string): string {
 
 function toInputDate(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+function emptyTraceInteractions(): TraceInteraction[] {
+  return demoTraceInteractions.slice(0, 0);
+}
+
+function mergeTraceInteractions(
+  currentInteractions: TraceInteraction[],
+  nextInteractions: TraceInteraction[],
+): TraceInteraction[] {
+  const byId = new Map<string, TraceInteraction>();
+
+  for (const interaction of currentInteractions) {
+    byId.set(interaction.id, interaction);
+  }
+
+  for (const interaction of nextInteractions) {
+    byId.set(interaction.id, interaction);
+  }
+
+  return [...byId.values()]
+    .sort(
+      (left, right) =>
+        new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime(),
+    )
+    .slice(0, MAX_TRACE_INTERACTIONS);
+}
+
+function latestTraceDate(interactions: TraceInteraction[]): Date {
+  if (interactions.length === 0) {
+    return new Date();
+  }
+
+  return new Date(
+    Math.max(
+      ...interactions.map((interaction) =>
+        new Date(interaction.startedAt).getTime(),
+      ),
+    ),
+  );
+}
+
+function rangeForPreset(preset: Exclude<DatePreset, "custom">, latestDate: Date) {
+  const days = preset === "7d" ? 7 : 30;
+
+  return {
+    fromDate: toInputDate(new Date(latestDate.getTime() - (days - 1) * MS_PER_DAY)),
+    toDate: toInputDate(latestDate),
+  };
+}
+
+function writeAdminViewStateCookie(viewState: AdminCachedViewState) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const encodedViewState = encodeURIComponent(JSON.stringify(viewState));
+  window.document.cookie = `${ADMIN_VIEW_STATE_COOKIE}=${encodedViewState}; Path=/; Max-Age=86400; SameSite=Lax`;
+}
+
+function initialAdminViewState({
+  initialInteractions,
+  initialDueCount,
+  initialViewState,
+}: {
+  currentUserEmail: string;
+  initialInteractions: TraceInteraction[];
+  initialDueCount: number;
+  initialViewState?: AdminCachedViewState | null;
+}) {
+  const serverInteractions =
+    initialInteractions.length > 0 ? initialInteractions : emptyTraceInteractions();
+
+  if (initialViewState) {
+    return {
+      interactions: serverInteractions,
+      dueCount: initialDueCount,
+      preset: initialViewState.preset,
+      fromDate: initialViewState.fromDate,
+      toDate: initialViewState.toDate,
+      typeFilter: initialViewState.typeFilter,
+      statusFilter: initialViewState.statusFilter,
+      searchTerm: initialViewState.searchTerm,
+      sortKey: initialViewState.sortKey,
+      sortDirection: initialViewState.sortDirection,
+      expandedInteractionId:
+        initialViewState.expandedInteractionId || serverInteractions[0]?.id || "",
+    };
+  }
+
+  const defaultRange = rangeForPreset("7d", latestTraceDate(serverInteractions));
+
+  return {
+    interactions: serverInteractions,
+    dueCount: initialDueCount,
+    preset: "7d" as DatePreset,
+    fromDate: defaultRange.fromDate,
+    toDate: defaultRange.toDate,
+    typeFilter: "all" as const,
+    statusFilter: "all" as const,
+    searchTerm: "",
+    sortKey: "startedAt" as SortKey,
+    sortDirection: "desc" as SortDirection,
+    expandedInteractionId: serverInteractions[0]?.id || "",
+  };
+}
+
+function updateAdminHistory(pathname: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.history.pushState(null, "", pathname);
 }
 
 function statusLabel(status: TraceStatus): string {
@@ -746,23 +881,34 @@ export function AdminPageClient({
   currentUser,
   initialInteractions,
   initialDueCount,
+  initialViewState,
   selectedTraceId = null,
 }: AdminPageClientProps) {
   const router = useRouter();
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
   const isLocalAuth = isLocalTestAuthEnabled();
+  const resolvedInitialViewState = useMemo(
+    () =>
+      initialAdminViewState({
+        currentUserEmail: currentUser.email,
+        initialInteractions,
+        initialDueCount,
+        initialViewState,
+      }),
+    [currentUser.email, initialDueCount, initialInteractions, initialViewState],
+  );
   const accountWidgetsCustomPages = useMemo(
     () => createAccountWidgetsCustomPages(),
     [],
   );
-  const traceInteractions = useMemo(
-    () =>
-      initialInteractions.length > 0
-        ? initialInteractions
-        : demoTraceInteractions.slice(0, 0),
-    [initialInteractions],
+  const [traceInteractions, setTraceInteractions] = useState(
+    () => resolvedInitialViewState.interactions,
   );
+  const [dueCount, setDueCount] = useState(
+    () => resolvedInitialViewState.dueCount,
+  );
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const menuAvatarUrl = clerkUser?.imageUrl || currentUser.avatarUrl;
   const menuLabel =
     clerkUser?.fullName ||
@@ -772,39 +918,109 @@ export function AdminPageClient({
   const menuEmail =
     clerkUser?.primaryEmailAddress?.emailAddress || currentUser.email;
   const latestDate = useMemo(
-    () =>
-      traceInteractions.length > 0
-        ? new Date(
-            Math.max(
-              ...traceInteractions.map((interaction) =>
-                new Date(interaction.startedAt).getTime(),
-              ),
-            ),
-          )
-        : new Date(),
+    () => latestTraceDate(traceInteractions),
     [traceInteractions],
   );
-  const [preset, setPreset] = useState<DatePreset>("7d");
-  const [fromDate, setFromDate] = useState(
-    toInputDate(new Date(latestDate.getTime() - 6 * MS_PER_DAY)),
+  const [preset, setPreset] = useState<DatePreset>(
+    () => resolvedInitialViewState.preset,
   );
-  const [toDate, setToDate] = useState(toInputDate(latestDate));
-  const [typeFilter, setTypeFilter] = useState<"all" | CallType>("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | TraceStatus>("all");
-  const [searchTerm, setSearchTerm] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("startedAt");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [fromDate, setFromDate] = useState(
+    () => resolvedInitialViewState.fromDate,
+  );
+  const [toDate, setToDate] = useState(() => resolvedInitialViewState.toDate);
+  const [typeFilter, setTypeFilter] = useState<"all" | CallType>(
+    () => resolvedInitialViewState.typeFilter,
+  );
+  const [statusFilter, setStatusFilter] = useState<"all" | TraceStatus>(
+    () => resolvedInitialViewState.statusFilter,
+  );
+  const [searchTerm, setSearchTerm] = useState(
+    () => resolvedInitialViewState.searchTerm,
+  );
+  const [sortKey, setSortKey] = useState<SortKey>(
+    () => resolvedInitialViewState.sortKey,
+  );
+  const [sortDirection, setSortDirection] = useState<SortDirection>(
+    () => resolvedInitialViewState.sortDirection,
+  );
   const [expandedInteractionId, setExpandedInteractionId] = useState(
-    () => selectedTraceId ?? traceInteractions[0]?.id ?? "",
+    () => resolvedInitialViewState.expandedInteractionId,
   );
   const [selectedCallId, setSelectedCallId] = useState<string | null>(
     selectedTraceId,
   );
 
+  const refreshTraces = useCallback(async () => {
+    setIsRefreshing(true);
+
+    try {
+      const response = await fetch("/api/admin/traces", {
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error("Could not refresh admin traces.");
+      }
+
+      const payload = (await response.json()) as AdminTracesResponse;
+
+      if (!Array.isArray(payload.interactions)) {
+        throw new Error("Admin traces response was malformed.");
+      }
+
+      setTraceInteractions((current) =>
+        mergeTraceInteractions(current, payload.interactions),
+      );
+
+      if (Number.isFinite(payload.dueCount)) {
+        setDueCount(payload.dueCount);
+      }
+    } catch (error) {
+      console.error("[waxon] admin traces refresh failed", {
+        error: error instanceof Error ? error.message : "unknown error",
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, []);
+
   const closeTracePanel = useCallback(() => {
     setSelectedCallId(null);
-    router.push("/admin");
-  }, [router]);
+    updateAdminHistory("/admin");
+  }, []);
+
+  const openTracePanel = useCallback((callId: string, interactionId: string) => {
+    setSelectedCallId(callId);
+    setExpandedInteractionId(interactionId);
+    updateAdminHistory(`/admin/traces/${encodeURIComponent(callId)}`);
+  }, []);
+
+  const persistAdminPageCache = useCallback(() => {
+    writeAdminViewStateCookie({
+      preset,
+      fromDate,
+      toDate,
+      typeFilter,
+      statusFilter,
+      searchTerm,
+      sortKey,
+      sortDirection,
+      expandedInteractionId,
+    });
+  }, [
+    expandedInteractionId,
+    fromDate,
+    preset,
+    searchTerm,
+    sortDirection,
+    sortKey,
+    statusFilter,
+    toDate,
+    typeFilter,
+  ]);
 
   function setPresetRange(nextPreset: DatePreset) {
     setPreset(nextPreset);
@@ -813,9 +1029,9 @@ export function AdminPageClient({
       return;
     }
 
-    const days = nextPreset === "7d" ? 7 : 30;
-    setFromDate(toInputDate(new Date(latestDate.getTime() - (days - 1) * MS_PER_DAY)));
-    setToDate(toInputDate(latestDate));
+    const range = rangeForPreset(nextPreset, latestDate);
+    setFromDate(range.fromDate);
+    setToDate(range.toDate);
   }
 
   function updateSort(nextSortKey: SortKey) {
@@ -894,11 +1110,50 @@ export function AdminPageClient({
   }, [selectedCallId, traceInteractions]);
 
   useEffect(() => {
-    setSelectedCallId(selectedTraceId);
-    if (selectedTraceId) {
-      setExpandedInteractionId(selectedTraceId);
+    setTraceInteractions((current) =>
+      mergeTraceInteractions(
+        current,
+        initialInteractions.length > 0
+          ? initialInteractions
+          : emptyTraceInteractions(),
+      ),
+    );
+  }, [initialInteractions]);
+
+  useEffect(() => {
+    void refreshTraces();
+  }, [refreshTraces]);
+
+  useEffect(() => {
+    if (preset === "custom") {
+      return;
     }
+
+    const range = rangeForPreset(preset, latestDate);
+    setFromDate(range.fromDate);
+    setToDate(range.toDate);
+  }, [latestDate, preset]);
+
+  useEffect(() => {
+    if (!selectedTraceId) {
+      return;
+    }
+
+    setSelectedCallId(selectedTraceId);
   }, [selectedTraceId]);
+
+  useEffect(() => {
+    if (!selectedCallId) {
+      return;
+    }
+
+    for (const interaction of traceInteractions) {
+      if (interaction.calls.some((call) => call.id === selectedCallId)) {
+        setExpandedInteractionId(interaction.id);
+        return;
+      }
+    }
+  }, [selectedCallId, traceInteractions]);
 
   useEffect(() => {
     if (!selectedCallContext) {
@@ -914,6 +1169,10 @@ export function AdminPageClient({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [closeTracePanel, selectedCallContext]);
+
+  useEffect(() => {
+    persistAdminPageCache();
+  }, [persistAdminPageCache]);
 
   const totals = filteredInteractions.reduce(
     (current, interaction) => {
@@ -938,7 +1197,7 @@ export function AdminPageClient({
       <section className="review-shell admin-shell" aria-label="Admin traces">
         <ReviewToolbar
           activeTab="admin"
-          dueCount={initialDueCount}
+          dueCount={dueCount}
           showAdmin
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuLabel}
@@ -959,6 +1218,8 @@ export function AdminPageClient({
               void clerk.signOut({ redirectUrl: "/" });
             }
           }}
+          onReviewClick={persistAdminPageCache}
+          onDecksClick={persistAdminPageCache}
         />
 
         <div className="admin-stage">
@@ -1007,7 +1268,9 @@ export function AdminPageClient({
                 className="admin-icon-button"
                 type="button"
                 aria-label="Refresh traces"
-                onClick={() => router.refresh()}
+                aria-busy={isRefreshing}
+                disabled={isRefreshing}
+                onClick={() => void refreshTraces()}
               >
                 <RefreshCw aria-hidden="true" />
               </button>
@@ -1171,6 +1434,10 @@ export function AdminPageClient({
                             key={call.id}
                             href={`/admin/traces/${encodeURIComponent(call.id)}`}
                             aria-label={`Open LLM call details for ${call.operation}`}
+                            onClick={(event) => {
+                              event.preventDefault();
+                              openTracePanel(call.id, interaction.id);
+                            }}
                           >
                             <span className="admin-call-name">
                               <strong>{call.operation}</strong>

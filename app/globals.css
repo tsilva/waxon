@@ -4542,12 +4542,33 @@ textarea {
   stroke-width: 2.4;
 }
 
+.admin-icon-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.admin-icon-button[aria-busy="true"] svg {
+  animation: admin-refresh-spin 820ms linear infinite;
+}
+
 .admin-icon-button:hover,
 .admin-icon-button:focus-visible {
   border-color: rgb(166 124 82 / 36%);
   background: var(--accent-soft);
   outline: 3px solid rgb(166 124 82 / 12%);
   outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-icon-button[aria-busy="true"] svg {
+    animation: none;
+  }
+}
+
+@keyframes admin-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .admin-metrics {
