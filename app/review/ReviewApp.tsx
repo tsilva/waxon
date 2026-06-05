@@ -1,11 +1,11 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
-import Image from "next/image";
 import Link from "next/link";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { ReviewToolbar } from "@/app/ReviewToolbar";
 import type {
   DeckEmbeddingPlot as DeckEmbeddingPlotResponse,
   DeckEmbeddingPlotPoint,
@@ -21,7 +21,6 @@ import {
   ChevronDown,
   FileText,
   Layers,
-  LogOut,
   Mic,
   Plus,
   Search,
@@ -31,7 +30,6 @@ import {
   Trash2,
   Upload,
   User,
-  UserCog,
   X,
 } from "lucide-react";
 import {
@@ -1044,14 +1042,6 @@ function StopIcon() {
   return <Square aria-hidden="true" fill="currentColor" />;
 }
 
-function ManageAccountIcon() {
-  return <UserCog aria-hidden="true" />;
-}
-
-function SignOutIcon() {
-  return <LogOut aria-hidden="true" />;
-}
-
 function UploadIcon() {
   return <Upload aria-hidden="true" />;
 }
@@ -1509,7 +1499,6 @@ export default function ReviewApp({
     () => !hasLoadedQuestionRef.current,
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isQuestionGeneratorOpen, setIsQuestionGeneratorOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfileResponse | null>(
@@ -1555,7 +1544,6 @@ export default function ReviewApp({
     cachedSessionRef.current?.queueLoadedLimit ?? QUEUE_PAGE_SIZE,
   );
   const isQueuePageLoadingRef = useRef(false);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
   const keepListeningRef = useRef(false);
@@ -2180,40 +2168,6 @@ export default function ReviewApp({
       isActive = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (!isUserMenuOpen) {
-      return;
-    }
-
-    function closeUserMenu(event: globalThis.MouseEvent | globalThis.TouchEvent) {
-      const target = event.target;
-
-      if (
-        target instanceof Node &&
-        userMenuRef.current &&
-        !userMenuRef.current.contains(target)
-      ) {
-        setIsUserMenuOpen(false);
-      }
-    }
-
-    function closeUserMenuOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsUserMenuOpen(false);
-      }
-    }
-
-    window.addEventListener("mousedown", closeUserMenu);
-    window.addEventListener("touchstart", closeUserMenu);
-    window.addEventListener("keydown", closeUserMenuOnEscape);
-
-    return () => {
-      window.removeEventListener("mousedown", closeUserMenu);
-      window.removeEventListener("touchstart", closeUserMenu);
-      window.removeEventListener("keydown", closeUserMenuOnEscape);
-    };
-  }, [isUserMenuOpen]);
 
   useEffect(() => {
     if (!isSettingsOpen) {
@@ -3305,7 +3259,7 @@ export default function ReviewApp({
     [decks],
   );
   const isDeckInReviewRotation = (deckId: string | null | undefined) =>
-    deckId == null || activeReviewDeckIds.has(deckId);
+    deckId == null || decks.length === 0 || activeReviewDeckIds.has(deckId);
 
   const sessionPreviousAnswers: PreviousAnswerItem[] = messages
     .filter(
@@ -3570,7 +3524,7 @@ export default function ReviewApp({
     QUEUE_ROW_ESTIMATED_HEIGHT;
   const previousAnswerPlaceholderCount = isPreviousExpanded
     ? 0
-    : isReviewResting
+    : !isLoadingQuestion
       ? 0
     : Math.max(
         0,
@@ -3924,152 +3878,35 @@ export default function ReviewApp({
       }`}
     >
       <section className="review-shell" aria-label="Flashcard review">
-        <header className="reader-header">
-          <div className="reader-heading">
-            <Link className="reader-brand admin-brand-link" href="/">
-              <Image
-                className="reader-brand-mark"
-                src="/brand/icon/header-mark.svg"
-                alt=""
-                aria-hidden="true"
-                width={34}
-                height={34}
-              />
-              <span>waxon</span>
-            </Link>
-            <div className="reader-tabs" role="tablist" aria-label="Review views">
-              <Link
-                className={`reader-tab ${
-                  activeTab === "review" ? "reader-tab-active" : ""
-                }`}
-                href="/review"
-                role="tab"
-                id="review-tab"
-                aria-selected={activeTab === "review"}
-                aria-controls="review-panel"
-                onClick={(event) => navigateToTab("review", event)}
-              >
-                Review
-              </Link>
-              <Link
-                className={`reader-tab ${
-                  activeTab === "queue" ? "reader-tab-active" : ""
-                }`}
-                href="/decks"
-                role="tab"
-                id="queue-tab"
-                aria-selected={activeTab === "queue"}
-                aria-controls="queue-panel"
-                onClick={(event) => {
-                  event.preventDefault();
-                  closeDeckQueue();
-                }}
-              >
-                Decks
-              </Link>
-              {canViewAdmin ? (
-                <Link
-                  className="reader-tab"
-                  href="/admin"
-                  role="tab"
-                  aria-selected="false"
-                >
-                  Admin
-                </Link>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="reader-actions">
-            <span className="queue-summary">
-              {queueRemaining} due
-            </span>
-            <div className="user-menu" ref={userMenuRef}>
-              <button
-                className={`user-menu-trigger ${
-                  isUserMenuOpen ? "user-menu-trigger-active" : ""
-                }`}
-                type="button"
-                aria-label="Open user menu"
-                aria-haspopup="menu"
-                aria-expanded={isUserMenuOpen}
-                aria-controls="user-menu-panel"
-                title="User menu"
-                onClick={() => setIsUserMenuOpen((isOpen) => !isOpen)}
-              >
-                {menuAvatarUrl ? (
-                  <span
-                    className="user-avatar-image"
-                    aria-hidden="true"
-                    style={{ backgroundImage: `url("${menuAvatarUrl}")` }}
-                  />
-                ) : (
-                  <UserIcon />
-                )}
-              </button>
-              {isUserMenuOpen ? (
-                <div
-                  className="user-menu-panel"
-                  id="user-menu-panel"
-                  role="menu"
-                  aria-label="User menu"
-                >
-                  <div className="user-menu-account">
-                    {menuAvatarUrl ? (
-                      <span
-                        className="user-menu-account-avatar"
-                        aria-hidden="true"
-                        style={{ backgroundImage: `url("${menuAvatarUrl}")` }}
-                      />
-                    ) : (
-                      <span className="user-menu-account-avatar" aria-hidden="true">
-                        <UserIcon />
-                      </span>
-                    )}
-                    <div>
-                      <strong>{menuDisplayName}</strong>
-                      {menuEmail ? <span>{menuEmail}</span> : null}
-                    </div>
-                  </div>
-                  <button
-                    className="user-menu-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setIsUserMenuOpen(false);
-                      if (isLocalAuth) {
-                        setIsSettingsOpen(true);
-                      } else {
-                        clerk.openUserProfile({
-                          customPages: accountWidgetsCustomPages,
-                        });
-                      }
-                    }}
-                  >
-                    <ManageAccountIcon />
-                    <span>Manage accounts</span>
-                  </button>
-                  <button
-                    className="user-menu-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setIsUserMenuOpen(false);
-                      if (isLocalAuth) {
-                        window.location.assign("/");
-                      } else {
-                        void clerk.signOut({ redirectUrl: "/" });
-                      }
-                    }}
-                  >
-                    <SignOutIcon />
-                    <span>Sign out</span>
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </header>
+        <ReviewToolbar
+          activeTab={activeTab === "queue" ? "decks" : "review"}
+          dueCount={queueRemaining}
+          showAdmin={canViewAdmin}
+          menuAvatarUrl={menuAvatarUrl}
+          menuDisplayName={menuDisplayName}
+          menuEmail={menuEmail}
+          onReviewClick={(event) => navigateToTab("review", event)}
+          onDecksClick={(event) => {
+            event.preventDefault();
+            closeDeckQueue();
+          }}
+          onManageAccount={() => {
+            if (isLocalAuth) {
+              setIsSettingsOpen(true);
+            } else {
+              clerk.openUserProfile({
+                customPages: accountWidgetsCustomPages,
+              });
+            }
+          }}
+          onSignOut={() => {
+            if (isLocalAuth) {
+              window.location.assign("/");
+            } else {
+              void clerk.signOut({ redirectUrl: "/" });
+            }
+          }}
+        />
 
         <div
           className={`review-stage ${

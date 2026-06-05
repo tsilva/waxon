@@ -1,7 +1,6 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -9,17 +8,15 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
-  LogOut,
   RefreshCw,
   Search,
   SlidersHorizontal,
-  User,
-  UserCog,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import type { AuthenticatedUser } from "@/app/lib/auth";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { ReviewToolbar } from "@/app/ReviewToolbar";
 
 type CallType =
   | "answer_eval"
@@ -60,6 +57,7 @@ type DatePreset = "7d" | "30d" | "custom";
 type AdminPageClientProps = {
   currentUser: Pick<AuthenticatedUser, "displayName" | "email" | "avatarUrl">;
   initialInteractions: TraceInteraction[];
+  initialDueCount: number;
   selectedTraceId?: string | null;
 };
 
@@ -747,6 +745,7 @@ function CostChart({ interactions }: { interactions: TraceInteraction[] }) {
 export function AdminPageClient({
   currentUser,
   initialInteractions,
+  initialDueCount,
   selectedTraceId = null,
 }: AdminPageClientProps) {
   const router = useRouter();
@@ -801,8 +800,6 @@ export function AdminPageClient({
   const [selectedCallId, setSelectedCallId] = useState<string | null>(
     selectedTraceId,
   );
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const closeTracePanel = useCallback(() => {
     setSelectedCallId(null);
@@ -904,40 +901,6 @@ export function AdminPageClient({
   }, [selectedTraceId]);
 
   useEffect(() => {
-    if (!isUserMenuOpen) {
-      return;
-    }
-
-    function closeUserMenu(event: globalThis.MouseEvent | globalThis.TouchEvent) {
-      const target = event.target;
-
-      if (
-        target instanceof Node &&
-        userMenuRef.current &&
-        !userMenuRef.current.contains(target)
-      ) {
-        setIsUserMenuOpen(false);
-      }
-    }
-
-    function closeUserMenuOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsUserMenuOpen(false);
-      }
-    }
-
-    window.addEventListener("mousedown", closeUserMenu);
-    window.addEventListener("touchstart", closeUserMenu);
-    window.addEventListener("keydown", closeUserMenuOnEscape);
-
-    return () => {
-      window.removeEventListener("mousedown", closeUserMenu);
-      window.removeEventListener("touchstart", closeUserMenu);
-      window.removeEventListener("keydown", closeUserMenuOnEscape);
-    };
-  }, [isUserMenuOpen]);
-
-  useEffect(() => {
     if (!selectedCallContext) {
       return;
     }
@@ -973,120 +936,30 @@ export function AdminPageClient({
   return (
     <main className="page admin-page">
       <section className="review-shell admin-shell" aria-label="Admin traces">
-        <header className="reader-header">
-          <div className="reader-heading">
-            <Link className="reader-brand admin-brand-link" href="/">
-              <Image
-                className="reader-brand-mark"
-                src="/brand/icon/header-mark.svg"
-                alt=""
-                aria-hidden="true"
-                width={34}
-                height={34}
-              />
-              <span>waxon</span>
-            </Link>
-            <div className="reader-tabs" role="tablist" aria-label="Waxon views">
-              <Link className="reader-tab" href="/review" role="tab" aria-selected="false">
-                Review
-              </Link>
-              <Link className="reader-tab" href="/queue" role="tab" aria-selected="false">
-                Decks
-              </Link>
-              <span className="reader-tab reader-tab-active" role="tab" aria-selected="true">
-                Admin
-              </span>
-            </div>
-          </div>
-
-          <div className="reader-actions">
-            <span className="queue-summary">149 due</span>
-            <div className="user-menu" ref={userMenuRef}>
-              <button
-                className={`user-menu-trigger ${
-                  isUserMenuOpen ? "user-menu-trigger-active" : ""
-                }`}
-                type="button"
-                aria-label="Open user menu"
-                aria-haspopup="menu"
-                aria-expanded={isUserMenuOpen}
-                aria-controls="user-menu-panel"
-                title="User menu"
-                onClick={() => setIsUserMenuOpen((isOpen) => !isOpen)}
-              >
-                {menuAvatarUrl ? (
-                  <span
-                    className="user-avatar-image"
-                    aria-hidden="true"
-                    style={{ backgroundImage: `url("${menuAvatarUrl}")` }}
-                  />
-                ) : (
-                  <User aria-hidden="true" />
-                )}
-              </button>
-              {isUserMenuOpen ? (
-                <div
-                  className="user-menu-panel"
-                  id="user-menu-panel"
-                  role="menu"
-                  aria-label="User menu"
-                >
-                  <div className="user-menu-account">
-                    {menuAvatarUrl ? (
-                      <span
-                        className="user-menu-account-avatar"
-                        aria-hidden="true"
-                        style={{ backgroundImage: `url("${menuAvatarUrl}")` }}
-                      />
-                    ) : (
-                      <span className="user-menu-account-avatar" aria-hidden="true">
-                        <User aria-hidden="true" />
-                      </span>
-                    )}
-                    <div>
-                      <strong>{menuLabel}</strong>
-                      {menuEmail ? <span>{menuEmail}</span> : null}
-                    </div>
-                  </div>
-                  <button
-                    className="user-menu-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setIsUserMenuOpen(false);
-                      if (isLocalAuth) {
-                        router.push("/review");
-                      } else {
-                        clerk.openUserProfile({
-                          customPages: accountWidgetsCustomPages,
-                        });
-                      }
-                    }}
-                  >
-                    <UserCog aria-hidden="true" />
-                    <span>Manage accounts</span>
-                  </button>
-                  <button
-                    className="user-menu-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setIsUserMenuOpen(false);
-                      if (isLocalAuth) {
-                        window.location.assign("/");
-                      } else {
-                        void clerk.signOut({ redirectUrl: "/" });
-                      }
-                    }}
-                  >
-                    <LogOut aria-hidden="true" />
-                    <span>Sign out</span>
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </header>
+        <ReviewToolbar
+          activeTab="admin"
+          dueCount={initialDueCount}
+          showAdmin
+          menuAvatarUrl={menuAvatarUrl}
+          menuDisplayName={menuLabel}
+          menuEmail={menuEmail}
+          onManageAccount={() => {
+            if (isLocalAuth) {
+              router.push("/review");
+            } else {
+              clerk.openUserProfile({
+                customPages: accountWidgetsCustomPages,
+              });
+            }
+          }}
+          onSignOut={() => {
+            if (isLocalAuth) {
+              window.location.assign("/");
+            } else {
+              void clerk.signOut({ redirectUrl: "/" });
+            }
+          }}
+        />
 
         <div className="admin-stage">
           <section className="admin-heading-row">
@@ -1130,7 +1003,12 @@ export function AdminPageClient({
                   }}
                 />
               </label>
-              <button className="admin-icon-button" type="button" aria-label="Refresh traces">
+              <button
+                className="admin-icon-button"
+                type="button"
+                aria-label="Refresh traces"
+                onClick={() => router.refresh()}
+              >
                 <RefreshCw aria-hidden="true" />
               </button>
             </div>

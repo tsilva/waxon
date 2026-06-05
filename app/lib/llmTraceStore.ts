@@ -204,6 +204,28 @@ export async function finishLlmTrace(
   void persistTraceInteraction(interaction);
 }
 
+export async function recordFailedLlmTrace(input: {
+  traceId: string;
+  operation: string;
+  model: string;
+  question?: string | null;
+  requestBody: unknown;
+  error: Error;
+}): Promise<void> {
+  const pendingTrace = beginLlmTrace({
+    traceId: input.traceId,
+    operation: input.operation,
+    model: input.model,
+    question: input.question,
+    requestBody: input.requestBody,
+  });
+
+  await finishLlmTrace(pendingTrace, {
+    ok: false,
+    error: input.error,
+  });
+}
+
 export async function listLlmTraceInteractions(): Promise<LlmTraceInteraction[]> {
   const localInteractions = listLocalTraceInteractions();
 

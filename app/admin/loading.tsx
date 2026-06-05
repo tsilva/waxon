@@ -26,7 +26,7 @@ export default function AdminLoading() {
               <Link className="reader-tab" href="/review" role="tab" aria-selected="false">
                 Review
               </Link>
-              <Link className="reader-tab" href="/queue" role="tab" aria-selected="false">
+              <Link className="reader-tab" href="/decks" role="tab" aria-selected="false">
                 Decks
               </Link>
               <span className="reader-tab reader-tab-active" role="tab" aria-selected="true">
@@ -36,7 +36,7 @@ export default function AdminLoading() {
           </div>
 
           <div className="reader-actions">
-            <span className="queue-summary">149 due</span>
+            <span className="queue-summary admin-skeleton-line admin-skeleton-count" />
             <span className="user-menu-trigger admin-skeleton-avatar" aria-hidden="true" />
           </div>
         </header>
