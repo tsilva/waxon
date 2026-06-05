@@ -1,9 +1,9 @@
-import { SignUp } from "@clerk/nextjs";
+import { SignUpWithFallback } from "./SignUpWithFallback";
 
 export default function SignUpPage() {
   return (
     <main className="auth-page">
-      <SignUp />
+      <SignUpWithFallback />
     </main>
   );
 }

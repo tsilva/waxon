@@ -8,14 +8,12 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
-  Copy,
   FileText,
   LogOut,
   Mic,
   PencilLine,
   Plus,
   Search,
-  Settings,
   Sparkles,
   Square,
   Trash2,
@@ -73,6 +71,14 @@ type QueueStatusResponse = {
   deckEmbeddingPlot: DeckEmbeddingPlotResponse;
 };
 
+type EvaluationPhase =
+  | "queued"
+  | "evaluating-answer"
+  | "saving-evaluation"
+  | "gating-probes"
+  | "saving-probes"
+  | "finalizing";
+
 type ReferenceAnswerResponse = {
   answer: string;
 };
@@ -94,6 +100,7 @@ type EvaluationQueueItem = {
   question: string;
   answer: string | null;
   status: "grading" | "resolved";
+  phase: EvaluationPhase | null;
   submittedAt: number;
   score: number | null;
   justification: string | null;
@@ -163,6 +170,7 @@ type ChatMessage =
       evaluationId: string;
       submittedAt: number;
       status: "grading" | "resolved";
+      phase: EvaluationPhase | null;
       score: number | null;
       justification: string | null;
       answerSummary: string | null;
@@ -175,6 +183,7 @@ type PreviousAnswerItem = {
   question: string;
   answer: string | null;
   status: "grading" | "resolved";
+  phase: EvaluationPhase | null;
   score: number | null;
   justification: string | null;
   timestamp: number | null;
@@ -207,7 +216,6 @@ type ReviewSessionSnapshot = {
   deckSortKey: DeckSortKey;
   editingDeckId: string | null;
   deckDraftName: string;
-  deckDraftDescription: string;
   deckEmbeddingPlot: DeckEmbeddingPlotResponse;
   messages: ChatMessage[];
   referenceAnswers: Record<string, ReferenceAnswerState>;
@@ -252,11 +260,21 @@ type DeckSortKey = "updated" | "due" | "name";
 type DeckManagementItem = {
   id: string;
   name: string;
-  description: string;
+  slug: string;
   dueCount: number;
   cardCount: number;
-  lastReviewedLabel: string;
-  inRotation: boolean;
+  lastReviewedAt: number | null;
+  inReviewRotation: boolean;
+};
+
+type DecksResponse = {
+  decks: DeckManagementItem[];
+};
+
+type DeckMutationResponse = {
+  ok: boolean;
+  deck?: DeckManagementItem;
+  error?: string;
 };
 
 type GeneratedQuestionStatus = "new" | "selected" | "adding" | "added";
@@ -392,6 +410,7 @@ type AnswerHistoryEntry = {
   submittedAt: number;
   resolvedAt: number | null;
   status: "grading" | "resolved";
+  phase: EvaluationPhase | null;
 };
 
 type MathParseResult = {
@@ -402,44 +421,6 @@ type MathParseResult = {
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
 const QUEUE_PAGE_SIZE = 48;
-const INITIAL_DECKS: DeckManagementItem[] = [
-  {
-    id: "ml-foundations",
-    name: "ML Foundations",
-    description: "foundation cards",
-    dueCount: 63,
-    cardCount: 512,
-    lastReviewedLabel: "today",
-    inRotation: true,
-  },
-  {
-    id: "systems-design",
-    name: "Systems Design",
-    description: "architecture prompts",
-    dueCount: 34,
-    cardCount: 278,
-    lastReviewedLabel: "today",
-    inRotation: true,
-  },
-  {
-    id: "math-review",
-    name: "Math Review",
-    description: "linear algebra, calculus, probability",
-    dueCount: 21,
-    cardCount: 196,
-    lastReviewedLabel: "yesterday",
-    inRotation: true,
-  },
-  {
-    id: "research-papers",
-    name: "Research Papers",
-    description: "paper notes",
-    dueCount: 18,
-    cardCount: 142,
-    lastReviewedLabel: "yesterday",
-    inRotation: false,
-  },
-];
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 
 function createEmptyDeckEmbeddingPlot(): DeckEmbeddingPlotResponse {
@@ -826,6 +807,25 @@ function scoreTone(score: number | null) {
   return "high";
 }
 
+function formatEvaluationPhase(phase: EvaluationPhase | null): string {
+  switch (phase) {
+    case "queued":
+      return "Queued for evaluation";
+    case "evaluating-answer":
+      return "Waiting for evaluator";
+    case "saving-evaluation":
+      return "Saving evaluation";
+    case "gating-probes":
+      return "Checking follow-up questions";
+    case "saving-probes":
+      return "Saving follow-up questions";
+    case "finalizing":
+      return "Finalizing evaluation";
+    default:
+      return "Evaluating in background";
+  }
+}
+
 function PreviousAnswerScore({
   score,
   className,
@@ -978,10 +978,6 @@ function MicrophoneIcon() {
 
 function StopIcon() {
   return <Square aria-hidden="true" fill="currentColor" />;
-}
-
-function SettingsIcon() {
-  return <Settings aria-hidden="true" />;
 }
 
 function ManageAccountIcon() {
@@ -1188,10 +1184,10 @@ export default function ReviewApp({
     () => cachedSessionRef.current?.queueSortKey ?? "review-date",
   );
   const [decks, setDecks] = useState<DeckManagementItem[]>(
-    () => cachedSessionRef.current?.decks ?? INITIAL_DECKS,
+    () => cachedSessionRef.current?.decks ?? [],
   );
   const [selectedDeckId, setSelectedDeckId] = useState(
-    () => cachedSessionRef.current?.selectedDeckId ?? INITIAL_DECKS[0].id,
+    () => cachedSessionRef.current?.selectedDeckId ?? "",
   );
   const [deckSearchQuery, setDeckSearchQuery] = useState(
     () => cachedSessionRef.current?.deckSearchQuery ?? "",
@@ -1205,9 +1201,8 @@ export default function ReviewApp({
   const [deckDraftName, setDeckDraftName] = useState(
     () => cachedSessionRef.current?.deckDraftName ?? "",
   );
-  const [deckDraftDescription, setDeckDraftDescription] = useState(
-    () => cachedSessionRef.current?.deckDraftDescription ?? "",
-  );
+  const [isDecksLoading, setIsDecksLoading] = useState(false);
+  const [deckPageMessage, setDeckPageMessage] = useState<string | null>(null);
   const [deckEmbeddingPlot, setDeckEmbeddingPlot] =
     useState<DeckEmbeddingPlotResponse>(
       () => cachedSessionRef.current?.deckEmbeddingPlot ?? createEmptyDeckEmbeddingPlot(),
@@ -1379,7 +1374,6 @@ export default function ReviewApp({
       deckSortKey,
       editingDeckId,
       deckDraftName,
-      deckDraftDescription,
       deckEmbeddingPlot,
       messages,
       referenceAnswers,
@@ -1400,7 +1394,6 @@ export default function ReviewApp({
   }, [
     answer,
     currentUser,
-    deckDraftDescription,
     deckDraftName,
     deckEmbeddingPlot,
     deckSearchQuery,
@@ -1447,9 +1440,7 @@ export default function ReviewApp({
     const normalizedQuery = deckSearchQuery.trim().toLowerCase();
     const filteredDecks = normalizedQuery
       ? decks.filter((deck) =>
-          `${deck.name} ${deck.description}`
-            .toLowerCase()
-            .includes(normalizedQuery),
+          `${deck.name} ${deck.slug}`.toLowerCase().includes(normalizedQuery),
         )
       : decks;
 
@@ -1463,110 +1454,200 @@ export default function ReviewApp({
       }
 
       return (
-        Number(b.inRotation) - Number(a.inRotation) ||
+        Number(b.inReviewRotation) - Number(a.inReviewRotation) ||
         b.dueCount - a.dueCount ||
         a.name.localeCompare(b.name)
       );
     });
   }, [deckSearchQuery, deckSortKey, decks]);
-  const rotationDeckCount = decks.filter((deck) => deck.inRotation).length;
+  const rotationDeckCount = decks.filter((deck) => deck.inReviewRotation).length;
   const rotationDueCount = decks.reduce(
-    (total, deck) => (deck.inRotation ? total + deck.dueCount : total),
+    (total, deck) => (deck.inReviewRotation ? total + deck.dueCount : total),
     0,
   );
   const totalCardCount = decks.reduce((total, deck) => total + deck.cardCount, 0);
 
+  const loadDecks = useCallback(async () => {
+    setIsDecksLoading(true);
+    setDeckPageMessage(null);
+
+    try {
+      const response = await fetch("/api/decks", {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        throw new Error("Could not load decks.");
+      }
+
+      const data = (await response.json()) as DecksResponse;
+
+      setDecks(data.decks);
+      setSelectedDeckId((currentDeckId) =>
+        data.decks.some((deck) => deck.id === currentDeckId)
+          ? currentDeckId
+          : data.decks[0]?.id ?? "",
+      );
+    } catch (loadError) {
+      setDeckPageMessage(
+        loadError instanceof Error ? loadError.message : "Could not load decks.",
+      );
+    } finally {
+      setIsDecksLoading(false);
+    }
+  }, []);
+
   const openDeckEditor = useCallback((deck: DeckManagementItem) => {
     setSelectedDeckId(deck.id);
     setDeckDraftName(deck.name);
-    setDeckDraftDescription(deck.description);
     setEditingDeckId(deck.id);
   }, []);
 
-  const createDeck = useCallback(() => {
-    const deckId = `deck-${Date.now()}`;
-    const newDeck: DeckManagementItem = {
-      id: deckId,
-      name: "Untitled deck",
-      description: "",
-      dueCount: 0,
-      cardCount: 0,
-      lastReviewedLabel: "not reviewed",
-      inRotation: false,
-    };
+  const createDeck = useCallback(async () => {
+    setDeckPageMessage(null);
 
-    setDecks((currentDecks) => [newDeck, ...currentDecks]);
-    setSelectedDeckId(deckId);
-    setDeckDraftName(newDeck.name);
-    setDeckDraftDescription(newDeck.description);
-    setEditingDeckId(deckId);
+    try {
+      const response = await fetch("/api/decks", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: "Untitled deck",
+          inReviewRotation: false,
+        }),
+      });
+      const data = (await response.json()) as DeckMutationResponse;
+
+      if (!response.ok || !data.ok || !data.deck) {
+        throw new Error(data.error ?? "Could not create deck.");
+      }
+
+      setDecks((currentDecks) => [data.deck as DeckManagementItem, ...currentDecks]);
+      setSelectedDeckId(data.deck.id);
+      setDeckDraftName(data.deck.name);
+      setEditingDeckId(data.deck.id);
+    } catch (createError) {
+      setDeckPageMessage(
+        createError instanceof Error
+          ? createError.message
+          : "Could not create deck.",
+      );
+    }
   }, []);
 
-  const saveDeckDraft = useCallback(() => {
+  const saveDeckDraft = useCallback(async () => {
     if (!editingDeckId) {
       return;
     }
 
     const nextName = deckDraftName.trim();
 
-    setDecks((currentDecks) =>
-      currentDecks.map((deck) =>
-        deck.id === editingDeckId
-          ? {
-              ...deck,
-              name: nextName || deck.name,
-              description: deckDraftDescription.trim(),
-            }
-          : deck,
-      ),
-    );
-    setEditingDeckId(null);
-  }, [deckDraftDescription, deckDraftName, editingDeckId]);
+    if (!nextName) {
+      setDeckPageMessage("Deck name is required.");
+      return;
+    }
 
-  const deleteDeck = useCallback(
-    (deckId: string) => {
-      setDecks((currentDecks) => {
-        const nextDecks = currentDecks.filter((deck) => deck.id !== deckId);
-
-        if (selectedDeckId === deckId) {
-          setSelectedDeckId(nextDecks[0]?.id ?? "");
-        }
-
-        if (editingDeckId === deckId) {
-          setEditingDeckId(null);
-        }
-
-        return nextDecks;
+    try {
+      const response = await fetch(`/api/decks/${encodeURIComponent(editingDeckId)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: nextName,
+        }),
       });
+      const data = (await response.json()) as DeckMutationResponse;
+
+      if (!response.ok || !data.ok || !data.deck) {
+        throw new Error(data.error ?? "Could not update deck.");
+      }
+
+      setDecks((currentDecks) =>
+        currentDecks.map((deck) =>
+          deck.id === editingDeckId ? (data.deck as DeckManagementItem) : deck,
+        ),
+      );
+      setEditingDeckId(null);
+    } catch (updateError) {
+      setDeckPageMessage(
+        updateError instanceof Error
+          ? updateError.message
+          : "Could not update deck.",
+      );
+    }
+  }, [deckDraftName, editingDeckId]);
+
+  const archiveDeck = useCallback(
+    async (deckId: string) => {
+      setDeckPageMessage(null);
+
+      try {
+        const response = await fetch(`/api/decks/${encodeURIComponent(deckId)}`, {
+          method: "DELETE",
+        });
+        const data = (await response.json()) as DeckMutationResponse;
+
+        if (!response.ok || !data.ok) {
+          throw new Error(data.error ?? "Could not archive deck.");
+        }
+
+        setDecks((currentDecks) => {
+          const nextDecks = currentDecks.filter((deck) => deck.id !== deckId);
+
+          if (selectedDeckId === deckId) {
+            setSelectedDeckId(nextDecks[0]?.id ?? "");
+          }
+
+          if (editingDeckId === deckId) {
+            setEditingDeckId(null);
+          }
+
+          return nextDecks;
+        });
+      } catch (deleteError) {
+        setDeckPageMessage(
+          deleteError instanceof Error
+            ? deleteError.message
+            : "Could not archive deck.",
+        );
+      }
     },
     [editingDeckId, selectedDeckId],
   );
 
-  const duplicateDeck = useCallback((deck: DeckManagementItem) => {
-    const deckId = `deck-${Date.now()}`;
-    const copiedDeck: DeckManagementItem = {
-      ...deck,
-      id: deckId,
-      name: `${deck.name} copy`,
-      inRotation: false,
-      lastReviewedLabel: "not reviewed",
-    };
+  const toggleDeckRotation = useCallback(async (deck: DeckManagementItem) => {
+    setDeckPageMessage(null);
 
-    setDecks((currentDecks) => [copiedDeck, ...currentDecks]);
-    setSelectedDeckId(deckId);
-  }, []);
+    try {
+      const response = await fetch(`/api/decks/${encodeURIComponent(deck.id)}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          inReviewRotation: !deck.inReviewRotation,
+        }),
+      });
+      const data = (await response.json()) as DeckMutationResponse;
 
-  const toggleDeckRotation = useCallback((deckId: string) => {
-    setDecks((currentDecks) =>
-      currentDecks.map((deck) =>
-        deck.id === deckId
-          ? {
-              ...deck,
-              inRotation: !deck.inRotation,
-            }
-          : deck,
-      ),
-    );
+      if (!response.ok || !data.ok || !data.deck) {
+        throw new Error(data.error ?? "Could not update rotation.");
+      }
+
+      setDecks((currentDecks) =>
+        currentDecks.map((currentDeck) =>
+          currentDeck.id === deck.id ? (data.deck as DeckManagementItem) : currentDeck,
+        ),
+      );
+    } catch (toggleError) {
+      setDeckPageMessage(
+        toggleError instanceof Error
+          ? toggleError.message
+          : "Could not update rotation.",
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -1576,6 +1657,14 @@ export default function ReviewApp({
 
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== "queue" || decks.length > 0 || isDecksLoading) {
+      return;
+    }
+
+    void loadDecks();
+  }, [activeTab, decks.length, isDecksLoading, loadDecks]);
 
   useEffect(() => {
     if (cachedSessionRef.current?.currentUser) {
@@ -1990,6 +2079,7 @@ export default function ReviewApp({
 
         if (
           message.status === evaluation.status &&
+          message.phase === evaluation.phase &&
           message.score === evaluation.score &&
           message.justification === evaluation.justification &&
           message.answerSummary === evaluation.answerSummary &&
@@ -2004,6 +2094,7 @@ export default function ReviewApp({
         return {
           ...message,
           status: evaluation.status,
+          phase: evaluation.phase,
           score: evaluation.score,
           justification: evaluation.justification,
           answerSummary: evaluation.answerSummary,
@@ -2061,6 +2152,7 @@ export default function ReviewApp({
           evaluationId: data.evaluationId,
           submittedAt,
           status: "grading",
+          phase: "queued",
           score: null,
           justification: null,
           answerSummary: null,
@@ -2655,6 +2747,7 @@ export default function ReviewApp({
         question: message.question,
         answer: message.answer,
         status: message.status,
+        phase: message.phase,
         score: message.score,
         justification: message.justification,
         timestamp,
@@ -2690,6 +2783,7 @@ export default function ReviewApp({
         question: evaluation.question,
         answer: evaluation.answer || "(blank)",
         status: evaluation.status,
+        phase: evaluation.phase,
         score: evaluation.score,
         justification: evaluation.justification,
         timestamp,
@@ -2731,6 +2825,7 @@ export default function ReviewApp({
       question: attempt.question,
       answer: attempt.rawAnswer || "(blank)",
       status: "resolved",
+      phase: null,
       score: attempt.score,
       justification: attempt.justification,
       timestamp: attempt.resolvedAt || attempt.submittedAt,
@@ -2776,6 +2871,7 @@ export default function ReviewApp({
         question: item.question,
         answer: item.lastAnswer,
         status: "resolved",
+        phase: null,
         score: item.lastScore,
         justification:
           item.lastJustification ??
@@ -2905,6 +3001,7 @@ export default function ReviewApp({
         submittedAt: attempt.submittedAt,
         resolvedAt: attempt.resolvedAt,
         status: "resolved",
+        phase: null,
       }));
     const sessionAnswerHistory: AnswerHistoryEntry[] = selectedAnswerMessages
       .map((message) => {
@@ -2921,6 +3018,7 @@ export default function ReviewApp({
           submittedAt: evaluation?.submittedAt ?? message.submittedAt,
           resolvedAt: evaluation?.resolvedAt ?? message.resolvedAt,
           status: message.status,
+          phase: evaluation?.phase ?? message.phase,
         };
       })
       .filter(
@@ -3209,25 +3307,12 @@ export default function ReviewApp({
                     type="button"
                     role="menuitem"
                     onClick={() => {
-                      setAvatarMessage(null);
-                      setIsUserMenuOpen(false);
-                      setIsSettingsOpen(true);
-                    }}
-                  >
-                    <SettingsIcon />
-                    <span>Settings</span>
-                  </button>
-                  <button
-                    className="user-menu-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
                       setIsUserMenuOpen(false);
                       clerk.openUserProfile();
                     }}
                   >
                     <ManageAccountIcon />
-                    <span>Manage account</span>
+                    <span>Manage accounts</span>
                   </button>
                   <button
                     className="user-menu-item"
@@ -3475,7 +3560,7 @@ export default function ReviewApp({
                             </span>
                             {isPending ? (
                               <p className="previous-summary">
-                                Evaluating in background...
+                                {formatEvaluationPhase(item.phase)}...
                               </p>
                             ) : (
                               <MarkdownContent
@@ -3604,113 +3689,110 @@ export default function ReviewApp({
             </label>
           </div>
 
-          {decks.length === 0 ? (
+          {deckPageMessage ? (
+            <p className="queue-empty" role="status">
+              {deckPageMessage}
+            </p>
+          ) : null}
+
+          {isDecksLoading ? (
+            <p className="queue-empty">Loading decks...</p>
+          ) : decks.length === 0 ? (
             <p className="queue-empty">No decks yet.</p>
+          ) : visibleDecks.length === 0 ? (
+            <p className="queue-empty">No matching decks.</p>
           ) : (
             <ol className="queue-list deck-list" ref={queueListRef}>
               {visibleDecks.map((deck) => {
                 const isSelected = selectedDeck?.id === deck.id;
 
                 return (
-                <li
-                  className="queue-row deck-row"
-                  key={deck.id}
-                >
-                  <div
-                    className={`queue-row-card deck-row-card ${
-                      isSelected ? "deck-row-card-selected" : ""
-                    }`}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Select ${deck.name}`}
-                    aria-pressed={isSelected}
-                    onClick={() => setSelectedDeckId(deck.id)}
-                    onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setSelectedDeckId(deck.id);
-                      }
-                    }}
-                  >
-                    <div className="deck-row-main">
-                      <div className="deck-row-copy">
-                        <p className="queue-question deck-name">{deck.name}</p>
-                        {deck.description ? (
-                          <p className="queue-origin deck-description">
-                            {deck.description}
-                          </p>
-                        ) : null}
-                      </div>
-                      <div className="deck-row-meta" aria-label="Deck details">
-                        <span
-                          className={`due-badge ${
-                            deck.dueCount > 0 ? "now" : "scheduled"
-                          }`}
-                        >
-                          {deck.dueCount} due
-                        </span>
-                        <span>{deck.cardCount} cards</span>
-                        <span>{deck.lastReviewedLabel}</span>
-                      </div>
-                    </div>
-                    <div className="deck-row-actions">
-                      <button
-                        className={`deck-rotation-toggle ${
-                          deck.inRotation ? "deck-rotation-toggle-on" : ""
-                        }`}
-                        type="button"
-                        aria-label={
-                          deck.inRotation
-                            ? `Remove ${deck.name} from review rotation`
-                            : `Add ${deck.name} to review rotation`
+                  <li className="queue-row deck-row" key={deck.id}>
+                    <div
+                      className={`queue-row-card deck-row-card ${
+                        isSelected ? "deck-row-card-selected" : ""
+                      }`}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Select ${deck.name}`}
+                      aria-pressed={isSelected}
+                      onClick={() => setSelectedDeckId(deck.id)}
+                      onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedDeckId(deck.id);
                         }
-                        aria-pressed={deck.inRotation}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleDeckRotation(deck.id);
-                        }}
-                      >
-                        <span />
-                      </button>
-                      <button
-                        className="deck-icon-button"
-                        type="button"
-                        aria-label={`Edit ${deck.name}`}
-                        title="Edit"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openDeckEditor(deck);
-                        }}
-                      >
-                        <PencilLine aria-hidden="true" />
-                      </button>
-                      <button
-                        className="deck-icon-button"
-                        type="button"
-                        aria-label={`Duplicate ${deck.name}`}
-                        title="Duplicate"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          duplicateDeck(deck);
-                        }}
-                      >
-                        <Copy aria-hidden="true" />
-                      </button>
-                      <button
-                        className="deck-icon-button deck-icon-button-danger"
-                        type="button"
-                        aria-label={`Delete ${deck.name}`}
-                        title="Delete"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          deleteDeck(deck.id);
-                        }}
-                      >
-                        <Trash2 aria-hidden="true" />
-                      </button>
+                      }}
+                    >
+                      <div className="deck-row-main">
+                        <div className="deck-row-copy">
+                          <p className="queue-question deck-name">{deck.name}</p>
+                          {deck.slug ? (
+                            <p className="queue-origin deck-description">
+                              {deck.slug}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="deck-row-meta" aria-label="Deck details">
+                          <span
+                            className={`due-badge ${
+                              deck.dueCount > 0 ? "now" : "scheduled"
+                            }`}
+                          >
+                            {deck.dueCount} due
+                          </span>
+                          <span>{deck.cardCount} cards</span>
+                          <span>{formatReviewDate(deck.lastReviewedAt)}</span>
+                        </div>
+                      </div>
+                      <div className="deck-row-actions">
+                        <button
+                          className={`deck-rotation-toggle ${
+                            deck.inReviewRotation
+                              ? "deck-rotation-toggle-on"
+                              : ""
+                          }`}
+                          type="button"
+                          aria-label={
+                            deck.inReviewRotation
+                              ? `Remove ${deck.name} from review rotation`
+                              : `Add ${deck.name} to review rotation`
+                          }
+                          aria-pressed={deck.inReviewRotation}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void toggleDeckRotation(deck);
+                          }}
+                        >
+                          <span />
+                        </button>
+                        <button
+                          className="deck-icon-button"
+                          type="button"
+                          aria-label={`Edit ${deck.name}`}
+                          title="Edit"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openDeckEditor(deck);
+                          }}
+                        >
+                          <PencilLine aria-hidden="true" />
+                        </button>
+                        <button
+                          className="deck-icon-button deck-icon-button-danger"
+                          type="button"
+                          aria-label={`Archive ${deck.name}`}
+                          title="Archive"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void archiveDeck(deck.id);
+                          }}
+                        >
+                          <Trash2 aria-hidden="true" />
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                </li>
+                  </li>
                 );
               })}
             </ol>
@@ -3765,16 +3847,6 @@ export default function ReviewApp({
                   onChange={(event) => setDeckDraftName(event.target.value)}
                 />
               </label>
-              <label className="settings-field">
-                <span>Description</span>
-                <input
-                  className="settings-input"
-                  value={deckDraftDescription}
-                  onChange={(event) =>
-                    setDeckDraftDescription(event.target.value)
-                  }
-                />
-              </label>
             </div>
 
             <div className="deck-editor-stats" aria-label="Deck question summary">
@@ -3787,7 +3859,7 @@ export default function ReviewApp({
                 <dd>due</dd>
               </div>
               <div>
-                <dt>{editingDeck.inRotation ? "on" : "off"}</dt>
+                <dt>{editingDeck.inReviewRotation ? "on" : "off"}</dt>
                 <dd>rotation</dd>
               </div>
             </div>
@@ -4263,7 +4335,7 @@ export default function ReviewApp({
                             ) : (
                               <p className="stats-history-summary stats-history-summary-muted">
                                 {isPending
-                                  ? "Evaluating in background..."
+                                  ? `${formatEvaluationPhase(entry.phase)}...`
                                   : "No feedback returned."}
                               </p>
                             )}
@@ -4282,7 +4354,9 @@ export default function ReviewApp({
                             )}
                           </time>
                           <span className="stats-history-status">
-                            {isPending ? "Grading" : "Resolved"}
+                            {isPending
+                              ? formatEvaluationPhase(entry.phase)
+                              : "Resolved"}
                           </span>
                         </div>
                       </li>

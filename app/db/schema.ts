@@ -105,6 +105,8 @@ export const decks = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
+    inReviewRotation: boolean("in_review_rotation").notNull().default(true),
+    archivedAt: bigint("archived_at", { mode: "number" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
   },

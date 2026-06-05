@@ -7,6 +7,7 @@ import {
   desc,
   eq,
   inArray,
+  isNull,
   lte,
   notInArray,
   sql,
@@ -109,6 +110,19 @@ export type QueuedQuestionsPage = {
   total: number;
 };
 
+export type DeckSummary = {
+  id: string;
+  name: string;
+  slug: string;
+  inReviewRotation: boolean;
+  archivedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  cardCount: number;
+  dueCount: number;
+  lastReviewedAt: number | null;
+};
+
 const LEGACY_QUESTIONS_FILE = path.join(process.cwd(), "data", "questions.csv");
 const DEFAULT_DECK = {
   id: "deep-learning",
@@ -121,6 +135,8 @@ const seededUserIds = new Set<string>();
 type UserContextInput = {
   user?: AuthenticatedUser;
   userId?: string;
+  deckId?: string;
+  deckScope?: "default" | "rotation" | "all";
 };
 
 type UserContext = {
@@ -239,6 +255,43 @@ function toDueQuestion(row: QuestionRow): DueQuestion {
   };
 }
 
+function deckSlug(input: string): string {
+  const slug = input
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+
+  return slug || "untitled-deck";
+}
+
+function deckIdForSlug(userId: string, slug: string): string {
+  return userId === "tsilva" ? slug : `${userId}:${slug}`;
+}
+
+async function uniqueDeckSlug(userId: string, preferredSlug: string): Promise<string> {
+  const rows = await db
+    .select({ slug: decks.slug })
+    .from(decks)
+    .where(eq(decks.userId, userId));
+  const existingSlugs = new Set(rows.map((row) => row.slug));
+
+  if (!existingSlugs.has(preferredSlug)) {
+    return preferredSlug;
+  }
+
+  for (let suffix = 2; suffix < 10_000; suffix += 1) {
+    const candidate = `${preferredSlug}-${suffix}`;
+
+    if (!existingSlugs.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error("Could not create a unique deck slug.");
+}
+
 function normalizeEmbeddingModel(embeddingModel: string): string {
   return embeddingModel.trim();
 }
@@ -307,6 +360,7 @@ async function seedCurrentUserAndDeck(context: UserContext): Promise<void> {
       userId: context.userId,
       name: DEFAULT_DECK.name,
       slug: DEFAULT_DECK.slug,
+      inReviewRotation: true,
       createdAt: now,
       updatedAt: now,
     })
@@ -364,11 +418,28 @@ async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext
   return context;
 }
 
+function questionDeckWhereClause(context: UserContext, input: UserContextInput) {
+  if (input.deckId) {
+    return eq(questions.deckId, input.deckId);
+  }
+
+  if (input.deckScope === "all") {
+    return sql`true`;
+  }
+
+  if (input.deckScope === "rotation") {
+    return and(eq(decks.inReviewRotation, true), isNull(decks.archivedAt));
+  }
+
+  return eq(questions.deckId, context.deckId);
+}
+
 async function selectQuestionRows(
   whereClause = sql`true`,
   input: UserContextInput = {},
 ): Promise<QuestionRow[]> {
   const context = await ensureSeedData(input);
+  const deckWhereClause = questionDeckWhereClause(context, input);
 
   const rows = await db
     .select({
@@ -390,8 +461,8 @@ async function selectQuestionRows(
     .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(
       and(
-        eq(questions.deckId, context.deckId),
         eq(decks.userId, context.userId),
+        deckWhereClause,
         whereClause,
       ),
     )
@@ -402,6 +473,169 @@ async function selectQuestionRows(
 
 export async function ensureQuestionsDatabase(): Promise<void> {
   await ensureSeedData();
+}
+
+function toDeckSummary(row: {
+  id: string;
+  name: string;
+  slug: string;
+  inReviewRotation: boolean;
+  archivedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  cardCount: number;
+  dueCount: number;
+  lastReviewedAt: number | null;
+}): DeckSummary {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    inReviewRotation: row.inReviewRotation,
+    archivedAt: row.archivedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    cardCount: Number(row.cardCount) || 0,
+    dueCount: Number(row.dueCount) || 0,
+    lastReviewedAt: row.lastReviewedAt,
+  };
+}
+
+export async function listDecks(
+  input: UserContextInput = {},
+): Promise<DeckSummary[]> {
+  const context = await ensureSeedData(input);
+  const now = Math.round(Date.now());
+  const rows = await db
+    .select({
+      id: decks.id,
+      name: decks.name,
+      slug: decks.slug,
+      inReviewRotation: decks.inReviewRotation,
+      archivedAt: decks.archivedAt,
+      createdAt: decks.createdAt,
+      updatedAt: decks.updatedAt,
+      cardCount: sql<number>`count(distinct ${questions.id})`,
+      dueCount: sql<number>`count(distinct ${questions.id}) filter (where ${questions.nextDue} <= ${now})`,
+      lastReviewedAt: sql<number | null>`max(${questionReviews.resolvedAt})`,
+    })
+    .from(decks)
+    .leftJoin(questions, eq(questions.deckId, decks.id))
+    .leftJoin(questionReviews, eq(questionReviews.deckId, decks.id))
+    .where(and(eq(decks.userId, context.userId), isNull(decks.archivedAt)))
+    .groupBy(
+      decks.id,
+      decks.name,
+      decks.slug,
+      decks.inReviewRotation,
+      decks.archivedAt,
+      decks.createdAt,
+      decks.updatedAt,
+    )
+    .orderBy(desc(decks.updatedAt), asc(decks.name));
+
+  return rows.map(toDeckSummary);
+}
+
+export async function createDeck(input: {
+  name: string;
+  inReviewRotation?: boolean;
+  userId?: string;
+}): Promise<DeckSummary> {
+  const context = await ensureSeedData(input);
+  const name = input.name.trim() || "Untitled deck";
+  const slug = await uniqueDeckSlug(context.userId, deckSlug(name));
+  const now = Math.round(Date.now());
+  const deckId = deckIdForSlug(context.userId, slug);
+
+  await db.insert(decks).values({
+    id: deckId,
+    userId: context.userId,
+    name,
+    slug,
+    inReviewRotation: input.inReviewRotation ?? false,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const deck = (await listDecks({ userId: context.userId })).find(
+    (item) => item.id === deckId,
+  );
+
+  if (!deck) {
+    throw new Error("Created deck could not be loaded.");
+  }
+
+  return deck;
+}
+
+export async function updateDeck(input: {
+  deckId: string;
+  name?: string;
+  inReviewRotation?: boolean;
+  userId?: string;
+}): Promise<DeckSummary> {
+  const context = await ensureSeedData(input);
+  const currentDeck = (await listDecks({ userId: context.userId })).find(
+    (deck) => deck.id === input.deckId,
+  );
+
+  if (!currentDeck) {
+    throw new Error("Deck not found.");
+  }
+
+  const nextName = input.name?.trim();
+  const now = Math.round(Date.now());
+
+  await db
+    .update(decks)
+    .set({
+      ...(nextName ? { name: nextName } : {}),
+      ...(input.inReviewRotation === undefined
+        ? {}
+        : { inReviewRotation: input.inReviewRotation }),
+      updatedAt: now,
+    })
+    .where(and(eq(decks.id, input.deckId), eq(decks.userId, context.userId)));
+
+  const deck = (await listDecks({ userId: context.userId })).find(
+    (item) => item.id === input.deckId,
+  );
+
+  if (!deck) {
+    throw new Error("Updated deck could not be loaded.");
+  }
+
+  return deck;
+}
+
+export async function archiveDeck(input: {
+  deckId: string;
+  userId?: string;
+}): Promise<void> {
+  const context = await ensureSeedData(input);
+  const currentDeck = (await listDecks({ userId: context.userId })).find(
+    (deck) => deck.id === input.deckId,
+  );
+
+  if (!currentDeck) {
+    throw new Error("Deck not found.");
+  }
+
+  if (currentDeck.id === context.deckId) {
+    throw new Error("The current Deep Learning deck cannot be archived.");
+  }
+
+  const now = Math.round(Date.now());
+
+  await db
+    .update(decks)
+    .set({
+      archivedAt: now,
+      inReviewRotation: false,
+      updatedAt: now,
+    })
+    .where(and(eq(decks.id, input.deckId), eq(decks.userId, context.userId)));
 }
 
 export async function readQuestions(
@@ -742,7 +976,7 @@ export async function getDueQuestions(
 ): Promise<DueQuestion[]> {
   const rows = await selectQuestionRows(
     lte(questions.nextDue, Math.round(now)),
-    input,
+    { ...input, deckScope: "rotation" },
   );
 
   return rows
@@ -754,7 +988,10 @@ export async function getDueQuestions(
 export async function getAllQueuedQuestions(
   input: UserContextInput = {},
 ): Promise<DueQuestion[]> {
-  const rows = await selectQuestionRows(sql`true`, input);
+  const rows = await selectQuestionRows(sql`true`, {
+    ...input,
+    deckScope: "rotation",
+  });
 
   return rows
     .map(toDueQuestion)
@@ -775,8 +1012,9 @@ export async function getQueuedQuestionsPage(
     new Set(input.excludeQuestions ?? []),
   ).filter(Boolean);
   const whereClause = and(
-    eq(questions.deckId, context.deckId),
     eq(decks.userId, context.userId),
+    eq(decks.inReviewRotation, true),
+    isNull(decks.archivedAt),
     excludeQuestions.length > 0
       ? notInArray(questions.question, excludeQuestions)
       : sql`true`,
@@ -824,7 +1062,10 @@ export async function getQuestionSnapshot(
   question: string,
   input: UserContextInput = {},
 ): Promise<DueQuestion | null> {
-  const [row] = await selectQuestionRows(eq(questions.question, question), input);
+  const [row] = await selectQuestionRows(eq(questions.question, question), {
+    ...input,
+    deckScope: "all",
+  });
 
   return row ? toDueQuestion(row) : null;
 }
@@ -850,7 +1091,13 @@ export async function getQuestionAttempts(
     .from(questionAttempts)
     .where(
       and(
-        eq(questionAttempts.deckId, context.deckId),
+        inArray(
+          questionAttempts.deckId,
+          db
+            .select({ id: decks.id })
+            .from(decks)
+            .where(eq(decks.userId, context.userId)),
+        ),
         eq(questionAttempts.question, question),
       ),
     )
@@ -893,7 +1140,13 @@ export async function getRecentQuestionAttempts(
     .from(questionAttempts)
     .where(
       and(
-        eq(questionAttempts.deckId, context.deckId),
+        inArray(
+          questionAttempts.deckId,
+          db
+            .select({ id: decks.id })
+            .from(decks)
+            .where(eq(decks.userId, context.userId)),
+        ),
         excludeQuestions.length > 0
           ? notInArray(questionAttempts.question, excludeQuestions)
           : sql`true`,
@@ -937,7 +1190,13 @@ export async function saveReferenceAnswer(input: {
     })
     .where(
       and(
-        eq(questions.deckId, context.deckId),
+        inArray(
+          questions.deckId,
+          db
+            .select({ id: decks.id })
+            .from(decks)
+            .where(eq(decks.userId, context.userId)),
+        ),
         eq(questions.question, input.question),
       ),
     );
@@ -1063,8 +1322,9 @@ export async function applyEvaluationToPostgres(input: {
       .innerJoin(decks, eq(decks.id, questions.deckId))
       .where(
         and(
-          eq(questions.deckId, context.deckId),
           eq(decks.userId, context.userId),
+          eq(decks.inReviewRotation, true),
+          isNull(decks.archivedAt),
           eq(questions.question, input.question),
         ),
       )
@@ -1120,7 +1380,7 @@ export async function applyEvaluationToPostgres(input: {
       })
       .where(
         and(
-          eq(questions.deckId, context.deckId),
+          eq(questions.deckId, row.deck_id),
           eq(questions.question, input.question),
         ),
       );
@@ -1128,7 +1388,7 @@ export async function applyEvaluationToPostgres(input: {
     const [attempt] = await tx
       .insert(questionAttempts)
       .values({
-        deckId: context.deckId,
+        deckId: row.deck_id,
         questionId: row.question_id,
         question: input.question,
         rawAnswer: input.answer,
@@ -1146,7 +1406,7 @@ export async function applyEvaluationToPostgres(input: {
 
     await tx.insert(questionReviews).values({
       attemptId: attempt.id,
-      deckId: context.deckId,
+      deckId: row.deck_id,
       questionId: row.question_id,
       question: input.question,
       score: input.score,

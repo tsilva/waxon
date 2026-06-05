@@ -1,5 +1,6 @@
 "use client";
 
+import { useUser } from "@clerk/nextjs";
 import Image from "next/image";
 import Link from "next/link";
 import {
@@ -737,7 +738,13 @@ function CostChart({ interactions }: { interactions: TraceInteraction[] }) {
 }
 
 export function AdminPageClient({ currentUser }: AdminPageClientProps) {
-  const menuAvatarUrl = currentUser.avatarUrl;
+  const { user: clerkUser } = useUser();
+  const menuAvatarUrl = clerkUser?.imageUrl || currentUser.avatarUrl;
+  const menuLabel =
+    clerkUser?.fullName ||
+    clerkUser?.username ||
+    currentUser.displayName ||
+    currentUser.email;
   const latestDate = useMemo(
     () =>
       new Date(
@@ -918,7 +925,7 @@ export function AdminPageClient({ currentUser }: AdminPageClientProps) {
                 className="user-menu-trigger"
                 type="button"
                 aria-label="User menu"
-                title={currentUser.displayName || currentUser.email}
+                title={menuLabel}
               >
                 {menuAvatarUrl ? (
                   <span
