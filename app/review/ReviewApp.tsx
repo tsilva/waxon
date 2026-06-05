@@ -209,6 +209,7 @@ type ActiveTab = "review" | "queue";
 
 type ReviewAppProps = {
   initialActiveTab?: ActiveTab;
+  initialDeckSlug?: string | null;
 };
 
 type ReviewSessionSnapshot = {
@@ -256,16 +257,40 @@ let reviewSessionSnapshot: ReviewSessionSnapshot | null = null;
 
 const REVIEW_TAB_PATHS: Record<ActiveTab, string> = {
   review: "/review",
-  queue: "/queue",
+  queue: "/decks",
 };
 
-function getReviewTabFromPathname(pathname: string): ActiveTab | null {
+type ReviewRouteState = {
+  activeTab: ActiveTab;
+  deckSlug: string | null;
+};
+
+function deckPath(deckSlug?: string | null): string {
+  return deckSlug ? `/decks/${encodeURIComponent(deckSlug)}` : REVIEW_TAB_PATHS.queue;
+}
+
+function getReviewRouteStateFromPathname(pathname: string): ReviewRouteState | null {
   if (pathname === REVIEW_TAB_PATHS.review) {
-    return "review";
+    return {
+      activeTab: "review",
+      deckSlug: null,
+    };
   }
 
   if (pathname === REVIEW_TAB_PATHS.queue) {
-    return "queue";
+    return {
+      activeTab: "queue",
+      deckSlug: null,
+    };
+  }
+
+  if (pathname.startsWith(`${REVIEW_TAB_PATHS.queue}/`)) {
+    const deckSlug = pathname.slice(REVIEW_TAB_PATHS.queue.length + 1);
+
+    return {
+      activeTab: "queue",
+      deckSlug: deckSlug ? decodeURIComponent(deckSlug) : null,
+    };
   }
 
   return null;
@@ -443,6 +468,7 @@ const QUEUE_PAGE_GROWTH_FACTOR = 1.75;
 const QUEUE_ROW_ESTIMATED_HEIGHT = 132;
 const QUEUE_ROW_OVERSCAN = 14;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
+const STALE_EVALUATION_GRADING_MS = 45_000;
 
 function createEmptyDeckEmbeddingPlot(): DeckEmbeddingPlotResponse {
   return {
@@ -1350,6 +1376,7 @@ function SubmitIcon() {
 
 export default function ReviewApp({
   initialActiveTab = "review",
+  initialDeckSlug = null,
 }: ReviewAppProps) {
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
@@ -1418,7 +1445,11 @@ export default function ReviewApp({
   );
   const [selectedDeckDetailId, setSelectedDeckDetailId] = useState<
     string | null
-  >(() => cachedSessionRef.current?.selectedDeckDetailId ?? null);
+  >(() =>
+    initialActiveTab === "queue" && initialDeckSlug
+      ? cachedSessionRef.current?.selectedDeckDetailId ?? null
+      : null,
+  );
   const [isCreatingDeck, setIsCreatingDeck] = useState(
     () => cachedSessionRef.current?.isCreatingDeck ?? false,
   );
@@ -1440,6 +1471,9 @@ export default function ReviewApp({
     () => cachedSessionRef.current?.messages ?? [],
   );
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialActiveTab);
+  const [routeDeckSlug, setRouteDeckSlug] = useState<string | null>(
+    initialActiveTab === "queue" ? initialDeckSlug : null,
+  );
   const [referenceAnswers, setReferenceAnswers] = useState<
     Record<string, ReferenceAnswerState>
   >(() => cachedSessionRef.current?.referenceAnswers ?? {});
@@ -1531,14 +1565,24 @@ export default function ReviewApp({
     (
       nextTab: ActiveTab,
       event?: ReactMouseEvent<HTMLAnchorElement>,
+      deckSlug?: string | null,
     ) => {
       event?.preventDefault();
       setActiveTab(nextTab);
+      setRouteDeckSlug(nextTab === "queue" ? deckSlug ?? null : null);
 
-      const nextPath = REVIEW_TAB_PATHS[nextTab];
+      const nextPath =
+        nextTab === "queue" ? deckPath(deckSlug) : REVIEW_TAB_PATHS[nextTab];
 
       if (window.location.pathname !== nextPath) {
-        window.history.pushState({ activeTab: nextTab }, "", nextPath);
+        window.history.pushState(
+          {
+            activeTab: nextTab,
+            deckSlug: nextTab === "queue" ? deckSlug ?? null : null,
+          },
+          "",
+          nextPath,
+        );
       }
     },
     [],
@@ -1550,14 +1594,20 @@ export default function ReviewApp({
 
   useEffect(() => {
     setActiveTab(initialActiveTab);
-  }, [initialActiveTab]);
+    setRouteDeckSlug(initialActiveTab === "queue" ? initialDeckSlug : null);
+
+    if (initialActiveTab !== "queue" || !initialDeckSlug) {
+      setSelectedDeckDetailId(null);
+    }
+  }, [initialActiveTab, initialDeckSlug]);
 
   useEffect(() => {
     function syncTabFromHistory() {
-      const nextTab = getReviewTabFromPathname(window.location.pathname);
+      const nextRoute = getReviewRouteStateFromPathname(window.location.pathname);
 
-      if (nextTab) {
-        setActiveTab(nextTab);
+      if (nextRoute) {
+        setActiveTab(nextRoute.activeTab);
+        setRouteDeckSlug(nextRoute.deckSlug);
         return;
       }
 
@@ -1815,18 +1865,25 @@ export default function ReviewApp({
         );
       }
 
+      const savedDeck = data.deck as DeckManagementItem;
+
       if (isCreatingDeck) {
         setDecks((currentDecks) => [
-          data.deck as DeckManagementItem,
+          savedDeck,
           ...currentDecks,
         ]);
-        setSelectedDeckId(data.deck.id);
+        setSelectedDeckId(savedDeck.id);
       } else {
         setDecks((currentDecks) =>
           currentDecks.map((deck) =>
-            deck.id === editingDeckId ? (data.deck as DeckManagementItem) : deck,
+            deck.id === editingDeckId ? savedDeck : deck,
           ),
         );
+
+        if (selectedDeckDetailId === savedDeck.id) {
+          setRouteDeckSlug(savedDeck.slug);
+          navigateToTab("queue", undefined, savedDeck.slug);
+        }
       }
 
       setIsCreatingDeck(false);
@@ -1848,6 +1905,8 @@ export default function ReviewApp({
     isCreatingDeck,
     isDeckDraftNameDuplicate,
     isDeckSaving,
+    navigateToTab,
+    selectedDeckDetailId,
   ]);
 
   const archiveDeck = useCallback(
@@ -1921,28 +1980,7 @@ export default function ReviewApp({
     }
   }, []);
 
-  const openDeckQueue = useCallback(
-    (deck: DeckManagementItem) => {
-      setSelectedDeckId(deck.id);
-      setSelectedDeckDetailId(deck.id);
-      queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
-      hasLoadedQueueStatusRef.current = false;
-      loadedQueueSortKeyRef.current = null;
-      setReviewQueue([]);
-      setRecentAttempts([]);
-      setReviewQueueTotal(0);
-      setDeckEmbeddingPlot(createEmptyDeckEmbeddingPlot());
-      setQueueVirtualRange({
-        start: 0,
-        end: QUEUE_PAGE_SIZE,
-      });
-      navigateToTab("queue");
-    },
-    [navigateToTab],
-  );
-
-  const closeDeckQueue = useCallback(() => {
-    setSelectedDeckDetailId(null);
+  const resetDeckQueueState = useCallback(() => {
     queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
     hasLoadedQueueStatusRef.current = false;
     loadedQueueSortKeyRef.current = null;
@@ -1955,6 +1993,34 @@ export default function ReviewApp({
       end: QUEUE_PAGE_SIZE,
     });
   }, []);
+
+  const openDeckQueue = useCallback(
+    (deck: DeckManagementItem, options: { updateUrl?: boolean } = {}) => {
+      const shouldReset = selectedDeckDetailId !== deck.id;
+
+      setSelectedDeckId(deck.id);
+      setSelectedDeckDetailId(deck.id);
+      setRouteDeckSlug(deck.slug);
+
+      if (shouldReset) {
+        resetDeckQueueState();
+      }
+
+      if (options.updateUrl ?? true) {
+        navigateToTab("queue", undefined, deck.slug);
+      } else {
+        setActiveTab("queue");
+      }
+    },
+    [navigateToTab, resetDeckQueueState, selectedDeckDetailId],
+  );
+
+  const closeDeckQueue = useCallback(() => {
+    setSelectedDeckDetailId(null);
+    setRouteDeckSlug(null);
+    resetDeckQueueState();
+    navigateToTab("queue");
+  }, [navigateToTab, resetDeckQueueState]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -1971,6 +2037,42 @@ export default function ReviewApp({
 
     void loadDecks();
   }, [activeTab, isDecksLoading, loadDecks]);
+
+  useEffect(() => {
+    if (activeTab !== "queue") {
+      return;
+    }
+
+    if (!routeDeckSlug) {
+      if (selectedDeckDetailId) {
+        setSelectedDeckDetailId(null);
+        resetDeckQueueState();
+      }
+
+      return;
+    }
+
+    const routedDeck = decks.find((deck) => deck.slug === routeDeckSlug);
+
+    if (routedDeck) {
+      setDeckPageMessage(null);
+      openDeckQueue(routedDeck, { updateUrl: false });
+      return;
+    }
+
+    if (hasLoadedDecksRef.current && !isDecksLoading) {
+      setSelectedDeckDetailId(null);
+      setDeckPageMessage(`Deck "${routeDeckSlug}" was not found.`);
+    }
+  }, [
+    activeTab,
+    decks,
+    isDecksLoading,
+    openDeckQueue,
+    resetDeckQueueState,
+    routeDeckSlug,
+    selectedDeckDetailId,
+  ]);
 
   useEffect(() => {
     if (cachedSessionRef.current?.currentUser) {
@@ -2418,6 +2520,38 @@ export default function ReviewApp({
       return hasChanged ? nextMessages : current;
     });
   }, [evaluations]);
+
+  useEffect(() => {
+    setMessages((current) => {
+      let hasChanged = false;
+
+      const nextMessages = current.map((message) => {
+        if (
+          message.kind !== "answer" ||
+          message.status !== "grading" ||
+          currentTime - message.submittedAt < STALE_EVALUATION_GRADING_MS
+        ) {
+          return message;
+        }
+
+        hasChanged = true;
+
+        return {
+          ...message,
+          status: "resolved" as const,
+          phase: null,
+          score: null,
+          justification:
+            "Evaluation did not finish. Try submitting the answer again.",
+          answerSummary: message.answer,
+          resolvedAt: currentTime,
+          nextDue: null,
+        };
+      });
+
+      return hasChanged ? nextMessages : current;
+    });
+  }, [currentTime]);
 
   const submit = useCallback(async (answerOverride?: string) => {
     clearPendingSpeechCommand();
@@ -2891,6 +3025,7 @@ export default function ReviewApp({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          deckId: selectedDeckDetailId,
           scope: generatorScope,
           files: generatorFiles,
           count,
@@ -2989,6 +3124,7 @@ export default function ReviewApp({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          deckId: selectedDeckDetailId,
           questions: questionsToAdd.map((item) => ({
             question: item.question,
             conciseAnswer: item.conciseAnswer,
@@ -3018,6 +3154,7 @@ export default function ReviewApp({
             : "Questions already exist or were rejected as duplicates.",
       );
       await loadStatus();
+      await loadDecks();
 
       if (!questionRef.current) {
         await loadNextQuestion({ surfaceError: false });
@@ -3684,14 +3821,14 @@ export default function ReviewApp({
                 className={`reader-tab ${
                   activeTab === "queue" ? "reader-tab-active" : ""
                 }`}
-                href="/queue"
+                href="/decks"
                 role="tab"
                 id="queue-tab"
                 aria-selected={activeTab === "queue"}
                 aria-controls="queue-panel"
                 onClick={(event) => {
+                  event.preventDefault();
                   closeDeckQueue();
-                  navigateToTab("queue", event);
                 }}
               >
                 Decks
@@ -4452,7 +4589,7 @@ export default function ReviewApp({
               <div>
                 <p className="previous-field-label">Deck</p>
                 <h2 id="deck-editor-title">
-                  {isCreatingDeck ? "New deck" : editingDeck?.name}
+                  {isCreatingDeck ? "New deck" : "Edit deck"}
                 </h2>
               </div>
               <button

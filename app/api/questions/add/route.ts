@@ -9,6 +9,7 @@ export async function POST(request: Request) {
   const body: unknown = await request.json().catch(() => null);
   const payload = body as Partial<{
     questions: unknown;
+    deckId: unknown;
   }>;
 
   if (
@@ -45,14 +46,25 @@ export async function POST(request: Request) {
       };
     },
   );
+  const deckId = typeof payload.deckId === "string" ? payload.deckId.trim() : "";
 
-  const result = await addQuestionsToDeck({
-    questions,
-  });
+  try {
+    const result = await addQuestionsToDeck({
+      questions,
+      deckId: deckId || undefined,
+    });
 
-  return NextResponse.json({
-    ok: true,
-    added: result.added,
-    rejected: result.rejected,
-  });
+    return NextResponse.json({
+      ok: true,
+      added: result.added,
+      rejected: result.rejected,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not add questions.";
+
+    return NextResponse.json(
+      { ok: false, error: message },
+      { status: message === "Deck not found." ? 404 : 500 },
+    );
+  }
 }

@@ -6,7 +6,7 @@ import {
 const isProtectedRoute = createRouteMatcher([
   "/admin(.*)",
   "/api(.*)",
-  "/queue(.*)",
+  "/decks(.*)",
   "/review(.*)",
 ]);
 
