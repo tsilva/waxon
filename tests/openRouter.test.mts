@@ -171,6 +171,60 @@ test("openRouterChatCompletion records actual request and response payloads", as
   assert.match(trace.calls[0]?.responsePayload ?? "", /prompt_tokens/);
 });
 
+test("listLlmTraceInteractions falls back to local traces when db read is unavailable", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDatabaseUrl = process.env.DATABASE_URL;
+  const originalConsoleError = console.error;
+  const traceId = `trace-local-fallback-${Date.now()}`;
+
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        choices: [{ message: { content: "{\"score\":10}" } }],
+        usage: {
+          prompt_tokens: 7,
+          completion_tokens: 3,
+          total_tokens: 10,
+        },
+      }),
+      { status: 200 },
+    );
+
+  try {
+    await openRouterChatCompletion({
+      apiKey: "test-key",
+      stream: false,
+      trace: {
+        operation: "evaluate_answer",
+        question: "What should admin show if db tracing is unavailable?",
+        traceId,
+      },
+      body: {
+        model: "test-model",
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+
+    process.env.DATABASE_URL = "not-a-valid-database-url";
+    console.error = () => {};
+
+    const trace = (await listLlmTraceInteractions()).find(
+      (candidate) => candidate.id === traceId,
+    );
+
+    assert.ok(trace);
+    assert.equal(trace.calls[0]?.inputTokens, 7);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
+    if (originalDatabaseUrl === undefined) {
+      delete process.env.DATABASE_URL;
+    } else {
+      process.env.DATABASE_URL = originalDatabaseUrl;
+    }
+  }
+});
+
 test("openRouterChatCompletion streams text chunks and reports activity", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];

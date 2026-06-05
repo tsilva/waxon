@@ -727,9 +727,11 @@ function enqueueProbingQuestions(probingQuestions: DueQuestion[]): void {
 async function processEvaluation(submission: Submission): Promise<void> {
   const startedAt = Date.now();
   let currentPhase: EvaluationPhase = "queued";
+  let phaseStartedAt = startedAt;
   let isFinished = false;
   let savedEvaluationResult: EvaluationResult | null = null;
   let savedEvaluationNextDue: number | null = null;
+  const phaseTimingsMs: Partial<Record<EvaluationPhase, number>> = {};
   let watchdog: ReturnType<typeof setTimeout> | null = null;
   const clearWatchdog = () => {
     if (watchdog !== null) {
@@ -764,7 +766,10 @@ async function processEvaluation(submission: Submission): Promise<void> {
     }, EVALUATION_PROCESSING_TIMEOUT_MS);
   };
   const setPhase = (phase: EvaluationPhase) => {
+    phaseTimingsMs[currentPhase] =
+      (phaseTimingsMs[currentPhase] ?? 0) + Date.now() - phaseStartedAt;
     currentPhase = phase;
+    phaseStartedAt = Date.now();
     resetWatchdog();
     updateEvaluationPhase(submission.evaluationId, phase);
   };
@@ -794,6 +799,8 @@ async function processEvaluation(submission: Submission): Promise<void> {
 
     isFinished = true;
     clearWatchdog();
+    phaseTimingsMs[currentPhase] =
+      (phaseTimingsMs[currentPhase] ?? 0) + Date.now() - phaseStartedAt;
 
     if (options.restoreQuestion) {
       restoreFailedQuestion(submission.queuedQuestion);
@@ -813,6 +820,18 @@ async function processEvaluation(submission: Submission): Promise<void> {
             : options.error === undefined
               ? undefined
               : "unknown error",
+      });
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+
+    if (elapsedMs > 10_000 || options.logAction !== "evaluation-finished") {
+      console.info("[waxon] evaluation timing", {
+        action: options.logAction,
+        evaluationId: submission.evaluationId,
+        question: submission.question,
+        elapsedMs,
+        phaseTimingsMs,
       });
     }
 
@@ -850,6 +869,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
     }
 
     const resolvedAt = Date.now();
+    savedEvaluationResult = result;
     setPhase("saving-evaluation");
     const persisted = await applyEvaluationToPostgres({
       question: submission.question,
@@ -868,7 +888,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
 
     if (persisted) {
       removeAllFromQueue(submission.question);
-      savedEvaluationResult = result;
       savedEvaluationNextDue = persisted.nextDue;
 
       reinsertQuestion(

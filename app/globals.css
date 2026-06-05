@@ -4403,7 +4403,7 @@ textarea {
   gap: 18px;
   width: min(1080px, 100%);
   margin: 0 auto;
-  padding: clamp(24px, 3.4vh, 36px) clamp(40px, 5.4vw, 68px) 34px;
+  padding: clamp(24px, 3.4vh, 36px) 0 34px;
 }
 
 .admin-heading-row {

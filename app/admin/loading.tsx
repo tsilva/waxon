@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { CSSProperties } from "react";
 
 const metricLabels = ["Total cost", "LLM calls", "Interactions", "Avg / interaction"];
@@ -11,7 +12,14 @@ export default function AdminLoading() {
         <header className="reader-header">
           <div className="reader-heading">
             <Link className="reader-brand admin-brand-link" href="/">
-              <span className="reader-brand-mark admin-skeleton-brand-mark" aria-hidden="true" />
+              <Image
+                className="reader-brand-mark"
+                src="/brand/icon/header-mark.svg"
+                alt=""
+                aria-hidden="true"
+                width={34}
+                height={34}
+              />
               <span>waxon</span>
             </Link>
             <div className="reader-tabs" role="tablist" aria-label="Waxon views">

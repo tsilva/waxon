@@ -19,6 +19,7 @@ import {
 } from "@/app/lib/openRouter";
 import { extractJsonObject } from "@/app/lib/jsonObject";
 import { getQuestionQualityReference } from "@/app/lib/questionQualityReference";
+import { vectorLiteral } from "@/app/lib/vectorLiteral";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -241,10 +242,6 @@ function normalizeGeneratedQuestions(
   }
 
   return normalized;
-}
-
-function vectorLiteral(embedding: number[]): string {
-  return `[${embedding.join(",")}]`;
 }
 
 async function summarizeGenerationContext(input: {

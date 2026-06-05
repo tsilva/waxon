@@ -1,17 +1,15 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { createHash } from "node:crypto";
+import {
+  chunks,
+  configureNeonWebSocket,
+  loadLocalEnvFiles,
+  requireEnv,
+  vectorLiteral,
+} from "./lib/runtime.mjs";
 
-for (const envFile of [".env", ".env.local"]) {
-  try {
-    process.loadEnvFile(envFile);
-  } catch {
-    // Missing env files are fine; CI can provide env vars directly.
-  }
-}
-
-if (typeof WebSocket !== "undefined") {
-  neonConfig.webSocketConstructor = WebSocket;
-}
+loadLocalEnvFiles();
+configureNeonWebSocket(neonConfig);
 
 const OPENROUTER_EMBEDDINGS_URL =
   "https://openrouter.ai/api/v1/embeddings";
@@ -90,24 +88,6 @@ function parseArgs(argv) {
   return options;
 }
 
-function requireEnv(name, fallbackName) {
-  const value = process.env[name] ?? process.env[fallbackName ?? ""];
-
-  if (!value) {
-    throw new Error(
-      fallbackName
-        ? `${name} or ${fallbackName} is required`
-        : `${name} is required`,
-    );
-  }
-
-  return value;
-}
-
-function vectorLiteral(embedding) {
-  return `[${embedding.join(",")}]`;
-}
-
 function normalizeEmbeddingText(value) {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -141,16 +121,6 @@ function buildEmbeddingSource(row, kind, sourceVersion) {
 
 function sourceHash(source) {
   return createHash("sha256").update(source).digest("hex");
-}
-
-function chunks(items, size) {
-  const result = [];
-
-  for (let index = 0; index < items.length; index += size) {
-    result.push(items.slice(index, index + size));
-  }
-
-  return result;
 }
 
 async function fetchEmbeddings(input, model, apiKey) {

@@ -909,80 +909,6 @@ export async function readQuestionsWithEmbeddings(input: {
   return Array.from(questionsByText.values());
 }
 
-export async function getQuestionEmbedding(input: {
-  question: string;
-  embeddingModel: string;
-  embeddingKind?: string;
-  sourceVersion?: number;
-  deckId?: string;
-  userId?: string;
-}): Promise<QuestionEmbedding | null> {
-  const context = await ensureSeedData(input);
-  const targetDeckId = input.deckId?.trim() || context.deckId;
-
-  const model = normalizeEmbeddingModel(input.embeddingModel);
-
-  if (!model) {
-    throw new Error("Embedding model is required");
-  }
-
-  const [row] = await db
-    .select({
-      question: questionEmbeddings.question,
-      embeddingModel: questionEmbeddings.embeddingModel,
-      embeddingKind: questionEmbeddings.embeddingKind,
-      sourceVersion: questionEmbeddings.sourceVersion,
-      sourceHash: questionEmbeddings.sourceHash,
-      isCurrent: questionEmbeddings.isCurrent,
-      embedding: questionEmbeddings.embedding,
-      createdAt: questionEmbeddings.createdAt,
-      updatedAt: questionEmbeddings.updatedAt,
-    })
-    .from(questionEmbeddings)
-    .innerJoin(questions, eq(questions.id, questionEmbeddings.questionId))
-    .innerJoin(decks, eq(decks.id, questions.deckId))
-    .where(
-      and(
-        eq(questions.deckId, targetDeckId),
-        eq(decks.userId, context.userId),
-        eq(questionEmbeddings.deckId, questions.deckId),
-        eq(questionEmbeddings.question, input.question),
-        eq(questionEmbeddings.embeddingModel, model),
-        input.embeddingKind === undefined
-          ? sql`true`
-          : eq(questionEmbeddings.embeddingKind, input.embeddingKind),
-        input.sourceVersion === undefined
-          ? sql`true`
-          : eq(questionEmbeddings.sourceVersion, input.sourceVersion),
-      ),
-    );
-
-  return row ? toQuestionEmbedding(row) : null;
-}
-
-export async function upsertQuestionEmbedding(input: {
-  question: string;
-  embeddingModel: string;
-  embeddingKind?: string;
-  sourceVersion?: number;
-  sourceHash?: string;
-  embedding: number[];
-  deckId?: string;
-  now?: number;
-}): Promise<QuestionEmbedding> {
-  const [embedding] = await upsertQuestionEmbeddings({
-    embeddings: [input],
-    deckId: input.deckId,
-    now: input.now,
-  });
-
-  if (!embedding) {
-    throw new Error("Question embedding was not saved");
-  }
-
-  return embedding;
-}
-
 export async function upsertQuestionEmbeddings(input: {
   embeddings: Array<{
     question: string;
@@ -1123,20 +1049,6 @@ export async function getDueQuestions(
   return rows
     .map(toDueQuestion)
     .filter((row) => Number.isFinite(row.nextDue) && row.nextDue <= now)
-    .sort((a, b) => a.nextDue - b.nextDue);
-}
-
-export async function getAllQueuedQuestions(
-  input: UserContextInput = {},
-): Promise<DueQuestion[]> {
-  const rows = await selectQuestionRows(sql`true`, {
-    ...input,
-    deckScope: "rotation",
-  });
-
-  return rows
-    .map(toDueQuestion)
-    .filter((row) => Number.isFinite(row.nextDue))
     .sort((a, b) => a.nextDue - b.nextDue);
 }
 
@@ -1312,16 +1224,6 @@ export async function getRecentQuestionAttempts(
       Number.isFinite(attempt.submittedAt) &&
       Number.isFinite(attempt.resolvedAt),
   );
-}
-
-export async function getStoredReferenceAnswer(
-  question: string,
-  input: UserContextInput = {},
-): Promise<string | null> {
-  const snapshot = await getQuestionSnapshot(question, input);
-  const answer = snapshot?.referenceAnswer?.trim() ?? "";
-
-  return answer || null;
 }
 
 export async function saveReferenceAnswer(input: {

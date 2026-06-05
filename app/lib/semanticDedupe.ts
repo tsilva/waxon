@@ -18,6 +18,7 @@ import {
 import { generateConciseAnswers } from "./conciseAnswer";
 import { extractJsonObject } from "./jsonObject";
 import { readQuestions, type QuestionInput } from "./postgresStore";
+import { vectorLiteral } from "./vectorLiteral";
 
 export type NovelQuestionCandidate = {
   question: string;
@@ -67,10 +68,6 @@ const SEMANTIC_DEDUPE_JUDGE_SYSTEM_PROMPT = [
   "Similar topic is not enough. Keep contrast pairs, prerequisite variants, examples with materially different reasoning, boundary cases, and failure-mode questions.",
   "Return strict JSON: {\"decisions\":[{\"candidateId\":\"...\",\"duplicateOf\":\"neighbor id or null\",\"rationale\":\"short\"}]}",
 ].join("\n\n");
-
-function vectorLiteral(embedding: number[]): string {
-  return `[${embedding.join(",")}]`;
-}
 
 function normalizeQuestionInput(
   input: Array<string | QuestionInput>,
