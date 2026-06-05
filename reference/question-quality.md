@@ -7,6 +7,7 @@ An optimal waxon question is:
 - **Concise:** uses the shortest wording that preserves the full recall target.
 - **Single-target:** asks one question instead of combining multiple prompts.
 - **Self-describing:** includes enough context to answer without relying on surrounding cards or the original source text.
+- **Standalone:** specifies the operation, object, convention, or scenario needed to answer; a learner should not need to infer missing context from the deck, title, answer, or neighboring questions. For example, "For input shape `(batch, in_features)` and weight shape `(in_features, out_features)`, what is the output shape?" is incomplete unless it names the operation, such as matrix multiplication or a linear layer.
 - **Recall-oriented:** asks for the learner to retrieve knowledge from memory rather than recognize a hint.
 - **Precise:** preserves important technical terms, constraints, examples, notation, and expected detail.
 - **Readable:** uses Markdown, code formatting, or math notation when that makes the question easier to parse.
