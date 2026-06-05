@@ -72,6 +72,7 @@ export type ReviewQueueItem = {
 
 export type DeckEmbeddingPlotPoint = {
   question: string;
+  lastScore: number | null;
   x: number;
   y: number;
 };
@@ -321,7 +322,7 @@ function normalizeProjectionValue(value: number, min: number, max: number): numb
 }
 
 function projectEmbeddings(
-  rows: Array<{ question: string; embedding: number[] }>,
+  rows: Array<{ question: string; lastScore: number | null; embedding: number[] }>,
 ): DeckEmbeddingPlotPoint[] {
   if (rows.length === 0) {
     return [];
@@ -331,6 +332,7 @@ function projectEmbeddings(
     return [
       {
         question: rows[0]?.question ?? "",
+        lastScore: rows[0]?.lastScore ?? null,
         x: 0.5,
         y: 0.5,
       },
@@ -355,6 +357,7 @@ function projectEmbeddings(
     : null;
   const projected = centered.map((row, index) => ({
     question: rows[index]?.question ?? "",
+    lastScore: rows[index]?.lastScore ?? null,
     rawX: firstComponent ? dotProduct(row, firstComponent) : index,
     rawY: secondComponent ? dotProduct(row, secondComponent) : 0,
   }));
@@ -367,6 +370,7 @@ function projectEmbeddings(
 
   return projected.map((point) => ({
     question: point.question,
+    lastScore: point.lastScore,
     x: normalizeProjectionValue(point.rawX, minX, maxX),
     y: normalizeProjectionValue(point.rawY, minY, maxY),
   }));
@@ -423,12 +427,17 @@ async function getDeckEmbeddingPlot(): Promise<DeckEmbeddingPlot> {
       return embedding
         ? {
             question: question.question,
+            lastScore: parseReviews(question.reviews).at(-1)?.score ?? null,
             embedding: embedding.embedding,
           }
         : null;
     })
     .filter(
-      (item): item is { question: string; embedding: number[] } =>
+      (item): item is {
+        question: string;
+        lastScore: number | null;
+        embedding: number[];
+      } =>
         item !== null &&
         item.embedding.length > 0 &&
         item.embedding.every(Number.isFinite),

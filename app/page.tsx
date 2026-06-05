@@ -119,6 +119,7 @@ type DeckEmbeddingPlotResponse = {
 
 type DeckEmbeddingPlotPoint = {
   question: string;
+  lastScore: number | null;
   x: number;
   y: number;
 };
@@ -1093,7 +1094,11 @@ function DeckEmbeddingPlot({
             {plot.points.map((point) => {
               const queueItem = statusByQuestion.get(point.question);
               const tone =
-                queueItem?.status === "now" ? "now" : "scheduled";
+                point.lastScore === null
+                  ? "unanswered"
+                  : queueItem?.status === "now"
+                    ? "now"
+                    : "scheduled";
               const x = padding + point.x * (width - padding * 2);
               const y = padding + (1 - point.y) * (height - padding * 2);
 
@@ -1129,7 +1134,11 @@ function DeckEmbeddingPlot({
               }
               role="status"
             >
-              <p>{hoveredPoint.question}</p>
+              <MarkdownInline
+                as="p"
+                className="embedding-tooltip-question"
+                text={hoveredPoint.question}
+              />
               <span>
                 {hoveredPoint.statusLabel}
                 {hoveredPoint.scoreLabel ? ` · ${hoveredPoint.scoreLabel}` : ""}

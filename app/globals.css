@@ -1422,7 +1422,7 @@ textarea {
 }
 
 .embedding-plot-point {
-  color: var(--accent);
+  color: var(--success);
   cursor: default;
   outline: none;
 }
@@ -1438,6 +1438,10 @@ textarea {
   color: var(--success);
 }
 
+.embedding-plot-point.point-unanswered {
+  color: var(--accent);
+}
+
 .embedding-plot-hit-area {
   fill: transparent;
   stroke: transparent;
@@ -1445,13 +1449,13 @@ textarea {
 
 .embedding-plot-point:hover circle:first-of-type,
 .embedding-plot-point:focus-visible circle:first-of-type {
-  fill: var(--accent-soft);
+  fill: var(--success-soft);
   stroke-width: 4;
 }
 
-.embedding-plot-point.point-now:hover circle:first-of-type,
-.embedding-plot-point.point-now:focus-visible circle:first-of-type {
-  fill: var(--success-soft);
+.embedding-plot-point.point-unanswered:hover circle:first-of-type,
+.embedding-plot-point.point-unanswered:focus-visible circle:first-of-type {
+  fill: var(--accent-soft);
 }
 
 .embedding-tooltip {
