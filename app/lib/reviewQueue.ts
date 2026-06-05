@@ -658,6 +658,31 @@ async function refreshIfEmpty(userId: string): Promise<void> {
   logQueueFlushStatus("refreshed-empty-queue");
 }
 
+async function refreshIfEarlierDueQuestionExists(userId: string): Promise<void> {
+  const currentQuestion =
+    state.queue.find((item) => !state.inFlightQuestions.has(item.question)) ??
+    null;
+  const dueQuestions = await getDueQuestions(Date.now(), { userId });
+  const earliestDueQuestion =
+    dueQuestions.find((item) => !state.inFlightQuestions.has(item.question)) ??
+    null;
+
+  if (!earliestDueQuestion) {
+    return;
+  }
+
+  if (
+    !currentQuestion ||
+    earliestDueQuestion.nextDue < currentQuestion.nextDue ||
+    !state.queue.some((item) => item.question === earliestDueQuestion.question)
+  ) {
+    state.queue = dueQuestions.filter(
+      (question) => !state.inFlightQuestions.has(question.question),
+    );
+    logQueueFlushStatus("refreshed-earlier-due-question");
+  }
+}
+
 function removeFromQueue(question: string): DueQuestion | null {
   const index = state.queue.findIndex((item) => item.question === question);
 
@@ -731,6 +756,8 @@ async function processEvaluation(submission: Submission): Promise<void> {
   const startedAt = Date.now();
   let currentPhase: EvaluationPhase = "queued";
   let isFinished = false;
+  let savedEvaluationResult: EvaluationResult | null = null;
+  let savedEvaluationNextDue: number | null = null;
   const setPhase = (phase: EvaluationPhase) => {
     currentPhase = phase;
     updateEvaluationPhase(submission.evaluationId, phase);
@@ -787,6 +814,14 @@ async function processEvaluation(submission: Submission): Promise<void> {
     return true;
   };
   const watchdog = setTimeout(() => {
+    if (savedEvaluationResult) {
+      finishEvaluation(savedEvaluationResult, savedEvaluationNextDue, {
+        restoreQuestion: false,
+        logAction: "evaluation-finished-before-enrichment-timeout",
+      });
+      return;
+    }
+
     finishEvaluation(
       failedEvaluation(
         `Evaluation timed out during ${currentPhase} after ${Math.round(
@@ -844,6 +879,26 @@ async function processEvaluation(submission: Submission): Promise<void> {
 
     if (persisted) {
       removeAllFromQueue(submission.question);
+      savedEvaluationResult = result;
+      savedEvaluationNextDue = persisted.nextDue;
+
+      reinsertQuestion(
+        {
+          deckId: persisted.deckId,
+          deckName: persisted.deckName,
+          userId: persisted.userId,
+          question: persisted.question,
+          reviews: persisted.reviews,
+          nextDue: persisted.nextDue,
+          createdAt: persisted.createdAt,
+          generatedFromQuestion: persisted.generatedFromQuestion,
+          lastAnswer: persisted.lastAnswer,
+          lastAnswerSummary: persisted.lastAnswerSummary,
+          conciseAnswer: persisted.conciseAnswer,
+          referenceAnswer: persisted.referenceAnswer,
+        },
+        result.score,
+      );
 
       if (
         result.score <= PROBING_QUESTION_SCORE_THRESHOLD &&
@@ -911,24 +966,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
           });
         }
       }
-
-      reinsertQuestion(
-        {
-          deckId: persisted.deckId,
-          deckName: persisted.deckName,
-          userId: persisted.userId,
-          question: persisted.question,
-          reviews: persisted.reviews,
-          nextDue: persisted.nextDue,
-          createdAt: persisted.createdAt,
-          generatedFromQuestion: persisted.generatedFromQuestion,
-          lastAnswer: persisted.lastAnswer,
-          lastAnswerSummary: persisted.lastAnswerSummary,
-          conciseAnswer: persisted.conciseAnswer,
-          referenceAnswer: persisted.referenceAnswer,
-        },
-        result.score,
-      );
     }
 
     setPhase("finalizing");
@@ -973,6 +1010,7 @@ export async function peekNextQuestion(input: {
 }> {
   const user = await initializeQueue();
   await refreshIfEmpty(user.id);
+  await refreshIfEarlierDueQuestionExists(user.id);
   const excludedQuestion = input.excludeQuestion?.trim() || null;
   const nextQuestion =
     state.queue.find(

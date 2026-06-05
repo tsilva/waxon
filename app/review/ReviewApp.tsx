@@ -1392,15 +1392,9 @@ export default function ReviewApp({
     [],
   );
   const cachedSessionRef = useRef(reviewSessionSnapshot);
-  const hasLoadedQuestionRef = useRef(
-    cachedSessionRef.current?.hasLoadedQuestion ?? false,
-  );
-  const hasLoadedQueueStatusRef = useRef(
-    cachedSessionRef.current?.hasLoadedQueueStatus ?? false,
-  );
-  const hasLoadedDecksRef = useRef(
-    cachedSessionRef.current?.hasLoadedDecks ?? false,
-  );
+  const hasLoadedQuestionRef = useRef(false);
+  const hasLoadedQueueStatusRef = useRef(false);
+  const hasLoadedDecksRef = useRef(false);
   const loadedQueueSortKeyRef = useRef<QueueSortKey | null>(
     cachedSessionRef.current?.loadedQueueSortKey ?? null,
   );
@@ -4242,16 +4236,7 @@ export default function ReviewApp({
                     </button>
 
                     {isDetailsExpanded ? (
-                      canViewAdmin && item.traceId ? (
-                        <Link
-                          className="previous-details-link"
-                          href={`/admin/traces/${encodeURIComponent(
-                            item.traceId,
-                          )}`}
-                        >
-                          More details
-                        </Link>
-                      ) : (
+                      <>
                         <button
                           className="previous-details-link"
                           type="button"
@@ -4259,7 +4244,17 @@ export default function ReviewApp({
                         >
                           More details
                         </button>
-                      )
+                        {canViewAdmin && item.traceId ? (
+                          <Link
+                            className="previous-details-link"
+                            href={`/admin/traces/${encodeURIComponent(
+                              item.traceId,
+                            )}`}
+                          >
+                            View trace
+                          </Link>
+                        ) : null}
+                      </>
                     ) : null}
                   </li>
                 );
