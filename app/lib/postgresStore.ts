@@ -865,6 +865,52 @@ export async function getQuestionAttempts(
   );
 }
 
+export async function getRecentQuestionAttempts(
+  input: UserContextInput & {
+    excludeQuestions?: string[];
+    limit: number;
+  } = {
+    limit: 24,
+  },
+): Promise<QuestionAttempt[]> {
+  const context = await ensureSeedData(input);
+  const excludeQuestions = Array.from(
+    new Set(input.excludeQuestions ?? []),
+  ).filter(Boolean);
+
+  const rows = await db
+    .select({
+      id: questionAttempts.id,
+      deckId: questionAttempts.deckId,
+      question: questionAttempts.question,
+      rawAnswer: questionAttempts.rawAnswer,
+      answerSummary: questionAttempts.answerSummary,
+      score: questionAttempts.score,
+      justification: questionAttempts.justification,
+      submittedAt: questionAttempts.submittedAt,
+      resolvedAt: questionAttempts.resolvedAt,
+    })
+    .from(questionAttempts)
+    .where(
+      and(
+        eq(questionAttempts.deckId, context.deckId),
+        excludeQuestions.length > 0
+          ? notInArray(questionAttempts.question, excludeQuestions)
+          : sql`true`,
+      ),
+    )
+    .orderBy(desc(questionAttempts.submittedAt), desc(questionAttempts.id))
+    .limit(Math.max(0, Math.floor(input.limit)));
+
+  return rows.filter(
+    (attempt) =>
+      Number.isFinite(attempt.id) &&
+      Number.isFinite(attempt.score) &&
+      Number.isFinite(attempt.submittedAt) &&
+      Number.isFinite(attempt.resolvedAt),
+  );
+}
+
 export async function getStoredReferenceAnswer(
   question: string,
   input: UserContextInput = {},

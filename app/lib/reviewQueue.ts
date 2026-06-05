@@ -3,6 +3,7 @@ import {
   getDueQuestions,
   getQuestionAttempts,
   getQueuedQuestionsPage,
+  getRecentQuestionAttempts,
   getQuestionSnapshot,
   readQuestionsWithEmbeddings,
   upsertDueQuestions,
@@ -94,6 +95,7 @@ export type QueueStatusSnapshot = {
   queueRemaining: number;
   pendingEvaluations: number;
   evaluations: EvaluationQueueItem[];
+  recentAttempts: QuestionAttempt[];
   reviewQueue: ReviewQueueItem[];
   reviewQueueTotal: number;
   reviewQueueOffset: number;
@@ -945,6 +947,11 @@ export async function queueStatus(input: {
     offset,
     sortKey,
   });
+  const recentAttempts = await getRecentQuestionAttempts({
+    userId: user.id,
+    excludeQuestions: Array.from(state.inFlightQuestions),
+    limit: 24,
+  });
   const deckEmbeddingPlot = await getDeckEmbeddingPlot({
     userId: user.id,
     questions: reviewQueuePage.items.map((item) => item.question),
@@ -955,6 +962,7 @@ export async function queueStatus(input: {
     queueRemaining: state.queue.length,
     pendingEvaluations: state.pendingEvaluations,
     evaluations: getVisibleEvaluations(),
+    recentAttempts,
     reviewQueue: reviewQueuePage.items,
     reviewQueueTotal: reviewQueuePage.total,
     reviewQueueOffset: offset,

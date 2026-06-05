@@ -3,7 +3,6 @@
 import { useClerk, useUser } from "@clerk/nextjs";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import {
   ArrowUp,
@@ -29,6 +28,7 @@ import {
   Fragment,
   type CSSProperties,
   KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -62,6 +62,7 @@ type QueueStatusResponse = {
   queueRemaining: number;
   pendingEvaluations: number;
   evaluations: EvaluationQueueItem[];
+  recentAttempts?: QuestionAttempt[];
   reviewQueue: ReviewQueueItem[];
   reviewQueueTotal?: number;
   reviewQueueOffset?: number;
@@ -192,6 +193,23 @@ type ActiveTab = "review" | "queue";
 type ReviewAppProps = {
   initialActiveTab?: ActiveTab;
 };
+
+const REVIEW_TAB_PATHS: Record<ActiveTab, string> = {
+  review: "/review",
+  queue: "/queue",
+};
+
+function getReviewTabFromPathname(pathname: string): ActiveTab | null {
+  if (pathname === REVIEW_TAB_PATHS.review) {
+    return "review";
+  }
+
+  if (pathname === REVIEW_TAB_PATHS.queue) {
+    return "queue";
+  }
+
+  return null;
+}
 
 type QueueSortKey = "review-date" | "creation-date";
 
@@ -337,10 +355,11 @@ type MathParseResult = {
 
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
-const QUEUE_PAGE_SIZE = 24;
+const QUEUE_PAGE_SIZE = 48;
+const QUEUE_PAGE_GROWTH_FACTOR = 1.75;
 const QUEUE_ROW_ESTIMATED_HEIGHT = 132;
-const QUEUE_ROW_OVERSCAN = 10;
-const QUEUE_LOAD_AHEAD_PX = 720;
+const QUEUE_ROW_OVERSCAN = 14;
+const QUEUE_LOAD_AHEAD_PX = 3200;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 const MAX_AVATAR_UPLOAD_BYTES = 512 * 1024;
 const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit|skip)[.!?]*$/i;
@@ -1222,7 +1241,6 @@ function SubmitIcon() {
 export default function ReviewApp({
   initialActiveTab = "review",
 }: ReviewAppProps) {
-  const router = useRouter();
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
   const [question, setQuestion] = useState<string | null>(null);
@@ -1232,6 +1250,7 @@ export default function ReviewApp({
   const [speechMessage, setSpeechMessage] = useState<string | null>(null);
   const [queueRemaining, setQueueRemaining] = useState(0);
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>([]);
+  const [recentAttempts, setRecentAttempts] = useState<QuestionAttempt[]>([]);
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>([]);
   const [reviewQueueTotal, setReviewQueueTotal] = useState(0);
   const [isQueuePageLoading, setIsQueuePageLoading] = useState(false);
@@ -1320,14 +1339,47 @@ export default function ReviewApp({
     });
   }, []);
 
+  const navigateToTab = useCallback(
+    (
+      nextTab: ActiveTab,
+      event?: ReactMouseEvent<HTMLAnchorElement>,
+    ) => {
+      event?.preventDefault();
+      setActiveTab(nextTab);
+
+      const nextPath = REVIEW_TAB_PATHS[nextTab];
+
+      if (window.location.pathname !== nextPath) {
+        window.history.pushState({ activeTab: nextTab }, "", nextPath);
+      }
+    },
+    [],
+  );
+
   const openQueue = useCallback(() => {
-    setActiveTab("queue");
-    router.push("/queue");
-  }, [router]);
+    navigateToTab("queue");
+  }, [navigateToTab]);
 
   useEffect(() => {
     setActiveTab(initialActiveTab);
   }, [initialActiveTab]);
+
+  useEffect(() => {
+    function syncTabFromHistory() {
+      const nextTab = getReviewTabFromPathname(window.location.pathname);
+
+      if (nextTab) {
+        setActiveTab(nextTab);
+        return;
+      }
+
+      window.location.reload();
+    }
+
+    window.addEventListener("popstate", syncTabFromHistory);
+
+    return () => window.removeEventListener("popstate", syncTabFromHistory);
+  }, []);
 
   useEffect(() => {
     answerRef.current = answer;
@@ -1655,6 +1707,7 @@ export default function ReviewApp({
   const applyQueueStatus = useCallback((data: QueueStatusResponse) => {
     setQueueRemaining(data.queueRemaining);
     setEvaluations(data.evaluations);
+    setRecentAttempts(data.recentAttempts ?? []);
     setReviewQueue(data.reviewQueue);
     setReviewQueueTotal(data.reviewQueueTotal ?? data.reviewQueue.length);
     queueLoadedLimitRef.current = Math.max(
@@ -1725,6 +1778,7 @@ export default function ReviewApp({
   useEffect(() => {
     queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
     setReviewQueue([]);
+    setRecentAttempts([]);
     setReviewQueueTotal(0);
     setQueueVirtualRange({
       start: 0,
@@ -2396,6 +2450,10 @@ export default function ReviewApp({
       if (!questionRef.current) {
         await loadNextQuestion({ surfaceError: false });
       }
+
+      if (data.added > 0) {
+        closeQuestionGenerator();
+      }
     } catch (addError) {
       setGeneratorMessage(
         addError instanceof Error
@@ -2480,13 +2538,52 @@ export default function ReviewApp({
     ...evaluationPreviousAnswers.map((previousItem) => previousItem.question),
   ]);
 
+  const recentAttemptPreviousAnswers: PreviousAnswerItem[] = recentAttempts
+    .filter((attempt) => {
+      if (
+        attempt.question === question ||
+        livePreviousQuestions.has(attempt.question)
+      ) {
+        return false;
+      }
+
+      return !messages.some((message) => {
+        if (message.kind !== "answer") {
+          return false;
+        }
+
+        return (
+          message.question === attempt.question &&
+          message.answer === attempt.rawAnswer &&
+          Math.abs(message.submittedAt - attempt.submittedAt) < 10_000
+        );
+      });
+    })
+    .map((attempt) => ({
+      id: `attempt-${attempt.id}`,
+      question: attempt.question,
+      answer: attempt.rawAnswer || "(blank)",
+      status: "resolved",
+      score: attempt.score,
+      justification: attempt.justification,
+      timestamp: attempt.resolvedAt || attempt.submittedAt,
+      timeLabel: formatRelativeTime(
+        attempt.resolvedAt || attempt.submittedAt,
+        currentTime,
+      ),
+    }));
+  const recentAttemptQuestions = new Set(
+    recentAttemptPreviousAnswers.map((previousItem) => previousItem.question),
+  );
+
   const historicalPreviousAnswers: PreviousAnswerItem[] = reviewQueue
     .filter(
       (item) =>
         item.lastScore !== null &&
         item.lastAnswer !== null &&
         item.question !== question &&
-        !livePreviousQuestions.has(item.question),
+        !livePreviousQuestions.has(item.question) &&
+        !recentAttemptQuestions.has(item.question),
     )
     .sort((a, b) => {
       const aScore = a.lastScore ?? -1;
@@ -2524,6 +2621,7 @@ export default function ReviewApp({
   const previousAnswers = [
     ...sessionPreviousAnswers,
     ...evaluationPreviousAnswers,
+    ...recentAttemptPreviousAnswers,
     ...historicalPreviousAnswers,
   ];
   const hasPreviousAnswers = previousAnswers.length > 0;
@@ -2557,7 +2655,13 @@ export default function ReviewApp({
 
     const nextLimit = Math.min(
       reviewQueueTotal,
-      Math.max(QUEUE_PAGE_SIZE, reviewQueue.length + QUEUE_PAGE_SIZE),
+      Math.max(
+        reviewQueue.length + QUEUE_PAGE_SIZE,
+        Math.ceil(
+          Math.max(reviewQueue.length, QUEUE_PAGE_SIZE) *
+            QUEUE_PAGE_GROWTH_FACTOR,
+        ),
+      ),
     );
 
     if (nextLimit <= reviewQueue.length) {
@@ -2630,6 +2734,9 @@ export default function ReviewApp({
     }
 
     const queueItem = reviewQueue.find((item) => item.question === selectedQuestion);
+    const recentQuestionAttempts = recentAttempts.filter(
+      (attempt) => attempt.question === selectedQuestion,
+    );
     const resolvedEvaluations = evaluations.filter(
       (evaluation) =>
         evaluation.question === selectedQuestion &&
@@ -2643,6 +2750,13 @@ export default function ReviewApp({
 
     for (const entry of queueItem?.reviewHistory ?? []) {
       historyMap.set(`${entry.ts}-${entry.score}`, entry);
+    }
+
+    for (const attempt of recentQuestionAttempts) {
+      historyMap.set(`${attempt.resolvedAt}-${attempt.score}`, {
+        ts: attempt.resolvedAt,
+        score: attempt.score,
+      });
     }
 
     for (const evaluation of resolvedEvaluations) {
@@ -2667,8 +2781,17 @@ export default function ReviewApp({
         evaluation.status === "grading",
     ).length;
     const lastScore = scores.at(-1) ?? queueItem?.lastScore ?? null;
+    const persistedAttempts = [
+      ...(queueItem?.attempts ?? []),
+      ...recentQuestionAttempts.filter(
+        (attempt) =>
+          !(queueItem?.attempts ?? []).some(
+            (queueAttempt) => queueAttempt.id === attempt.id,
+          ),
+      ),
+    ];
     const persistedAnswerHistory: AnswerHistoryEntry[] =
-      queueItem?.attempts.map((attempt) => ({
+      persistedAttempts.map((attempt) => ({
         id: `attempt-${attempt.id}`,
         rawAnswer: attempt.rawAnswer || "(blank)",
         answerSummary: attempt.answerSummary || null,
@@ -2677,7 +2800,7 @@ export default function ReviewApp({
         submittedAt: attempt.submittedAt,
         resolvedAt: attempt.resolvedAt,
         status: "resolved",
-      })) ?? [];
+      }));
     const sessionAnswerHistory: AnswerHistoryEntry[] = messages
       .filter(
         (message): message is Extract<ChatMessage, { kind: "answer" }> =>
@@ -2739,7 +2862,7 @@ export default function ReviewApp({
         latestResolvedEvaluation?.justification ??
         null,
     };
-  }, [evaluations, messages, reviewQueue, selectedQuestion]);
+  }, [evaluations, messages, recentAttempts, reviewQueue, selectedQuestion]);
 
   const selectedReferenceAnswerState = selectedQuestionStats
     ? referenceAnswers[selectedQuestionStats.question]
@@ -2954,7 +3077,7 @@ export default function ReviewApp({
                 id="review-tab"
                 aria-selected={activeTab === "review"}
                 aria-controls="review-panel"
-                onClick={() => setActiveTab("review")}
+                onClick={(event) => navigateToTab("review", event)}
               >
                 Review
               </Link>
@@ -2967,7 +3090,7 @@ export default function ReviewApp({
                 id="queue-tab"
                 aria-selected={activeTab === "queue"}
                 aria-controls="queue-panel"
-                onClick={() => setActiveTab("queue")}
+                onClick={(event) => navigateToTab("queue", event)}
               >
                 Queue
               </Link>
@@ -3544,7 +3667,7 @@ export default function ReviewApp({
           >
             {isGeneratingQuestions ? (
               <div className="generator-progress-mask" role="status">
-                <div className="generator-progress-card">
+                <div className="generator-progress-content">
                   <Sparkles aria-hidden="true" />
                   <strong>Generating questions</strong>
                   <span>Please wait...</span>
@@ -3674,7 +3797,7 @@ export default function ReviewApp({
                 <section className="generator-review-panel" aria-label="Generated questions">
                 <div className="generator-review-header">
                   <div>
-                    <h3>Review</h3>
+                    <h3>Generated</h3>
                     <p>
                       {generatedQuestionCounts.new} available ·{" "}
                       {generatedQuestionCounts.selected} selected
