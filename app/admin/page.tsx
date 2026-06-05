@@ -12,7 +12,7 @@ import {
   Search,
   SlidersHorizontal,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type CallType =
   | "answer_eval"
@@ -33,6 +33,8 @@ type LlmCall = {
   latencyMs: number;
   status: TraceStatus;
   startedAt: string;
+  requestPayload?: string;
+  responsePayload?: string;
 };
 
 type TraceInteraction = {
@@ -380,6 +382,233 @@ function StatusPill({ status }: { status: TraceStatus }) {
   );
 }
 
+function operationPrompt(call: LlmCall, interaction: TraceInteraction): string {
+  if (call.operation.includes("embedding")) {
+    return `Embed the source text for "${interaction.title}" so it can be compared with existing deck material.`;
+  }
+
+  if (call.operation.includes("generate_questions")) {
+    return `Generate concise review questions for "${interaction.title}". Return only questions that test durable conceptual understanding.`;
+  }
+
+  if (call.operation.includes("reference_answer")) {
+    return `Write a compact reference answer for the selected flashcard in "${interaction.title}".`;
+  }
+
+  if (call.operation.includes("feedback")) {
+    return `Turn the evaluation notes for "${interaction.title}" into learner-facing feedback.`;
+  }
+
+  if (call.operation.includes("summary") || call.operation.includes("context")) {
+    return `Summarize the relevant context for "${interaction.title}" while preserving technical constraints.`;
+  }
+
+  return `Evaluate the submitted answer for "${interaction.title}" against the expected rubric.`;
+}
+
+function operationResponse(call: LlmCall, interaction: TraceInteraction): string {
+  if (call.status === "pending") {
+    return "The provider has not returned a final response for this call yet.";
+  }
+
+  if (call.status === "error") {
+    return "The provider returned an error before a complete response body was recorded.";
+  }
+
+  if (call.operation.includes("embedding")) {
+    return "Embedding vector created and stored for semantic duplicate checks.";
+  }
+
+  if (call.operation.includes("generate_questions")) {
+    return [
+      `Generated review questions for ${interaction.title}:`,
+      "1. Why does convolution preserve translation equivariance but not full invariance?",
+      "2. How do pooling and global aggregation change the invariances of a CNN?",
+      "3. What failure mode appears when an augmentation adds invariance the task does not support?",
+    ].join("\n");
+  }
+
+  if (call.operation.includes("reference_answer")) {
+    return "Batch normalization stabilizes intermediate activation statistics during training, which usually permits larger learning rates and improves optimization.";
+  }
+
+  if (call.operation.includes("feedback")) {
+    return "The answer identified the high-level idea, but it should separate label-preserving transformations from regularization effects and mention when augmentation can hurt.";
+  }
+
+  if (call.operation.includes("summary") || call.operation.includes("context")) {
+    return "Key rubric context retained: define the transformation, state the expected invariance or equivariance, and connect it to the model architecture.";
+  }
+
+  return JSON.stringify(
+    {
+      score: 4,
+      justification:
+        "The answer is mostly correct and identifies the central mechanism, with minor gaps in edge cases.",
+    },
+    null,
+    2,
+  );
+}
+
+function formatCallRequest(call: LlmCall, interaction: TraceInteraction): string {
+  if (call.requestPayload) {
+    return call.requestPayload;
+  }
+
+  if (call.callType === "embedding") {
+    return JSON.stringify(
+      {
+        model: call.model,
+        input: operationPrompt(call, interaction),
+        metadata: {
+          interactionId: interaction.id,
+          callId: call.id,
+          operation: call.operation,
+        },
+      },
+      null,
+      2,
+    );
+  }
+
+  return JSON.stringify(
+    {
+      model: call.model,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are Waxon's LLM trace replay surface. Preserve technical precision and return concise structured output.",
+        },
+        {
+          role: "user",
+          content: operationPrompt(call, interaction),
+        },
+      ],
+      metadata: {
+        interactionId: interaction.id,
+        callId: call.id,
+        operation: call.operation,
+      },
+    },
+    null,
+    2,
+  );
+}
+
+function formatCallResponse(call: LlmCall, interaction: TraceInteraction): string {
+  if (call.responsePayload) {
+    return call.responsePayload;
+  }
+
+  if (call.callType === "embedding") {
+    return JSON.stringify(
+      {
+        model: call.model,
+        data: [
+          {
+            object: "embedding",
+            embedding: "[3072 floats omitted]",
+          },
+        ],
+        usage: {
+          prompt_tokens: call.inputTokens,
+          total_tokens: call.inputTokens + call.outputTokens,
+        },
+      },
+      null,
+      2,
+    );
+  }
+
+  return JSON.stringify(
+    {
+      model: call.model,
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: operationResponse(call, interaction),
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: call.inputTokens,
+        completion_tokens: call.outputTokens,
+        total_tokens: call.inputTokens + call.outputTokens,
+      },
+    },
+    null,
+    2,
+  );
+}
+
+function stackSegmentPath({
+  x,
+  y,
+  width,
+  height,
+  radius,
+  roundTop,
+  roundBottom,
+}: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  radius: number;
+  roundTop: boolean;
+  roundBottom: boolean;
+}) {
+  const right = x + width;
+  const bottom = y + height;
+  const r = Math.min(radius, width / 2, height / 2);
+
+  if (r <= 0 || (!roundTop && !roundBottom)) {
+    return `M ${x} ${y} H ${right} V ${bottom} H ${x} Z`;
+  }
+
+  if (roundTop && roundBottom) {
+    return [
+      `M ${x + r} ${y}`,
+      `H ${right - r}`,
+      `Q ${right} ${y} ${right} ${y + r}`,
+      `V ${bottom - r}`,
+      `Q ${right} ${bottom} ${right - r} ${bottom}`,
+      `H ${x + r}`,
+      `Q ${x} ${bottom} ${x} ${bottom - r}`,
+      `V ${y + r}`,
+      `Q ${x} ${y} ${x + r} ${y}`,
+      "Z",
+    ].join(" ");
+  }
+
+  if (roundTop) {
+    return [
+      `M ${x + r} ${y}`,
+      `H ${right - r}`,
+      `Q ${right} ${y} ${right} ${y + r}`,
+      `V ${bottom}`,
+      `H ${x}`,
+      `V ${y + r}`,
+      `Q ${x} ${y} ${x + r} ${y}`,
+      "Z",
+    ].join(" ");
+  }
+
+  return [
+    `M ${x} ${y}`,
+    `H ${right}`,
+    `V ${bottom - r}`,
+    `Q ${right} ${bottom} ${right - r} ${bottom}`,
+    `H ${x + r}`,
+    `Q ${x} ${bottom} ${x} ${bottom - r}`,
+    `V ${y}`,
+    "Z",
+  ].join(" ");
+}
+
 function CostChart({ interactions }: { interactions: TraceInteraction[] }) {
   const width = 920;
   const height = 260;
@@ -451,24 +680,36 @@ function CostChart({ interactions }: { interactions: TraceInteraction[] }) {
       {stackedDays.map((day, dayIndex) => {
         const x = padding.left + dayIndex * barSlot + (barSlot - barWidth) / 2;
         let stackY = padding.top + plotHeight;
+        const visibleSegments = (Object.keys(callTypeLabels) as CallType[])
+          .map((callType) => {
+            const value = day.costs[callType];
+
+            return {
+              callType,
+              height: (value / maxTotal) * plotHeight,
+            };
+          })
+          .filter((segment) => segment.height > 0);
 
         return (
           <g key={day.day}>
-            {(Object.keys(callTypeLabels) as CallType[]).map((callType) => {
-              const value = day.costs[callType];
-              const segmentHeight = (value / maxTotal) * plotHeight;
-              stackY -= segmentHeight;
+            {visibleSegments.map((segment, segmentIndex) => {
+              stackY -= segment.height;
 
               return (
-                <rect
+                <path
                   className="admin-chart-bar"
-                  key={callType}
-                  x={x}
-                  y={stackY}
-                  width={barWidth}
-                  height={Math.max(0, segmentHeight)}
-                  fill={callTypeColors[callType]}
-                  rx="3"
+                  key={segment.callType}
+                  d={stackSegmentPath({
+                    x,
+                    y: stackY,
+                    width: barWidth,
+                    height: segment.height,
+                    radius: 3,
+                    roundTop: segmentIndex === visibleSegments.length - 1,
+                    roundBottom: segmentIndex === 0,
+                  })}
+                  fill={callTypeColors[segment.callType]}
                 />
               );
             })}
@@ -513,6 +754,7 @@ export default function AdminPage() {
   const [sortKey, setSortKey] = useState<SortKey>("startedAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [expandedInteractionId, setExpandedInteractionId] = useState("int-2039");
+  const [selectedCallId, setSelectedCallId] = useState<string | null>(null);
 
   function setPresetRange(nextPreset: DatePreset) {
     setPreset(nextPreset);
@@ -585,6 +827,37 @@ export default function AdminPage() {
       });
   }, [fromDate, searchTerm, sortDirection, sortKey, statusFilter, toDate, typeFilter]);
 
+  const selectedCallContext = useMemo(() => {
+    if (!selectedCallId) {
+      return null;
+    }
+
+    for (const interaction of traceInteractions) {
+      const call = interaction.calls.find((candidate) => candidate.id === selectedCallId);
+
+      if (call) {
+        return { call, interaction };
+      }
+    }
+
+    return null;
+  }, [selectedCallId]);
+
+  useEffect(() => {
+    if (!selectedCallContext) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelectedCallId(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedCallContext]);
+
   const totals = filteredInteractions.reduce(
     (current, interaction) => {
       const interactionTotals = sumInteraction(interaction);
@@ -634,12 +907,11 @@ export default function AdminPage() {
 
           <div className="reader-actions">
             <span className="queue-summary">149 due</span>
-            <Link className="admin-header-button" href="/" aria-label="Open queue">
-              Queue
-            </Link>
-            <button className="user-menu-trigger" type="button" aria-label="More options">
-              <MoreHorizontal aria-hidden="true" />
-            </button>
+            <div className="user-menu">
+              <button className="user-menu-trigger" type="button" aria-label="More options">
+                <MoreHorizontal aria-hidden="true" />
+              </button>
+            </div>
           </div>
         </header>
 
@@ -843,7 +1115,13 @@ export default function AdminPage() {
                     {isExpanded ? (
                       <div className="admin-call-list">
                         {interaction.calls.map((call) => (
-                          <div className="admin-call-row" key={call.id}>
+                          <button
+                            className="admin-call-row"
+                            key={call.id}
+                            type="button"
+                            aria-label={`Open LLM call details for ${call.operation}`}
+                            onClick={() => setSelectedCallId(call.id)}
+                          >
                             <span className="admin-call-name">
                               <strong>{call.operation}</strong>
                               <small>{call.model} · {call.id}</small>
@@ -854,7 +1132,7 @@ export default function AdminPage() {
                             <span>{formatCurrency(call.cost)}</span>
                             <span>{(call.latencyMs / 1000).toFixed(1)}s</span>
                             <StatusPill status={call.status} />
-                          </div>
+                          </button>
                         ))}
                       </div>
                     ) : null}
@@ -866,6 +1144,97 @@ export default function AdminPage() {
           </section>
         </div>
       </section>
+      {selectedCallContext ? (
+        <div
+          className="admin-call-modal-backdrop"
+          role="presentation"
+          onClick={() => setSelectedCallId(null)}
+        >
+          <section
+            className="admin-call-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-call-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="admin-call-modal-header">
+              <div>
+                <p className="admin-call-modal-kicker">
+                  {selectedCallContext.call.id}
+                </p>
+                <h2 className="admin-call-modal-title" id="admin-call-modal-title">
+                  {selectedCallContext.call.operation}
+                </h2>
+                <p className="admin-call-modal-subtitle">
+                  {selectedCallContext.interaction.title} ·{" "}
+                  {formatStartedAt(selectedCallContext.call.startedAt)}
+                </p>
+              </div>
+              <button
+                className="stats-modal-close"
+                type="button"
+                aria-label="Close LLM call details"
+                onClick={() => setSelectedCallId(null)}
+              />
+            </header>
+
+            <div className="admin-call-modal-meta" aria-label="LLM call metadata">
+              <div>
+                <span>Model</span>
+                <strong>{selectedCallContext.call.model}</strong>
+              </div>
+              <div>
+                <span>Type</span>
+                <strong>{callTypeLabels[selectedCallContext.call.callType]}</strong>
+              </div>
+              <div>
+                <span>Tokens</span>
+                <strong>
+                  {formatNumber(selectedCallContext.call.inputTokens)} in ·{" "}
+                  {formatNumber(selectedCallContext.call.outputTokens)} out
+                </strong>
+              </div>
+              <div>
+                <span>Cost</span>
+                <strong>{formatCurrency(selectedCallContext.call.cost)}</strong>
+              </div>
+              <div>
+                <span>Latency</span>
+                <strong>
+                  {(selectedCallContext.call.latencyMs / 1000).toFixed(1)}s
+                </strong>
+              </div>
+              <div>
+                <span>Status</span>
+                <StatusPill status={selectedCallContext.call.status} />
+              </div>
+            </div>
+
+            <div className="admin-call-payload-grid">
+              <section className="admin-call-payload-panel">
+                <div className="admin-call-payload-heading">
+                  <h3>Request sent</h3>
+                  <span>{formatNumber(selectedCallContext.call.inputTokens)} tokens</span>
+                </div>
+                <pre>{formatCallRequest(
+                  selectedCallContext.call,
+                  selectedCallContext.interaction,
+                )}</pre>
+              </section>
+              <section className="admin-call-payload-panel">
+                <div className="admin-call-payload-heading">
+                  <h3>Response received</h3>
+                  <span>{formatNumber(selectedCallContext.call.outputTokens)} tokens</span>
+                </div>
+                <pre>{formatCallResponse(
+                  selectedCallContext.call,
+                  selectedCallContext.interaction,
+                )}</pre>
+              </section>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

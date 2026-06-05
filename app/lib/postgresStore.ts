@@ -10,7 +10,11 @@ import {
   questions,
   users,
 } from "@/app/db/schema";
-import { getCurrentUser } from "./auth";
+import {
+  getCurrentUser,
+  getDeckIdForUser,
+  type AuthenticatedUser,
+} from "./auth";
 import { scheduleNextReview, serializeReviews } from "./scheduler";
 import { questionSlug } from "./questionSlug";
 
@@ -95,7 +99,18 @@ const DEFAULT_DECK = {
   slug: "deep-learning",
 };
 
-let databaseSeeded = false;
+const seededUserIds = new Set<string>();
+
+type UserContextInput = {
+  user?: AuthenticatedUser;
+  userId?: string;
+};
+
+type UserContext = {
+  user: AuthenticatedUser | null;
+  userId: string;
+  deckId: string;
+};
 
 function parseCsvRows(source: string): string[][] {
   const rows: string[][] = [];
@@ -175,8 +190,19 @@ function readLegacyCsvQuestions(): Array<{
     });
 }
 
-function currentDeckId(): string {
-  return DEFAULT_DECK.id;
+async function resolveUserContext(input: UserContextInput = {}): Promise<UserContext> {
+  const user = input.user ?? (input.userId ? null : await getCurrentUser());
+  const userId = input.userId ?? user?.id;
+
+  if (!userId) {
+    throw new Error("User id is required.");
+  }
+
+  return {
+    user,
+    userId,
+    deckId: getDeckIdForUser(userId),
+  };
 }
 
 function toDueQuestion(row: QuestionRow): DueQuestion {
@@ -234,33 +260,34 @@ function toQuestionEmbedding(row: {
   };
 }
 
-async function seedCurrentUserAndDeck(): Promise<void> {
+async function seedCurrentUserAndDeck(context: UserContext): Promise<void> {
   const now = Date.now();
-  const user = getCurrentUser();
 
-  await db
-    .insert(users)
-    .values({
-      id: user.id,
-      displayName: user.displayName,
-      email: user.email,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: users.id,
-      set: {
-        displayName: user.displayName,
-        email: user.email,
+  if (context.user) {
+    await db
+      .insert(users)
+      .values({
+        id: context.user.id,
+        displayName: context.user.displayName,
+        email: context.user.email,
+        createdAt: now,
         updatedAt: now,
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: users.id,
+        set: {
+          displayName: context.user.displayName,
+          email: context.user.email,
+          updatedAt: now,
+        },
+      });
+  }
 
   await db
     .insert(decks)
     .values({
-      id: DEFAULT_DECK.id,
-      userId: user.id,
+      id: context.deckId,
+      userId: context.userId,
       name: DEFAULT_DECK.name,
       slug: DEFAULT_DECK.slug,
       createdAt: now,
@@ -269,7 +296,7 @@ async function seedCurrentUserAndDeck(): Promise<void> {
     .onConflictDoUpdate({
       target: decks.id,
       set: {
-        userId: user.id,
+        userId: context.userId,
         name: DEFAULT_DECK.name,
         slug: DEFAULT_DECK.slug,
         updatedAt: now,
@@ -277,44 +304,55 @@ async function seedCurrentUserAndDeck(): Promise<void> {
     });
 }
 
-async function ensureSeedData(): Promise<void> {
-  if (databaseSeeded) {
-    return;
+async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext> {
+  const context = await resolveUserContext(input);
+
+  if (seededUserIds.has(context.userId)) {
+    return context;
   }
 
-  await seedCurrentUserAndDeck();
+  await seedCurrentUserAndDeck(context);
 
   const [{ value: questionCount = 0 } = { value: 0 }] = await db
     .select({ value: count() })
     .from(questions)
-    .where(eq(questions.deckId, currentDeckId()));
+    .where(eq(questions.deckId, context.deckId));
 
-  if (questionCount === 0) {
-    const seedRows = readLegacyCsvQuestions();
-
-    if (seedRows.length > 0) {
-      await db
-        .insert(questions)
-        .values(
-          seedRows.map((row) => ({
-            deckId: currentDeckId(),
-            question: row.question,
-            questionSlug: questionSlug(row.question),
-            reviews: row.reviews,
-            nextDue: row.nextDue,
-          })),
-        )
-        .onConflictDoNothing();
-    }
+  if (questionCount > 0) {
+    seededUserIds.add(context.userId);
+    return context;
   }
 
-  databaseSeeded = true;
+  const seedRows = readLegacyCsvQuestions();
+
+  if (seedRows.length === 0) {
+    seededUserIds.add(context.userId);
+    return context;
+  }
+
+  await db
+    .insert(questions)
+    .values(
+      seedRows.map((row) => ({
+        deckId: context.deckId,
+        question: row.question,
+        questionSlug: questionSlug(row.question),
+        reviews: row.reviews,
+        nextDue: row.nextDue,
+      })),
+    )
+    .onConflictDoNothing();
+
+  seededUserIds.add(context.userId);
+  return context;
 }
 
-async function selectQuestionRows(whereClause = sql`true`): Promise<QuestionRow[]> {
-  await ensureSeedData();
+async function selectQuestionRows(
+  whereClause = sql`true`,
+  input: UserContextInput = {},
+): Promise<QuestionRow[]> {
+  const context = await ensureSeedData(input);
 
-  const user = getCurrentUser();
   const rows = await db
     .select({
       question_id: questions.id,
@@ -335,8 +373,8 @@ async function selectQuestionRows(whereClause = sql`true`): Promise<QuestionRow[
     .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(
       and(
-        eq(questions.deckId, currentDeckId()),
-        eq(decks.userId, user.id),
+        eq(questions.deckId, context.deckId),
+        eq(decks.userId, context.userId),
         whereClause,
       ),
     )
@@ -355,8 +393,9 @@ export async function readQuestions(): Promise<QuestionRow[]> {
 
 export async function readQuestionsWithEmbeddings(input: {
   embeddingModel?: string;
+  userId?: string;
 } = {}): Promise<QuestionWithEmbeddings[]> {
-  await ensureSeedData();
+  const context = await ensureSeedData(input);
 
   const model =
     input.embeddingModel === undefined
@@ -367,7 +406,6 @@ export async function readQuestionsWithEmbeddings(input: {
     throw new Error("Embedding model is required");
   }
 
-  const user = getCurrentUser();
   const rows = await db
     .select({
       deck_id: questions.deckId,
@@ -404,7 +442,12 @@ export async function readQuestionsWithEmbeddings(input: {
           : eq(questionEmbeddings.embeddingModel, model),
       ),
     )
-    .where(and(eq(questions.deckId, currentDeckId()), eq(decks.userId, user.id)))
+    .where(
+      and(
+        eq(questions.deckId, context.deckId),
+        eq(decks.userId, context.userId),
+      ),
+    )
     .orderBy(
       asc(questions.nextDue),
       asc(questions.question),
@@ -470,8 +513,9 @@ export async function getQuestionEmbedding(input: {
   embeddingModel: string;
   embeddingKind?: string;
   sourceVersion?: number;
+  userId?: string;
 }): Promise<QuestionEmbedding | null> {
-  await ensureSeedData();
+  const context = await ensureSeedData(input);
 
   const model = normalizeEmbeddingModel(input.embeddingModel);
 
@@ -496,8 +540,8 @@ export async function getQuestionEmbedding(input: {
     .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(
       and(
-        eq(questions.deckId, currentDeckId()),
-        eq(decks.userId, getCurrentUser().id),
+        eq(questions.deckId, context.deckId),
+        eq(decks.userId, context.userId),
         eq(questionEmbeddings.deckId, questions.deckId),
         eq(questionEmbeddings.question, input.question),
         eq(questionEmbeddings.embeddingModel, model),
@@ -544,8 +588,9 @@ export async function upsertQuestionEmbeddings(input: {
     embedding: number[];
   }>;
   now?: number;
+  userId?: string;
 }): Promise<QuestionEmbedding[]> {
-  await ensureSeedData();
+  const context = await ensureSeedData(input);
 
   if (input.embeddings.length === 0) {
     return [];
@@ -586,7 +631,7 @@ export async function upsertQuestionEmbeddings(input: {
     valuesByKey.set(
       `${item.question}\0${model}\0${embeddingKind}\0${sourceVersion}`,
       {
-        deckId: currentDeckId(),
+        deckId: context.deckId,
         questionId: "",
         question: item.question,
         embeddingModel: model,
@@ -608,6 +653,7 @@ export async function upsertQuestionEmbeddings(input: {
       questions.question,
       Array.from(new Set(values.map((item) => item.question))),
     ),
+    { userId: context.userId },
   );
   const ownedQuestionByText = new Map(
     ownedQuestions.map((row) => [row.question, row.question_id]),
@@ -658,8 +704,14 @@ export async function upsertQuestionEmbeddings(input: {
   return rows.map(toQuestionEmbedding);
 }
 
-export async function getDueQuestions(now = Date.now()): Promise<DueQuestion[]> {
-  const rows = await selectQuestionRows(lte(questions.nextDue, Math.round(now)));
+export async function getDueQuestions(
+  now = Date.now(),
+  input: UserContextInput = {},
+): Promise<DueQuestion[]> {
+  const rows = await selectQuestionRows(
+    lte(questions.nextDue, Math.round(now)),
+    input,
+  );
 
   return rows
     .map(toDueQuestion)
@@ -667,8 +719,10 @@ export async function getDueQuestions(now = Date.now()): Promise<DueQuestion[]> 
     .sort((a, b) => a.nextDue - b.nextDue);
 }
 
-export async function getAllQueuedQuestions(): Promise<DueQuestion[]> {
-  const rows = await selectQuestionRows();
+export async function getAllQueuedQuestions(
+  input: UserContextInput = {},
+): Promise<DueQuestion[]> {
+  const rows = await selectQuestionRows(sql`true`, input);
 
   return rows
     .map(toDueQuestion)
@@ -678,16 +732,18 @@ export async function getAllQueuedQuestions(): Promise<DueQuestion[]> {
 
 export async function getQuestionSnapshot(
   question: string,
+  input: UserContextInput = {},
 ): Promise<DueQuestion | null> {
-  const [row] = await selectQuestionRows(eq(questions.question, question));
+  const [row] = await selectQuestionRows(eq(questions.question, question), input);
 
   return row ? toDueQuestion(row) : null;
 }
 
 export async function getQuestionAttempts(
   question: string,
+  input: UserContextInput = {},
 ): Promise<QuestionAttempt[]> {
-  await ensureSeedData();
+  const context = await ensureSeedData(input);
 
   const rows = await db
     .select({
@@ -704,7 +760,7 @@ export async function getQuestionAttempts(
     .from(questionAttempts)
     .where(
       and(
-        eq(questionAttempts.deckId, currentDeckId()),
+        eq(questionAttempts.deckId, context.deckId),
         eq(questionAttempts.question, question),
       ),
     )
@@ -721,8 +777,9 @@ export async function getQuestionAttempts(
 
 export async function getStoredReferenceAnswer(
   question: string,
+  input: UserContextInput = {},
 ): Promise<string | null> {
-  const snapshot = await getQuestionSnapshot(question);
+  const snapshot = await getQuestionSnapshot(question, input);
   const answer = snapshot?.referenceAnswer?.trim() ?? "";
 
   return answer || null;
@@ -732,8 +789,9 @@ export async function saveReferenceAnswer(input: {
   question: string;
   answer: string;
   now: number;
+  userId?: string;
 }): Promise<void> {
-  await ensureSeedData();
+  const context = await ensureSeedData(input);
 
   await db
     .update(questions)
@@ -743,7 +801,7 @@ export async function saveReferenceAnswer(input: {
     })
     .where(
       and(
-        eq(questions.deckId, currentDeckId()),
+        eq(questions.deckId, context.deckId),
         eq(questions.question, input.question),
       ),
     );
@@ -786,8 +844,9 @@ export async function upsertDueQuestions(input: {
   questions: Array<string | QuestionInput>;
   sourceQuestion: string | null;
   now: number;
+  userId?: string;
 }): Promise<DueQuestion[]> {
-  await ensureSeedData();
+  const context = await ensureSeedData(input);
 
   const generatedQuestions = normalizeGeneratedQuestions(input.questions);
 
@@ -801,7 +860,7 @@ export async function upsertDueQuestions(input: {
     .insert(questions)
     .values(
       generatedQuestions.map((question) => ({
-        deckId: currentDeckId(),
+        deckId: context.deckId,
         question: question.question,
         questionSlug: questionSlug(question.question),
         nextDue: now,
@@ -829,6 +888,7 @@ export async function upsertDueQuestions(input: {
       questions.questionSlug,
       generatedQuestions.map((question) => questionSlug(question.question)),
     ),
+    { userId: context.userId },
   );
 
   return rows.map(toDueQuestion);
@@ -842,8 +902,9 @@ export async function applyEvaluationToPostgres(input: {
   score: number;
   submittedAt: number;
   now: number;
+  userId?: string;
 }): Promise<PersistedEvaluation> {
-  await ensureSeedData();
+  const context = await ensureSeedData(input);
 
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -866,8 +927,8 @@ export async function applyEvaluationToPostgres(input: {
       .innerJoin(decks, eq(decks.id, questions.deckId))
       .where(
         and(
-          eq(questions.deckId, currentDeckId()),
-          eq(decks.userId, getCurrentUser().id),
+          eq(questions.deckId, context.deckId),
+          eq(decks.userId, context.userId),
           eq(questions.question, input.question),
         ),
       )
@@ -923,7 +984,7 @@ export async function applyEvaluationToPostgres(input: {
       })
       .where(
         and(
-          eq(questions.deckId, currentDeckId()),
+          eq(questions.deckId, context.deckId),
           eq(questions.question, input.question),
         ),
       );
@@ -931,7 +992,7 @@ export async function applyEvaluationToPostgres(input: {
     const [attempt] = await tx
       .insert(questionAttempts)
       .values({
-        deckId: currentDeckId(),
+        deckId: context.deckId,
         questionId: row.question_id,
         question: input.question,
         rawAnswer: input.answer,
@@ -949,7 +1010,7 @@ export async function applyEvaluationToPostgres(input: {
 
     await tx.insert(questionReviews).values({
       attemptId: attempt.id,
-      deckId: currentDeckId(),
+      deckId: context.deckId,
       questionId: row.question_id,
       question: input.question,
       score: input.score,

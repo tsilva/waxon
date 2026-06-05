@@ -46,6 +46,25 @@ LLM_MODEL=openai/gpt-5.5
 
 `LLM_MODEL` is optional. The app also accepts `LLM_API_KEY` if `OPENROUTER_API_KEY` is not set.
 
+For login and signup, create a Clerk application and add the Clerk keys to
+`.env.local`:
+
+```bash
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your-clerk-publishable-key
+CLERK_SECRET_KEY=your-clerk-secret-key
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+```
+
+To attach the first Clerk test account to the existing local `tsilva` data, set
+this before the first sign-in. The email guard prevents another test account
+from claiming that legacy user:
+
+```bash
+WAXON_CLAIM_LEGACY_USER_ID=tsilva
+WAXON_CLAIM_LEGACY_EMAIL=eng.tiago.silva@gmail.com
+```
+
 ## Commands
 
 ```bash
@@ -63,7 +82,8 @@ pnpm typecheck  # run TypeScript without emitting files
 
 - Questions and review history live in Neon Postgres.
 - If the configured deck has no questions, the app bootstraps it from `data/questions.csv`.
-- The app currently hardcodes `tsilva` as the authenticated user.
+- Login and signup use Clerk. Waxon stores its own internal users and maps Clerk
+  accounts through `auth_accounts`.
 - The `users` table owns `decks`; the default deck is `Deep Learning`.
 - The `questions` table stores per-card state and is associated to a deck with `deck_id`.
 - The `question_attempts` table stores every resolved user attempt with its `deck_id`: raw answer, concise LLM answer summary, score, justification, and timestamps.

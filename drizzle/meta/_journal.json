@@ -50,6 +50,13 @@
       "when": 1780590000002,
       "tag": "0007_maximum_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780658556609,
+      "tag": "0007_lowly_blink",
+      "breakpoints": true
     }
   ]
 }

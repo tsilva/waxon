@@ -6,7 +6,7 @@ import {
   DEDUPE_SOURCE_VERSION,
   DEFAULT_EMBEDDING_MODEL,
 } from "@/app/lib/embeddingSource";
-import { getCurrentUser } from "@/app/lib/auth";
+import { getCurrentUser, getDeckIdForUser } from "@/app/lib/auth";
 import { ensureQuestionsDatabase } from "@/app/lib/postgresStore";
 import {
   extractChatCompletionText,
@@ -20,7 +20,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const OPENROUTER_MODEL = process.env.LLM_MODEL || "openai/gpt-5.5";
-const DEFAULT_DECK_ID = "deep-learning";
 const MAX_CONTEXT_CHARS = 32_000;
 const MAX_SUMMARY_CHARS = 1_600;
 const MAX_QUESTION_COUNT = 40;
@@ -376,8 +375,8 @@ export async function POST(request: Request) {
   }
 
   const body: unknown = await request.json().catch(() => null);
-  const user = getCurrentUser();
-  const deckId = DEFAULT_DECK_ID;
+  const user = await getCurrentUser();
+  const deckId = getDeckIdForUser(user.id);
   const payload = body as Record<string, unknown>;
   const scope = normalizeText(payload.scope);
   const files = normalizeFiles(payload.files);

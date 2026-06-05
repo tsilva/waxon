@@ -1,3 +1,8 @@
+import { auth, clerkClient } from "@clerk/nextjs/server";
+import { and, eq } from "drizzle-orm";
+import { db } from "@/app/db/client";
+import { authAccounts, users } from "@/app/db/schema";
+
 export type AuthenticatedUser = {
   id: string;
   displayName: string;
@@ -5,13 +10,145 @@ export type AuthenticatedUser = {
   avatarUrl: string | null;
 };
 
-const DEFAULT_AUTHENTICATED_USER: AuthenticatedUser = {
-  id: "tsilva",
-  displayName: "Tiago Silva",
-  email: "tsilva@localhost",
-  avatarUrl: null,
-};
+const CLERK_PROVIDER = "clerk";
 
-export function getCurrentUser(): AuthenticatedUser {
-  return DEFAULT_AUTHENTICATED_USER;
+function normalizeDisplayName(input: {
+  fullName: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  username: string | null;
+  email: string;
+}): string {
+  const displayName =
+    input.fullName?.trim() ||
+    [input.firstName, input.lastName]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(" ") ||
+    input.username?.trim() ||
+    input.email.split("@")[0]?.trim();
+
+  return displayName || "Waxon user";
+}
+
+function appUserIdForClerkUser(clerkUserId: string): string {
+  return `clerk:${clerkUserId}`;
+}
+
+async function findLegacyClaimUserId(email: string): Promise<string | null> {
+  const legacyUserId = process.env.WAXON_CLAIM_LEGACY_USER_ID?.trim();
+
+  if (!legacyUserId) {
+    return null;
+  }
+
+  const legacyEmail = process.env.WAXON_CLAIM_LEGACY_EMAIL?.trim().toLowerCase();
+
+  if (legacyEmail && email.trim().toLowerCase() !== legacyEmail) {
+    return null;
+  }
+
+  const [legacyUser] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, legacyUserId))
+    .limit(1);
+
+  if (!legacyUser) {
+    return null;
+  }
+
+  const [existingClaim] = await db
+    .select({ id: authAccounts.id })
+    .from(authAccounts)
+    .where(eq(authAccounts.userId, legacyUserId))
+    .limit(1);
+
+  return existingClaim ? null : legacyUser.id;
+}
+
+export function getDeckIdForUser(userId: string): string {
+  return userId === "tsilva" ? "deep-learning" : `${userId}:deep-learning`;
+}
+
+export async function getCurrentUser(): Promise<AuthenticatedUser> {
+  const authObject = await auth.protect();
+  const clerkUserId = authObject.userId;
+  const client = await clerkClient();
+  const clerkUser = await client.users.getUser(clerkUserId);
+  const email =
+    clerkUser.primaryEmailAddress?.emailAddress ??
+    clerkUser.emailAddresses[0]?.emailAddress ??
+    `${clerkUserId}@clerk.local`;
+  const displayName = normalizeDisplayName({
+    fullName: clerkUser.fullName,
+    firstName: clerkUser.firstName,
+    lastName: clerkUser.lastName,
+    username: clerkUser.username,
+    email,
+  });
+  const now = Date.now();
+
+  const [existingAccount] = await db
+    .select({ userId: authAccounts.userId })
+    .from(authAccounts)
+    .where(
+      and(
+        eq(authAccounts.provider, CLERK_PROVIDER),
+        eq(authAccounts.providerAccountId, clerkUserId),
+      ),
+    )
+    .limit(1);
+
+  const userId =
+    existingAccount?.userId ??
+    (await findLegacyClaimUserId(email)) ??
+    appUserIdForClerkUser(clerkUserId);
+
+  const [row] = await db
+    .insert(users)
+    .values({
+      id: userId,
+      displayName,
+      email,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: users.id,
+      set: {
+        displayName,
+        email,
+        updatedAt: now,
+      },
+    })
+    .returning({
+      id: users.id,
+      displayName: users.displayName,
+      email: users.email,
+      avatarUrl: users.avatarUrl,
+    });
+
+  await db
+    .insert(authAccounts)
+    .values({
+      userId,
+      provider: CLERK_PROVIDER,
+      providerAccountId: clerkUserId,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [authAccounts.provider, authAccounts.providerAccountId],
+      set: {
+        userId,
+        updatedAt: now,
+      },
+    });
+
+  if (!row) {
+    throw new Error("Could not load current user.");
+  }
+
+  return row;
 }
