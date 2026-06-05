@@ -13,6 +13,7 @@ import type { EvaluationResult } from "./evaluateAnswerParsing";
 import type { ExistingQuestionNeighbor } from "./questionNeighbors";
 
 export {
+  failedEvaluation,
   PROBING_QUESTION_SCORE_THRESHOLD,
   type EvaluationResult,
   type FailedEvaluationResult,

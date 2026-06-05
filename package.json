@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@clerk/nextjs": "7.4.2",
     "@neondatabase/serverless": "^1.1.0",
     "@sentry/nextjs": "^10.55.0",
     "drizzle-orm": "^0.45.2",

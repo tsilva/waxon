@@ -53,7 +53,7 @@ function validateAvatarUrl(avatarUrl: unknown): string | null {
 }
 
 async function ensureCurrentUser(): Promise<UserProfile> {
-  const currentUser = getCurrentUser();
+  const currentUser = await getCurrentUser();
   const now = Date.now();
 
   const [row] = await db
@@ -112,7 +112,7 @@ export async function PATCH(request: NextRequest) {
 
   await ensureCurrentUser();
 
-  const currentUser = getCurrentUser();
+  const currentUser = await getCurrentUser();
   const [row] = await db
     .update(users)
     .set({

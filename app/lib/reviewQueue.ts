@@ -13,6 +13,7 @@ import {
 } from "./postgresStore";
 import {
   evaluateAnswer,
+  failedEvaluation,
   PROBING_QUESTION_SCORE_THRESHOLD,
   type EvaluationResult,
 } from "./evaluateAnswer";
@@ -22,11 +23,14 @@ import {
   DEDUPE_SOURCE_VERSION,
   DEFAULT_EMBEDDING_MODEL,
 } from "./embeddingSource";
-import { getCurrentUser } from "./auth";
+import {
+  getCurrentUser,
+  getDeckIdForUser,
+  type AuthenticatedUser,
+} from "./auth";
 import { gateNovelQuestions } from "./semanticDedupe";
 
 export const RESOLVED_JUDGING_VISIBLE_MS = 10_000;
-const DEFAULT_DECK_ID = "deep-learning";
 
 type Submission = {
   evaluationId: string;
@@ -102,6 +106,7 @@ type LatestEvaluation = {
 };
 
 type QueueState = {
+  userId: string | null;
   initialized: boolean;
   initializing: Promise<void> | null;
   queue: DueQuestion[];
@@ -119,6 +124,7 @@ const globalForQueue = globalThis as typeof globalThis & {
 const state: QueueState =
   globalForQueue.waxonQueue ??
   {
+    userId: null,
     initialized: false,
     initializing: null,
     queue: [],
@@ -130,8 +136,30 @@ const state: QueueState =
   };
 
 globalForQueue.waxonQueue = state;
+state.userId ??= null;
 state.latestByQuestion ??= {};
 state.subscribers ??= new Set<QueueStatusSubscriber>();
+
+function resetQueueStateForUser(userId: string): void {
+  state.userId = userId;
+  state.initialized = false;
+  state.initializing = null;
+  state.queue = [];
+  state.pendingEvaluations = 0;
+  state.inFlightQuestions = new Set();
+  state.evaluations = [];
+  state.latestByQuestion = {};
+}
+
+async function ensureQueueUser(): Promise<AuthenticatedUser> {
+  const user = await getCurrentUser();
+
+  if (state.userId !== user.id) {
+    resetQueueStateForUser(user.id);
+  }
+
+  return user;
+}
 
 function logQueueFlushStatus(action: string): void {
   console.info("[waxon] queue flush status", {
@@ -376,8 +404,8 @@ function projectEmbeddings(
   }));
 }
 
-async function getDeckEmbeddingPlot(): Promise<DeckEmbeddingPlot> {
-  const questions = await readQuestionsWithEmbeddings();
+async function getDeckEmbeddingPlot(userId: string): Promise<DeckEmbeddingPlot> {
+  const questions = await readQuestionsWithEmbeddings({ userId });
   const totalQuestions = questions.length;
   const modelCounts = new Map<string, number>();
   const preferredEmbeddings = questions.flatMap((question) =>
@@ -467,13 +495,16 @@ async function getDeckEmbeddingPlot(): Promise<DeckEmbeddingPlot> {
   };
 }
 
-async function getReviewQueueItems(now = Date.now()): Promise<ReviewQueueItem[]> {
-  const queuedQuestions = await getAllQueuedQuestions();
+async function getReviewQueueItems(
+  userId: string,
+  now = Date.now(),
+): Promise<ReviewQueueItem[]> {
+  const queuedQuestions = await getAllQueuedQuestions({ userId });
   const attemptsByQuestion = new Map(
     await Promise.all(
       queuedQuestions.map(async (item) => [
         item.question,
-        await getQuestionAttempts(item.question),
+        await getQuestionAttempts(item.question, { userId }),
       ] as const),
     ),
   );
@@ -514,13 +545,15 @@ async function getReviewQueueItems(now = Date.now()): Promise<ReviewQueueItem[]>
     });
 }
 
-async function initializeQueue(): Promise<void> {
+async function initializeQueue(): Promise<AuthenticatedUser> {
+  const user = await ensureQueueUser();
+
   if (state.initialized) {
-    return;
+    return user;
   }
 
   if (!state.initializing) {
-    state.initializing = getDueQuestions().then((dueQuestions) => {
+    state.initializing = getDueQuestions(Date.now(), { userId: user.id }).then((dueQuestions) => {
       state.queue = dueQuestions;
       state.initialized = true;
       state.initializing = null;
@@ -529,14 +562,15 @@ async function initializeQueue(): Promise<void> {
   }
 
   await state.initializing;
+  return user;
 }
 
-async function refreshIfEmpty(): Promise<void> {
+async function refreshIfEmpty(userId: string): Promise<void> {
   if (state.queue.length > 0) {
     return;
   }
 
-  const dueQuestions = await getDueQuestions();
+  const dueQuestions = await getDueQuestions(Date.now(), { userId });
   state.queue = dueQuestions.filter(
     (question) => !state.inFlightQuestions.has(question.question),
   );
@@ -628,6 +662,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       score: result.score,
       submittedAt: submission.submittedAt,
       now: resolvedAt,
+      userId: submission.userId ?? undefined,
     });
 
     if (persisted) {
@@ -655,6 +690,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
             })),
             sourceQuestion: submission.question,
             now: resolvedAt,
+            userId: persisted.userId,
           });
 
           await upsertQuestionEmbeddings({
@@ -667,6 +703,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
               sourceHash: candidate.sourceHash,
               embedding: candidate.embedding,
             })),
+            userId: persisted.userId,
           });
 
           enqueueProbingQuestions(probingQuestions);
@@ -698,6 +735,20 @@ async function processEvaluation(submission: Submission): Promise<void> {
     }
 
     resolveEvaluationItem(submission.evaluationId, result, persisted?.nextDue ?? null);
+  } catch (error) {
+    console.info("[waxon] evaluation processing failed", {
+      question: submission.question,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+    restoreFailedQuestion(submission.queuedQuestion);
+    resolveEvaluationItem(
+      submission.evaluationId,
+      failedEvaluation(
+        "Evaluation failed before it could be saved.",
+        submission.answer,
+      ),
+      null,
+    );
   } finally {
     state.pendingEvaluations = Math.max(0, state.pendingEvaluations - 1);
     state.inFlightQuestions.delete(submission.question);
@@ -710,8 +761,8 @@ export async function peekNextQuestion(): Promise<{
   question: string | null;
   queueRemaining: number;
 }> {
-  await initializeQueue();
-  await refreshIfEmpty();
+  const user = await initializeQueue();
+  await refreshIfEmpty(user.id);
 
   return {
     question: state.queue[0]?.question ?? null,
@@ -722,8 +773,8 @@ export async function peekNextQuestion(): Promise<{
 export async function skipQuestion(input: {
   question: string;
 }): Promise<{ question: string | null; queueRemaining: number }> {
-  await initializeQueue();
-  await refreshIfEmpty();
+  const user = await initializeQueue();
+  await refreshIfEmpty(user.id);
 
   const skipped = removeFromQueue(input.question);
 
@@ -740,10 +791,11 @@ export async function submitAnswer(input: {
   question: string;
   answer: string;
 }): Promise<{ evaluationId: string }> {
-  await initializeQueue();
+  const user = await initializeQueue();
 
   const queued = removeFromQueue(input.question);
-  const snapshot = queued ?? (await getQuestionSnapshot(input.question));
+  const snapshot =
+    queued ?? (await getQuestionSnapshot(input.question, { userId: user.id }));
   const submittedAt = Date.now();
   const evaluation = createEvaluationItem({
     question: input.question,
@@ -760,8 +812,8 @@ export async function submitAnswer(input: {
     evaluationId: evaluation.id,
     question: input.question,
     queuedQuestion: queued,
-    userId: snapshot?.userId ?? null,
-    deckId: snapshot?.deckId ?? null,
+    userId: snapshot?.userId ?? user.id,
+    deckId: snapshot?.deckId ?? getDeckIdForUser(user.id),
     answer: input.answer,
     submittedAt,
     previousReviews: snapshot?.reviews ?? "",
@@ -775,13 +827,13 @@ export async function submitAnswer(input: {
 export async function addQuestionsToDeck(input: {
   questions: Array<string | QuestionInput>;
 }): Promise<{ added: number; rejected: number }> {
-  await initializeQueue();
+  const user = await initializeQueue();
+  const deckId = getDeckIdForUser(user.id);
 
-  const user = getCurrentUser();
   const gateResult = await gateNovelQuestions(input.questions, {
     operation: "add_questions_gate",
     userId: user.id,
-    deckId: DEFAULT_DECK_ID,
+    deckId,
   });
 
   const addedQuestions = await upsertDueQuestions({
@@ -791,6 +843,7 @@ export async function addQuestionsToDeck(input: {
     })),
     sourceQuestion: null,
     now: Date.now(),
+    userId: user.id,
   });
 
   await upsertQuestionEmbeddings({
@@ -802,6 +855,7 @@ export async function addQuestionsToDeck(input: {
       sourceHash: candidate.sourceHash,
       embedding: candidate.embedding,
     })),
+    userId: user.id,
   });
 
   enqueueProbingQuestions(addedQuestions);
@@ -814,11 +868,11 @@ export async function addQuestionsToDeck(input: {
 }
 
 export async function queueStatus(): Promise<QueueStatusSnapshot> {
-  await initializeQueue();
-  await refreshIfEmpty();
+  const user = await initializeQueue();
+  await refreshIfEmpty(user.id);
   const [reviewQueue, deckEmbeddingPlot] = await Promise.all([
-    getReviewQueueItems(),
-    getDeckEmbeddingPlot(),
+    getReviewQueueItems(user.id),
+    getDeckEmbeddingPlot(user.id),
   ]);
 
   return {

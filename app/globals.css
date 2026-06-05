@@ -198,6 +198,67 @@ textarea {
   text-shadow: none;
 }
 
+.auth-bar {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 36px;
+  font-family: var(--font-ui);
+}
+
+.auth-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.auth-action {
+  min-height: 36px;
+  border: 1px solid rgb(227 218 196 / 86%);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: rgb(255 255 255 / 68%);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1;
+  box-shadow:
+    0 10px 24px rgb(42 24 22 / 5%),
+    inset 0 1px 0 rgb(255 255 255 / 90%);
+}
+
+.auth-action-primary {
+  border-color: rgb(166 124 82 / 32%);
+  background: var(--accent);
+  color: #fff;
+}
+
+.auth-action:hover,
+.auth-action:focus-visible {
+  border-color: rgb(166 124 82 / 42%);
+  color: var(--accent);
+  outline: 3px solid rgb(166 124 82 / 12%);
+  outline-offset: 3px;
+}
+
+.auth-action-primary:hover,
+.auth-action-primary:focus-visible {
+  background: var(--accent-hover);
+  color: #fff;
+}
+
+.auth-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 72px 16px 32px;
+}
+
 .landing-page {
   display: grid;
   align-content: start;
@@ -2187,7 +2248,8 @@ textarea {
 
 .generator-modal-backdrop,
 .settings-modal-backdrop,
-.stats-modal-backdrop {
+.stats-modal-backdrop,
+.admin-call-modal-backdrop {
   position: fixed;
   inset: 0;
   z-index: 80;
@@ -2201,7 +2263,8 @@ textarea {
 
 .generator-modal,
 .settings-modal,
-.stats-modal {
+.stats-modal,
+.admin-call-modal {
   width: min(880px, 100%);
   max-height: min(860px, calc(100vh - 48px));
   overflow-y: auto;
@@ -2216,6 +2279,10 @@ textarea {
   width: min(560px, 100%);
 }
 
+.admin-call-modal {
+  width: min(1040px, 100%);
+}
+
 .generator-modal {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -2224,7 +2291,8 @@ textarea {
 
 .generator-modal-header,
 .settings-modal-header,
-.stats-modal-header {
+.stats-modal-header,
+.admin-call-modal-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
@@ -2235,7 +2303,8 @@ textarea {
 
 .generator-modal-kicker,
 .settings-modal-kicker,
-.stats-modal-kicker {
+.stats-modal-kicker,
+.admin-call-modal-kicker {
   margin: 0 0 8px;
   color: var(--muted);
   font-size: 12px;
@@ -2247,7 +2316,8 @@ textarea {
 
 .generator-modal-title,
 .settings-modal-title,
-.stats-modal-title {
+.stats-modal-title,
+.admin-call-modal-title {
   margin: 0;
   color: var(--ink);
   font-size: clamp(22px, 2.1vw, 30px);
@@ -3197,36 +3267,6 @@ textarea {
   text-decoration: none;
 }
 
-.admin-header-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 42px;
-  border: 1px solid rgb(227 218 196 / 86%);
-  border-radius: 8px;
-  padding: 0 16px;
-  background: rgb(255 255 255 / 72%);
-  color: var(--ink-soft);
-  font-family: var(--font-ui);
-  font-size: 15px;
-  font-weight: 760;
-  line-height: 1;
-  text-decoration: none;
-  white-space: nowrap;
-  box-shadow:
-    0 10px 24px rgb(42 24 22 / 5%),
-    inset 0 1px 0 rgb(255 255 255 / 90%);
-}
-
-.admin-header-button:hover,
-.admin-header-button:focus-visible {
-  border-color: rgb(166 124 82 / 36%);
-  background: rgb(245 238 224 / 72%);
-  color: var(--accent);
-  outline: 3px solid rgb(166 124 82 / 12%);
-  outline-offset: 3px;
-}
-
 .admin-stage {
   display: grid;
   gap: 18px;
@@ -3702,9 +3742,21 @@ textarea {
   min-height: 48px;
   border-bottom: 1px solid rgb(227 218 196 / 58%);
   padding: 8px 12px 8px 0;
+  background: transparent;
   color: var(--ink-soft);
+  cursor: pointer;
   font-size: 11px;
   font-weight: 690;
+  line-height: 1.25;
+  text-align: left;
+  width: 100%;
+}
+
+.admin-call-row:hover,
+.admin-call-row:focus-visible {
+  background: rgb(255 255 255 / 48%);
+  color: var(--ink);
+  outline: 0;
 }
 
 .admin-call-row:last-child {
@@ -3761,6 +3813,111 @@ textarea {
   border-color: rgb(140 84 98 / 28%);
   background: rgb(140 84 98 / 8%);
   color: var(--danger);
+}
+
+.admin-call-modal-subtitle {
+  margin: 9px 0 0;
+  color: var(--muted-strong);
+  font-size: 13px;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.admin-call-modal-meta {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 16px;
+}
+
+.admin-call-modal-meta div {
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 68px;
+  border: 1px solid rgb(227 218 196 / 72%);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgb(255 255 255 / 44%);
+}
+
+.admin-call-modal-meta span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 820;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.admin-call-modal-meta strong {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-call-payload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.admin-call-payload-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 360px;
+  border: 1px solid rgb(227 218 196 / 72%);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgb(251 248 240 / 72%);
+}
+
+.admin-call-payload-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  border-bottom: 1px solid rgb(227 218 196 / 64%);
+  padding: 0 13px;
+  background: rgb(255 255 255 / 42%);
+}
+
+.admin-call-payload-heading h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 780;
+  line-height: 1.2;
+}
+
+.admin-call-payload-heading span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.admin-call-payload-panel pre {
+  max-height: min(430px, 42vh);
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: var(--ink-soft);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 620;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @media (max-width: 760px) {
@@ -4241,17 +4398,35 @@ textarea {
 
   .generator-modal-backdrop,
   .settings-modal-backdrop,
-  .stats-modal-backdrop {
+  .stats-modal-backdrop,
+  .admin-call-modal-backdrop {
     align-items: stretch;
     padding: 10px;
   }
 
   .generator-modal,
   .settings-modal,
-  .stats-modal {
+  .stats-modal,
+  .admin-call-modal {
     max-height: none;
     border-radius: 14px;
     padding: 18px;
+  }
+
+  .admin-call-modal-meta {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-call-payload-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-call-payload-panel {
+    min-height: 300px;
+  }
+
+  .admin-call-payload-panel pre {
+    max-height: 320px;
   }
 
   .generator-modal {
@@ -4352,10 +4527,6 @@ textarea {
 
   .admin-shell {
     min-height: 100vh;
-  }
-
-  .admin-header-button {
-    display: none;
   }
 
   .admin-page .queue-summary {

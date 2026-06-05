@@ -62,6 +62,40 @@ export const users = pgTable(
   ],
 );
 
+export const authAccounts = pgTable(
+  "auth_accounts",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    providerAccountId: text("provider_account_id").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => [
+    uniqueIndex("auth_accounts_provider_account_idx").on(
+      table.provider,
+      table.providerAccountId,
+    ),
+    index("auth_accounts_user_id_idx").on(table.userId),
+    check(
+      "auth_accounts_provider_nonempty_check",
+      sql`length(trim(${table.provider})) > 0`,
+    ),
+    check(
+      "auth_accounts_provider_account_id_nonempty_check",
+      sql`length(trim(${table.providerAccountId})) > 0`,
+    ),
+    check("auth_accounts_created_at_check", sql`${table.createdAt} >= 0`),
+    check(
+      "auth_accounts_updated_at_check",
+      sql`${table.updatedAt} >= ${table.createdAt}`,
+    ),
+  ],
+);
+
 export const decks = pgTable(
   "decks",
   {
