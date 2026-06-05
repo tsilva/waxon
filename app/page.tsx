@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import {
   ArrowUp,
   Check,
@@ -2529,6 +2530,14 @@ export default function Home() {
               >
                 Queue
               </button>
+              <Link
+                className="reader-tab"
+                href="/admin"
+                role="tab"
+                aria-selected="false"
+              >
+                Admin
+              </Link>
             </div>
           </div>
 

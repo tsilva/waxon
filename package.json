@@ -17,6 +17,7 @@
     "answers:backfill-concise": "node scripts/backfill-concise-answers.mjs",
     "embeddings:backfill": "node scripts/backfill-question-embeddings.mjs",
     "start": "next start",
+    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
