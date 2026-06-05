@@ -17,6 +17,7 @@ import {
   openRouterChatCompletion,
   openRouterEmbeddings,
 } from "@/app/lib/openRouter";
+import { extractJsonObject } from "@/app/lib/jsonObject";
 import { getQuestionQualityReference } from "@/app/lib/questionQualityReference";
 
 export const runtime = "nodejs";
@@ -28,6 +29,11 @@ const MAX_SUMMARY_CHARS = 1_600;
 const DEFAULT_QUESTION_COUNT = 5;
 const MAX_QUESTION_COUNT = 10;
 const GENERATION_NEIGHBOR_COUNT = 32;
+const GENERATION_CONTEXT_SUMMARY_SYSTEM_PROMPT = [
+  "Summarize desired flashcard coverage scope for semantic retrieval.",
+  "Focus on concepts, skills, components, boundaries, prerequisites, and failure modes to cover.",
+  `Keep it under ${MAX_SUMMARY_CHARS} characters. Do not list generated questions.`,
+].join("\n\n");
 
 type ContextFilePayload = {
   name: string;
@@ -171,18 +177,21 @@ function buildContext(input: {
     .slice(0, MAX_CONTEXT_CHARS);
 }
 
-function extractJsonObject(source: string): unknown {
-  try {
-    return JSON.parse(source);
-  } catch {
-    const match = source.match(/\{[\s\S]*\}/);
-
-    if (!match) {
-      throw new Error("Model did not return JSON.");
-    }
-
-    return JSON.parse(match[0]);
-  }
+function buildQuestionGenerationSystemPrompt(questionQualityReference: string): string {
+  return [
+    "You generate high-quality spaced-repetition questions for a study deck.",
+    "Every generated question must follow the shared question-quality reference below.",
+    "Maximize coverage across the content instead of making variants of the same point.",
+    "Avoid generic questions such as 'What is the key idea behind the topic?'",
+    "Each question must include a concise expected answer for dedupe embeddings.",
+    "The conciseAnswer is not a user-facing explanation. It is the shortest answer that preserves the atomic recall target.",
+    "Do not include long explanations, numbering, or preambles.",
+    "Do not duplicate existing questions, near-duplicates, or current modal review queue questions.",
+    "Return JSON only with this shape:",
+    '{"questions":[{"question":"...","conciseAnswer":"short expected answer","sourceLabel":"Prompt or filename","coverageLabel":"short covered concept"}]}',
+    "Shared question-quality reference:",
+    questionQualityReference,
+  ].join("\n\n");
 }
 
 function normalizeGeneratedQuestions(
@@ -257,14 +266,12 @@ async function summarizeGenerationContext(input: {
       max_tokens: 500,
       messages: [
         {
+          role: "system",
+          content: GENERATION_CONTEXT_SUMMARY_SYSTEM_PROMPT,
+        },
+        {
           role: "user",
-          content: [
-            "Summarize this desired flashcard coverage scope for semantic retrieval.",
-            "Focus on concepts, skills, components, boundaries, prerequisites, and failure modes to cover.",
-            `Keep it under ${MAX_SUMMARY_CHARS} characters. Do not list generated questions.`,
-            "Context:",
-            input.context,
-          ].join("\n\n"),
+          content: ["Context:", input.context].join("\n\n"),
         },
       ],
     },
@@ -442,26 +449,13 @@ export async function POST(request: Request) {
       messages: [
         {
           role: "system",
-          content: [
-            "You generate high-quality spaced-repetition questions for a study deck.",
-            "Every generated question must follow the shared question-quality reference below.",
-            "Maximize coverage across the content instead of making variants of the same point.",
-            "Avoid generic questions such as 'What is the key idea behind the topic?'",
-            "Each question must include a concise expected answer for dedupe embeddings.",
-            "Do not include long explanations, numbering, or preambles.",
-            "Shared question-quality reference:",
-            questionQualityReference,
-          ].join("\n\n"),
+          content: buildQuestionGenerationSystemPrompt(questionQualityReference),
         },
         {
           role: "user",
           content: [
             `Generate exactly ${count} recall questions.`,
             `Difficulty: ${difficulty}.`,
-            "Return JSON only with this shape:",
-            '{"questions":[{"question":"...","conciseAnswer":"short expected answer","sourceLabel":"Prompt or filename","coverageLabel":"short covered concept"}]}',
-            "The conciseAnswer is not a user-facing explanation. It is the shortest answer that preserves the atomic recall target.",
-            "Do not duplicate any existing questions or near-duplicates.",
             existingQuestions.size > 0
               ? `Existing questions to avoid:\n${Array.from(existingQuestions)
                   .slice(0, 200)

@@ -12,7 +12,6 @@ import {
   upsertQuestionEmbeddings,
   type DueQuestion,
   type QuestionInput,
-  type QuestionAttempt,
   type QueuedQuestionsSortKey,
 } from "./postgresStore";
 import {
@@ -22,7 +21,7 @@ import {
   PROBING_QUESTION_SCORE_THRESHOLD,
   type EvaluationResult,
 } from "./evaluateAnswer";
-import { parseReviews, reinsertionDelay, type ReviewEntry } from "./scheduler";
+import { parseReviews, reinsertionDelay } from "./scheduler";
 import {
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
@@ -34,17 +33,17 @@ import {
   type AuthenticatedUser,
 } from "./auth";
 import { gateNovelQuestions } from "./semanticDedupe";
+import type {
+  DeckEmbeddingPlot,
+  DeckEmbeddingPlotPoint,
+  EvaluationPhase,
+  EvaluationQueueItem,
+  QueueStatusSnapshot,
+  ReviewQueueItem,
+} from "./reviewTypes";
 
 export const RESOLVED_JUDGING_VISIBLE_MS = 5 * 60_000;
 const EVALUATION_PROCESSING_TIMEOUT_MS = EVALUATION_TIMEOUT_MS;
-
-type EvaluationPhase =
-  | "queued"
-  | "evaluating-answer"
-  | "saving-evaluation"
-  | "gating-probes"
-  | "saving-probes"
-  | "finalizing";
 
 type Submission = {
   evaluationId: string;
@@ -56,67 +55,6 @@ type Submission = {
   answer: string;
   submittedAt: number;
   previousReviews: string;
-};
-
-export type EvaluationQueueItem = {
-  id: string;
-  traceId: string;
-  question: string;
-  answer: string;
-  status: "grading" | "resolved";
-  phase: EvaluationPhase | null;
-  submittedAt: number;
-  score: number | null;
-  justification: string | null;
-  answerSummary: string | null;
-  resolvedAt: number | null;
-  nextDue: number | null;
-};
-
-export type ReviewQueueItem = {
-  deckId: string;
-  deckName: string;
-  question: string;
-  nextDue: number;
-  createdAt: number;
-  msUntilDue: number;
-  status: "now" | "scheduled";
-  generatedFromQuestion: string | null;
-  reviewHistory: ReviewEntry[];
-  lastScore: number | null;
-  lastAnswer: string | null;
-  lastAnswerSummary: string | null;
-  conciseAnswer: string | null;
-  referenceAnswer: string | null;
-  lastJustification: string | null;
-  attempts: QuestionAttempt[];
-};
-
-export type DeckEmbeddingPlotPoint = {
-  question: string;
-  lastScore: number | null;
-  x: number;
-  y: number;
-};
-
-export type DeckEmbeddingPlot = {
-  model: string | null;
-  totalQuestions: number;
-  embeddedQuestions: number;
-  points: DeckEmbeddingPlotPoint[];
-};
-
-export type QueueStatusSnapshot = {
-  queueRemaining: number;
-  pendingEvaluations: number;
-  evaluations: EvaluationQueueItem[];
-  recentAttempts: QuestionAttempt[];
-  reviewQueue: ReviewQueueItem[];
-  reviewQueueTotal: number;
-  reviewQueueOffset: number;
-  reviewQueueLimit: number;
-  reviewQueueHasMore: boolean;
-  deckEmbeddingPlot: DeckEmbeddingPlot;
 };
 
 type QueueStatusSubscriber = (status: QueueStatusSnapshot) => void;
@@ -233,6 +171,7 @@ export function subscribeQueueStatus(
 
 function createEvaluationItem(input: {
   traceId: string;
+  deckId: string | null;
   question: string;
   answer: string;
   submittedAt: number;
@@ -242,10 +181,12 @@ function createEvaluationItem(input: {
   return {
     id,
     traceId: input.traceId,
+    deckId: input.deckId,
     question: input.question,
     answer: input.answer,
     status: "grading",
     phase: "queued",
+    lastActivityAt: input.submittedAt,
     submittedAt: input.submittedAt,
     score: null,
     justification: null,
@@ -299,7 +240,38 @@ function updateEvaluationPhase(
   }
 
   item.phase = phase;
+  item.lastActivityAt = Date.now();
   void broadcastQueueStatus();
+}
+
+function touchEvaluationActivity(
+  evaluationId: string,
+  phase: EvaluationPhase,
+): boolean {
+  const item = state.evaluations.find(
+    (evaluation) => evaluation.id === evaluationId,
+  );
+
+  if (!item || item.status !== "grading") {
+    return false;
+  }
+
+  const now = Date.now();
+
+  if (item.phase !== phase) {
+    item.phase = phase;
+    item.lastActivityAt = now;
+    void broadcastQueueStatus();
+    return true;
+  }
+
+  if (now - item.lastActivityAt < 1_000) {
+    return false;
+  }
+
+  item.lastActivityAt = now;
+  void broadcastQueueStatus();
+  return true;
 }
 
 function getVisibleEvaluations(now = Date.now()): EvaluationQueueItem[] {
@@ -758,9 +730,47 @@ async function processEvaluation(submission: Submission): Promise<void> {
   let isFinished = false;
   let savedEvaluationResult: EvaluationResult | null = null;
   let savedEvaluationNextDue: number | null = null;
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  const clearWatchdog = () => {
+    if (watchdog !== null) {
+      clearTimeout(watchdog);
+      watchdog = null;
+    }
+  };
+  const resetWatchdog = () => {
+    clearWatchdog();
+    watchdog = setTimeout(() => {
+      if (savedEvaluationResult) {
+        finishEvaluation(savedEvaluationResult, savedEvaluationNextDue, {
+          restoreQuestion: false,
+          logAction: "evaluation-finished-before-enrichment-timeout",
+        });
+        return;
+      }
+
+      finishEvaluation(
+        failedEvaluation(
+          `Evaluation timed out during ${currentPhase} after ${Math.round(
+            EVALUATION_PROCESSING_TIMEOUT_MS / 1000,
+          )}s without evaluator activity.`,
+          submission.answer,
+        ),
+        null,
+        {
+          restoreQuestion: true,
+          logAction: "evaluation-timeout",
+        },
+      );
+    }, EVALUATION_PROCESSING_TIMEOUT_MS);
+  };
   const setPhase = (phase: EvaluationPhase) => {
     currentPhase = phase;
+    resetWatchdog();
     updateEvaluationPhase(submission.evaluationId, phase);
+  };
+  const markActivity = () => {
+    resetWatchdog();
+    touchEvaluationActivity(submission.evaluationId, currentPhase);
   };
   const finishEvaluation = (
     result: EvaluationResult,
@@ -783,7 +793,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
     }
 
     isFinished = true;
-    clearTimeout(watchdog);
+    clearWatchdog();
 
     if (options.restoreQuestion) {
       restoreFailedQuestion(submission.queuedQuestion);
@@ -813,29 +823,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
     void broadcastQueueStatus();
     return true;
   };
-  const watchdog = setTimeout(() => {
-    if (savedEvaluationResult) {
-      finishEvaluation(savedEvaluationResult, savedEvaluationNextDue, {
-        restoreQuestion: false,
-        logAction: "evaluation-finished-before-enrichment-timeout",
-      });
-      return;
-    }
-
-    finishEvaluation(
-      failedEvaluation(
-        `Evaluation timed out during ${currentPhase} after ${Math.round(
-          EVALUATION_PROCESSING_TIMEOUT_MS / 1000,
-        )}s.`,
-        submission.answer,
-      ),
-      null,
-      {
-        restoreQuestion: true,
-        logAction: "evaluation-timeout",
-      },
-    );
-  }, EVALUATION_PROCESSING_TIMEOUT_MS);
+  resetWatchdog();
 
   try {
     setPhase("evaluating-answer");
@@ -846,6 +834,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       userId: submission.userId,
       deckId: submission.deckId,
       traceId: submission.traceId,
+      onActivity: markActivity,
     });
 
     if (isFinished) {
@@ -991,6 +980,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
 
 export async function peekNextQuestion(): Promise<{
   question: string | null;
+  deckId: string | null;
   deckName: string | null;
   queueRemaining: number;
 }>;
@@ -998,6 +988,7 @@ export async function peekNextQuestion(input: {
   excludeQuestion?: string | null;
 }): Promise<{
   question: string | null;
+  deckId: string | null;
   deckName: string | null;
   queueRemaining: number;
 }>;
@@ -1005,6 +996,7 @@ export async function peekNextQuestion(input: {
   excludeQuestion?: string | null;
 } = {}): Promise<{
   question: string | null;
+  deckId: string | null;
   deckName: string | null;
   queueRemaining: number;
 }> {
@@ -1021,6 +1013,7 @@ export async function peekNextQuestion(input: {
 
   return {
     question: nextQuestion?.question ?? null,
+    deckId: nextQuestion?.deckId ?? null,
     deckName: nextQuestion?.deckName ?? null,
     queueRemaining: state.queue.length,
   };
@@ -1030,6 +1023,7 @@ export async function skipQuestion(input: {
   question: string;
 }): Promise<{
   question: string | null;
+  deckId: string | null;
   deckName: string | null;
   queueRemaining: number;
 }> {
@@ -1058,8 +1052,10 @@ export async function submitAnswer(input: {
     queued ?? (await getQuestionSnapshot(input.question, { userId: user.id }));
   const submittedAt = Date.now();
   const traceId = crypto.randomUUID();
+  const deckId = snapshot?.deckId ?? getDeckIdForUser(user.id);
   const evaluation = createEvaluationItem({
     traceId,
+    deckId,
     question: input.question,
     answer: input.answer,
     submittedAt,
@@ -1077,7 +1073,7 @@ export async function submitAnswer(input: {
     question: input.question,
     queuedQuestion: queued,
     userId: snapshot?.userId ?? user.id,
-    deckId: snapshot?.deckId ?? getDeckIdForUser(user.id),
+    deckId,
     answer: input.answer,
     submittedAt,
     previousReviews: snapshot?.reviews ?? "",
@@ -1167,6 +1163,8 @@ export async function queueStatus(input: {
   const recentAttempts = await getRecentQuestionAttempts({
     userId: user.id,
     excludeQuestions: Array.from(state.inFlightQuestions),
+    deckScope: input.deckId ? undefined : "rotation",
+    deckId: input.deckId,
     limit: 24,
   });
   const deckEmbeddingPlot = await getDeckEmbeddingPlot({

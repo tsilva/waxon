@@ -23,6 +23,8 @@ export type OpenRouterChatRequest = {
   temperature?: number;
   max_tokens?: number;
   user?: string;
+  stream?: boolean;
+  stream_options?: unknown;
 };
 
 export type OpenRouterEmbeddingRequest = {
@@ -55,6 +57,7 @@ export type OpenRouterEmbeddingResponse = {
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
+const STREAM_DONE_SENTINEL = "[DONE]";
 
 export function getOpenRouterApiKey(): string | null {
   return process.env.OPENROUTER_API_KEY ?? process.env.LLM_API_KEY ?? null;
@@ -110,19 +113,169 @@ async function parseOpenRouterJson(response: Response): Promise<unknown> {
   }
 }
 
+function extractStreamingDeltaText(chunk: unknown): string {
+  const body = chunk as {
+    choices?: Array<{
+      delta?: {
+        content?: unknown;
+      };
+      message?: {
+        content?: unknown;
+      };
+    }>;
+  };
+  const content =
+    body.choices?.[0]?.delta?.content ?? body.choices?.[0]?.message?.content;
+
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        const candidate = part as { text?: unknown };
+        return typeof candidate.text === "string" ? candidate.text : "";
+      })
+      .join("");
+  }
+
+  return "";
+}
+
+async function parseOpenRouterStream(
+  response: Response,
+  onActivity?: () => void,
+): Promise<OpenRouterChatResponse> {
+  if (!response.body) {
+    return (await parseOpenRouterJson(response)) as OpenRouterChatResponse;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let rawText = "";
+  let content = "";
+  let finalChunk: OpenRouterChatResponse | null = null;
+  let usage: OpenRouterUsage | undefined;
+
+  const parseEvent = (eventText: string) => {
+    const payloads = eventText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim())
+      .filter(Boolean);
+
+    for (const payload of payloads) {
+      if (payload === STREAM_DONE_SENTINEL) {
+        continue;
+      }
+
+      let parsed: OpenRouterChatResponse;
+
+      try {
+        parsed = JSON.parse(payload) as OpenRouterChatResponse;
+      } catch {
+        continue;
+      }
+
+      finalChunk = parsed;
+      usage = parsed.usage ?? usage;
+
+      const deltaText = extractStreamingDeltaText(parsed);
+
+      if (deltaText) {
+        content += deltaText;
+        onActivity?.();
+      }
+    }
+  };
+
+  onActivity?.();
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    onActivity?.();
+    const text = decoder.decode(value, { stream: true });
+    rawText += text;
+    buffer += text;
+
+    let eventBoundary = buffer.indexOf("\n\n");
+
+    while (eventBoundary !== -1) {
+      const eventText = buffer.slice(0, eventBoundary);
+      buffer = buffer.slice(eventBoundary + 2);
+      parseEvent(eventText);
+      eventBoundary = buffer.indexOf("\n\n");
+    }
+  }
+
+  const finalText = decoder.decode();
+  rawText += finalText;
+  buffer += finalText;
+
+  if (buffer.trim()) {
+    parseEvent(buffer);
+  }
+
+  const finalResponseChunk = finalChunk as OpenRouterChatResponse | null;
+
+  if (!finalResponseChunk && rawText.trim()) {
+    try {
+      return JSON.parse(rawText) as OpenRouterChatResponse;
+    } catch {
+      return {
+        choices: [
+          {
+            message: {
+              content: rawText.trim(),
+            },
+          },
+        ],
+      };
+    }
+  }
+
+  return {
+    id: finalResponseChunk?.id,
+    model: finalResponseChunk?.model,
+    choices: [
+      {
+        message: {
+          content,
+        },
+      },
+    ],
+    usage,
+  };
+}
+
 export async function openRouterChatCompletion(input: {
   apiKey: string;
   body: OpenRouterChatRequest;
   signal?: AbortSignal;
   trace: OpenRouterTraceContext;
+  stream?: boolean;
+  onActivity?: () => void;
 }): Promise<{ response: Response; body: OpenRouterChatResponse }> {
   const traceId = input.trace.traceId ?? crypto.randomUUID();
   const trace = {
     ...input.trace,
     userId: input.trace.userId ?? input.body.user ?? null,
   };
+  const shouldStream = input.stream ?? true;
   const body = {
     ...input.body,
+    stream: input.body.stream ?? shouldStream,
+    stream_options:
+      input.body.stream_options ??
+      (shouldStream ? { include_usage: true } : undefined),
     user: input.body.user ?? trace.userId ?? undefined,
     session_id: trace.deckId ?? undefined,
     trace: buildTraceMetadata(trace, traceId),
@@ -142,11 +295,12 @@ export async function openRouterChatCompletion(input: {
       headers: withOpenRouterHeaders(input.apiKey),
       body: JSON.stringify(body),
     });
-    const parsed = (await parseOpenRouterJson(
-      response,
-    )) as OpenRouterChatResponse;
+    const parsed =
+      body.stream && response.ok
+        ? await parseOpenRouterStream(response, input.onActivity)
+        : ((await parseOpenRouterJson(response)) as OpenRouterChatResponse);
 
-    finishLlmTrace(pendingTrace, {
+    await finishLlmTrace(pendingTrace, {
       ok: response.ok,
       responseBody: {
         status: response.status,
@@ -158,7 +312,7 @@ export async function openRouterChatCompletion(input: {
 
     return { response, body: parsed };
   } catch (error) {
-    finishLlmTrace(pendingTrace, {
+    await finishLlmTrace(pendingTrace, {
       ok: false,
       error,
     });
@@ -202,7 +356,7 @@ export async function openRouterEmbeddings(input: {
       response,
     )) as OpenRouterEmbeddingResponse;
 
-    finishLlmTrace(pendingTrace, {
+    await finishLlmTrace(pendingTrace, {
       ok: response.ok,
       responseBody: {
         status: response.status,
@@ -214,7 +368,7 @@ export async function openRouterEmbeddings(input: {
 
     return { response, body: parsed };
   } catch (error) {
-    finishLlmTrace(pendingTrace, {
+    await finishLlmTrace(pendingTrace, {
       ok: false,
       error,
     });

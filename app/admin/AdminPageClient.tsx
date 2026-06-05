@@ -1,6 +1,6 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
+import { useClerk, useUser } from "@clerk/nextjs";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -9,13 +9,17 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
+  LogOut,
   RefreshCw,
   Search,
   SlidersHorizontal,
   User,
+  UserCog,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import type { AuthenticatedUser } from "@/app/lib/auth";
+import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 
 type CallType =
   | "answer_eval"
@@ -746,7 +750,13 @@ export function AdminPageClient({
   selectedTraceId = null,
 }: AdminPageClientProps) {
   const router = useRouter();
+  const clerk = useClerk();
   const { user: clerkUser } = useUser();
+  const isLocalAuth = isLocalTestAuthEnabled();
+  const accountWidgetsCustomPages = useMemo(
+    () => createAccountWidgetsCustomPages(),
+    [],
+  );
   const traceInteractions = useMemo(
     () =>
       initialInteractions.length > 0
@@ -760,6 +770,8 @@ export function AdminPageClient({
     clerkUser?.username ||
     currentUser.displayName ||
     currentUser.email;
+  const menuEmail =
+    clerkUser?.primaryEmailAddress?.emailAddress || currentUser.email;
   const latestDate = useMemo(
     () =>
       traceInteractions.length > 0
@@ -789,6 +801,8 @@ export function AdminPageClient({
   const [selectedCallId, setSelectedCallId] = useState<string | null>(
     selectedTraceId,
   );
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const closeTracePanel = useCallback(() => {
     setSelectedCallId(null);
@@ -890,6 +904,40 @@ export function AdminPageClient({
   }, [selectedTraceId]);
 
   useEffect(() => {
+    if (!isUserMenuOpen) {
+      return;
+    }
+
+    function closeUserMenu(event: globalThis.MouseEvent | globalThis.TouchEvent) {
+      const target = event.target;
+
+      if (
+        target instanceof Node &&
+        userMenuRef.current &&
+        !userMenuRef.current.contains(target)
+      ) {
+        setIsUserMenuOpen(false);
+      }
+    }
+
+    function closeUserMenuOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsUserMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("mousedown", closeUserMenu);
+    window.addEventListener("touchstart", closeUserMenu);
+    window.addEventListener("keydown", closeUserMenuOnEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", closeUserMenu);
+      window.removeEventListener("touchstart", closeUserMenu);
+      window.removeEventListener("keydown", closeUserMenuOnEscape);
+    };
+  }, [isUserMenuOpen]);
+
+  useEffect(() => {
     if (!selectedCallContext) {
       return;
     }
@@ -953,12 +1001,18 @@ export function AdminPageClient({
 
           <div className="reader-actions">
             <span className="queue-summary">149 due</span>
-            <div className="user-menu">
+            <div className="user-menu" ref={userMenuRef}>
               <button
-                className="user-menu-trigger"
+                className={`user-menu-trigger ${
+                  isUserMenuOpen ? "user-menu-trigger-active" : ""
+                }`}
                 type="button"
-                aria-label="User menu"
-                title={menuLabel}
+                aria-label="Open user menu"
+                aria-haspopup="menu"
+                aria-expanded={isUserMenuOpen}
+                aria-controls="user-menu-panel"
+                title="User menu"
+                onClick={() => setIsUserMenuOpen((isOpen) => !isOpen)}
               >
                 {menuAvatarUrl ? (
                   <span
@@ -970,6 +1024,66 @@ export function AdminPageClient({
                   <User aria-hidden="true" />
                 )}
               </button>
+              {isUserMenuOpen ? (
+                <div
+                  className="user-menu-panel"
+                  id="user-menu-panel"
+                  role="menu"
+                  aria-label="User menu"
+                >
+                  <div className="user-menu-account">
+                    {menuAvatarUrl ? (
+                      <span
+                        className="user-menu-account-avatar"
+                        aria-hidden="true"
+                        style={{ backgroundImage: `url("${menuAvatarUrl}")` }}
+                      />
+                    ) : (
+                      <span className="user-menu-account-avatar" aria-hidden="true">
+                        <User aria-hidden="true" />
+                      </span>
+                    )}
+                    <div>
+                      <strong>{menuLabel}</strong>
+                      {menuEmail ? <span>{menuEmail}</span> : null}
+                    </div>
+                  </div>
+                  <button
+                    className="user-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      if (isLocalAuth) {
+                        router.push("/review");
+                      } else {
+                        clerk.openUserProfile({
+                          customPages: accountWidgetsCustomPages,
+                        });
+                      }
+                    }}
+                  >
+                    <UserCog aria-hidden="true" />
+                    <span>Manage accounts</span>
+                  </button>
+                  <button
+                    className="user-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      if (isLocalAuth) {
+                        window.location.assign("/");
+                      } else {
+                        void clerk.signOut({ redirectUrl: "/" });
+                      }
+                    }}
+                  >
+                    <LogOut aria-hidden="true" />
+                    <span>Sign out</span>
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </header>

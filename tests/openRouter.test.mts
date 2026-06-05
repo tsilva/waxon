@@ -18,6 +18,7 @@ test("openRouterChatCompletion sends user and deck trace identifiers", async () 
   try {
     await openRouterChatCompletion({
       apiKey: "test-key",
+      stream: false,
       trace: {
         operation: "test_operation",
         userId: "user-123",
@@ -98,6 +99,7 @@ test("openRouterChatCompletion mirrors body user into trace metadata", async () 
   try {
     await openRouterChatCompletion({
       apiKey: "test-key",
+      stream: false,
       trace: {
         operation: "test_operation",
       },
@@ -140,6 +142,7 @@ test("openRouterChatCompletion records actual request and response payloads", as
   try {
     await openRouterChatCompletion({
       apiKey: "test-key",
+      stream: false,
       trace: {
         operation: "evaluate_answer",
         userId: "user-recording",
@@ -156,7 +159,7 @@ test("openRouterChatCompletion records actual request and response payloads", as
     globalThis.fetch = originalFetch;
   }
 
-  const trace = listLlmTraceInteractions().find(
+  const trace = (await listLlmTraceInteractions()).find(
     (candidate) => candidate.id === traceId,
   );
 
@@ -166,4 +169,73 @@ test("openRouterChatCompletion records actual request and response payloads", as
   assert.equal(trace.calls[0]?.inputTokens, 12);
   assert.match(trace.calls[0]?.requestPayload ?? "", /hello/);
   assert.match(trace.calls[0]?.responsePayload ?? "", /prompt_tokens/);
+});
+
+test("openRouterChatCompletion streams text chunks and reports activity", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Record<string, unknown>[] = [];
+  let activityCount = 0;
+  const encoder = new TextEncoder();
+
+  globalThis.fetch = async (_url, init) => {
+    requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [{ delta: { content: "{\"score\"" } }],
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [{ delta: { content: ":10}" } }],
+                usage: {
+                  prompt_tokens: 8,
+                  completion_tokens: 4,
+                  total_tokens: 12,
+                },
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+        },
+      },
+    );
+  };
+
+  try {
+    const { body } = await openRouterChatCompletion({
+      apiKey: "test-key",
+      onActivity: () => {
+        activityCount += 1;
+      },
+      trace: {
+        operation: "test_streaming",
+      },
+      body: {
+        model: "test-model",
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+
+    assert.equal(requestBodies[0]?.stream, true);
+    assert.deepEqual(requestBodies[0]?.stream_options, { include_usage: true });
+    assert.equal(body.choices?.[0]?.message?.content, "{\"score\":10}");
+    assert.equal(body.usage?.completion_tokens, 4);
+    assert.ok(activityCount >= 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

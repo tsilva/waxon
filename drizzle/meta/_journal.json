@@ -71,6 +71,13 @@
       "when": 1780669300000,
       "tag": "0009_deck_archive",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1780692642836,
+      "tag": "0011_llm_trace_interactions",
+      "breakpoints": true
     }
   ]
 }

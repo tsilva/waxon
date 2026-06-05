@@ -4,6 +4,7 @@ import {
   openRouterChatCompletion,
   type OpenRouterTraceContext,
 } from "./openRouter";
+import { extractJsonObject } from "./jsonObject";
 
 export type ConciseAnswerInput = {
   id: string;
@@ -16,6 +17,12 @@ export type ConciseAnswerResult = ConciseAnswerInput & {
 
 const CONCISE_ANSWER_TIMEOUT_MS = 25_000;
 const MAX_CONCISE_ANSWER_CHARS = 320;
+const CONCISE_ANSWER_SYSTEM_PROMPT = [
+  "Generate concise expected answers for flashcard questions.",
+  "Each answer is used for semantic duplicate detection, not as an explanation.",
+  "Keep each answer factual, direct, and as short as possible while preserving the recall target.",
+  "Return strict JSON: {\"answers\":[{\"id\":\"...\",\"conciseAnswer\":\"...\"}]}",
+].join("\n\n");
 
 function normalizeConciseAnswer(value: unknown): string {
   if (typeof value !== "string") {
@@ -23,20 +30,6 @@ function normalizeConciseAnswer(value: unknown): string {
   }
 
   return value.trim().replace(/\s+/g, " ").slice(0, MAX_CONCISE_ANSWER_CHARS);
-}
-
-function extractJsonObject(source: string): unknown {
-  try {
-    return JSON.parse(source);
-  } catch {
-    const match = source.match(/\{[\s\S]*\}/);
-
-    if (!match) {
-      throw new Error("Model did not return JSON.");
-    }
-
-    return JSON.parse(match[0]);
-  }
 }
 
 export async function generateConciseAnswers(
@@ -76,12 +69,12 @@ export async function generateConciseAnswers(
         max_tokens: Math.min(4096, 140 * input.length + 400),
         messages: [
           {
+            role: "system",
+            content: CONCISE_ANSWER_SYSTEM_PROMPT,
+          },
+          {
             role: "user",
             content: [
-              "Generate concise expected answers for flashcard questions.",
-              "Each answer is used for semantic duplicate detection, not as an explanation.",
-              "Keep each answer factual, direct, and as short as possible while preserving the recall target.",
-              "Return strict JSON: {\"answers\":[{\"id\":\"...\",\"conciseAnswer\":\"...\"}]}",
               "Questions:",
               JSON.stringify(
                 input.map((item) => ({

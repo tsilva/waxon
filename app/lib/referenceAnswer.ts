@@ -18,10 +18,7 @@ export function hasReferenceAnswerExplanation(answer: string): boolean {
   return REFERENCE_ANSWER_EXPLANATION_PATTERN.test(answer);
 }
 
-function buildPrompt(input: ReferenceAnswerInput): string {
-  return `Answer this flashcard as a concise reference answer with a brief explanation.
-
-Question: ${input.question}
+const REFERENCE_ANSWER_SYSTEM_PROMPT = `Answer flashcards as concise reference answers with brief explanations.
 
 Return both sections using exactly these Markdown labels:
 - **Answer:** the direct answer.
@@ -29,6 +26,9 @@ Return both sections using exactly these Markdown labels:
 
 Keep the total response direct, accurate, and no longer than five sentences.
 Use Markdown when it improves readability. Use inline math as $...$ and display equations as $$...$$.`;
+
+function buildUserPrompt(input: ReferenceAnswerInput): string {
+  return `Question: ${input.question}`;
 }
 
 export async function generateReferenceAnswer(
@@ -60,8 +60,12 @@ export async function generateReferenceAnswer(
         model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
         messages: [
           {
+            role: "system",
+            content: REFERENCE_ANSWER_SYSTEM_PROMPT,
+          },
+          {
             role: "user",
-            content: buildPrompt(input),
+            content: buildUserPrompt(input),
           },
         ],
         temperature: 0,
@@ -70,12 +74,23 @@ export async function generateReferenceAnswer(
     });
 
     if (!response.ok) {
+      console.info("[waxon] reference answer request failed", {
+        provider: "openrouter",
+        model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+        status: response.status,
+        statusText: response.statusText,
+      });
       return "Reference answer is unavailable right now.";
     }
 
     const answer = extractChatCompletionText(body);
     return answer || "Reference answer is unavailable right now.";
-  } catch {
+  } catch (error) {
+    console.info("[waxon] reference answer request failed", {
+      provider: "openrouter",
+      model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+      error: error instanceof Error ? error.message : "unknown error",
+    });
     return "Reference answer is unavailable right now.";
   } finally {
     clearTimeout(timeout);

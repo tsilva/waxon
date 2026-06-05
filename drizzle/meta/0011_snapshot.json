@@ -1,0 +1,1385 @@
+{
+  "id": "934e21ef-907f-4bd5-85fe-e5bf71346f3a",
+  "prevId": "64cbed60-6fac-4a8d-9c0d-eaf4e701b786",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.auth_accounts": {
+      "name": "auth_accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_account_id": {
+          "name": "provider_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        }
+      },
+      "indexes": {
+        "auth_accounts_provider_account_idx": {
+          "name": "auth_accounts_provider_account_idx",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "auth_accounts_user_id_idx": {
+          "name": "auth_accounts_user_id_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "auth_accounts_user_id_users_id_fk": {
+          "name": "auth_accounts_user_id_users_id_fk",
+          "tableFrom": "auth_accounts",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "auth_accounts_provider_nonempty_check": {
+          "name": "auth_accounts_provider_nonempty_check",
+          "value": "length(trim(\"auth_accounts\".\"provider\")) > 0"
+        },
+        "auth_accounts_provider_account_id_nonempty_check": {
+          "name": "auth_accounts_provider_account_id_nonempty_check",
+          "value": "length(trim(\"auth_accounts\".\"provider_account_id\")) > 0"
+        },
+        "auth_accounts_created_at_check": {
+          "name": "auth_accounts_created_at_check",
+          "value": "\"auth_accounts\".\"created_at\" >= 0"
+        },
+        "auth_accounts_updated_at_check": {
+          "name": "auth_accounts_updated_at_check",
+          "value": "\"auth_accounts\".\"updated_at\" >= \"auth_accounts\".\"created_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.decks": {
+      "name": "decks",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "in_review_rotation": {
+          "name": "in_review_rotation",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        }
+      },
+      "indexes": {
+        "decks_user_slug_idx": {
+          "name": "decks_user_slug_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "decks_user_id_users_id_fk": {
+          "name": "decks_user_id_users_id_fk",
+          "tableFrom": "decks",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "decks_id_nonempty_check": {
+          "name": "decks_id_nonempty_check",
+          "value": "length(trim(\"decks\".\"id\")) > 0"
+        },
+        "decks_name_nonempty_check": {
+          "name": "decks_name_nonempty_check",
+          "value": "length(trim(\"decks\".\"name\")) > 0"
+        },
+        "decks_slug_nonempty_check": {
+          "name": "decks_slug_nonempty_check",
+          "value": "length(trim(\"decks\".\"slug\")) > 0"
+        },
+        "decks_created_at_check": {
+          "name": "decks_created_at_check",
+          "value": "\"decks\".\"created_at\" >= 0"
+        },
+        "decks_updated_at_check": {
+          "name": "decks_updated_at_check",
+          "value": "\"decks\".\"updated_at\" >= \"decks\".\"created_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.llm_trace_interactions": {
+      "name": "llm_trace_interactions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "calls": {
+          "name": "calls",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        }
+      },
+      "indexes": {
+        "llm_trace_interactions_started_at_idx": {
+          "name": "llm_trace_interactions_started_at_idx",
+          "columns": [
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "llm_trace_interactions_id_nonempty_check": {
+          "name": "llm_trace_interactions_id_nonempty_check",
+          "value": "length(trim(\"llm_trace_interactions\".\"id\")) > 0"
+        },
+        "llm_trace_interactions_title_nonempty_check": {
+          "name": "llm_trace_interactions_title_nonempty_check",
+          "value": "length(trim(\"llm_trace_interactions\".\"title\")) > 0"
+        },
+        "llm_trace_interactions_kind_check": {
+          "name": "llm_trace_interactions_kind_check",
+          "value": "\"llm_trace_interactions\".\"kind\" IN ('Answer submitted', 'Question generation', 'Reference answer')"
+        },
+        "llm_trace_interactions_status_check": {
+          "name": "llm_trace_interactions_status_check",
+          "value": "\"llm_trace_interactions\".\"status\" IN ('ok', 'pending', 'error')"
+        },
+        "llm_trace_interactions_started_at_check": {
+          "name": "llm_trace_interactions_started_at_check",
+          "value": "\"llm_trace_interactions\".\"started_at\" >= 0"
+        },
+        "llm_trace_interactions_updated_at_check": {
+          "name": "llm_trace_interactions_updated_at_check",
+          "value": "\"llm_trace_interactions\".\"updated_at\" >= \"llm_trace_interactions\".\"started_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.question_attempts": {
+      "name": "question_attempts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "deck_id": {
+          "name": "deck_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question": {
+          "name": "question",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "raw_answer": {
+          "name": "raw_answer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "answer_summary": {
+          "name": "answer_summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "score": {
+          "name": "score",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "justification": {
+          "name": "justification",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "submitted_at": {
+          "name": "submitted_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "question_attempts_deck_question_submitted_idx": {
+          "name": "question_attempts_deck_question_submitted_idx",
+          "columns": [
+            {
+              "expression": "deck_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "question",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "submitted_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "question_attempts_question_id_submitted_idx": {
+          "name": "question_attempts_question_id_submitted_idx",
+          "columns": [
+            {
+              "expression": "question_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "submitted_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "question_attempts_deck_id_decks_id_fk": {
+          "name": "question_attempts_deck_id_decks_id_fk",
+          "tableFrom": "question_attempts",
+          "tableTo": "decks",
+          "columnsFrom": [
+            "deck_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "question_attempts_question_id_questions_id_fk": {
+          "name": "question_attempts_question_id_questions_id_fk",
+          "tableFrom": "question_attempts",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "question_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "question_attempts_deck_question_id_fk": {
+          "name": "question_attempts_deck_question_id_fk",
+          "tableFrom": "question_attempts",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "deck_id",
+            "question_id"
+          ],
+          "columnsTo": [
+            "deck_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "question_attempts_question_id_question_fk": {
+          "name": "question_attempts_question_id_question_fk",
+          "tableFrom": "question_attempts",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "question_id",
+            "question"
+          ],
+          "columnsTo": [
+            "id",
+            "question"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "question_attempts_score_check": {
+          "name": "question_attempts_score_check",
+          "value": "\"question_attempts\".\"score\" BETWEEN 0 AND 10"
+        },
+        "question_attempts_submitted_at_check": {
+          "name": "question_attempts_submitted_at_check",
+          "value": "\"question_attempts\".\"submitted_at\" >= 0"
+        },
+        "question_attempts_resolved_at_check": {
+          "name": "question_attempts_resolved_at_check",
+          "value": "\"question_attempts\".\"resolved_at\" >= \"question_attempts\".\"submitted_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.question_embeddings": {
+      "name": "question_embeddings",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "deck_id": {
+          "name": "deck_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question": {
+          "name": "question",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding_model": {
+          "name": "embedding_model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding_kind": {
+          "name": "embedding_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'question_only'"
+        },
+        "source_version": {
+          "name": "source_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "source_hash": {
+          "name": "source_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "is_current": {
+          "name": "is_current",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "vector(3072)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        }
+      },
+      "indexes": {
+        "question_embeddings_current_source_idx": {
+          "name": "question_embeddings_current_source_idx",
+          "columns": [
+            {
+              "expression": "deck_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "question_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "embedding_model",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "embedding_kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "source_version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "question_embeddings_lookup_idx": {
+          "name": "question_embeddings_lookup_idx",
+          "columns": [
+            {
+              "expression": "deck_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "embedding_model",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "embedding_kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "source_version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "is_current",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "question_embeddings_question_lookup_idx": {
+          "name": "question_embeddings_question_lookup_idx",
+          "columns": [
+            {
+              "expression": "question_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "embedding_model",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "embedding_kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "question_embeddings_question_text_lookup_idx": {
+          "name": "question_embeddings_question_text_lookup_idx",
+          "columns": [
+            {
+              "expression": "question",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "embedding_model",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "embedding_kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "question_embeddings_deck_id_decks_id_fk": {
+          "name": "question_embeddings_deck_id_decks_id_fk",
+          "tableFrom": "question_embeddings",
+          "tableTo": "decks",
+          "columnsFrom": [
+            "deck_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "question_embeddings_question_id_questions_id_fk": {
+          "name": "question_embeddings_question_id_questions_id_fk",
+          "tableFrom": "question_embeddings",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "question_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "question_embeddings_deck_question_id_fk": {
+          "name": "question_embeddings_deck_question_id_fk",
+          "tableFrom": "question_embeddings",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "deck_id",
+            "question_id"
+          ],
+          "columnsTo": [
+            "deck_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "question_embeddings_question_id_question_fk": {
+          "name": "question_embeddings_question_id_question_fk",
+          "tableFrom": "question_embeddings",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "question_id",
+            "question"
+          ],
+          "columnsTo": [
+            "id",
+            "question"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "question_embeddings_model_nonempty_check": {
+          "name": "question_embeddings_model_nonempty_check",
+          "value": "length(trim(\"question_embeddings\".\"embedding_model\")) > 0"
+        },
+        "question_embeddings_kind_nonempty_check": {
+          "name": "question_embeddings_kind_nonempty_check",
+          "value": "length(trim(\"question_embeddings\".\"embedding_kind\")) > 0"
+        },
+        "question_embeddings_source_version_check": {
+          "name": "question_embeddings_source_version_check",
+          "value": "\"question_embeddings\".\"source_version\" > 0"
+        },
+        "question_embeddings_source_hash_check": {
+          "name": "question_embeddings_source_hash_check",
+          "value": "length(\"question_embeddings\".\"source_hash\") <= 128"
+        },
+        "question_embeddings_created_at_check": {
+          "name": "question_embeddings_created_at_check",
+          "value": "\"question_embeddings\".\"created_at\" >= 0"
+        },
+        "question_embeddings_updated_at_check": {
+          "name": "question_embeddings_updated_at_check",
+          "value": "\"question_embeddings\".\"updated_at\" >= \"question_embeddings\".\"created_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.question_reviews": {
+      "name": "question_reviews",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "attempt_id": {
+          "name": "attempt_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deck_id": {
+          "name": "deck_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question": {
+          "name": "question",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "score": {
+          "name": "score",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "submitted_at": {
+          "name": "submitted_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        }
+      },
+      "indexes": {
+        "question_reviews_deck_question_submitted_idx": {
+          "name": "question_reviews_deck_question_submitted_idx",
+          "columns": [
+            {
+              "expression": "deck_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "question",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "submitted_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "question_reviews_question_id_submitted_idx": {
+          "name": "question_reviews_question_id_submitted_idx",
+          "columns": [
+            {
+              "expression": "question_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "submitted_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "question_reviews_question_id_resolved_idx": {
+          "name": "question_reviews_question_id_resolved_idx",
+          "columns": [
+            {
+              "expression": "question_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "resolved_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "question_reviews_attempt_id_question_attempts_id_fk": {
+          "name": "question_reviews_attempt_id_question_attempts_id_fk",
+          "tableFrom": "question_reviews",
+          "tableTo": "question_attempts",
+          "columnsFrom": [
+            "attempt_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "question_reviews_deck_id_decks_id_fk": {
+          "name": "question_reviews_deck_id_decks_id_fk",
+          "tableFrom": "question_reviews",
+          "tableTo": "decks",
+          "columnsFrom": [
+            "deck_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "question_reviews_question_id_questions_id_fk": {
+          "name": "question_reviews_question_id_questions_id_fk",
+          "tableFrom": "question_reviews",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "question_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "question_reviews_deck_question_id_fk": {
+          "name": "question_reviews_deck_question_id_fk",
+          "tableFrom": "question_reviews",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "deck_id",
+            "question_id"
+          ],
+          "columnsTo": [
+            "deck_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "question_reviews_question_id_question_fk": {
+          "name": "question_reviews_question_id_question_fk",
+          "tableFrom": "question_reviews",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "question_id",
+            "question"
+          ],
+          "columnsTo": [
+            "id",
+            "question"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "question_reviews_attempt_id_unique": {
+          "name": "question_reviews_attempt_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "attempt_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "question_reviews_score_check": {
+          "name": "question_reviews_score_check",
+          "value": "\"question_reviews\".\"score\" BETWEEN 0 AND 10"
+        },
+        "question_reviews_submitted_at_check": {
+          "name": "question_reviews_submitted_at_check",
+          "value": "\"question_reviews\".\"submitted_at\" >= 0"
+        },
+        "question_reviews_resolved_at_check": {
+          "name": "question_reviews_resolved_at_check",
+          "value": "\"question_reviews\".\"resolved_at\" >= \"question_reviews\".\"submitted_at\""
+        },
+        "question_reviews_created_at_check": {
+          "name": "question_reviews_created_at_check",
+          "value": "\"question_reviews\".\"created_at\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.questions": {
+      "name": "questions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "question": {
+          "name": "question",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_slug": {
+          "name": "question_slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deck_id": {
+          "name": "deck_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reviews": {
+          "name": "reviews",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "next_due": {
+          "name": "next_due",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "generated_from_question": {
+          "name": "generated_from_question",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_answer": {
+          "name": "last_answer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "last_answer_summary": {
+          "name": "last_answer_summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "concise_answer": {
+          "name": "concise_answer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "reference_answer": {
+          "name": "reference_answer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        }
+      },
+      "indexes": {
+        "questions_deck_question_slug_idx": {
+          "name": "questions_deck_question_slug_idx",
+          "columns": [
+            {
+              "expression": "deck_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "question_slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "questions_deck_next_due_idx": {
+          "name": "questions_deck_next_due_idx",
+          "columns": [
+            {
+              "expression": "deck_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "next_due",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "questions_deck_id_decks_id_fk": {
+          "name": "questions_deck_id_decks_id_fk",
+          "tableFrom": "questions",
+          "tableTo": "decks",
+          "columnsFrom": [
+            "deck_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "questions_deck_generated_from_question_fk": {
+          "name": "questions_deck_generated_from_question_fk",
+          "tableFrom": "questions",
+          "tableTo": "questions",
+          "columnsFrom": [
+            "deck_id",
+            "generated_from_question"
+          ],
+          "columnsTo": [
+            "deck_id",
+            "question"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "questions_deck_id_unique": {
+          "name": "questions_deck_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "deck_id",
+            "id"
+          ]
+        },
+        "questions_id_question_unique": {
+          "name": "questions_id_question_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "question"
+          ]
+        },
+        "questions_deck_question_unique": {
+          "name": "questions_deck_question_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "deck_id",
+            "question"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "questions_question_nonempty_check": {
+          "name": "questions_question_nonempty_check",
+          "value": "length(trim(\"questions\".\"question\")) > 0"
+        },
+        "questions_question_slug_nonempty_check": {
+          "name": "questions_question_slug_nonempty_check",
+          "value": "length(trim(\"questions\".\"question_slug\")) > 0"
+        },
+        "questions_next_due_check": {
+          "name": "questions_next_due_check",
+          "value": "\"questions\".\"next_due\" >= 0"
+        },
+        "questions_reviews_format_check": {
+          "name": "questions_reviews_format_check",
+          "value": "\"questions\".\"reviews\" = '' OR \"questions\".\"reviews\" ~ '^[0-9]+:(10|[0-9])(\\|[0-9]+:(10|[0-9]))*$'"
+        },
+        "questions_created_at_check": {
+          "name": "questions_created_at_check",
+          "value": "\"questions\".\"created_at\" >= 0"
+        },
+        "questions_updated_at_check": {
+          "name": "questions_updated_at_check",
+          "value": "\"questions\".\"updated_at\" >= \"questions\".\"created_at\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.users": {
+      "name": "users",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "avatar_url": {
+          "name": "avatar_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(extract(epoch from now()) * 1000)::bigint"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "users_id_nonempty_check": {
+          "name": "users_id_nonempty_check",
+          "value": "length(trim(\"users\".\"id\")) > 0"
+        },
+        "users_display_name_nonempty_check": {
+          "name": "users_display_name_nonempty_check",
+          "value": "length(trim(\"users\".\"display_name\")) > 0"
+        },
+        "users_email_nonempty_check": {
+          "name": "users_email_nonempty_check",
+          "value": "length(trim(\"users\".\"email\")) > 0"
+        },
+        "users_avatar_url_check": {
+          "name": "users_avatar_url_check",
+          "value": "\"users\".\"avatar_url\" IS NULL OR (\n        length(\"users\".\"avatar_url\") <= 700000\n        AND \"users\".\"avatar_url\" ~ '^data:image/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$'\n      )"
+        },
+        "users_created_at_check": {
+          "name": "users_created_at_check",
+          "value": "\"users\".\"created_at\" >= 0"
+        },
+        "users_updated_at_check": {
+          "name": "users_updated_at_check",
+          "value": "\"users\".\"updated_at\" >= \"users\".\"created_at\""
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
