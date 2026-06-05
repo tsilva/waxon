@@ -1,13 +1,16 @@
 "use client";
 
+import { useClerk, useUser } from "@clerk/nextjs";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { isAdminEmail } from "@/app/lib/adminAccess";
 import {
   ArrowUp,
   Check,
   ChevronDown,
   FileText,
+  LogOut,
   Mic,
   Plus,
   Settings,
@@ -16,6 +19,7 @@ import {
   Trash2,
   Upload,
   User,
+  UserCog,
   X,
 } from "lucide-react";
 import {
@@ -830,6 +834,14 @@ function SettingsIcon() {
   return <Settings aria-hidden="true" />;
 }
 
+function ManageAccountIcon() {
+  return <UserCog aria-hidden="true" />;
+}
+
+function SignOutIcon() {
+  return <LogOut aria-hidden="true" />;
+}
+
 function UploadIcon() {
   return <Upload aria-hidden="true" />;
 }
@@ -1165,6 +1177,8 @@ export default function ReviewApp({
   initialActiveTab = "review",
 }: ReviewAppProps) {
   const router = useRouter();
+  const clerk = useClerk();
+  const { user: clerkUser } = useUser();
   const [question, setQuestion] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
   const [speechPreview, setSpeechPreview] = useState("");
@@ -1200,6 +1214,15 @@ export default function ReviewApp({
   const [currentUser, setCurrentUser] = useState<UserProfileResponse | null>(null);
   const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
+  const canViewAdmin = isAdminEmail(currentUser?.email);
+  const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
+  const menuDisplayName =
+    clerkUser?.fullName ||
+    clerkUser?.username ||
+    currentUser?.displayName ||
+    "Account";
+  const menuEmail =
+    clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
   const [generatorScope, setGeneratorScope] = useState("");
   const [generatorQuestionCount, setGeneratorQuestionCount] = useState(12);
   const [generatorFiles, setGeneratorFiles] = useState<GeneratorContextFile[]>([]);
@@ -2547,14 +2570,16 @@ export default function ReviewApp({
               >
                 Queue
               </Link>
-              <Link
-                className="reader-tab"
-                href="/admin"
-                role="tab"
-                aria-selected="false"
-              >
-                Admin
-              </Link>
+              {canViewAdmin ? (
+                <Link
+                  className="reader-tab"
+                  href="/admin"
+                  role="tab"
+                  aria-selected="false"
+                >
+                  Admin
+                </Link>
+              ) : null}
             </div>
           </div>
 
@@ -2575,15 +2600,11 @@ export default function ReviewApp({
                 title="User menu"
                 onClick={() => setIsUserMenuOpen((isOpen) => !isOpen)}
               >
-                {currentUser?.avatarUrl ? (
-                  <Image
+                {menuAvatarUrl ? (
+                  <span
                     className="user-avatar-image"
-                    src={currentUser.avatarUrl}
-                    alt=""
                     aria-hidden="true"
-                    width={42}
-                    height={42}
-                    unoptimized
+                    style={{ backgroundImage: `url("${menuAvatarUrl}")` }}
                   />
                 ) : (
                   <UserIcon />
@@ -2596,6 +2617,23 @@ export default function ReviewApp({
                   role="menu"
                   aria-label="User menu"
                 >
+                  <div className="user-menu-account">
+                    {menuAvatarUrl ? (
+                      <span
+                        className="user-menu-account-avatar"
+                        aria-hidden="true"
+                        style={{ backgroundImage: `url("${menuAvatarUrl}")` }}
+                      />
+                    ) : (
+                      <span className="user-menu-account-avatar" aria-hidden="true">
+                        <UserIcon />
+                      </span>
+                    )}
+                    <div>
+                      <strong>{menuDisplayName}</strong>
+                      {menuEmail ? <span>{menuEmail}</span> : null}
+                    </div>
+                  </div>
                   <button
                     className="user-menu-item"
                     type="button"
@@ -2608,6 +2646,30 @@ export default function ReviewApp({
                   >
                     <SettingsIcon />
                     <span>Settings</span>
+                  </button>
+                  <button
+                    className="user-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      clerk.openUserProfile();
+                    }}
+                  >
+                    <ManageAccountIcon />
+                    <span>Manage account</span>
+                  </button>
+                  <button
+                    className="user-menu-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      void clerk.signOut({ redirectUrl: "/" });
+                    }}
+                  >
+                    <SignOutIcon />
+                    <span>Sign out</span>
                   </button>
                 </div>
               ) : null}
@@ -3292,14 +3354,10 @@ export default function ReviewApp({
 
             <div className="settings-profile">
               <div className="settings-avatar-preview" aria-hidden="true">
-                {currentUser?.avatarUrl ? (
-                  <Image
+                {menuAvatarUrl ? (
+                  <span
                     className="settings-avatar-image"
-                    src={currentUser.avatarUrl}
-                    alt=""
-                    width={88}
-                    height={88}
-                    unoptimized
+                    style={{ backgroundImage: `url("${menuAvatarUrl}")` }}
                   />
                 ) : (
                   <UserIcon />
