@@ -33,6 +33,15 @@ import {
 import { gateNovelQuestions } from "./semanticDedupe";
 
 export const RESOLVED_JUDGING_VISIBLE_MS = 10_000;
+const EVALUATION_PROCESSING_TIMEOUT_MS = 90_000;
+
+type EvaluationPhase =
+  | "queued"
+  | "evaluating-answer"
+  | "saving-evaluation"
+  | "gating-probes"
+  | "saving-probes"
+  | "finalizing";
 
 type Submission = {
   evaluationId: string;
@@ -50,6 +59,7 @@ export type EvaluationQueueItem = {
   question: string;
   answer: string;
   status: "grading" | "resolved";
+  phase: EvaluationPhase | null;
   submittedAt: number;
   score: number | null;
   justification: string | null;
@@ -220,6 +230,7 @@ function createEvaluationItem(input: {
     question: input.question,
     answer: input.answer,
     status: "grading",
+    phase: "queued",
     submittedAt: input.submittedAt,
     score: null,
     justification: null,
@@ -243,6 +254,7 @@ function resolveEvaluationItem(
   }
 
   item.status = "resolved";
+  item.phase = null;
   item.score = result.score;
   item.justification = result.justification;
   item.answerSummary = result.answerSummary;
@@ -257,6 +269,22 @@ function resolveEvaluationItem(
       resolvedAt: item.resolvedAt,
     };
   }
+}
+
+function updateEvaluationPhase(
+  evaluationId: string,
+  phase: EvaluationPhase,
+): void {
+  const item = state.evaluations.find(
+    (evaluation) => evaluation.id === evaluationId,
+  );
+
+  if (!item || item.status !== "grading" || item.phase === phase) {
+    return;
+  }
+
+  item.phase = phase;
+  void broadcastQueueStatus();
 }
 
 function getVisibleEvaluations(now = Date.now()): EvaluationQueueItem[] {
@@ -681,7 +709,82 @@ function enqueueProbingQuestions(probingQuestions: DueQuestion[]): void {
 }
 
 async function processEvaluation(submission: Submission): Promise<void> {
+  const startedAt = Date.now();
+  let currentPhase: EvaluationPhase = "queued";
+  let isFinished = false;
+  const setPhase = (phase: EvaluationPhase) => {
+    currentPhase = phase;
+    updateEvaluationPhase(submission.evaluationId, phase);
+  };
+  const finishEvaluation = (
+    result: EvaluationResult,
+    nextDue: number | null,
+    options: {
+      restoreQuestion: boolean;
+      logAction: string;
+      error?: unknown;
+    },
+  ) => {
+    if (isFinished) {
+      console.info("[waxon] late evaluation completion ignored", {
+        action: options.logAction,
+        evaluationId: submission.evaluationId,
+        question: submission.question,
+        phase: currentPhase,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return false;
+    }
+
+    isFinished = true;
+    clearTimeout(watchdog);
+
+    if (options.restoreQuestion) {
+      restoreFailedQuestion(submission.queuedQuestion);
+    }
+
+    if (options.error !== undefined || result.status === "failed") {
+      console.info("[waxon] evaluation resolved without grading", {
+        action: options.logAction,
+        evaluationId: submission.evaluationId,
+        question: submission.question,
+        phase: currentPhase,
+        elapsedMs: Date.now() - startedAt,
+        reason: result.justification,
+        error:
+          options.error instanceof Error
+            ? options.error.message
+            : options.error === undefined
+              ? undefined
+              : "unknown error",
+      });
+    }
+
+    resolveEvaluationItem(submission.evaluationId, result, nextDue);
+    state.pendingEvaluations = Math.max(0, state.pendingEvaluations - 1);
+    state.inFlightQuestions.delete(submission.question);
+    logQueueFlushStatus(options.logAction);
+    void broadcastQueueStatus();
+    return true;
+  };
+  const watchdog = setTimeout(() => {
+    finishEvaluation(
+      failedEvaluation(
+        `Evaluation timed out during ${currentPhase} after ${Math.round(
+          EVALUATION_PROCESSING_TIMEOUT_MS / 1000,
+        )}s.`,
+        submission.answer,
+      ),
+      null,
+      {
+        restoreQuestion: true,
+        logAction: "evaluation-timeout",
+      },
+    );
+  }, EVALUATION_PROCESSING_TIMEOUT_MS);
+
   try {
+    setPhase("evaluating-answer");
     const result = await evaluateAnswer({
       question: submission.question,
       answer: submission.answer,
@@ -690,13 +793,20 @@ async function processEvaluation(submission: Submission): Promise<void> {
       deckId: submission.deckId,
     });
 
+    if (isFinished) {
+      return;
+    }
+
     if (result.status === "failed") {
-      restoreFailedQuestion(submission.queuedQuestion);
-      resolveEvaluationItem(submission.evaluationId, result, null);
+      finishEvaluation(result, null, {
+        restoreQuestion: true,
+        logAction: "evaluation-failed",
+      });
       return;
     }
 
     const resolvedAt = Date.now();
+    setPhase("saving-evaluation");
     const persisted = await applyEvaluationToPostgres({
       question: submission.question,
       answer: submission.answer,
@@ -708,6 +818,10 @@ async function processEvaluation(submission: Submission): Promise<void> {
       userId: submission.userId ?? undefined,
     });
 
+    if (isFinished) {
+      return;
+    }
+
     if (persisted) {
       removeAllFromQueue(submission.question);
 
@@ -716,6 +830,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
         result.probingQuestions.length > 0
       ) {
         try {
+          setPhase("gating-probes");
           const sourceQuestionKey = submission.question.trim().toLowerCase();
           const gateResult = await gateNovelQuestions(
             result.probingQuestions.filter(
@@ -728,6 +843,11 @@ async function processEvaluation(submission: Submission): Promise<void> {
               question: submission.question,
             },
           );
+          if (isFinished) {
+            return;
+          }
+
+          setPhase("saving-probes");
           const probingQuestions = await upsertDueQuestions({
             questions: gateResult.accepted.map((candidate) => ({
               question: candidate.question,
@@ -737,6 +857,10 @@ async function processEvaluation(submission: Submission): Promise<void> {
             now: resolvedAt,
             userId: persisted.userId,
           });
+
+          if (isFinished) {
+            return;
+          }
 
           await upsertQuestionEmbeddings({
             embeddings: gateResult.accepted.map((candidate) => ({
@@ -751,10 +875,16 @@ async function processEvaluation(submission: Submission): Promise<void> {
             userId: persisted.userId,
           });
 
+          if (isFinished) {
+            return;
+          }
+
           enqueueProbingQuestions(probingQuestions);
         } catch (error) {
           console.info("[waxon] probing question insertion failed", {
             question: submission.question,
+            phase: currentPhase,
+            elapsedMs: Date.now() - startedAt,
             error: error instanceof Error ? error.message : "unknown error",
           });
         }
@@ -779,26 +909,24 @@ async function processEvaluation(submission: Submission): Promise<void> {
       );
     }
 
-    resolveEvaluationItem(submission.evaluationId, result, persisted?.nextDue ?? null);
-  } catch (error) {
-    console.info("[waxon] evaluation processing failed", {
-      question: submission.question,
-      error: error instanceof Error ? error.message : "unknown error",
+    setPhase("finalizing");
+    finishEvaluation(result, persisted?.nextDue ?? null, {
+      restoreQuestion: false,
+      logAction: "evaluation-finished",
     });
-    restoreFailedQuestion(submission.queuedQuestion);
-    resolveEvaluationItem(
-      submission.evaluationId,
+  } catch (error) {
+    finishEvaluation(
       failedEvaluation(
-        "Evaluation failed before it could be saved.",
+        `Evaluation failed during ${currentPhase} before it could be saved.`,
         submission.answer,
       ),
       null,
+      {
+        restoreQuestion: true,
+        logAction: "evaluation-processing-failed",
+        error,
+      },
     );
-  } finally {
-    state.pendingEvaluations = Math.max(0, state.pendingEvaluations - 1);
-    state.inFlightQuestions.delete(submission.question);
-    logQueueFlushStatus("evaluation-finished");
-    void broadcastQueueStatus();
   }
 }
 

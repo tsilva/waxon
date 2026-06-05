@@ -271,6 +271,78 @@ textarea {
   padding: 72px 16px 32px;
 }
 
+.auth-fallback {
+  display: grid;
+  justify-items: start;
+  width: min(440px, 100%);
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 52%), transparent 60%),
+    var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.auth-fallback-kicker,
+.auth-fallback-action {
+  font-family: var(--font-ui);
+}
+
+.auth-fallback-kicker {
+  margin: 0 0 14px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.auth-fallback h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.08;
+}
+
+.auth-fallback p:not(.auth-fallback-kicker) {
+  margin: 14px 0 24px;
+  color: var(--ink-soft);
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.auth-fallback-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid rgb(166 124 82 / 30%);
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-decoration: none;
+}
+
+.auth-fallback-action svg {
+  width: 16px;
+  height: 16px;
+}
+
+.auth-fallback-action:hover,
+.auth-fallback-action:focus-visible {
+  background: var(--accent-hover);
+  color: #fff;
+  outline: 3px solid rgb(166 124 82 / 12%);
+  outline-offset: 3px;
+}
+
 .landing-page {
   display: grid;
   align-content: start;
@@ -2719,7 +2791,7 @@ textarea {
 
 .deck-row-actions {
   display: grid;
-  grid-template-columns: 42px repeat(3, 38px);
+  grid-template-columns: 42px repeat(2, 38px);
   align-items: center;
   justify-content: end;
   gap: 8px;
@@ -5198,7 +5270,7 @@ textarea {
   }
 
   .deck-row-actions {
-    grid-template-columns: 42px repeat(3, 38px);
+    grid-template-columns: 42px repeat(2, 38px);
     justify-content: flex-start;
   }
 
