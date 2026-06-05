@@ -1,4 +1,5 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
+import { extractJsonObject } from "./lib/json-object.mjs";
 
 for (const envFile of [".env", ".env.local"]) {
   try {
@@ -13,6 +14,12 @@ if (typeof WebSocket !== "undefined") {
 }
 
 const DEFAULT_BATCH_SIZE = 20;
+const CONCISE_ANSWER_SYSTEM_PROMPT = [
+  "Generate concise expected answers for flashcard questions.",
+  "Each answer is used for semantic duplicate detection, not as an explanation.",
+  "Keep each answer factual, direct, and as short as possible while preserving the recall target.",
+  "Return strict JSON: {\"answers\":[{\"question\":\"...\",\"conciseAnswer\":\"...\"}]}",
+].join("\n\n");
 
 function parseArgs(argv) {
   const options = {
@@ -72,20 +79,6 @@ function chunks(items, size) {
   return result;
 }
 
-function extractJsonObject(source) {
-  try {
-    return JSON.parse(source);
-  } catch {
-    const match = source.match(/\{[\s\S]*\}/);
-
-    if (!match) {
-      throw new Error("Model did not return JSON.");
-    }
-
-    return JSON.parse(match[0]);
-  }
-}
-
 async function loadQuestions(pool, force) {
   const result = await pool.query(
     `
@@ -116,14 +109,12 @@ async function generateConciseAnswers(batch, apiKey) {
       max_tokens: Math.min(4096, 140 * batch.length + 400),
       messages: [
         {
+          role: "system",
+          content: CONCISE_ANSWER_SYSTEM_PROMPT,
+        },
+        {
           role: "user",
-          content: [
-            "Generate concise expected answers for flashcard questions.",
-            "Each answer is used for semantic duplicate detection, not as an explanation.",
-            "Keep each answer factual, direct, and as short as possible while preserving the recall target.",
-            "Return strict JSON: {\"answers\":[{\"question\":\"...\",\"conciseAnswer\":\"...\"}]}",
-            JSON.stringify(batch.map((row) => ({ question: row.question }))),
-          ].join("\n\n"),
+          content: JSON.stringify(batch.map((row) => ({ question: row.question }))),
         },
       ],
     }),

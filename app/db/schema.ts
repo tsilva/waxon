@@ -353,3 +353,43 @@ export const questionReviews = pgTable(
     check("question_reviews_created_at_check", sql`${table.createdAt} >= 0`),
   ],
 );
+
+export const llmTraceInteractions = pgTable(
+  "llm_trace_interactions",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    kind: text("kind").notNull(),
+    startedAt: bigint("started_at", { mode: "number" }).notNull(),
+    status: text("status").notNull(),
+    calls: text("calls").notNull(),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => [
+    index("llm_trace_interactions_started_at_idx").on(table.startedAt.desc()),
+    check(
+      "llm_trace_interactions_id_nonempty_check",
+      sql`length(trim(${table.id})) > 0`,
+    ),
+    check(
+      "llm_trace_interactions_title_nonempty_check",
+      sql`length(trim(${table.title})) > 0`,
+    ),
+    check(
+      "llm_trace_interactions_kind_check",
+      sql`${table.kind} IN ('Answer submitted', 'Question generation', 'Reference answer')`,
+    ),
+    check(
+      "llm_trace_interactions_status_check",
+      sql`${table.status} IN ('ok', 'pending', 'error')`,
+    ),
+    check(
+      "llm_trace_interactions_started_at_check",
+      sql`${table.startedAt} >= 0`,
+    ),
+    check(
+      "llm_trace_interactions_updated_at_check",
+      sql`${table.updatedAt} >= ${table.startedAt}`,
+    ),
+  ],
+);

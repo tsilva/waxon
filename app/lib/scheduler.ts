@@ -37,14 +37,6 @@ export function serializeReviews(entries: ReviewEntry[]): string {
   return entries.map((entry) => `${entry.ts}:${entry.score}`).join("|");
 }
 
-export function appendReview(
-  reviews: string,
-  entry: ReviewEntry,
-  maxEntries = 10,
-): string {
-  return serializeReviews([...parseReviews(reviews), entry].slice(-maxEntries));
-}
-
 export function scheduleNextReview(input: {
   previousReviews: ReviewEntry[];
   newScore: number;
@@ -91,4 +83,3 @@ export function reinsertionDelay(score: number): number | null {
 
   return null;
 }
-

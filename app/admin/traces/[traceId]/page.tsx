@@ -22,7 +22,7 @@ export default async function AdminTracePage({
   return (
     <AdminPageClient
       currentUser={currentUser}
-      initialInteractions={listLlmTraceInteractions()}
+      initialInteractions={await listLlmTraceInteractions()}
       selectedTraceId={traceId}
     />
   );

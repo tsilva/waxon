@@ -1,3 +1,6 @@
+import { desc } from "drizzle-orm";
+import type { llmTraceInteractions } from "../db/schema";
+
 export type LlmTraceCallType =
   | "answer_eval"
   | "question_generation"
@@ -147,7 +150,7 @@ export function beginLlmTrace(input: {
   return pending;
 }
 
-export function finishLlmTrace(
+export async function finishLlmTrace(
   pending: PendingTrace,
   input: {
     ok: boolean;
@@ -160,7 +163,7 @@ export function finishLlmTrace(
     };
     error?: unknown;
   },
-): void {
+): Promise<void> {
   const interaction = state.interactions.find(
     (candidate) => candidate.id === pending.traceId,
   );
@@ -196,13 +199,162 @@ export function finishLlmTrace(
   );
 
   interaction.status = call.status;
+
+  await persistTraceInteraction(interaction);
 }
 
-export function listLlmTraceInteractions(): LlmTraceInteraction[] {
+export async function listLlmTraceInteractions(): Promise<LlmTraceInteraction[]> {
+  if (process.env.DATABASE_URL) {
+    try {
+      const { db } = await import("../db/client");
+      const { llmTraceInteractions: llmTraceInteractionsTable } = await import(
+        "../db/schema"
+      );
+      const rows = await db
+        .select()
+        .from(llmTraceInteractionsTable)
+        .orderBy(desc(llmTraceInteractionsTable.startedAt))
+        .limit(MAX_TRACE_INTERACTIONS);
+
+      return rows.map(rowToTraceInteraction).filter(isTraceInteraction);
+    } catch (error) {
+      console.info("[waxon] llm trace db read skipped", {
+        error: error instanceof Error ? error.message : "unknown error",
+      });
+    }
+  }
+
   return state.interactions.map((interaction) => ({
     ...interaction,
     calls: interaction.calls.map((call) => ({ ...call })),
   }));
+}
+
+async function persistTraceInteraction(
+  interaction: LlmTraceInteraction,
+): Promise<void> {
+  if (!process.env.DATABASE_URL) {
+    return;
+  }
+
+  try {
+    const { db } = await import("../db/client");
+    const { llmTraceInteractions: llmTraceInteractionsTable } = await import(
+      "../db/schema"
+    );
+    const row = traceInteractionToRow(interaction);
+
+    await db
+      .insert(llmTraceInteractionsTable)
+      .values(row)
+      .onConflictDoUpdate({
+        target: llmTraceInteractionsTable.id,
+        set: {
+          title: row.title,
+          kind: row.kind,
+          startedAt: row.startedAt,
+          status: row.status,
+          calls: row.calls,
+          updatedAt: row.updatedAt,
+        },
+      });
+  } catch (error) {
+    console.info("[waxon] llm trace db write skipped", {
+      traceId: interaction.id,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+  }
+}
+
+function traceInteractionToRow(
+  interaction: LlmTraceInteraction,
+): typeof llmTraceInteractions.$inferInsert {
+  const startedAt = Date.parse(interaction.startedAt);
+
+  return {
+    id: interaction.id,
+    title: interaction.title,
+    kind: interaction.kind,
+    startedAt: Number.isFinite(startedAt) ? startedAt : Date.now(),
+    status: interaction.status,
+    calls: JSON.stringify(interaction.calls),
+    updatedAt: Date.now(),
+  };
+}
+
+function rowToTraceInteraction(
+  row: typeof llmTraceInteractions.$inferSelect,
+): LlmTraceInteraction | null {
+  let calls: unknown;
+
+  try {
+    calls = JSON.parse(row.calls);
+  } catch {
+    return null;
+  }
+
+  if (!Array.isArray(calls)) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    title: row.title,
+    kind: isTraceInteractionKind(row.kind) ? row.kind : "Answer submitted",
+    startedAt: new Date(row.startedAt).toISOString(),
+    status: isTraceStatus(row.status) ? row.status : "error",
+    calls: calls.filter(isTraceCall),
+  };
+}
+
+function isTraceInteraction(
+  interaction: LlmTraceInteraction | null,
+): interaction is LlmTraceInteraction {
+  return interaction !== null;
+}
+
+function isTraceInteractionKind(
+  value: string,
+): value is LlmTraceInteraction["kind"] {
+  return (
+    value === "Answer submitted" ||
+    value === "Question generation" ||
+    value === "Reference answer"
+  );
+}
+
+function isTraceStatus(value: string): value is LlmTraceStatus {
+  return value === "ok" || value === "pending" || value === "error";
+}
+
+function isTraceCallType(value: unknown): value is LlmTraceCallType {
+  return (
+    value === "answer_eval" ||
+    value === "question_generation" ||
+    value === "embedding" ||
+    value === "summarization"
+  );
+}
+
+function isTraceCall(value: unknown): value is LlmTraceCall {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const call = value as Partial<LlmTraceCall>;
+
+  return (
+    typeof call.id === "string" &&
+    typeof call.operation === "string" &&
+    typeof call.model === "string" &&
+    isTraceCallType(call.callType) &&
+    typeof call.inputTokens === "number" &&
+    typeof call.outputTokens === "number" &&
+    typeof call.cost === "number" &&
+    typeof call.latencyMs === "number" &&
+    isTraceStatus(call.status ?? "") &&
+    typeof call.startedAt === "string"
+  );
 }
 
 function toFiniteNumber(value: unknown): number | null {

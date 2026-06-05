@@ -28,9 +28,10 @@ export type EvaluateAnswerInput = {
   userId?: string | null;
   deckId?: string | null;
   traceId?: string | null;
+  onActivity?: () => void;
 };
 
-export const EVALUATION_TIMEOUT_MS = 10_000;
+export const EVALUATION_TIMEOUT_MS = 60_000;
 const BROWSER_SMOKE_CORRECT_TOKEN = "browser-smoke-correct-token";
 const MAX_CONTEXT_TEXT_CHARS = 220;
 
@@ -41,9 +42,9 @@ function isBrowserSmokeEvaluatorEnabled(): boolean {
   );
 }
 
-function evaluateBrowserSmokeAnswer(
+async function evaluateBrowserSmokeAnswer(
   input: EvaluateAnswerInput,
-): EvaluationResult {
+): Promise<EvaluationResult> {
   const normalizedAnswer = input.answer.trim().toLowerCase();
   const isCorrect = normalizedAnswer.includes(BROWSER_SMOKE_CORRECT_TOKEN);
   const result: EvaluationResult = {
@@ -68,7 +69,7 @@ function evaluateBrowserSmokeAnswer(
     },
   });
 
-  finishLlmTrace(pendingTrace, {
+  await finishLlmTrace(pendingTrace, {
     ok: true,
     responseBody: result,
     usage: {
@@ -113,22 +114,10 @@ function formatNeighborContext(neighbors: ExistingQuestionNeighbor[]): string {
     .join("\n");
 }
 
-function buildPrompt(
-  input: EvaluateAnswerInput,
-  similarExistingQuestions: ExistingQuestionNeighbor[],
-): string {
+function buildSystemPrompt(): string {
   const questionQualityReference = getQuestionQualityReference();
 
   return `You are grading a free-text recall answer.
-
-Question: ${input.question}
-
-User answer: ${input.answer}
-
-Previous review history: ${input.previousReviews}
-
-Similar existing questions near the source question:
-${formatNeighborContext(similarExistingQuestions)}
 
 Grade the answer from 0 to 10. In the same response, generate extra
 probingQuestions only when the score is ${PROBING_QUESTION_SCORE_THRESHOLD} or
@@ -175,6 +164,20 @@ Return strict JSON only:
 }`;
 }
 
+function buildUserPrompt(
+  input: EvaluateAnswerInput,
+  similarExistingQuestions: ExistingQuestionNeighbor[],
+): string {
+  return [
+    "Grade this submitted flashcard answer.",
+    `Question: ${input.question}`,
+    `User answer: ${input.answer}`,
+    `Previous review history: ${input.previousReviews}`,
+    "Similar existing questions near the source question:",
+    formatNeighborContext(similarExistingQuestions),
+  ].join("\n\n");
+}
+
 async function loadSimilarExistingQuestionContext(
   input: EvaluateAnswerInput,
 ): Promise<ExistingQuestionNeighbor[]> {
@@ -198,7 +201,7 @@ export async function evaluateAnswer(
   input: EvaluateAnswerInput,
 ): Promise<EvaluationResult> {
   if (isBrowserSmokeEvaluatorEnabled()) {
-    return evaluateBrowserSmokeAnswer(input);
+    return await evaluateBrowserSmokeAnswer(input);
   }
 
   const apiKey = getOpenRouterApiKey();
@@ -213,12 +216,22 @@ export async function evaluateAnswer(
   const similarExistingQuestions = await loadSimilarExistingQuestionContext(input);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), EVALUATION_TIMEOUT_MS);
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const resetIdleTimeout = () => {
+    input.onActivity?.();
+    if (timeout !== null) {
+      clearTimeout(timeout);
+    }
+    timeout = setTimeout(() => controller.abort(), EVALUATION_TIMEOUT_MS);
+  };
+
+  resetIdleTimeout();
 
   try {
     const { response, body } = await openRouterChatCompletion({
       apiKey,
       signal: controller.signal,
+      onActivity: resetIdleTimeout,
       trace: {
         operation: "evaluate_answer",
         userId: input.userId,
@@ -230,13 +243,18 @@ export async function evaluateAnswer(
         model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
         messages: [
           {
+            role: "system",
+            content: buildSystemPrompt(),
+          },
+          {
             role: "user",
-            content: buildPrompt(input, similarExistingQuestions),
+            content: buildUserPrompt(input, similarExistingQuestions),
           },
         ],
         response_format: {
           type: "json_object",
         },
+        stream: true,
         temperature: 0,
         max_tokens: 500,
       },
@@ -276,7 +294,9 @@ export async function evaluateAnswer(
       input.answer,
     );
   } finally {
-    clearTimeout(timeout);
+    if (timeout !== null) {
+      clearTimeout(timeout);
+    }
   }
 }
 

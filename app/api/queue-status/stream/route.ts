@@ -2,8 +2,8 @@ import {
   queueStatus,
   RESOLVED_JUDGING_VISIBLE_MS,
   subscribeQueueStatus,
-  type QueueStatusSnapshot,
 } from "@/app/lib/reviewQueue";
+import type { QueueStatusSnapshot } from "@/app/lib/reviewTypes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +37,17 @@ function nextRefreshDelay(status: QueueStatusSnapshot): number | null {
 }
 
 export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
+  const offset = Number.parseInt(url.searchParams.get("offset") ?? "", 10);
+  const sort = url.searchParams.get("sort");
+  const deckId = url.searchParams.get("deckId")?.trim();
+  const statusInput = {
+    limit: Number.isFinite(limit) ? limit : undefined,
+    offset: Number.isFinite(offset) ? offset : undefined,
+    sortKey: sort === "creation-date" ? ("creation-date" as const) : ("review-date" as const),
+    deckId: deckId || undefined,
+  };
   let cancelStream = () => {};
 
   const stream = new ReadableStream<Uint8Array>({
@@ -84,7 +95,7 @@ export async function GET(request: Request) {
           return;
         }
 
-        const status = await queueStatus();
+        const status = await queueStatus(statusInput);
         emitStatus(status);
       };
 
@@ -113,7 +124,9 @@ export async function GET(request: Request) {
 
       cancelStream = close;
 
-      unsubscribe = subscribeQueueStatus(emitStatus);
+      unsubscribe = subscribeQueueStatus(() => {
+        void sendStatus();
+      });
       heartbeat = setInterval(() => {
         enqueue(encoder.encode(": keepalive\n\n"));
       }, 25_000);

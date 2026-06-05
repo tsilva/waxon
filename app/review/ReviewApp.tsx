@@ -6,6 +6,15 @@ import Link from "next/link";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import type {
+  DeckEmbeddingPlot as DeckEmbeddingPlotResponse,
+  DeckEmbeddingPlotPoint,
+  EvaluationPhase,
+  EvaluationQueueItem,
+  QuestionAttempt,
+  ReviewHistoryEntry,
+  ReviewQueueItem,
+} from "@/app/lib/reviewTypes";
 import {
   ArrowUp,
   Check,
@@ -14,9 +23,9 @@ import {
   Layers,
   LogOut,
   Mic,
-  PencilLine,
   Plus,
   Search,
+  Settings,
   Sparkles,
   Square,
   Trash2,
@@ -43,6 +52,7 @@ import {
 
 type NextQuestionResponse = {
   question: string | null;
+  deckId: string | null;
   deckName: string | null;
   queueRemaining: number;
 };
@@ -77,14 +87,6 @@ type QueueStatusResponse = {
   deckEmbeddingPlot: DeckEmbeddingPlotResponse;
 };
 
-type EvaluationPhase =
-  | "queued"
-  | "evaluating-answer"
-  | "saving-evaluation"
-  | "gating-probes"
-  | "saving-probes"
-  | "finalizing";
-
 type ReferenceAnswerResponse = {
   answer: string;
 };
@@ -99,70 +101,6 @@ type UserProfileResponse = {
 type ReferenceAnswerState = {
   status: "loading" | "resolved" | "error";
   answer: string;
-};
-
-type EvaluationQueueItem = {
-  id: string;
-  traceId: string;
-  question: string;
-  answer: string | null;
-  status: "grading" | "resolved";
-  phase: EvaluationPhase | null;
-  submittedAt: number;
-  score: number | null;
-  justification: string | null;
-  answerSummary: string | null;
-  resolvedAt: number | null;
-  nextDue: number | null;
-};
-
-type ReviewQueueItem = {
-  deckId: string;
-  deckName: string;
-  question: string;
-  nextDue: number;
-  createdAt: number;
-  msUntilDue: number;
-  status: "now" | "scheduled";
-  generatedFromQuestion: string | null;
-  reviewHistory: ReviewHistoryEntry[];
-  lastScore: number | null;
-  lastAnswer: string | null;
-  lastAnswerSummary: string | null;
-  conciseAnswer: string | null;
-  referenceAnswer: string | null;
-  lastJustification: string | null;
-  attempts: QuestionAttempt[];
-};
-
-type ReviewHistoryEntry = {
-  ts: number;
-  score: number;
-};
-
-type QuestionAttempt = {
-  id: number;
-  question: string;
-  rawAnswer: string;
-  answerSummary: string;
-  score: number;
-  justification: string;
-  submittedAt: number;
-  resolvedAt: number;
-};
-
-type DeckEmbeddingPlotResponse = {
-  model: string | null;
-  totalQuestions: number;
-  embeddedQuestions: number;
-  points: DeckEmbeddingPlotPoint[];
-};
-
-type DeckEmbeddingPlotPoint = {
-  question: string;
-  lastScore: number | null;
-  x: number;
-  y: number;
 };
 
 type HoveredEmbeddingPoint = DeckEmbeddingPlotPoint & {
@@ -183,6 +121,7 @@ type ChatMessage =
   | {
       id: string;
       kind: "answer";
+      deckId: string | null;
       question: string;
       answer: string;
       evaluationId: string;
@@ -190,6 +129,7 @@ type ChatMessage =
       submittedAt: number;
       status: "grading" | "resolved";
       phase: EvaluationPhase | null;
+      lastActivityAt: number;
       score: number | null;
       justification: string | null;
       answerSummary: string | null;
@@ -203,6 +143,7 @@ type PreviousAnswerItem = {
   answer: string | null;
   status: "grading" | "resolved";
   phase: EvaluationPhase | null;
+  lastActivityAt: number | null;
   score: number | null;
   justification: string | null;
   traceId: string | null;
@@ -219,6 +160,7 @@ type ReviewAppProps = {
 
 type ReviewSessionSnapshot = {
   question: string | null;
+  currentDeckId: string | null;
   currentDeckName: string | null;
   answer: string;
   speechPreview: string;
@@ -315,6 +257,41 @@ type DeckManagementItem = {
   lastReviewedAt: number | null;
   inReviewRotation: boolean;
 };
+
+const deckLoadingRows = Array.from({ length: 4 }, (_, index) => index);
+
+function DeckListLoadingPlaceholders() {
+  return (
+    <>
+      <span className="sr-only" role="status">
+        Loading decks
+      </span>
+      <ol className="queue-list deck-list deck-skeleton-list" aria-hidden="true">
+        {deckLoadingRows.map((row) => (
+          <li className="queue-row deck-row deck-skeleton-row" key={row}>
+            <div className="queue-row-card deck-row-card deck-skeleton-card">
+              <div className="deck-row-main">
+                <div className="deck-row-copy deck-skeleton-copy">
+                  <span className="admin-skeleton-line deck-skeleton-name" />
+                  <span className="admin-skeleton-line deck-skeleton-slug" />
+                </div>
+                <div className="deck-row-meta deck-skeleton-meta">
+                  <span className="admin-skeleton-pill deck-skeleton-due" />
+                  <span className="admin-skeleton-line deck-skeleton-count" />
+                  <span className="admin-skeleton-line deck-skeleton-date" />
+                </div>
+              </div>
+              <div className="deck-row-actions">
+                <span className="deck-skeleton-toggle" />
+                <span className="admin-skeleton-refresh deck-skeleton-button" />
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
 
 type DecksResponse = {
   decks: DeckManagementItem[];
@@ -460,6 +437,7 @@ type AnswerHistoryEntry = {
   resolvedAt: number | null;
   status: "grading" | "resolved";
   phase: EvaluationPhase | null;
+  lastActivityAt: number | null;
 };
 
 type MathParseResult = {
@@ -885,6 +863,31 @@ function formatEvaluationPhase(phase: EvaluationPhase | null): string {
     default:
       return "Evaluating in background";
   }
+}
+
+function formatEvaluationActivity(
+  lastActivityAt: number | null,
+  currentTime: number,
+): string {
+  if (lastActivityAt === null) {
+    return "Activity pending";
+  }
+
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor((currentTime - lastActivityAt) / 1000),
+  );
+
+  if (elapsedSeconds < 2) {
+    return "Active now";
+  }
+
+  if (elapsedSeconds < 60) {
+    return `Active ${elapsedSeconds}s ago`;
+  }
+
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  return `Active ${elapsedMinutes}m ago`;
 }
 
 function PreviousAnswerScore({
@@ -1364,7 +1367,7 @@ function DeckEmbeddingPlot({
                 className="embedding-tooltip-question"
                 text={hoveredPoint.question}
               />
-              <span>
+              <span className="embedding-tooltip-meta">
                 {hoveredPoint.statusLabel}
                 {hoveredPoint.scoreLabel ? ` · ${hoveredPoint.scoreLabel}` : ""}
               </span>
@@ -1392,9 +1395,15 @@ export default function ReviewApp({
     [],
   );
   const cachedSessionRef = useRef(reviewSessionSnapshot);
-  const hasLoadedQuestionRef = useRef(false);
-  const hasLoadedQueueStatusRef = useRef(false);
-  const hasLoadedDecksRef = useRef(false);
+  const hasLoadedQuestionRef = useRef(
+    cachedSessionRef.current?.hasLoadedQuestion ?? false,
+  );
+  const hasLoadedQueueStatusRef = useRef(
+    cachedSessionRef.current?.hasLoadedQueueStatus ?? false,
+  );
+  const hasLoadedDecksRef = useRef(
+    cachedSessionRef.current?.hasLoadedDecks ?? false,
+  );
   const loadedQueueSortKeyRef = useRef<QueueSortKey | null>(
     cachedSessionRef.current?.loadedQueueSortKey ?? null,
   );
@@ -1403,6 +1412,9 @@ export default function ReviewApp({
   );
   const [currentDeckName, setCurrentDeckName] = useState<string | null>(
     () => cachedSessionRef.current?.currentDeckName ?? null,
+  );
+  const [currentDeckId, setCurrentDeckId] = useState<string | null>(
+    () => cachedSessionRef.current?.currentDeckId ?? null,
   );
   const [answer, setAnswer] = useState(
     () => cachedSessionRef.current?.answer ?? "",
@@ -1465,8 +1477,11 @@ export default function ReviewApp({
   );
   const [isDecksLoading, setIsDecksLoading] = useState(false);
   const [isDeckSaving, setIsDeckSaving] = useState(false);
+  const [isDeckDeleting, setIsDeckDeleting] = useState(false);
   const [deckPageMessage, setDeckPageMessage] = useState<string | null>(null);
   const [deckEditorMessage, setDeckEditorMessage] = useState<string | null>(null);
+  const [isDeckDeleteConfirming, setIsDeckDeleteConfirming] = useState(false);
+  const [deckDeleteConfirmationName, setDeckDeleteConfirmationName] = useState("");
   const [deckEmbeddingPlot, setDeckEmbeddingPlot] =
     useState<DeckEmbeddingPlotResponse>(
       () => cachedSessionRef.current?.deckEmbeddingPlot ?? createEmptyDeckEmbeddingPlot(),
@@ -1643,6 +1658,7 @@ export default function ReviewApp({
   useEffect(() => {
     reviewSessionSnapshot = {
       question,
+      currentDeckId,
       currentDeckName,
       answer,
       speechPreview,
@@ -1681,6 +1697,7 @@ export default function ReviewApp({
     };
   }, [
     answer,
+    currentDeckId,
     currentDeckName,
     currentUser,
     deckDraftName,
@@ -1746,8 +1763,13 @@ export default function ReviewApp({
   const deckDraftNameMessage = isDeckDraftNameDuplicate
     ? "Deck name already exists."
     : deckEditorMessage;
+  const isDeckEditorBusy = isDeckSaving || isDeckDeleting;
   const canSaveDeckDraft =
-    !isDeckSaving && deckDraftNameKey.length > 0 && !isDeckDraftNameDuplicate;
+    !isDeckEditorBusy && deckDraftNameKey.length > 0 && !isDeckDraftNameDuplicate;
+  const canConfirmDeckDelete =
+    Boolean(editingDeck) &&
+    !isDeckEditorBusy &&
+    deckDeleteConfirmationName.trim() === editingDeck?.name;
   const visibleDecks = useMemo(() => {
     const normalizedQuery = deckSearchQuery.trim().toLowerCase();
     const filteredDecks = normalizedQuery
@@ -1814,6 +1836,8 @@ export default function ReviewApp({
     setSelectedDeckId(deck.id);
     setDeckDraftName(deck.name);
     setDeckEditorMessage(null);
+    setIsDeckDeleteConfirming(false);
+    setDeckDeleteConfirmationName("");
     setIsCreatingDeck(false);
     setEditingDeckId(deck.id);
   }, []);
@@ -1822,6 +1846,8 @@ export default function ReviewApp({
     setDeckPageMessage(null);
     setDeckEditorMessage(null);
     setDeckDraftName("");
+    setIsDeckDeleteConfirming(false);
+    setDeckDeleteConfirmationName("");
     setEditingDeckId(null);
     setIsCreatingDeck(true);
   }, []);
@@ -1895,6 +1921,8 @@ export default function ReviewApp({
 
       setIsCreatingDeck(false);
       setEditingDeckId(null);
+      setIsDeckDeleteConfirming(false);
+      setDeckDeleteConfirmationName("");
     } catch (updateError) {
       setDeckEditorMessage(
         updateError instanceof Error
@@ -1919,6 +1947,8 @@ export default function ReviewApp({
   const archiveDeck = useCallback(
     async (deckId: string) => {
       setDeckPageMessage(null);
+      setDeckEditorMessage(null);
+      setIsDeckDeleting(true);
 
       try {
         const response = await fetch(`/api/decks/${encodeURIComponent(deckId)}`, {
@@ -1946,17 +1976,28 @@ export default function ReviewApp({
         prefetchedNextQuestionRef.current = null;
         nextQuestionPrefetchRef.current?.abortController.abort();
         nextQuestionPrefetchRef.current = null;
+        setIsCreatingDeck(false);
+        setEditingDeckId(null);
+        setIsDeckDeleteConfirming(false);
+        setDeckDeleteConfirmationName("");
         hasLoadedQuestionRef.current = false;
         setQuestion(null);
         questionRef.current = null;
         setQueueRemaining(0);
         setReviewQueueVersion((currentVersion) => currentVersion + 1);
       } catch (deleteError) {
-        setDeckPageMessage(
+        const message =
           deleteError instanceof Error
             ? deleteError.message
-            : "Could not archive deck.",
-        );
+            : "Could not archive deck.";
+
+        if (editingDeckId === deckId) {
+          setDeckEditorMessage(message);
+        } else {
+          setDeckPageMessage(message);
+        }
+      } finally {
+        setIsDeckDeleting(false);
       }
     },
     [editingDeckId, selectedDeckId],
@@ -1992,6 +2033,7 @@ export default function ReviewApp({
       hasLoadedQuestionRef.current = false;
       setQuestion(null);
       questionRef.current = null;
+      setCurrentDeckId(null);
       setQueueRemaining(0);
       setReviewQueueVersion((currentVersion) => currentVersion + 1);
     } catch (toggleError) {
@@ -2045,13 +2087,19 @@ export default function ReviewApp({
     navigateToTab("queue");
   }, [navigateToTab, resetDeckQueueState]);
 
+  const hasPendingEvaluationActivity =
+    evaluations.some((evaluation) => evaluation.status === "grading") ||
+    messages.some(
+      (message) => message.kind === "answer" && message.status === "grading",
+    );
+
   useEffect(() => {
     const interval = window.setInterval(() => {
       setCurrentTime(Date.now());
-    }, 60_000);
+    }, hasPendingEvaluationActivity ? 1_000 : 60_000);
 
     return () => window.clearInterval(interval);
-  }, []);
+  }, [hasPendingEvaluationActivity]);
 
   useEffect(() => {
     if (activeTab !== "queue" || hasLoadedDecksRef.current || isDecksLoading) {
@@ -2245,6 +2293,7 @@ export default function ReviewApp({
     hasLoadedQuestionRef.current = true;
     setQuestion(data.question);
     questionRef.current = data.question;
+    setCurrentDeckId(data.deckId);
     setCurrentDeckName(data.deckName);
     setQueueRemaining(data.queueRemaining);
 
@@ -2356,6 +2405,7 @@ export default function ReviewApp({
     setIsLoadingQuestion(true);
     setQuestion(null);
     questionRef.current = null;
+    setCurrentDeckId(null);
     setCurrentDeckName(null);
     setError(null);
 
@@ -2390,6 +2440,20 @@ export default function ReviewApp({
     }
 
     return `/api/queue-status?${params.toString()}`;
+  }, [queueSortKey, selectedDeckDetailId]);
+
+  const queueStatusStreamUrl = useCallback((limit: number) => {
+    const params = new URLSearchParams({
+      limit: String(Math.max(0, Math.floor(limit))),
+      offset: "0",
+      sort: queueSortKey,
+    });
+
+    if (selectedDeckDetailId) {
+      params.set("deckId", selectedDeckDetailId);
+    }
+
+    return `/api/queue-status/stream?${params.toString()}`;
   }, [queueSortKey, selectedDeckDetailId]);
 
   const applyQueueStatus = useCallback((data: QueueStatusResponse) => {
@@ -2482,12 +2546,16 @@ export default function ReviewApp({
       void loadStatus(QUEUE_PAGE_SIZE);
     }
 
-    const events = new EventSource("/api/queue-status/stream");
+    const events = new EventSource(
+      queueStatusStreamUrl(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current)),
+    );
 
     events.addEventListener("status", (event) => {
       try {
-        JSON.parse((event as MessageEvent<string>).data) as QueueStatusResponse;
-        void loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
+        const data = JSON.parse(
+          (event as MessageEvent<string>).data,
+        ) as QueueStatusResponse;
+        applyQueueStatus(data);
       } catch {
         // Ignore malformed stream events; the connection can continue.
       }
@@ -2499,7 +2567,13 @@ export default function ReviewApp({
     };
 
     return () => events.close();
-  }, [loadStatus, queueSortKey, selectedDeckDetailId]);
+  }, [
+    applyQueueStatus,
+    loadStatus,
+    queueSortKey,
+    queueStatusStreamUrl,
+    selectedDeckDetailId,
+  ]);
 
   useEffect(() => {
     setMessages((current) => {
@@ -2521,11 +2595,13 @@ export default function ReviewApp({
         if (
           message.status === evaluation.status &&
           message.phase === evaluation.phase &&
+          message.lastActivityAt === evaluation.lastActivityAt &&
           message.score === evaluation.score &&
           message.justification === evaluation.justification &&
           message.answerSummary === evaluation.answerSummary &&
           message.nextDue === evaluation.nextDue &&
           message.resolvedAt === evaluation.resolvedAt &&
+          message.deckId === evaluation.deckId &&
           message.traceId === evaluation.traceId
         ) {
           return message;
@@ -2537,11 +2613,13 @@ export default function ReviewApp({
           ...message,
           status: evaluation.status,
           phase: evaluation.phase,
+          lastActivityAt: evaluation.lastActivityAt,
           score: evaluation.score,
           justification: evaluation.justification,
           answerSummary: evaluation.answerSummary,
           nextDue: evaluation.nextDue,
           resolvedAt: evaluation.resolvedAt,
+          deckId: evaluation.deckId,
           traceId: evaluation.traceId,
         };
       });
@@ -2569,6 +2647,7 @@ export default function ReviewApp({
           ...message,
           status: "resolved" as const,
           phase: null,
+          lastActivityAt: currentTime,
           score: null,
           justification:
             "Evaluation did not finish. Try submitting the answer again.",
@@ -2622,6 +2701,7 @@ export default function ReviewApp({
         {
           id: `answer-${data.evaluationId}`,
           kind: "answer",
+          deckId: currentDeckId,
           question: submittedQuestion,
           answer: submittedAnswer || "(blank)",
           evaluationId: data.evaluationId,
@@ -2629,6 +2709,7 @@ export default function ReviewApp({
           submittedAt,
           status: "grading",
           phase: "queued",
+          lastActivityAt: submittedAt,
           score: null,
           justification: null,
           answerSummary: null,
@@ -2665,6 +2746,7 @@ export default function ReviewApp({
   }, [
     applyNextQuestion,
     clearPendingSpeechCommand,
+    currentDeckId,
     loadNextQuestion,
     takePrefetchedNextQuestion,
   ]);
@@ -2701,6 +2783,7 @@ export default function ReviewApp({
       hasLoadedQuestionRef.current = true;
       setQuestion(data.question);
       questionRef.current = data.question;
+      setCurrentDeckId(data.deckId);
       setCurrentDeckName(data.deckName);
       setQueueRemaining(data.queueRemaining);
 
@@ -3212,10 +3295,22 @@ export default function ReviewApp({
     }
   }
 
+  const activeReviewDeckIds = useMemo(
+    () =>
+      new Set(
+        decks
+          .filter((deck) => deck.inReviewRotation)
+          .map((deck) => deck.id),
+      ),
+    [decks],
+  );
+  const isDeckInReviewRotation = (deckId: string | null | undefined) =>
+    deckId == null || activeReviewDeckIds.has(deckId);
+
   const sessionPreviousAnswers: PreviousAnswerItem[] = messages
     .filter(
       (message): message is Extract<ChatMessage, { kind: "answer" }> =>
-        message.kind === "answer",
+        message.kind === "answer" && isDeckInReviewRotation(message.deckId),
     )
     .slice()
     .reverse()
@@ -3228,6 +3323,7 @@ export default function ReviewApp({
         answer: message.answer,
         status: message.status,
         phase: message.phase,
+        lastActivityAt: message.lastActivityAt,
         score: message.score,
         justification: message.justification,
         traceId: message.traceId,
@@ -3251,6 +3347,7 @@ export default function ReviewApp({
   const evaluationPreviousAnswers: PreviousAnswerItem[] = evaluations
     .filter(
       (evaluation) =>
+        isDeckInReviewRotation(evaluation.deckId) &&
         !sessionPreviousEvaluationIds.has(evaluation.id) &&
         evaluation.answer !== null,
     )
@@ -3265,6 +3362,7 @@ export default function ReviewApp({
         answer: evaluation.answer || "(blank)",
         status: evaluation.status,
         phase: evaluation.phase,
+        lastActivityAt: evaluation.lastActivityAt,
         score: evaluation.score,
         justification: evaluation.justification,
         traceId: evaluation.traceId,
@@ -3284,6 +3382,7 @@ export default function ReviewApp({
   const recentAttemptPreviousAnswers: PreviousAnswerItem[] = recentAttempts
     .filter((attempt) => {
       if (
+        !isDeckInReviewRotation(attempt.deckId) ||
         attempt.question === question ||
         livePreviousQuestions.has(attempt.question)
       ) {
@@ -3308,6 +3407,7 @@ export default function ReviewApp({
       answer: attempt.rawAnswer || "(blank)",
       status: "resolved",
       phase: null,
+      lastActivityAt: null,
       score: attempt.score,
       justification: attempt.justification,
       traceId: null,
@@ -3326,6 +3426,7 @@ export default function ReviewApp({
       (item) =>
         item.lastScore !== null &&
         item.lastAnswer !== null &&
+        isDeckInReviewRotation(item.deckId) &&
         item.question !== question &&
         !livePreviousQuestions.has(item.question) &&
         !recentAttemptQuestions.has(item.question),
@@ -3355,6 +3456,7 @@ export default function ReviewApp({
         answer: item.lastAnswer,
         status: "resolved",
         phase: null,
+        lastActivityAt: null,
         score: item.lastScore,
         justification:
           item.lastJustification ??
@@ -3568,6 +3670,7 @@ export default function ReviewApp({
         resolvedAt: attempt.resolvedAt,
         status: "resolved",
         phase: null,
+        lastActivityAt: null,
       }));
     const sessionAnswerHistory: AnswerHistoryEntry[] = selectedAnswerMessages
       .map((message) => {
@@ -3585,6 +3688,7 @@ export default function ReviewApp({
           resolvedAt: evaluation?.resolvedAt ?? message.resolvedAt,
           status: message.status,
           phase: evaluation?.phase ?? message.phase,
+          lastActivityAt: evaluation?.lastActivityAt ?? message.lastActivityAt,
         };
       })
       .filter(
@@ -4202,9 +4306,15 @@ export default function ReviewApp({
                               Evaluation
                             </span>
                             {isPending ? (
-                              <p className="previous-summary">
-                                {formatEvaluationPhase(item.phase)}...
-                              </p>
+                              <div className="previous-summary previous-summary-pending">
+                                <p>{formatEvaluationPhase(item.phase)}...</p>
+                                <span>
+                                  {formatEvaluationActivity(
+                                    item.lastActivityAt,
+                                    currentTime,
+                                  )}
+                                </span>
+                              </div>
                             ) : (
                               <MarkdownContent
                                 className="previous-summary"
@@ -4487,7 +4597,7 @@ export default function ReviewApp({
               ) : null}
 
               {isDecksLoading ? (
-                <p className="queue-empty">Loading decks...</p>
+                <DeckListLoadingPlaceholders />
               ) : decks.length === 0 ? (
                 <p className="queue-empty">No decks yet.</p>
               ) : visibleDecks.length === 0 ? (
@@ -4560,26 +4670,14 @@ export default function ReviewApp({
                             <button
                               className="deck-icon-button"
                               type="button"
-                              aria-label={`Edit ${deck.name}`}
-                              title="Edit"
+                              aria-label={`Open ${deck.name} settings`}
+                              title="Settings"
                               onClick={(event) => {
                                 event.stopPropagation();
                                 openDeckEditor(deck);
                               }}
                             >
-                              <PencilLine aria-hidden="true" />
-                            </button>
-                            <button
-                              className="deck-icon-button deck-icon-button-danger"
-                              type="button"
-                              aria-label={`Archive ${deck.name}`}
-                              title="Archive"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void archiveDeck(deck.id);
-                              }}
-                            >
-                              <Trash2 aria-hidden="true" />
+                              <Settings aria-hidden="true" />
                             </button>
                           </div>
                         </div>
@@ -4605,9 +4703,11 @@ export default function ReviewApp({
           className="deck-editor-modal-backdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (!isDeckSaving && event.target === event.currentTarget) {
+            if (!isDeckEditorBusy && event.target === event.currentTarget) {
               setIsCreatingDeck(false);
               setEditingDeckId(null);
+              setIsDeckDeleteConfirming(false);
+              setDeckDeleteConfirmationName("");
             }
           }}
         >
@@ -4615,7 +4715,7 @@ export default function ReviewApp({
             className="deck-editor-modal"
             role="dialog"
             aria-modal="true"
-            aria-busy={isDeckSaving}
+            aria-busy={isDeckEditorBusy}
             aria-labelledby="deck-editor-title"
             onSubmit={(event) => {
               event.preventDefault();
@@ -4633,10 +4733,12 @@ export default function ReviewApp({
                 className="user-menu-trigger"
                 type="button"
                 aria-label="Close deck editor"
-                disabled={isDeckSaving}
+                disabled={isDeckEditorBusy}
                 onClick={() => {
                   setIsCreatingDeck(false);
                   setEditingDeckId(null);
+                  setIsDeckDeleteConfirming(false);
+                  setDeckDeleteConfirmationName("");
                 }}
               >
                 <X aria-hidden="true" />
@@ -4657,7 +4759,7 @@ export default function ReviewApp({
                   aria-describedby={
                     deckDraftNameMessage ? "deck-editor-message" : undefined
                   }
-                  disabled={isDeckSaving}
+                  disabled={isDeckEditorBusy}
                 />
               </label>
             </div>
@@ -4687,14 +4789,89 @@ export default function ReviewApp({
               </div>
             </div>
 
+            {!isCreatingDeck && editingDeck ? (
+              <div className="deck-editor-danger-zone">
+                {isDeckDeleteConfirming ? (
+                  <div className="deck-delete-confirmation">
+                    <p>
+                      Delete <strong>{editingDeck.name}</strong>? Type the deck name
+                      to confirm.
+                    </p>
+                    <label className="settings-field">
+                      <span>Deck name</span>
+                      <input
+                        className="settings-input"
+                        value={deckDeleteConfirmationName}
+                        onChange={(event) => {
+                          setDeckDeleteConfirmationName(event.target.value);
+                          setDeckEditorMessage(null);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+
+                            if (canConfirmDeckDelete) {
+                              void archiveDeck(editingDeck.id);
+                            }
+                          }
+                        }}
+                        placeholder={editingDeck.name}
+                        autoComplete="off"
+                        disabled={isDeckEditorBusy}
+                      />
+                    </label>
+                    <div className="deck-delete-confirmation-actions">
+                      <button
+                        className="resting-secondary"
+                        type="button"
+                        disabled={isDeckEditorBusy}
+                        onClick={() => {
+                          setIsDeckDeleteConfirming(false);
+                          setDeckDeleteConfirmationName("");
+                          setDeckEditorMessage(null);
+                        }}
+                      >
+                        Keep deck
+                      </button>
+                      <button
+                        className="deck-delete-confirm-button"
+                        type="button"
+                        disabled={!canConfirmDeckDelete}
+                        onClick={() => {
+                          void archiveDeck(editingDeck.id);
+                        }}
+                      >
+                        {isDeckDeleting ? "Deleting..." : "Delete deck"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    className="deck-delete-link"
+                    type="button"
+                    disabled={isDeckEditorBusy}
+                    onClick={() => {
+                      setIsDeckDeleteConfirming(true);
+                      setDeckDeleteConfirmationName("");
+                      setDeckEditorMessage(null);
+                    }}
+                  >
+                    Delete deck
+                  </button>
+                )}
+              </div>
+            ) : null}
+
             <div className="deck-editor-actions">
               <button
                 className="resting-secondary"
                 type="button"
-                disabled={isDeckSaving}
+                disabled={isDeckEditorBusy}
                 onClick={() => {
                   setIsCreatingDeck(false);
                   setEditingDeckId(null);
+                  setIsDeckDeleteConfirming(false);
+                  setDeckDeleteConfirmationName("");
                 }}
               >
                 Cancel
@@ -5162,7 +5339,12 @@ export default function ReviewApp({
                             ) : (
                               <p className="stats-history-summary stats-history-summary-muted">
                                 {isPending
-                                  ? `${formatEvaluationPhase(entry.phase)}...`
+                                  ? `${formatEvaluationPhase(
+                                      entry.phase,
+                                    )}... ${formatEvaluationActivity(
+                                      entry.lastActivityAt,
+                                      currentTime,
+                                    )}`
                                   : "No feedback returned."}
                               </p>
                             )}

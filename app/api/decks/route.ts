@@ -10,7 +10,10 @@ export async function GET() {
     return NextResponse.json({
       decks: await listDecks(),
     });
-  } catch {
+  } catch (error) {
+    console.info("[waxon] deck listing failed", {
+      error: error instanceof Error ? error.message : "unknown error",
+    });
     return NextResponse.json(
       { decks: [], error: "Could not load decks." },
       { status: 500 },

@@ -28,6 +28,7 @@ import {
 } from "./auth";
 import { scheduleNextReview, serializeReviews } from "./scheduler";
 import { questionSlug } from "./questionSlug";
+import type { QuestionAttempt } from "./reviewTypes";
 
 export type QuestionRow = {
   question_id: string;
@@ -58,18 +59,6 @@ export type DueQuestion = {
   conciseAnswer: string | null;
   referenceAnswer: string | null;
   createdAt: number;
-};
-
-export type QuestionAttempt = {
-  id: number;
-  deckId: string;
-  question: string;
-  rawAnswer: string;
-  answerSummary: string;
-  score: number;
-  justification: string;
-  submittedAt: number;
-  resolvedAt: number;
 };
 
 export type QuestionEmbedding = {
@@ -1278,6 +1267,13 @@ export async function getRecentQuestionAttempts(
   const excludeQuestions = Array.from(
     new Set(input.excludeQuestions ?? []),
   ).filter(Boolean);
+  const deckWhereClause = input.deckId
+    ? eq(decks.id, input.deckId)
+    : input.deckScope === "rotation"
+      ? and(eq(decks.inReviewRotation, true), isNull(decks.archivedAt))
+      : input.deckScope === "all"
+        ? sql`true`
+        : eq(decks.id, context.deckId);
 
   const rows = await db
     .select({
@@ -1299,7 +1295,7 @@ export async function getRecentQuestionAttempts(
           db
             .select({ id: decks.id })
             .from(decks)
-            .where(eq(decks.userId, context.userId)),
+            .where(and(eq(decks.userId, context.userId), deckWhereClause)),
         ),
         excludeQuestions.length > 0
           ? notInArray(questionAttempts.question, excludeQuestions)

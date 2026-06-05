@@ -16,7 +16,7 @@ export default async function AdminPage() {
   return (
     <AdminPageClient
       currentUser={currentUser}
-      initialInteractions={listLlmTraceInteractions()}
+      initialInteractions={await listLlmTraceInteractions()}
     />
   );
 }

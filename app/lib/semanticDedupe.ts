@@ -16,6 +16,7 @@ import {
   questionDedupeSourceHash,
 } from "./embeddingSource";
 import { generateConciseAnswers } from "./conciseAnswer";
+import { extractJsonObject } from "./jsonObject";
 import { readQuestions, type QuestionInput } from "./postgresStore";
 
 export type NovelQuestionCandidate = {
@@ -60,6 +61,12 @@ const NEIGHBOR_COUNT = 10;
 const MIN_EXTERNAL_SIMILARITY = 0.78;
 const MIN_BATCH_SIMILARITY = 0.86;
 const JUDGE_BATCH_SIZE = 10;
+const SEMANTIC_DEDUPE_JUDGE_SYSTEM_PROMPT = [
+  "Decide whether generated flashcard candidates are semantic duplicates of close neighbors.",
+  "Reject only when the candidate and a neighbor test the same atomic recall target, so mastering one would make the other redundant.",
+  "Similar topic is not enough. Keep contrast pairs, prerequisite variants, examples with materially different reasoning, boundary cases, and failure-mode questions.",
+  "Return strict JSON: {\"decisions\":[{\"candidateId\":\"...\",\"duplicateOf\":\"neighbor id or null\",\"rationale\":\"short\"}]}",
+].join("\n\n");
 
 function vectorLiteral(embedding: number[]): string {
   return `[${embedding.join(",")}]`;
@@ -115,20 +122,6 @@ function cosineSimilarity(left: number[], right: number[]): number {
   }
 
   return dotProduct(left, right) / denominator;
-}
-
-function extractJsonObject(source: string): unknown {
-  try {
-    return JSON.parse(source);
-  } catch {
-    const match = source.match(/\{[\s\S]*\}/);
-
-    if (!match) {
-      throw new Error("Model did not return JSON.");
-    }
-
-    return JSON.parse(match[0]);
-  }
 }
 
 async function fetchEmbeddings(
@@ -420,27 +413,25 @@ async function judgeDuplicateBatch(
         max_tokens: Math.min(4096, 220 * batch.length + 500),
         messages: [
           {
+            role: "system",
+            content: SEMANTIC_DEDUPE_JUDGE_SYSTEM_PROMPT,
+          },
+          {
             role: "user",
-            content: [
-              "Decide whether generated flashcard candidates are semantic duplicates of close neighbors.",
-              "Reject only when the candidate and a neighbor test the same atomic recall target, so mastering one would make the other redundant.",
-              "Similar topic is not enough. Keep contrast pairs, prerequisite variants, examples with materially different reasoning, boundary cases, and failure-mode questions.",
-              "Return strict JSON: {\"decisions\":[{\"candidateId\":\"...\",\"duplicateOf\":\"neighbor id or null\",\"rationale\":\"short\"}]}",
-              JSON.stringify({
-                candidates: batch.map((candidate) => ({
-                  id: candidate.id,
-                  question: candidate.question,
-                  conciseAnswer: candidate.conciseAnswer,
-                  neighbors: candidate.neighbors.map((neighbor) => ({
-                    id: neighbor.id,
-                    kind: neighbor.kind,
-                    question: neighbor.question,
-                    conciseAnswer: neighbor.conciseAnswer,
-                    similarity: neighbor.similarity,
-                  })),
+            content: JSON.stringify({
+              candidates: batch.map((candidate) => ({
+                id: candidate.id,
+                question: candidate.question,
+                conciseAnswer: candidate.conciseAnswer,
+                neighbors: candidate.neighbors.map((neighbor) => ({
+                  id: neighbor.id,
+                  kind: neighbor.kind,
+                  question: neighbor.question,
+                  conciseAnswer: neighbor.conciseAnswer,
+                  similarity: neighbor.similarity,
                 })),
-              }),
-            ].join("\n\n"),
+              })),
+            }),
           },
         ],
       },
