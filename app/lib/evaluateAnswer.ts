@@ -1,4 +1,5 @@
 import { getQuestionQualityReference } from "./questionQualityReference";
+import { beginLlmTrace, finishLlmTrace } from "./llmTraceStore";
 import {
   extractChatCompletionText,
   getOpenRouterApiKey,
@@ -30,7 +31,57 @@ export type EvaluateAnswerInput = {
 };
 
 export const EVALUATION_TIMEOUT_MS = 10_000;
+const BROWSER_SMOKE_CORRECT_TOKEN = "browser-smoke-correct-token";
 const MAX_CONTEXT_TEXT_CHARS = 220;
+
+function isBrowserSmokeEvaluatorEnabled(): boolean {
+  return (
+    process.env.NODE_ENV === "development" &&
+    process.env.WAXON_BROWSER_SMOKE_EVALUATOR === "1"
+  );
+}
+
+function evaluateBrowserSmokeAnswer(
+  input: EvaluateAnswerInput,
+): EvaluationResult {
+  const normalizedAnswer = input.answer.trim().toLowerCase();
+  const isCorrect = normalizedAnswer.includes(BROWSER_SMOKE_CORRECT_TOKEN);
+  const result: EvaluationResult = {
+    status: "graded",
+    score: isCorrect ? 10 : 2,
+    justification: isCorrect ? "Contains the expected smoke token." : "Missing the expected smoke token.",
+    answerSummary: input.answer.trim() || "(blank)",
+    probingQuestions: isCorrect
+      ? []
+      : ["What exact token should a browser smoke answer include?"],
+  };
+  const traceId = input.traceId ?? crypto.randomUUID();
+  const pendingTrace = beginLlmTrace({
+    traceId,
+    operation: "evaluate_answer_browser_smoke",
+    model: "deterministic-browser-smoke",
+    question: input.question,
+    requestBody: {
+      question: input.question,
+      answer: input.answer,
+      expectedToken: BROWSER_SMOKE_CORRECT_TOKEN,
+    },
+  });
+
+  finishLlmTrace(pendingTrace, {
+    ok: true,
+    responseBody: result,
+    usage: {
+      prompt_tokens: input.question.length + input.answer.length,
+      completion_tokens: result.justification.length,
+      total_tokens:
+        input.question.length + input.answer.length + result.justification.length,
+      cost: 0,
+    },
+  });
+
+  return result;
+}
 
 function truncateContextText(value: string): string {
   const normalized = value.trim().replace(/\s+/g, " ");
@@ -146,6 +197,10 @@ async function loadSimilarExistingQuestionContext(
 export async function evaluateAnswer(
   input: EvaluateAnswerInput,
 ): Promise<EvaluationResult> {
+  if (isBrowserSmokeEvaluatorEnabled()) {
+    return evaluateBrowserSmokeAnswer(input);
+  }
+
   const apiKey = getOpenRouterApiKey();
 
   if (!apiKey) {

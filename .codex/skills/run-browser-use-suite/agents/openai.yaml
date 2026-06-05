@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run Browser Use Suite"
+  short_description: "Run Waxon Browser Use suites from markdown files."
+  default_prompt: "Run the Browser Use test suite at tests/browser-use-signed-in-user-experience.md."
