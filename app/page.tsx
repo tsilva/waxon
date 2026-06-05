@@ -83,6 +83,7 @@ export default function LandingPage() {
           <span className="landing-red-rule" aria-hidden="true" />
           <p>
             Typed answers, model feedback, and spaced review in one quiet loop.
+            Wax on, wax off.
           </p>
           <div className="landing-hero-actions">
             <Link className="landing-primary" href="/review">
@@ -203,9 +204,6 @@ export default function LandingPage() {
 
       <footer className="landing-footer">
         <Link href="/privacy-policy">Privacy policy</Link>
-        <span className="landing-origin">
-          Named for the Karate Kid rhythm: &quot;wax on, wax off.&quot;
-        </span>
         <Link href="/terms-and-conditions">Terms and conditions</Link>
       </footer>
     </main>
