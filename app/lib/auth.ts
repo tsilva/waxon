@@ -3,6 +3,7 @@ import * as Sentry from "@sentry/nextjs";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import { authAccounts, users } from "@/app/db/schema";
+import { isLocalTestAuthEnabled, localTestUser } from "@/app/lib/localTestAuth";
 
 export type AuthenticatedUser = {
   id: string;
@@ -92,6 +93,48 @@ function setTraceIdentity(input: {
 }
 
 export async function getCurrentUser(): Promise<AuthenticatedUser> {
+  if (isLocalTestAuthEnabled()) {
+    const now = Date.now();
+    const deckId = getDeckIdForUser(localTestUser.id);
+
+    setTraceIdentity({
+      userId: localTestUser.id,
+      deckId,
+      email: localTestUser.email,
+      displayName: localTestUser.displayName,
+    });
+
+    const [row] = await db
+      .insert(users)
+      .values({
+        id: localTestUser.id,
+        displayName: localTestUser.displayName,
+        email: localTestUser.email,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: users.id,
+        set: {
+          displayName: localTestUser.displayName,
+          email: localTestUser.email,
+          updatedAt: now,
+        },
+      })
+      .returning({
+        id: users.id,
+        displayName: users.displayName,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+      });
+
+    if (!row) {
+      throw new Error("Could not load current user.");
+    }
+
+    return row;
+  }
+
   const authObject = await auth.protect();
   const clerkUserId = authObject.userId;
   const client = await clerkClient();

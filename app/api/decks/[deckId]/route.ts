@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { archiveDeck, updateDeck } from "@/app/lib/postgresStore";
+import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,10 @@ export async function PATCH(request: Request, context: RouteContext) {
           ? payload.inReviewRotation
           : undefined,
     });
+
+    if (typeof payload.inReviewRotation === "boolean") {
+      invalidateReviewQueue();
+    }
 
     return NextResponse.json({
       ok: true,
@@ -56,6 +61,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
 
   try {
     await archiveDeck({ deckId });
+    invalidateReviewQueue();
 
     return NextResponse.json({
       ok: true,

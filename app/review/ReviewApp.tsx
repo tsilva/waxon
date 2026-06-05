@@ -5,11 +5,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
+import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import {
   ArrowUp,
   Check,
   ChevronDown,
   FileText,
+  Layers,
   LogOut,
   Mic,
   PencilLine,
@@ -41,6 +43,7 @@ import {
 
 type NextQuestionResponse = {
   question: string | null;
+  deckName: string | null;
   queueRemaining: number;
 };
 
@@ -114,6 +117,8 @@ type EvaluationQueueItem = {
 };
 
 type ReviewQueueItem = {
+  deckId: string;
+  deckName: string;
   question: string;
   nextDue: number;
   createdAt: number;
@@ -214,6 +219,7 @@ type ReviewAppProps = {
 
 type ReviewSessionSnapshot = {
   question: string | null;
+  currentDeckName: string | null;
   answer: string;
   speechPreview: string;
   queueRemaining: number;
@@ -1380,6 +1386,7 @@ export default function ReviewApp({
 }: ReviewAppProps) {
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
+  const isLocalAuth = isLocalTestAuthEnabled();
   const accountWidgetsCustomPages = useMemo(
     () => createAccountWidgetsCustomPages(),
     [],
@@ -1399,6 +1406,9 @@ export default function ReviewApp({
   );
   const [question, setQuestion] = useState<string | null>(
     () => cachedSessionRef.current?.question ?? null,
+  );
+  const [currentDeckName, setCurrentDeckName] = useState<string | null>(
+    () => cachedSessionRef.current?.currentDeckName ?? null,
   );
   const [answer, setAnswer] = useState(
     () => cachedSessionRef.current?.answer ?? "",
@@ -1527,6 +1537,7 @@ export default function ReviewApp({
   const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const [reviewQueueVersion, setReviewQueueVersion] = useState(0);
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
   const queueStageRef = useRef<HTMLElement | null>(null);
@@ -1638,6 +1649,7 @@ export default function ReviewApp({
   useEffect(() => {
     reviewSessionSnapshot = {
       question,
+      currentDeckName,
       answer,
       speechPreview,
       queueRemaining,
@@ -1675,6 +1687,7 @@ export default function ReviewApp({
     };
   }, [
     answer,
+    currentDeckName,
     currentUser,
     deckDraftName,
     deckEmbeddingPlot,
@@ -1936,6 +1949,14 @@ export default function ReviewApp({
 
           return nextDecks;
         });
+        prefetchedNextQuestionRef.current = null;
+        nextQuestionPrefetchRef.current?.abortController.abort();
+        nextQuestionPrefetchRef.current = null;
+        hasLoadedQuestionRef.current = false;
+        setQuestion(null);
+        questionRef.current = null;
+        setQueueRemaining(0);
+        setReviewQueueVersion((currentVersion) => currentVersion + 1);
       } catch (deleteError) {
         setDeckPageMessage(
           deleteError instanceof Error
@@ -1971,6 +1992,14 @@ export default function ReviewApp({
           currentDeck.id === deck.id ? (data.deck as DeckManagementItem) : currentDeck,
         ),
       );
+      prefetchedNextQuestionRef.current = null;
+      nextQuestionPrefetchRef.current?.abortController.abort();
+      nextQuestionPrefetchRef.current = null;
+      hasLoadedQuestionRef.current = false;
+      setQuestion(null);
+      questionRef.current = null;
+      setQueueRemaining(0);
+      setReviewQueueVersion((currentVersion) => currentVersion + 1);
     } catch (toggleError) {
       setDeckPageMessage(
         toggleError instanceof Error
@@ -2222,6 +2251,7 @@ export default function ReviewApp({
     hasLoadedQuestionRef.current = true;
     setQuestion(data.question);
     questionRef.current = data.question;
+    setCurrentDeckName(data.deckName);
     setQueueRemaining(data.queueRemaining);
 
     if (data.question) {
@@ -2332,6 +2362,7 @@ export default function ReviewApp({
     setIsLoadingQuestion(true);
     setQuestion(null);
     questionRef.current = null;
+    setCurrentDeckName(null);
     setError(null);
 
     try {
@@ -2412,12 +2443,16 @@ export default function ReviewApp({
   }, [applyQueueStatus, queueStatusUrl]);
 
   useEffect(() => {
+    if (activeTab !== "review") {
+      return;
+    }
+
     if (hasLoadedQuestionRef.current) {
       return;
     }
 
     void loadNextQuestion({ surfaceError: false });
-  }, [clearPendingSpeechCommand, loadNextQuestion]);
+  }, [activeTab, loadNextQuestion, reviewQueueVersion]);
 
   useEffect(() => {
     if (!question) {
@@ -2672,6 +2707,7 @@ export default function ReviewApp({
       hasLoadedQuestionRef.current = true;
       setQuestion(data.question);
       questionRef.current = data.question;
+      setCurrentDeckName(data.deckName);
       setQueueRemaining(data.queueRemaining);
 
       if (data.question) {
@@ -3903,9 +3939,13 @@ export default function ReviewApp({
                     role="menuitem"
                     onClick={() => {
                       setIsUserMenuOpen(false);
-                      clerk.openUserProfile({
-                        customPages: accountWidgetsCustomPages,
-                      });
+                      if (isLocalAuth) {
+                        setIsSettingsOpen(true);
+                      } else {
+                        clerk.openUserProfile({
+                          customPages: accountWidgetsCustomPages,
+                        });
+                      }
                     }}
                   >
                     <ManageAccountIcon />
@@ -3917,7 +3957,11 @@ export default function ReviewApp({
                     role="menuitem"
                     onClick={() => {
                       setIsUserMenuOpen(false);
-                      void clerk.signOut({ redirectUrl: "/" });
+                      if (isLocalAuth) {
+                        window.location.assign("/");
+                      } else {
+                        void clerk.signOut({ redirectUrl: "/" });
+                      }
                     }}
                   >
                     <SignOutIcon />
@@ -3948,11 +3992,19 @@ export default function ReviewApp({
               {isLoadingQuestion ? (
                 <h2 className="question-title">Loading next question...</h2>
               ) : question ? (
-                <MarkdownInline
-                  as="h2"
-                  className="question-title"
-                  text={question}
-                />
+                <>
+                  {currentDeckName ? (
+                    <div className="question-source">
+                      <Layers aria-hidden="true" />
+                      <span>{currentDeckName}</span>
+                    </div>
+                  ) : null}
+                  <MarkdownInline
+                    as="h2"
+                    className="question-title"
+                    text={question}
+                  />
+                </>
               ) : (
                 <div className="resting-state">
                   <p className="resting-kicker">Review complete</p>
@@ -4260,18 +4312,8 @@ export default function ReviewApp({
           {selectedDeckDetailId ? (
             <>
               <div className="queue-detail-header">
-                <button
-                  className="queue-back-button"
-                  type="button"
-                  onClick={closeDeckQueue}
-                >
-                  Decks
-                </button>
                 <div>
                   <h2>{selectedDeckDetail?.name ?? "Deck"}</h2>
-                  {selectedDeckDetail?.slug ? (
-                    <p>{selectedDeckDetail.slug}</p>
-                  ) : null}
                 </div>
               </div>
 

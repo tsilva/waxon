@@ -46,8 +46,24 @@ LLM_MODEL=openai/gpt-5.5
 
 `LLM_MODEL` is optional. The app also accepts `LLM_API_KEY` if `OPENROUTER_API_KEY` is not set.
 
-For login and signup, create a Clerk application and add the Clerk keys to
-`.env.local`:
+In local development, login and signup buttons automatically enter the app as a
+test user:
+
+```text
+id: tsilva
+email: eng.tiago.silva@gmail.com
+```
+
+This keeps `/review`, `/decks`, `/admin`, and app API routes testable without a
+Clerk browser session. To test the real Clerk flow locally, disable the local
+test user:
+
+```bash
+NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1
+```
+
+For deployed environments, login and signup use Clerk. Create a Clerk
+application and add the Clerk keys to `.env.local`:
 
 ```bash
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your-clerk-publishable-key
