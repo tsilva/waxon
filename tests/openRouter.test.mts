@@ -4,6 +4,7 @@ import {
   openRouterChatCompletion,
   openRouterEmbeddings,
 } from "../app/lib/openRouter.ts";
+import { listLlmTraceInteractions } from "../app/lib/llmTraceStore.ts";
 
 test("openRouterChatCompletion sends user and deck trace identifiers", async () => {
   const originalFetch = globalThis.fetch;
@@ -116,4 +117,53 @@ test("openRouterChatCompletion mirrors body user into trace metadata", async () 
   const trace = requestBody.trace as Record<string, unknown> | undefined;
   assert.equal(requestBody.user, "body-user");
   assert.equal(trace?.user_id, "body-user");
+});
+
+test("openRouterChatCompletion records actual request and response payloads", async () => {
+  const originalFetch = globalThis.fetch;
+  const traceId = `trace-recording-${Date.now()}`;
+
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        choices: [{ message: { content: "{\"score\":10}" } }],
+        usage: {
+          prompt_tokens: 12,
+          completion_tokens: 4,
+          total_tokens: 16,
+          cost: 0.001,
+        },
+      }),
+      { status: 200, statusText: "OK" },
+    );
+
+  try {
+    await openRouterChatCompletion({
+      apiKey: "test-key",
+      trace: {
+        operation: "evaluate_answer",
+        userId: "user-recording",
+        deckId: "deck-recording",
+        question: "What payload should be visible?",
+        traceId,
+      },
+      body: {
+        model: "test-model",
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const trace = listLlmTraceInteractions().find(
+    (candidate) => candidate.id === traceId,
+  );
+
+  assert.ok(trace);
+  assert.equal(trace.status, "ok");
+  assert.equal(trace.calls[0]?.operation, "evaluate_answer");
+  assert.equal(trace.calls[0]?.inputTokens, 12);
+  assert.match(trace.calls[0]?.requestPayload ?? "", /hello/);
+  assert.match(trace.calls[0]?.responsePayload ?? "", /prompt_tokens/);
 });

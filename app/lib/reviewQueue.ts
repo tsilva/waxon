@@ -15,6 +15,7 @@ import {
 } from "./postgresStore";
 import {
   evaluateAnswer,
+  EVALUATION_TIMEOUT_MS,
   failedEvaluation,
   PROBING_QUESTION_SCORE_THRESHOLD,
   type EvaluationResult,
@@ -33,7 +34,7 @@ import {
 import { gateNovelQuestions } from "./semanticDedupe";
 
 export const RESOLVED_JUDGING_VISIBLE_MS = 10_000;
-const EVALUATION_PROCESSING_TIMEOUT_MS = 90_000;
+const EVALUATION_PROCESSING_TIMEOUT_MS = EVALUATION_TIMEOUT_MS;
 
 type EvaluationPhase =
   | "queued"
@@ -45,6 +46,7 @@ type EvaluationPhase =
 
 type Submission = {
   evaluationId: string;
+  traceId: string;
   question: string;
   queuedQuestion: DueQuestion | null;
   userId: string | null;
@@ -56,6 +58,7 @@ type Submission = {
 
 export type EvaluationQueueItem = {
   id: string;
+  traceId: string;
   question: string;
   answer: string;
   status: "grading" | "resolved";
@@ -219,6 +222,7 @@ export function subscribeQueueStatus(
 }
 
 function createEvaluationItem(input: {
+  traceId: string;
   question: string;
   answer: string;
   submittedAt: number;
@@ -227,6 +231,7 @@ function createEvaluationItem(input: {
 
   return {
     id,
+    traceId: input.traceId,
     question: input.question,
     answer: input.answer,
     status: "grading",
@@ -443,11 +448,13 @@ function projectEmbeddings(
 }
 
 async function getDeckEmbeddingPlot(input: {
+  deckId?: string;
   questions: string[];
   totalQuestions: number;
   userId: string;
 }): Promise<DeckEmbeddingPlot> {
   const questions = await readQuestionsWithEmbeddings({
+    deckId: input.deckId,
     userId: input.userId,
     questions: input.questions,
   });
@@ -543,6 +550,7 @@ async function getDeckEmbeddingPlot(input: {
 async function getReviewQueueItems(
   userId: string,
   input: {
+    deckId?: string;
     limit: number;
     offset: number;
     sortKey: QueuedQuestionsSortKey;
@@ -554,6 +562,7 @@ async function getReviewQueueItems(
 }> {
   const queuedQuestionsPage = await getQueuedQuestionsPage({
     userId,
+    deckId: input.deckId,
     excludeQuestions: Array.from(state.inFlightQuestions),
     limit: input.limit,
     offset: input.offset,
@@ -791,6 +800,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       previousReviews: submission.previousReviews,
       userId: submission.userId,
       deckId: submission.deckId,
+      traceId: submission.traceId,
     });
 
     if (isFinished) {
@@ -982,14 +992,16 @@ export async function skipQuestion(input: {
 export async function submitAnswer(input: {
   question: string;
   answer: string;
-}): Promise<{ evaluationId: string }> {
+}): Promise<{ evaluationId: string; traceId: string }> {
   const user = await initializeQueue();
 
   const queued = removeFromQueue(input.question);
   const snapshot =
     queued ?? (await getQuestionSnapshot(input.question, { userId: user.id }));
   const submittedAt = Date.now();
+  const traceId = crypto.randomUUID();
   const evaluation = createEvaluationItem({
+    traceId,
     question: input.question,
     answer: input.answer,
     submittedAt,
@@ -1003,6 +1015,7 @@ export async function submitAnswer(input: {
 
   void processEvaluation({
     evaluationId: evaluation.id,
+    traceId,
     question: input.question,
     queuedQuestion: queued,
     userId: snapshot?.userId ?? user.id,
@@ -1014,6 +1027,7 @@ export async function submitAnswer(input: {
 
   return {
     evaluationId: evaluation.id,
+    traceId,
   };
 }
 
@@ -1061,6 +1075,7 @@ export async function addQuestionsToDeck(input: {
 }
 
 export async function queueStatus(input: {
+  deckId?: string;
   limit?: number;
   offset?: number;
   sortKey?: QueuedQuestionsSortKey;
@@ -1071,6 +1086,7 @@ export async function queueStatus(input: {
   const offset = Math.max(0, Math.floor(input.offset ?? 0));
   const sortKey = input.sortKey ?? "review-date";
   const reviewQueuePage = await getReviewQueueItems(user.id, {
+    deckId: input.deckId,
     limit,
     offset,
     sortKey,
@@ -1082,6 +1098,7 @@ export async function queueStatus(input: {
   });
   const deckEmbeddingPlot = await getDeckEmbeddingPlot({
     userId: user.id,
+    deckId: input.deckId,
     questions: reviewQueuePage.items.map((item) => item.question),
     totalQuestions: reviewQueuePage.total,
   });

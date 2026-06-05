@@ -45,10 +45,19 @@ export async function POST(request: Request) {
       ok: true,
       deck,
     });
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not create deck.";
+
     return NextResponse.json(
-      { ok: false, error: "Could not create deck." },
-      { status: 500 },
+      { ok: false, error: message },
+      {
+        status:
+          message === "Deck name already exists."
+            ? 409
+            : message === "Deck name is required."
+              ? 400
+              : 500,
+      },
     );
   }
 }

@@ -1,3 +1,8 @@
+import {
+  beginLlmTrace,
+  finishLlmTrace,
+} from "./llmTraceStore.ts";
+
 export type OpenRouterTraceContext = {
   operation: string;
   userId?: string | null;
@@ -122,16 +127,43 @@ export async function openRouterChatCompletion(input: {
     session_id: trace.deckId ?? undefined,
     trace: buildTraceMetadata(trace, traceId),
   };
-
-  const response = await fetch(OPENROUTER_CHAT_URL, {
-    method: "POST",
-    signal: input.signal,
-    headers: withOpenRouterHeaders(input.apiKey),
-    body: JSON.stringify(body),
+  const pendingTrace = beginLlmTrace({
+    traceId,
+    operation: trace.operation,
+    model: body.model,
+    question: trace.question,
+    requestBody: body,
   });
-  const parsed = (await parseOpenRouterJson(response)) as OpenRouterChatResponse;
 
-  return { response, body: parsed };
+  try {
+    const response = await fetch(OPENROUTER_CHAT_URL, {
+      method: "POST",
+      signal: input.signal,
+      headers: withOpenRouterHeaders(input.apiKey),
+      body: JSON.stringify(body),
+    });
+    const parsed = (await parseOpenRouterJson(
+      response,
+    )) as OpenRouterChatResponse;
+
+    finishLlmTrace(pendingTrace, {
+      ok: response.ok,
+      responseBody: {
+        status: response.status,
+        statusText: response.statusText,
+        body: parsed,
+      },
+      usage: parsed.usage,
+    });
+
+    return { response, body: parsed };
+  } catch (error) {
+    finishLlmTrace(pendingTrace, {
+      ok: false,
+      error,
+    });
+    throw error;
+  }
 }
 
 export async function openRouterEmbeddings(input: {
@@ -151,16 +183,43 @@ export async function openRouterEmbeddings(input: {
     session_id: trace.deckId ?? undefined,
     trace: buildTraceMetadata(trace, traceId),
   };
-
-  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
-    method: "POST",
-    signal: input.signal,
-    headers: withOpenRouterHeaders(input.apiKey),
-    body: JSON.stringify(body),
+  const pendingTrace = beginLlmTrace({
+    traceId,
+    operation: trace.operation,
+    model: body.model,
+    question: trace.question,
+    requestBody: body,
   });
-  const parsed = (await parseOpenRouterJson(response)) as OpenRouterEmbeddingResponse;
 
-  return { response, body: parsed };
+  try {
+    const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
+      method: "POST",
+      signal: input.signal,
+      headers: withOpenRouterHeaders(input.apiKey),
+      body: JSON.stringify(body),
+    });
+    const parsed = (await parseOpenRouterJson(
+      response,
+    )) as OpenRouterEmbeddingResponse;
+
+    finishLlmTrace(pendingTrace, {
+      ok: response.ok,
+      responseBody: {
+        status: response.status,
+        statusText: response.statusText,
+        body: parsed,
+      },
+      usage: parsed.usage,
+    });
+
+    return { response, body: parsed };
+  } catch (error) {
+    finishLlmTrace(pendingTrace, {
+      ok: false,
+      error,
+    });
+    throw error;
+  }
 }
 
 function buildTraceMetadata(

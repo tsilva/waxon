@@ -26,9 +26,10 @@ export type EvaluateAnswerInput = {
   previousReviews: string;
   userId?: string | null;
   deckId?: string | null;
+  traceId?: string | null;
 };
 
-const EVALUATION_TIMEOUT_MS = 25_000;
+export const EVALUATION_TIMEOUT_MS = 10_000;
 const MAX_CONTEXT_TEXT_CHARS = 220;
 
 function truncateContextText(value: string): string {
@@ -168,6 +169,7 @@ export async function evaluateAnswer(
         userId: input.userId,
         deckId: input.deckId,
         question: input.question,
+        traceId: input.traceId,
       },
       body: {
         model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
@@ -205,6 +207,15 @@ export async function evaluateAnswer(
       model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
       error: error instanceof Error ? error.message : "unknown error",
     });
+    if (isAbortError(error)) {
+      return failedEvaluation(
+        `LLM evaluation timed out after ${Math.round(
+          EVALUATION_TIMEOUT_MS / 1000,
+        )}s while waiting for OpenRouter.`,
+        input.answer,
+      );
+    }
+
     return failedEvaluation(
       "LLM evaluation failed or returned invalid JSON.",
       input.answer,
@@ -212,4 +223,11 @@ export async function evaluateAnswer(
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.message.includes("aborted"))
+  );
 }

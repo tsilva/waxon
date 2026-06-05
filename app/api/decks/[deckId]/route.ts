@@ -37,7 +37,16 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     return NextResponse.json(
       { ok: false, error: message },
-      { status: message === "Deck not found." ? 404 : 500 },
+      {
+        status:
+          message === "Deck not found."
+            ? 404
+            : message === "Deck name already exists."
+              ? 409
+              : message === "Deck name is required."
+                ? 400
+                : 500,
+      },
     );
   }
 }
