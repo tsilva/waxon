@@ -230,6 +230,7 @@ type ReviewSessionSnapshot = {
   generatorMessage: string | null;
   hasLoadedQuestion: boolean;
   hasLoadedQueueStatus: boolean;
+  hasLoadedDecks: boolean;
   loadedQueueSortKey: QueueSortKey | null;
   queueLoadedLimit: number;
 };
@@ -1146,6 +1147,9 @@ export default function ReviewApp({
   const hasLoadedQueueStatusRef = useRef(
     cachedSessionRef.current?.hasLoadedQueueStatus ?? false,
   );
+  const hasLoadedDecksRef = useRef(
+    cachedSessionRef.current?.hasLoadedDecks ?? false,
+  );
   const loadedQueueSortKeyRef = useRef<QueueSortKey | null>(
     cachedSessionRef.current?.loadedQueueSortKey ?? null,
   );
@@ -1388,6 +1392,7 @@ export default function ReviewApp({
       generatorMessage,
       hasLoadedQuestion: hasLoadedQuestionRef.current,
       hasLoadedQueueStatus: hasLoadedQueueStatusRef.current,
+      hasLoadedDecks: hasLoadedDecksRef.current,
       loadedQueueSortKey: loadedQueueSortKeyRef.current,
       queueLoadedLimit: queueLoadedLimitRef.current,
     };
@@ -1493,6 +1498,7 @@ export default function ReviewApp({
         loadError instanceof Error ? loadError.message : "Could not load decks.",
       );
     } finally {
+      hasLoadedDecksRef.current = true;
       setIsDecksLoading(false);
     }
   }, []);
@@ -1659,12 +1665,12 @@ export default function ReviewApp({
   }, []);
 
   useEffect(() => {
-    if (activeTab !== "queue" || decks.length > 0 || isDecksLoading) {
+    if (activeTab !== "queue" || hasLoadedDecksRef.current || isDecksLoading) {
       return;
     }
 
     void loadDecks();
-  }, [activeTab, decks.length, isDecksLoading, loadDecks]);
+  }, [activeTab, isDecksLoading, loadDecks]);
 
   useEffect(() => {
     if (cachedSessionRef.current?.currentUser) {
