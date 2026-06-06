@@ -28,7 +28,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const OPENROUTER_MODEL = process.env.LLM_MODEL || "openai/gpt-5.5";
-const LEARN_BATCH_SIZE = 2;
+const LEARN_BATCH_SIZE = 8;
 const MAX_LEARN_BODY_BYTES = 48 * 1024;
 const MAX_DECK_ID_CHARS = 200;
 const MAX_QUESTION_CHARS = 1_200;
@@ -284,7 +284,7 @@ export async function POST(request: Request) {
     body: {
       model: OPENROUTER_MODEL,
       temperature: 0.35,
-      max_tokens: 1200,
+      max_tokens: 2400,
       response_format: { type: "json_object" },
       messages: [
         {
