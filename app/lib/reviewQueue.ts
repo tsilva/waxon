@@ -1,13 +1,19 @@
+import { after } from "next/server";
 import {
   applyEvaluationToPostgres,
+  createAnswerEvaluationRecord,
   getDueQuestions,
+  getVisibleAnswerEvaluations,
   getQuestionAttempts,
   getQueuedQuestionsPage,
+  getQuestionSnapshotById,
   getRecentQuestionAttempts,
   getQuestionSnapshot,
   listDecks,
+  resolveAnswerEvaluationRecord,
   readQuestionsWithEmbeddings,
   resolveOwnedDeckId,
+  updateAnswerEvaluationPhase,
   upsertDueQuestions,
   upsertQuestionEmbeddings,
   type DueQuestion,
@@ -44,10 +50,12 @@ import type {
 
 export const RESOLVED_JUDGING_VISIBLE_MS = 5 * 60_000;
 const EVALUATION_PROCESSING_TIMEOUT_MS = EVALUATION_TIMEOUT_MS;
+const ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS = 5 * 60_000;
 
 type Submission = {
   evaluationId: string;
   traceId: string;
+  questionId: string | null;
   question: string;
   queuedQuestion: DueQuestion | null;
   userId: string | null;
@@ -72,9 +80,9 @@ type QueueState = {
   initializing: Promise<void> | null;
   queue: DueQuestion[];
   pendingEvaluations: number;
-  inFlightQuestions: Set<string>;
+  inFlightQuestionKeys: Set<string>;
   evaluations: EvaluationQueueItem[];
-  latestByQuestion: Record<string, LatestEvaluation>;
+  latestByQuestionKey: Record<string, LatestEvaluation>;
   subscribers: Set<QueueStatusSubscriber>;
 };
 
@@ -90,16 +98,28 @@ const state: QueueState =
     initializing: null,
     queue: [],
     pendingEvaluations: 0,
-    inFlightQuestions: new Set<string>(),
+    inFlightQuestionKeys: new Set<string>(),
     evaluations: [],
-    latestByQuestion: {},
+    latestByQuestionKey: {},
     subscribers: new Set<QueueStatusSubscriber>(),
   };
 
 globalForQueue.waxonQueue = state;
+const legacyState = state as QueueState & {
+  inFlightQuestions?: Set<string>;
+  latestByQuestion?: Record<string, LatestEvaluation>;
+};
 state.userId ??= null;
-state.latestByQuestion ??= {};
+state.inFlightQuestionKeys ??= legacyState.inFlightQuestions ?? new Set<string>();
+state.latestByQuestionKey ??= legacyState.latestByQuestion ?? {};
 state.subscribers ??= new Set<QueueStatusSubscriber>();
+
+function questionKey(input: {
+  questionId?: string | null;
+  question: string;
+}): string {
+  return input.questionId ?? `question:${input.question}`;
+}
 
 function resetQueueStateForUser(userId: string): void {
   state.userId = userId;
@@ -107,9 +127,9 @@ function resetQueueStateForUser(userId: string): void {
   state.initializing = null;
   state.queue = [];
   state.pendingEvaluations = 0;
-  state.inFlightQuestions = new Set();
+  state.inFlightQuestionKeys = new Set();
   state.evaluations = [];
-  state.latestByQuestion = {};
+  state.latestByQuestionKey = {};
 }
 
 export function invalidateReviewQueue(): void {
@@ -135,7 +155,7 @@ function logQueueFlushStatus(action: string): void {
     action,
     queueRemaining: state.queue.length,
     pendingEvaluations: state.pendingEvaluations,
-    inFlightQuestions: state.inFlightQuestions.size,
+    inFlightQuestions: state.inFlightQuestionKeys.size,
     evaluationsTracked: state.evaluations.length,
     initialized: state.initialized,
   });
@@ -171,6 +191,7 @@ export function subscribeQueueStatus(
 
 function createEvaluationItem(input: {
   traceId: string;
+  questionId: string | null;
   deckId: string | null;
   question: string;
   answer: string;
@@ -181,6 +202,7 @@ function createEvaluationItem(input: {
   return {
     id,
     traceId: input.traceId,
+    questionId: input.questionId,
     deckId: input.deckId,
     question: input.question,
     answer: input.answer,
@@ -218,7 +240,7 @@ function resolveEvaluationItem(
   item.nextDue = nextDue;
 
   if (result.status === "graded") {
-    state.latestByQuestion[item.question] = {
+    state.latestByQuestionKey[questionKey(item)] = {
       score: result.score,
       justification: result.justification,
       answerSummary: result.answerSummary,
@@ -283,6 +305,32 @@ function getVisibleEvaluations(now = Date.now()): EvaluationQueueItem[] {
   );
 
   return state.evaluations;
+}
+
+function mergeEvaluationItems(
+  memoryItems: EvaluationQueueItem[],
+  persistedItems: EvaluationQueueItem[],
+): EvaluationQueueItem[] {
+  const byId = new Map<string, EvaluationQueueItem>();
+
+  for (const item of memoryItems) {
+    byId.set(item.id, item);
+  }
+
+  for (const item of persistedItems) {
+    const existing = byId.get(item.id);
+
+    if (!existing || item.status === "resolved" || existing.status !== "resolved") {
+      byId.set(item.id, item);
+    }
+  }
+
+  return [...byId.values()].sort((left, right) => {
+    const leftTime = left.resolvedAt ?? left.submittedAt;
+    const rightTime = right.resolvedAt ?? right.submittedAt;
+
+    return leftTime - rightTime || left.id.localeCompare(right.id);
+  });
 }
 
 function dotProduct(a: number[], b: number[]): number {
@@ -545,17 +593,22 @@ async function getReviewQueueItems(
   const queuedQuestionsPage = await getQueuedQuestionsPage({
     userId,
     deckId: input.deckId,
-    excludeQuestions: Array.from(state.inFlightQuestions),
+    excludeQuestionIds: Array.from(state.inFlightQuestionKeys).filter(
+      (key) => !key.startsWith("question:"),
+    ),
     limit: input.limit,
     offset: input.offset,
     sortKey: input.sortKey,
   });
   const queuedQuestions = queuedQuestionsPage.items;
-  const attemptsByQuestion = new Map(
+  const attemptsByQuestionId = new Map(
     await Promise.all(
       queuedQuestions.map(async (item) => [
-        item.question,
-        await getQuestionAttempts(item.question, { userId }),
+        item.questionId,
+        await getQuestionAttempts(item.question, {
+          userId,
+          questionId: item.questionId,
+        }),
       ] as const),
     ),
   );
@@ -565,11 +618,12 @@ async function getReviewQueueItems(
     items: queuedQuestions
       .map((item) => {
         const msUntilDue = item.nextDue - now;
-        const latest = state.latestByQuestion[item.question];
+        const latest = state.latestByQuestionKey[questionKey(item)];
         const reviewHistory = parseReviews(item.reviews);
         const lastReview = reviewHistory.at(-1);
 
         return {
+          questionId: item.questionId,
           deckId: item.deckId,
           deckName: item.deckName,
           question: item.question,
@@ -585,7 +639,7 @@ async function getReviewQueueItems(
           conciseAnswer: item.conciseAnswer,
           referenceAnswer: item.referenceAnswer,
           lastJustification: latest?.justification ?? null,
-          attempts: attemptsByQuestion.get(item.question) ?? [],
+          attempts: attemptsByQuestionId.get(item.questionId) ?? [],
         } satisfies ReviewQueueItem;
       })
       .sort((a, b) => {
@@ -625,18 +679,22 @@ async function refreshIfEmpty(userId: string): Promise<void> {
 
   const dueQuestions = await getDueQuestions(Date.now(), { userId });
   state.queue = dueQuestions.filter(
-    (question) => !state.inFlightQuestions.has(question.question),
+    (question) => !state.inFlightQuestionKeys.has(questionKey(question)),
   );
   logQueueFlushStatus("refreshed-empty-queue");
 }
 
 async function refreshIfEarlierDueQuestionExists(userId: string): Promise<void> {
   const currentQuestion =
-    state.queue.find((item) => !state.inFlightQuestions.has(item.question)) ??
+    state.queue.find(
+      (item) => !state.inFlightQuestionKeys.has(questionKey(item)),
+    ) ??
     null;
   const dueQuestions = await getDueQuestions(Date.now(), { userId });
   const earliestDueQuestion =
-    dueQuestions.find((item) => !state.inFlightQuestions.has(item.question)) ??
+    dueQuestions.find(
+      (item) => !state.inFlightQuestionKeys.has(questionKey(item)),
+    ) ??
     null;
 
   if (!earliestDueQuestion) {
@@ -646,17 +704,21 @@ async function refreshIfEarlierDueQuestionExists(userId: string): Promise<void> 
   if (
     !currentQuestion ||
     earliestDueQuestion.nextDue < currentQuestion.nextDue ||
-    !state.queue.some((item) => item.question === earliestDueQuestion.question)
+    !state.queue.some((item) => questionKey(item) === questionKey(earliestDueQuestion))
   ) {
     state.queue = dueQuestions.filter(
-      (question) => !state.inFlightQuestions.has(question.question),
+      (question) => !state.inFlightQuestionKeys.has(questionKey(question)),
     );
     logQueueFlushStatus("refreshed-earlier-due-question");
   }
 }
 
-function removeFromQueue(question: string): DueQuestion | null {
-  const index = state.queue.findIndex((item) => item.question === question);
+function removeFromQueue(input: {
+  questionId?: string | null;
+  question: string;
+}): DueQuestion | null {
+  const targetKey = questionKey(input);
+  const index = state.queue.findIndex((item) => questionKey(item) === targetKey);
 
   if (index === -1) {
     return null;
@@ -666,8 +728,12 @@ function removeFromQueue(question: string): DueQuestion | null {
   return removed ?? null;
 }
 
-function removeAllFromQueue(question: string): void {
-  state.queue = state.queue.filter((item) => item.question !== question);
+function removeAllFromQueue(input: {
+  questionId?: string | null;
+  question: string;
+}): void {
+  const targetKey = questionKey(input);
+  state.queue = state.queue.filter((item) => questionKey(item) !== targetKey);
 }
 
 function reinsertQuestion(question: DueQuestion, score: number): void {
@@ -677,7 +743,9 @@ function reinsertQuestion(question: DueQuestion, score: number): void {
     return;
   }
 
-  state.queue = state.queue.filter((item) => item.question !== question.question);
+  state.queue = state.queue.filter(
+    (item) => questionKey(item) !== questionKey(question),
+  );
   if (state.queue.length === 0) {
     logQueueFlushStatus("deferred-low-score-reinsertion");
     return;
@@ -695,7 +763,7 @@ function restoreFailedQuestion(question: DueQuestion | null): void {
 
   state.queue = [
     question,
-    ...state.queue.filter((item) => item.question !== question.question),
+    ...state.queue.filter((item) => questionKey(item) !== questionKey(question)),
   ];
   logQueueFlushStatus("restored-failed-evaluation-question");
 }
@@ -706,22 +774,65 @@ function enqueueProbingQuestions(probingQuestions: DueQuestion[]): void {
   }
 
   const dueProbingQuestions = probingQuestions.filter(
-    (question) => !state.inFlightQuestions.has(question.question),
+    (question) => !state.inFlightQuestionKeys.has(questionKey(question)),
   );
 
   if (dueProbingQuestions.length === 0) {
     return;
   }
 
-  const probeQuestionText = new Set(
-    dueProbingQuestions.map((question) => question.question),
+  const probeQuestionKeys = new Set(
+    dueProbingQuestions.map((question) => questionKey(question)),
   );
 
   state.queue = [
     ...dueProbingQuestions,
-    ...state.queue.filter((question) => !probeQuestionText.has(question.question)),
+    ...state.queue.filter((question) => !probeQuestionKeys.has(questionKey(question))),
   ];
   logQueueFlushStatus("queued-probing-questions");
+}
+
+function persistEvaluationFailure(
+  evaluationId: string,
+  result: EvaluationResult,
+  resolvedAt = Date.now(),
+): void {
+  void resolveAnswerEvaluationRecord({
+    id: evaluationId,
+    score: result.score,
+    justification: result.justification,
+    answerSummary: result.answerSummary,
+    nextDue: null,
+    resolvedAt,
+  }).catch((error: unknown) => {
+    console.info("[waxon] failed to persist evaluation failure status", {
+      evaluationId,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+  });
+}
+
+async function persistEvaluationResolution(input: {
+  evaluationId: string;
+  result: EvaluationResult;
+  nextDue: number | null;
+  resolvedAt: number;
+}): Promise<void> {
+  try {
+    await resolveAnswerEvaluationRecord({
+      id: input.evaluationId,
+      score: input.result.score,
+      justification: input.result.justification,
+      answerSummary: input.result.answerSummary,
+      nextDue: input.nextDue,
+      resolvedAt: input.resolvedAt,
+    });
+  } catch (error) {
+    console.info("[waxon] failed to persist evaluation resolution status", {
+      evaluationId: input.evaluationId,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+  }
 }
 
 async function processEvaluation(submission: Submission): Promise<void> {
@@ -772,6 +883,10 @@ async function processEvaluation(submission: Submission): Promise<void> {
     phaseStartedAt = Date.now();
     resetWatchdog();
     updateEvaluationPhase(submission.evaluationId, phase);
+    void updateAnswerEvaluationPhase({
+      id: submission.evaluationId,
+      phase,
+    });
   };
   const markActivity = () => {
     resetWatchdog();
@@ -806,6 +921,10 @@ async function processEvaluation(submission: Submission): Promise<void> {
       restoreFailedQuestion(submission.queuedQuestion);
     }
 
+    if (result.status === "failed") {
+      persistEvaluationFailure(submission.evaluationId, result);
+    }
+
     if (options.error !== undefined || result.status === "failed") {
       console.info("[waxon] evaluation resolved without grading", {
         action: options.logAction,
@@ -837,7 +956,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
 
     resolveEvaluationItem(submission.evaluationId, result, nextDue);
     state.pendingEvaluations = Math.max(0, state.pendingEvaluations - 1);
-    state.inFlightQuestions.delete(submission.question);
+    state.inFlightQuestionKeys.delete(questionKey(submission));
     logQueueFlushStatus(options.logAction);
     void broadcastQueueStatus();
     return true;
@@ -887,7 +1006,13 @@ async function processEvaluation(submission: Submission): Promise<void> {
     }
 
     if (persisted) {
-      removeAllFromQueue(submission.question);
+      await persistEvaluationResolution({
+        evaluationId: submission.evaluationId,
+        result,
+        nextDue: persisted.nextDue,
+        resolvedAt,
+      });
+      removeAllFromQueue(submission);
       savedEvaluationNextDue = persisted.nextDue;
 
       reinsertQuestion(
@@ -895,6 +1020,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
           deckId: persisted.deckId,
           deckName: persisted.deckName,
           userId: persisted.userId,
+          questionId: persisted.questionId,
           question: persisted.question,
           reviews: persisted.reviews,
           nextDue: persisted.nextDue,
@@ -974,6 +1100,13 @@ async function processEvaluation(submission: Submission): Promise<void> {
           });
         }
       }
+    } else {
+      await persistEvaluationResolution({
+        evaluationId: submission.evaluationId,
+        result,
+        nextDue: null,
+        resolvedAt,
+      });
     }
 
     setPhase("finalizing");
@@ -998,22 +1131,27 @@ async function processEvaluation(submission: Submission): Promise<void> {
 }
 
 export async function peekNextQuestion(): Promise<{
+  questionId: string | null;
   question: string | null;
   deckId: string | null;
   deckName: string | null;
   queueRemaining: number;
 }>;
 export async function peekNextQuestion(input: {
+  excludeQuestionId?: string | null;
   excludeQuestion?: string | null;
 }): Promise<{
+  questionId: string | null;
   question: string | null;
   deckId: string | null;
   deckName: string | null;
   queueRemaining: number;
 }>;
 export async function peekNextQuestion(input: {
+  excludeQuestionId?: string | null;
   excludeQuestion?: string | null;
 } = {}): Promise<{
+  questionId: string | null;
   question: string | null;
   deckId: string | null;
   deckName: string | null;
@@ -1022,15 +1160,18 @@ export async function peekNextQuestion(input: {
   const user = await initializeQueue();
   await refreshIfEmpty(user.id);
   await refreshIfEarlierDueQuestionExists(user.id);
+  const excludedQuestionKey = input.excludeQuestionId?.trim() || null;
   const excludedQuestion = input.excludeQuestion?.trim() || null;
   const nextQuestion =
     state.queue.find(
       (item) =>
-        !state.inFlightQuestions.has(item.question) &&
+        !state.inFlightQuestionKeys.has(questionKey(item)) &&
+        item.questionId !== excludedQuestionKey &&
         item.question !== excludedQuestion,
     ) ?? null;
 
   return {
+    questionId: nextQuestion?.questionId ?? null,
     question: nextQuestion?.question ?? null,
     deckId: nextQuestion?.deckId ?? null,
     deckName: nextQuestion?.deckName ?? null,
@@ -1039,8 +1180,10 @@ export async function peekNextQuestion(input: {
 }
 
 export async function skipQuestion(input: {
+  questionId?: string | null;
   question: string;
 }): Promise<{
+  questionId: string | null;
   question: string | null;
   deckId: string | null;
   deckName: string | null;
@@ -1049,7 +1192,7 @@ export async function skipQuestion(input: {
   const user = await initializeQueue();
   await refreshIfEmpty(user.id);
 
-  const skipped = removeFromQueue(input.question);
+  const skipped = removeFromQueue(input);
 
   if (skipped) {
     state.queue.push(skipped);
@@ -1061,19 +1204,25 @@ export async function skipQuestion(input: {
 }
 
 export async function submitAnswer(input: {
+  questionId?: string | null;
   question: string;
   answer: string;
 }): Promise<{ evaluationId: string; traceId: string }> {
   const user = await initializeQueue();
 
-  const queued = removeFromQueue(input.question);
+  const queued = removeFromQueue(input);
   const snapshot =
-    queued ?? (await getQuestionSnapshot(input.question, { userId: user.id }));
+    queued ??
+    (input.questionId
+      ? await getQuestionSnapshotById(input.questionId, { userId: user.id })
+      : await getQuestionSnapshot(input.question, { userId: user.id }));
   const submittedAt = Date.now();
   const traceId = crypto.randomUUID();
+  const questionId = snapshot?.questionId ?? input.questionId ?? null;
   const deckId = snapshot?.deckId ?? getDeckIdForUser(user.id);
   const evaluation = createEvaluationItem({
     traceId,
+    questionId,
     deckId,
     question: input.question,
     answer: input.answer,
@@ -1081,14 +1230,24 @@ export async function submitAnswer(input: {
   });
 
   state.evaluations = [...state.evaluations, evaluation].slice(-50);
+  await createAnswerEvaluationRecord({
+    id: evaluation.id,
+    traceId,
+    userId: snapshot?.userId ?? user.id,
+    deckId,
+    question: input.question,
+    answer: input.answer,
+    submittedAt,
+  });
   state.pendingEvaluations += 1;
-  state.inFlightQuestions.add(input.question);
+  state.inFlightQuestionKeys.add(questionKey({ questionId, question: input.question }));
   logQueueFlushStatus("submitted-answer");
   void broadcastQueueStatus();
 
-  void processEvaluation({
+  const submission = {
     evaluationId: evaluation.id,
     traceId,
+    questionId,
     question: input.question,
     queuedQuestion: queued,
     userId: snapshot?.userId ?? user.id,
@@ -1096,7 +1255,9 @@ export async function submitAnswer(input: {
     answer: input.answer,
     submittedAt,
     previousReviews: snapshot?.reviews ?? "",
-  });
+  } satisfies Submission;
+
+  after(() => processEvaluation(submission));
 
   return {
     evaluationId: evaluation.id,
@@ -1170,6 +1331,7 @@ export async function queueStatus(input: {
 } = {}): Promise<QueueStatusSnapshot> {
   const user = await initializeQueue();
   await refreshIfEmpty(user.id);
+  const now = Date.now();
   const limit = Math.min(2_000, Math.max(0, Math.floor(input.limit ?? 24)));
   const offset = Math.max(0, Math.floor(input.offset ?? 0));
   const sortKey = input.sortKey ?? "review-date";
@@ -1181,7 +1343,6 @@ export async function queueStatus(input: {
   });
   const recentAttempts = await getRecentQuestionAttempts({
     userId: user.id,
-    excludeQuestions: Array.from(state.inFlightQuestions),
     deckScope: input.deckId ? undefined : "rotation",
     deckId: input.deckId,
     limit: 24,
@@ -1192,11 +1353,18 @@ export async function queueStatus(input: {
     questions: reviewQueuePage.items.map((item) => item.question),
     totalQuestions: reviewQueuePage.total,
   });
+  const persistedEvaluations = await getVisibleAnswerEvaluations({
+    userId: user.id,
+    deckId: input.deckId,
+    activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
+    resolvedSince: now - RESOLVED_JUDGING_VISIBLE_MS,
+    limit: 50,
+  });
 
   return {
     queueRemaining: state.queue.length,
     pendingEvaluations: state.pendingEvaluations,
-    evaluations: getVisibleEvaluations(),
+    evaluations: mergeEvaluationItems(getVisibleEvaluations(now), persistedEvaluations),
     recentAttempts,
     reviewQueue: reviewQueuePage.items,
     reviewQueueTotal: reviewQueuePage.total,

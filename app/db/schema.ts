@@ -354,6 +354,89 @@ export const questionReviews = pgTable(
   ],
 );
 
+export const answerEvaluations = pgTable(
+  "answer_evaluations",
+  {
+    id: text("id").primaryKey(),
+    traceId: text("trace_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    deckId: text("deck_id")
+      .notNull()
+      .references(() => decks.id, { onDelete: "cascade" }),
+    question: text("question").notNull(),
+    rawAnswer: text("raw_answer").notNull(),
+    status: text("status").notNull(),
+    phase: text("phase"),
+    lastActivityAt: bigint("last_activity_at", { mode: "number" }).notNull(),
+    score: integer("score"),
+    justification: text("justification"),
+    answerSummary: text("answer_summary"),
+    nextDue: bigint("next_due", { mode: "number" }),
+    submittedAt: bigint("submitted_at", { mode: "number" }).notNull(),
+    resolvedAt: bigint("resolved_at", { mode: "number" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => [
+    index("answer_evaluations_user_status_submitted_idx").on(
+      table.userId,
+      table.status,
+      table.submittedAt.desc(),
+    ),
+    index("answer_evaluations_deck_submitted_idx").on(
+      table.deckId,
+      table.submittedAt.desc(),
+    ),
+    check("answer_evaluations_id_nonempty_check", sql`length(trim(${table.id})) > 0`),
+    check(
+      "answer_evaluations_trace_id_nonempty_check",
+      sql`length(trim(${table.traceId})) > 0`,
+    ),
+    check(
+      "answer_evaluations_question_nonempty_check",
+      sql`length(trim(${table.question})) > 0`,
+    ),
+    check(
+      "answer_evaluations_status_check",
+      sql`${table.status} IN ('grading', 'resolved')`,
+    ),
+    check(
+      "answer_evaluations_phase_check",
+      sql`${table.phase} IS NULL OR ${table.phase} IN (
+        'queued',
+        'evaluating-answer',
+        'saving-evaluation',
+        'gating-probes',
+        'saving-probes',
+        'finalizing'
+      )`,
+    ),
+    check(
+      "answer_evaluations_score_check",
+      sql`${table.score} IS NULL OR ${table.score} BETWEEN 0 AND 10`,
+    ),
+    check(
+      "answer_evaluations_last_activity_at_check",
+      sql`${table.lastActivityAt} >= 0`,
+    ),
+    check(
+      "answer_evaluations_submitted_at_check",
+      sql`${table.submittedAt} >= 0`,
+    ),
+    check(
+      "answer_evaluations_resolved_at_check",
+      sql`${table.resolvedAt} IS NULL OR ${table.resolvedAt} >= ${table.submittedAt}`,
+    ),
+    check("answer_evaluations_created_at_check", sql`${table.createdAt} >= 0`),
+    check(
+      "answer_evaluations_updated_at_check",
+      sql`${table.updatedAt} >= ${table.createdAt}`,
+    ),
+  ],
+);
+
 export const llmTraceInteractions = pgTable(
   "llm_trace_interactions",
   {

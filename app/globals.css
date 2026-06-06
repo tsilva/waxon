@@ -165,6 +165,7 @@ textarea {
 .previous-row-empty p,
 .previous-field-label,
 .previous-details-link,
+.stats-history-trace-link,
 .previous-answer,
 .previous-time,
 .question-source,
@@ -4192,6 +4193,23 @@ textarea {
   min-width: 84px;
   min-height: 24px;
   text-align: right;
+}
+
+.stats-history-trace-link {
+  width: fit-content;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 760;
+  line-height: 1.2;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.stats-history-trace-link:hover,
+.stats-history-trace-link:focus-visible {
+  color: var(--accent-hover);
+  outline: 2px solid rgb(166 124 82 / 16%);
+  outline-offset: 4px;
 }
 
 .account-profile-widgets {

@@ -49,6 +49,7 @@ import {
 } from "react";
 
 type NextQuestionResponse = {
+  questionId: string | null;
   question: string | null;
   deckId: string | null;
   deckName: string | null;
@@ -56,11 +57,13 @@ type NextQuestionResponse = {
 };
 
 type PrefetchedNextQuestion = {
+  excludeQuestionId: string | null;
   excludeQuestion: string;
   data: NextQuestionResponse;
 };
 
 type NextQuestionPrefetch = {
+  excludeQuestionId: string | null;
   excludeQuestion: string;
   abortController: AbortController;
   promise: Promise<PrefetchedNextQuestion | null>;
@@ -119,6 +122,7 @@ type ChatMessage =
   | {
       id: string;
       kind: "answer";
+      questionId: string | null;
       deckId: string | null;
       question: string;
       answer: string;
@@ -157,6 +161,7 @@ type ReviewAppProps = {
 };
 
 type ReviewSessionSnapshot = {
+  currentQuestionId: string | null;
   question: string | null;
   currentDeckId: string | null;
   currentDeckName: string | null;
@@ -185,6 +190,7 @@ type ReviewSessionSnapshot = {
   referenceAnswers: Record<string, ReferenceAnswerState>;
   isPreviousExpanded: boolean;
   expandedPreviousAnswerIds: Set<string>;
+  selectedQuestionId: string | null;
   selectedQuestion: string | null;
   currentUser: UserProfileResponse | null;
   generatorScope: string;
@@ -339,11 +345,18 @@ type PendingSpeechCommand = {
   submitAnswer: string;
 };
 
-function nextQuestionUrl(excludeQuestion?: string | null) {
+function nextQuestionUrl(input: {
+  excludeQuestionId?: string | null;
+  excludeQuestion?: string | null;
+} = {}) {
   const params = new URLSearchParams();
 
-  if (excludeQuestion) {
-    params.set("excludeQuestion", excludeQuestion);
+  if (input.excludeQuestionId) {
+    params.set("excludeQuestionId", input.excludeQuestionId);
+  }
+
+  if (input.excludeQuestion) {
+    params.set("excludeQuestion", input.excludeQuestion);
   }
 
   return params.size > 0
@@ -352,10 +365,11 @@ function nextQuestionUrl(excludeQuestion?: string | null) {
 }
 
 async function fetchNextQuestionData(input: {
+  excludeQuestionId?: string | null;
   excludeQuestion?: string | null;
   signal?: AbortSignal;
 } = {}): Promise<NextQuestionResponse> {
-  const response = await fetch(nextQuestionUrl(input.excludeQuestion), {
+  const response = await fetch(nextQuestionUrl(input), {
     cache: "no-store",
     signal: input.signal,
   });
@@ -407,6 +421,7 @@ type SpeechRecognition = EventTarget & {
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
 
 type QuestionStats = {
+  questionId: string | null;
   question: string;
   reviewHistory: ReviewHistoryEntry[];
   answerHistory: AnswerHistoryEntry[];
@@ -431,6 +446,7 @@ type AnswerHistoryEntry = {
   answerSummary: string | null;
   score: number | null;
   justification: string | null;
+  traceId: string | null;
   submittedAt: number;
   resolvedAt: number | null;
   status: "grading" | "resolved";
@@ -1400,6 +1416,9 @@ export default function ReviewApp({
   const [question, setQuestion] = useState<string | null>(
     () => cachedSessionRef.current?.question ?? null,
   );
+  const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(
+    () => cachedSessionRef.current?.currentQuestionId ?? null,
+  );
   const [currentDeckName, setCurrentDeckName] = useState<string | null>(
     () => cachedSessionRef.current?.currentDeckName ?? null,
   );
@@ -1492,6 +1511,9 @@ export default function ReviewApp({
   const [expandedPreviousAnswerIds, setExpandedPreviousAnswerIds] = useState<
     Set<string>
   >(() => new Set(cachedSessionRef.current?.expandedPreviousAnswerIds ?? []));
+  const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(
+    () => cachedSessionRef.current?.selectedQuestionId ?? null,
+  );
   const [selectedQuestion, setSelectedQuestion] = useState<string | null>(
     () => cachedSessionRef.current?.selectedQuestion ?? null,
   );
@@ -1538,6 +1560,7 @@ export default function ReviewApp({
   const [reviewQueueVersion, setReviewQueueVersion] = useState(0);
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
+  const questionIdRef = useRef(currentQuestionId);
   const queueStageRef = useRef<HTMLElement | null>(null);
   const queueListRef = useRef<HTMLOListElement | null>(null);
   const queueLoadedLimitRef = useRef(
@@ -1636,6 +1659,10 @@ export default function ReviewApp({
   }, [question]);
 
   useEffect(() => {
+    questionIdRef.current = currentQuestionId;
+  }, [currentQuestionId]);
+
+  useEffect(() => {
     isSubmittingRef.current = isSubmitting;
   }, [isSubmitting]);
 
@@ -1645,6 +1672,7 @@ export default function ReviewApp({
 
   useEffect(() => {
     reviewSessionSnapshot = {
+      currentQuestionId,
       question,
       currentDeckId,
       currentDeckName,
@@ -1670,6 +1698,7 @@ export default function ReviewApp({
       referenceAnswers,
       isPreviousExpanded,
       expandedPreviousAnswerIds: new Set(expandedPreviousAnswerIds),
+      selectedQuestionId,
       selectedQuestion,
       currentUser,
       generatorScope,
@@ -1685,6 +1714,7 @@ export default function ReviewApp({
     };
   }, [
     answer,
+    currentQuestionId,
     currentDeckId,
     currentDeckName,
     currentUser,
@@ -1714,9 +1744,18 @@ export default function ReviewApp({
     reviewQueueTotal,
     selectedDeckId,
     selectedDeckDetailId,
+    selectedQuestionId,
     selectedQuestion,
     speechPreview,
   ]);
+
+  const selectQuestion = useCallback(
+    (nextQuestion: string | null, nextQuestionId: string | null = null) => {
+      setSelectedQuestion(nextQuestion);
+      setSelectedQuestionId(nextQuestion ? nextQuestionId : null);
+    },
+    [],
+  );
 
   const closeQuestionGenerator = useCallback(() => {
     if (isGeneratingQuestions) {
@@ -1971,6 +2010,8 @@ export default function ReviewApp({
         hasLoadedQuestionRef.current = false;
         setQuestion(null);
         questionRef.current = null;
+        setCurrentQuestionId(null);
+        questionIdRef.current = null;
         setQueueRemaining(0);
         setReviewQueueVersion((currentVersion) => currentVersion + 1);
       } catch (deleteError) {
@@ -2021,6 +2062,8 @@ export default function ReviewApp({
       hasLoadedQuestionRef.current = false;
       setQuestion(null);
       questionRef.current = null;
+      setCurrentQuestionId(null);
+      questionIdRef.current = null;
       setCurrentDeckId(null);
       setQueueRemaining(0);
       setReviewQueueVersion((currentVersion) => currentVersion + 1);
@@ -2245,6 +2288,8 @@ export default function ReviewApp({
 
   const applyNextQuestion = useCallback((data: NextQuestionResponse) => {
     hasLoadedQuestionRef.current = true;
+    setCurrentQuestionId(data.questionId);
+    questionIdRef.current = data.questionId;
     setQuestion(data.question);
     questionRef.current = data.question;
     setCurrentDeckId(data.deckId);
@@ -2256,18 +2301,30 @@ export default function ReviewApp({
     }
   }, [appendQuestion]);
 
-  const prefetchNextQuestion = useCallback((excludeQuestion: string | null) => {
+  const prefetchNextQuestion = useCallback((
+    excludeQuestionId: string | null,
+    excludeQuestion: string | null,
+  ) => {
+    const normalizedQuestionId = excludeQuestionId?.trim() || null;
     const normalizedQuestion = excludeQuestion?.trim();
 
     if (!normalizedQuestion) {
       return;
     }
 
-    if (prefetchedNextQuestionRef.current?.excludeQuestion === normalizedQuestion) {
+    if (
+      prefetchedNextQuestionRef.current?.excludeQuestionId ===
+        normalizedQuestionId &&
+      prefetchedNextQuestionRef.current?.excludeQuestion === normalizedQuestion
+    ) {
       return;
     }
 
-    if (nextQuestionPrefetchRef.current?.excludeQuestion === normalizedQuestion) {
+    if (
+      nextQuestionPrefetchRef.current?.excludeQuestionId ===
+        normalizedQuestionId &&
+      nextQuestionPrefetchRef.current?.excludeQuestion === normalizedQuestion
+    ) {
       return;
     }
 
@@ -2276,10 +2333,12 @@ export default function ReviewApp({
 
     const abortController = new AbortController();
     const promise = fetchNextQuestionData({
+      excludeQuestionId: normalizedQuestionId,
       excludeQuestion: normalizedQuestion,
       signal: abortController.signal,
     })
       .then((data): PrefetchedNextQuestion => ({
+        excludeQuestionId: normalizedQuestionId,
         excludeQuestion: normalizedQuestion,
         data,
       }))
@@ -2295,6 +2354,7 @@ export default function ReviewApp({
       });
 
     const request: NextQuestionPrefetch = {
+      excludeQuestionId: normalizedQuestionId,
       excludeQuestion: normalizedQuestion,
       abortController,
       promise,
@@ -2311,6 +2371,7 @@ export default function ReviewApp({
 
       if (
         prefetched &&
+        questionIdRef.current === prefetched.excludeQuestionId &&
         questionRef.current === prefetched.excludeQuestion
       ) {
         prefetchedNextQuestionRef.current = prefetched;
@@ -2319,18 +2380,25 @@ export default function ReviewApp({
   }, []);
 
   const takePrefetchedNextQuestion = useCallback(
-    async (excludeQuestion: string) => {
+    async (excludeQuestionId: string | null, excludeQuestion: string) => {
+      const normalizedQuestionId = excludeQuestionId?.trim() || null;
       const normalizedQuestion = excludeQuestion.trim();
       const cachedQuestion = prefetchedNextQuestionRef.current;
 
-      if (cachedQuestion?.excludeQuestion === normalizedQuestion) {
+      if (
+        cachedQuestion?.excludeQuestionId === normalizedQuestionId &&
+        cachedQuestion?.excludeQuestion === normalizedQuestion
+      ) {
         prefetchedNextQuestionRef.current = null;
         return cachedQuestion.data;
       }
 
       const pendingPrefetch = nextQuestionPrefetchRef.current;
 
-      if (pendingPrefetch?.excludeQuestion !== normalizedQuestion) {
+      if (
+        pendingPrefetch?.excludeQuestionId !== normalizedQuestionId ||
+        pendingPrefetch?.excludeQuestion !== normalizedQuestion
+      ) {
         return null;
       }
 
@@ -2340,7 +2408,10 @@ export default function ReviewApp({
         nextQuestionPrefetchRef.current = null;
       }
 
-      if (prefetched?.excludeQuestion !== normalizedQuestion) {
+      if (
+        prefetched?.excludeQuestionId !== normalizedQuestionId ||
+        prefetched.excludeQuestion !== normalizedQuestion
+      ) {
         return null;
       }
 
@@ -2351,6 +2422,7 @@ export default function ReviewApp({
   );
 
   const loadNextQuestion = useCallback(async (options?: {
+    excludeQuestionId?: string | null;
     excludeQuestion?: string | null;
     surfaceError?: boolean;
   }) => {
@@ -2359,12 +2431,15 @@ export default function ReviewApp({
     setIsLoadingQuestion(true);
     setQuestion(null);
     questionRef.current = null;
+    setCurrentQuestionId(null);
+    questionIdRef.current = null;
     setCurrentDeckId(null);
     setCurrentDeckName(null);
     setError(null);
 
     try {
       const data = await fetchNextQuestionData({
+        excludeQuestionId: options?.excludeQuestionId,
         excludeQuestion: options?.excludeQuestion,
       });
       applyNextQuestion(data);
@@ -2474,8 +2549,8 @@ export default function ReviewApp({
       return;
     }
 
-    prefetchNextQuestion(question);
-  }, [prefetchNextQuestion, question]);
+    prefetchNextQuestion(currentQuestionId, question);
+  }, [currentQuestionId, prefetchNextQuestion, question]);
 
   useEffect(() => {
     return () => {
@@ -2624,6 +2699,7 @@ export default function ReviewApp({
     }
 
     const submittedQuestion = activeQuestion;
+    const submittedQuestionId = questionIdRef.current;
     const submittedAnswer = (answerOverride ?? answerRef.current).trim();
     const submittedAt = Date.now();
 
@@ -2639,6 +2715,7 @@ export default function ReviewApp({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          questionId: submittedQuestionId,
           question: submittedQuestion,
           answer: submittedAnswer,
         }),
@@ -2655,6 +2732,7 @@ export default function ReviewApp({
         {
           id: `answer-${data.evaluationId}`,
           kind: "answer",
+          questionId: submittedQuestionId,
           deckId: currentDeckId,
           question: submittedQuestion,
           answer: submittedAnswer || "(blank)",
@@ -2673,7 +2751,7 @@ export default function ReviewApp({
       ]);
 
       const prefetchedQuestion =
-        await takePrefetchedNextQuestion(submittedQuestion);
+        await takePrefetchedNextQuestion(submittedQuestionId, submittedQuestion);
 
       if (prefetchedQuestion) {
         applyNextQuestion({
@@ -2681,11 +2759,16 @@ export default function ReviewApp({
           queueRemaining: Math.max(0, prefetchedQuestion.queueRemaining - 1),
         });
       } else {
-        await loadNextQuestion({ excludeQuestion: submittedQuestion });
+        await loadNextQuestion({
+          excludeQuestionId: submittedQuestionId,
+          excludeQuestion: submittedQuestion,
+        });
       }
 
       return true;
     } catch (submitError) {
+      setCurrentQuestionId(submittedQuestionId);
+      questionIdRef.current = submittedQuestionId;
       setQuestion(submittedQuestion);
       setAnswer(submittedAnswer);
       setError(
@@ -2708,6 +2791,7 @@ export default function ReviewApp({
   const skipCurrentQuestion = useCallback(async () => {
     clearPendingSpeechCommand();
     const activeQuestion = questionRef.current;
+    const activeQuestionId = questionIdRef.current;
 
     if (!activeQuestion || isSubmittingRef.current) {
       return false;
@@ -2725,6 +2809,7 @@ export default function ReviewApp({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          questionId: activeQuestionId,
           question: activeQuestion,
         }),
       });
@@ -2734,16 +2819,7 @@ export default function ReviewApp({
       }
 
       const data = (await response.json()) as NextQuestionResponse;
-      hasLoadedQuestionRef.current = true;
-      setQuestion(data.question);
-      questionRef.current = data.question;
-      setCurrentDeckId(data.deckId);
-      setCurrentDeckName(data.deckName);
-      setQueueRemaining(data.queueRemaining);
-
-      if (data.question) {
-        appendQuestion(data.question);
-      }
+      applyNextQuestion(data);
 
       return true;
     } catch (skipError) {
@@ -2754,7 +2830,7 @@ export default function ReviewApp({
       );
       return false;
     }
-  }, [appendQuestion, clearPendingSpeechCommand]);
+  }, [applyNextQuestion, clearPendingSpeechCommand]);
 
   const handleSpeechText = useCallback(
     async (transcript: string) => {
@@ -3536,13 +3612,21 @@ export default function ReviewApp({
       return null;
     }
 
-    const queueItem = reviewQueue.find((item) => item.question === selectedQuestion);
+    const matchesSelectedQuestion = (input: {
+      questionId?: string | null;
+      question: string;
+    }) =>
+      selectedQuestionId
+        ? input.questionId === selectedQuestionId
+        : input.question === selectedQuestion;
+    const queueItem =
+      reviewQueue.find((item) => matchesSelectedQuestion(item)) ?? null;
     const recentQuestionAttempts = recentAttempts.filter(
-      (attempt) => attempt.question === selectedQuestion,
+      (attempt) => matchesSelectedQuestion(attempt),
     );
     const resolvedEvaluations = evaluations.filter(
       (evaluation) =>
-        evaluation.question === selectedQuestion &&
+        matchesSelectedQuestion(evaluation) &&
         evaluation.status === "resolved" &&
         evaluation.score !== null,
     );
@@ -3580,12 +3664,12 @@ export default function ReviewApp({
     const scores = reviewHistory.map((entry) => entry.score);
     const pendingCount = evaluations.filter(
       (evaluation) =>
-        evaluation.question === selectedQuestion &&
+        matchesSelectedQuestion(evaluation) &&
         evaluation.status === "grading",
     ).length;
     const selectedAnswerMessages = messages.filter(
       (message): message is Extract<ChatMessage, { kind: "answer" }> =>
-        message.kind === "answer" && message.question === selectedQuestion,
+        message.kind === "answer" && matchesSelectedQuestion(message),
     );
     const latestResolvedEvaluationWithNextDue = resolvedEvaluations.findLast(
       (evaluation) => evaluation.nextDue !== null,
@@ -3620,6 +3704,7 @@ export default function ReviewApp({
         answerSummary: attempt.answerSummary || null,
         score: attempt.score,
         justification: attempt.justification || null,
+        traceId: null,
         submittedAt: attempt.submittedAt,
         resolvedAt: attempt.resolvedAt,
         status: "resolved",
@@ -3638,6 +3723,7 @@ export default function ReviewApp({
           answerSummary: message.answerSummary,
           score: message.score,
           justification: message.justification,
+          traceId: message.traceId,
           submittedAt: evaluation?.submittedAt ?? message.submittedAt,
           resolvedAt: evaluation?.resolvedAt ?? message.resolvedAt,
           status: message.status,
@@ -3656,12 +3742,48 @@ export default function ReviewApp({
               ) < 10_000,
           ),
       );
+    const selectedAnswerEvaluationIds = new Set(
+      selectedAnswerMessages.map((message) => message.evaluationId),
+    );
+    const evaluationAnswerHistory: AnswerHistoryEntry[] = evaluations
+      .filter(
+        (evaluation) =>
+          matchesSelectedQuestion(evaluation) &&
+          evaluation.answer !== null &&
+          !selectedAnswerEvaluationIds.has(evaluation.id),
+      )
+      .map((evaluation) => ({
+        id: `evaluation-${evaluation.id}`,
+        rawAnswer: evaluation.answer || "(blank)",
+        answerSummary: evaluation.answerSummary,
+        score: evaluation.score,
+        justification: evaluation.justification,
+        traceId: evaluation.traceId,
+        submittedAt: evaluation.submittedAt,
+        resolvedAt: evaluation.resolvedAt,
+        status: evaluation.status,
+        phase: evaluation.phase,
+        lastActivityAt: evaluation.lastActivityAt,
+      }))
+      .filter(
+        (evaluationAttempt) =>
+          !persistedAnswerHistory.some(
+            (persistedAttempt) =>
+              persistedAttempt.rawAnswer === evaluationAttempt.rawAnswer &&
+              persistedAttempt.score === evaluationAttempt.score &&
+              Math.abs(
+                persistedAttempt.submittedAt - evaluationAttempt.submittedAt,
+              ) < 10_000,
+          ),
+      );
     const answerHistory = [
       ...persistedAnswerHistory,
       ...sessionAnswerHistory,
+      ...evaluationAnswerHistory,
     ].sort((a, b) => b.submittedAt - a.submittedAt);
 
     return {
+      questionId: queueItem?.questionId ?? selectedQuestionId,
       question: selectedQuestion,
       reviewHistory,
       answerHistory,
@@ -3691,6 +3813,7 @@ export default function ReviewApp({
     messages,
     recentAttempts,
     reviewQueue,
+    selectedQuestionId,
     selectedQuestion,
   ]);
 
@@ -3731,14 +3854,14 @@ export default function ReviewApp({
 
     function closeOnEscape(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
-        setSelectedQuestion(null);
+        selectQuestion(null);
       }
     }
 
     window.addEventListener("keydown", closeOnEscape);
 
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [selectedQuestionStats]);
+  }, [selectQuestion, selectedQuestionStats]);
 
   useEffect(() => {
     if (activeTab !== "queue" || !selectedDeckDetailId) {
@@ -3796,9 +3919,16 @@ export default function ReviewApp({
     selectedDeckDetailId,
   ]);
 
-  async function generateReferenceAnswer(questionToAnswer: string) {
+  async function generateReferenceAnswer(
+    questionToAnswer: string,
+    questionIdToAnswer: string | null,
+  ) {
     const storedAnswer =
-      reviewQueue.find((item) => item.question === questionToAnswer)
+      reviewQueue.find((item) =>
+        questionIdToAnswer
+          ? item.questionId === questionIdToAnswer
+          : item.question === questionToAnswer,
+      )
         ?.referenceAnswer ?? null;
 
     if (storedAnswer) {
@@ -3827,6 +3957,7 @@ export default function ReviewApp({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          questionId: questionIdToAnswer,
           question: questionToAnswer,
         }),
       });
@@ -3846,7 +3977,9 @@ export default function ReviewApp({
       }));
       setReviewQueue((current) =>
         current.map((queueItem) =>
-          queueItem.question === questionToAnswer
+          (questionIdToAnswer
+            ? queueItem.questionId === questionIdToAnswer
+            : queueItem.question === questionToAnswer)
             ? {
                 ...queueItem,
                 referenceAnswer: data.answer.startsWith(
@@ -4183,25 +4316,13 @@ export default function ReviewApp({
                     </button>
 
                     {isDetailsExpanded ? (
-                      <>
-                        <button
-                          className="previous-details-link"
-                          type="button"
-                          onClick={() => setSelectedQuestion(item.question)}
-                        >
-                          More details
-                        </button>
-                        {canViewAdmin && item.traceId ? (
-                          <Link
-                            className="previous-details-link"
-                            href={`/admin/traces/${encodeURIComponent(
-                              item.traceId,
-                            )}`}
-                          >
-                            View trace
-                          </Link>
-                        ) : null}
-                      </>
+                      <button
+                        className="previous-details-link"
+                        type="button"
+                        onClick={() => selectQuestion(item.question)}
+                      >
+                        More details
+                      </button>
                     ) : null}
                   </li>
                 );
@@ -4316,11 +4437,11 @@ export default function ReviewApp({
                         role="button"
                         tabIndex={0}
                         aria-label={`Open card details for ${item.question}`}
-                        onClick={() => setSelectedQuestion(item.question)}
+                        onClick={() => selectQuestion(item.question, item.questionId)}
                         onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
                           if (event.key === "Enter" || event.key === " ") {
                             event.preventDefault();
-                            setSelectedQuestion(item.question);
+                            selectQuestion(item.question, item.questionId);
                           }
                         }}
                       >
@@ -5053,7 +5174,7 @@ export default function ReviewApp({
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setSelectedQuestion(null);
+              selectQuestion(null);
             }
           }}
         >
@@ -5076,7 +5197,7 @@ export default function ReviewApp({
                 className="stats-modal-close"
                 type="button"
                 aria-label="Close stats"
-                onClick={() => setSelectedQuestion(null)}
+                onClick={() => selectQuestion(null)}
               />
             </div>
 
@@ -5204,6 +5325,16 @@ export default function ReviewApp({
                               ? formatEvaluationPhase(entry.phase)
                               : "Resolved"}
                           </span>
+                          {canViewAdmin && entry.traceId ? (
+                            <Link
+                              className="stats-history-trace-link"
+                              href={`/admin/traces/${encodeURIComponent(
+                                entry.traceId,
+                              )}`}
+                            >
+                              View trace
+                            </Link>
+                          ) : null}
                         </div>
                       </li>
                     );
@@ -5236,7 +5367,10 @@ export default function ReviewApp({
                       className="stats-generate-answer"
                       type="button"
                       onClick={() =>
-                        void generateReferenceAnswer(selectedQuestionStats.question)
+                        void generateReferenceAnswer(
+                          selectedQuestionStats.question,
+                          selectedQuestionStats.questionId,
+                        )
                       }
                       disabled={isGeneratingReferenceAnswer}
                     >

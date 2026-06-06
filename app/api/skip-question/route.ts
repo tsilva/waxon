@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   const body = (await request.json()) as {
+    questionId?: unknown;
     question?: unknown;
   };
 
@@ -20,5 +21,15 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json(await skipQuestion({ question: body.question }));
+  const questionId =
+    typeof body.questionId === "string" && body.questionId.trim()
+      ? body.questionId.trim()
+      : null;
+
+  return NextResponse.json(
+    await skipQuestion({
+      questionId,
+      question: body.question,
+    }),
+  );
 }
