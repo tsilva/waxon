@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/app/db/client";
 import {
+  consumeUserRateLimit,
+  normalizeBoundedText,
+  readJsonBodyWithLimit,
+} from "@/app/lib/apiLimits";
+import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
@@ -25,6 +30,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const OPENROUTER_MODEL = process.env.LLM_MODEL || "openai/gpt-5.5";
+const MAX_GENERATE_BODY_BYTES = 96 * 1024;
+const MAX_DECK_ID_CHARS = 200;
+const MAX_SCOPE_CHARS = 12_000;
+const MAX_FILE_COUNT = 6;
+const MAX_FILE_NAME_CHARS = 160;
+const MAX_FILE_CONTENT_CHARS = 20_000;
+const MAX_TOTAL_FILE_CONTENT_CHARS = 32_000;
+const MAX_DIFFICULTY_CHARS = 40;
+const MAX_EXISTING_QUESTION_COUNT = 200;
+const MAX_EXISTING_QUESTION_CHARS = 1_200;
+const MAX_MODAL_QUESTION_COUNT = 120;
+const MAX_MODAL_CONCISE_ANSWER_CHARS = 800;
+const MAX_MODAL_COVERAGE_LABEL_CHARS = 240;
 const MAX_CONTEXT_CHARS = 32_000;
 const MAX_SUMMARY_CHARS = 1_600;
 const DEFAULT_QUESTION_COUNT = 5;
@@ -55,6 +73,17 @@ type ExistingQuestionContext = {
   coverageLabel: string;
 };
 
+type NormalizeResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; response: NextResponse };
+
+function validationError(error: string): NormalizeResult<never> {
+  return {
+    ok: false,
+    response: NextResponse.json({ ok: false, error }, { status: 400 }),
+  };
+}
+
 function normalizeQuestionCount(value: unknown): number {
   const numericValue =
     typeof value === "number"
@@ -74,52 +103,113 @@ function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function normalizeFiles(value: unknown): ContextFilePayload[] {
+function normalizeFiles(value: unknown): NormalizeResult<ContextFilePayload[]> {
   if (!Array.isArray(value)) {
-    return [];
+    return { ok: true, value: [] };
   }
 
-  return value
-    .map((item): ContextFilePayload | null => {
-      if (!item || typeof item !== "object") {
-        return null;
-      }
+  if (value.length > MAX_FILE_COUNT) {
+    return validationError(`files can include at most ${MAX_FILE_COUNT} items.`);
+  }
 
-      const record = item as Record<string, unknown>;
-      const name = normalizeText(record.name);
-      const content = normalizeText(record.content);
+  const files: ContextFilePayload[] = [];
+  let totalContentLength = 0;
 
-      if (!name && !content) {
-        return null;
-      }
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
 
-      return {
-        name: name || "context",
-        content,
-        status: normalizeText(record.status),
-      };
-    })
-    .filter((item): item is ContextFilePayload => item !== null);
+    const record = item as Record<string, unknown>;
+    const name = normalizeText(record.name);
+    const content = normalizeText(record.content);
+    const status = normalizeText(record.status);
+
+    if (name.length > MAX_FILE_NAME_CHARS) {
+      return validationError(
+        `file name must be ${MAX_FILE_NAME_CHARS} characters or fewer.`,
+      );
+    }
+
+    if (content.length > MAX_FILE_CONTENT_CHARS) {
+      return validationError(
+        `file content must be ${MAX_FILE_CONTENT_CHARS} characters or fewer.`,
+      );
+    }
+
+    if (status.length > MAX_DIFFICULTY_CHARS) {
+      return validationError(
+        `file status must be ${MAX_DIFFICULTY_CHARS} characters or fewer.`,
+      );
+    }
+
+    if (!name && !content) {
+      continue;
+    }
+
+    totalContentLength += content.length;
+
+    if (totalContentLength > MAX_TOTAL_FILE_CONTENT_CHARS) {
+      return validationError(
+        `total file content must be ${MAX_TOTAL_FILE_CONTENT_CHARS} characters or fewer.`,
+      );
+    }
+
+    files.push({
+      name: name || "context",
+      content,
+      status,
+    });
+  }
+
+  return { ok: true, value: files };
 }
 
-function normalizeExistingQuestions(value: unknown): Set<string> {
+function normalizeExistingQuestions(value: unknown): NormalizeResult<Set<string>> {
   if (!Array.isArray(value)) {
-    return new Set();
+    return { ok: true, value: new Set() };
   }
 
-  return new Set(
-    value
-      .filter((item): item is string => typeof item === "string")
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean),
-  );
+  if (value.length > MAX_EXISTING_QUESTION_COUNT) {
+    return validationError(
+      `existingQuestions can include at most ${MAX_EXISTING_QUESTION_COUNT} items.`,
+    );
+  }
+
+  const questions = new Set<string>();
+
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+
+    const question = item.trim();
+
+    if (question.length > MAX_EXISTING_QUESTION_CHARS) {
+      return validationError(
+        `existingQuestions items must be ${MAX_EXISTING_QUESTION_CHARS} characters or fewer.`,
+      );
+    }
+
+    if (question) {
+      questions.add(question.toLowerCase());
+    }
+  }
+
+  return { ok: true, value: questions };
 }
 
 function normalizeExistingQuestionContexts(
   value: unknown,
-): ExistingQuestionContext[] {
+): NormalizeResult<ExistingQuestionContext[]> {
   if (!Array.isArray(value)) {
-    return [];
+    return { ok: true, value: [] };
+  }
+
+  if (value.length > MAX_MODAL_QUESTION_COUNT) {
+    return validationError(
+      `modalQuestions can include at most ${MAX_MODAL_QUESTION_COUNT} items.`,
+    );
   }
 
   const seen = new Set<string>();
@@ -132,7 +222,27 @@ function normalizeExistingQuestionContexts(
 
     const record = item as Record<string, unknown>;
     const question = normalizeText(record.question).replace(/\s+/g, " ");
+    const conciseAnswer = normalizeText(record.conciseAnswer).replace(/\s+/g, " ");
+    const coverageLabel = normalizeText(record.coverageLabel).replace(/\s+/g, " ");
     const key = question.toLowerCase();
+
+    if (question.length > MAX_EXISTING_QUESTION_CHARS) {
+      return validationError(
+        `modalQuestions question must be ${MAX_EXISTING_QUESTION_CHARS} characters or fewer.`,
+      );
+    }
+
+    if (conciseAnswer.length > MAX_MODAL_CONCISE_ANSWER_CHARS) {
+      return validationError(
+        `modalQuestions conciseAnswer must be ${MAX_MODAL_CONCISE_ANSWER_CHARS} characters or fewer.`,
+      );
+    }
+
+    if (coverageLabel.length > MAX_MODAL_COVERAGE_LABEL_CHARS) {
+      return validationError(
+        `modalQuestions coverageLabel must be ${MAX_MODAL_COVERAGE_LABEL_CHARS} characters or fewer.`,
+      );
+    }
 
     if (!question || seen.has(key)) {
       continue;
@@ -141,16 +251,12 @@ function normalizeExistingQuestionContexts(
     seen.add(key);
     normalized.push({
       question,
-      conciseAnswer: normalizeText(record.conciseAnswer).replace(/\s+/g, " "),
-      coverageLabel: normalizeText(record.coverageLabel).replace(/\s+/g, " "),
+      conciseAnswer,
+      coverageLabel,
     });
-
-    if (normalized.length >= 120) {
-      break;
-    }
   }
 
-  return normalized;
+  return { ok: true, value: normalized };
 }
 
 function buildContext(input: {
@@ -373,6 +479,12 @@ async function loadGenerationNeighbors(input: {
 }
 
 export async function POST(request: Request) {
+  const parsed = await readJsonBodyWithLimit(request, MAX_GENERATE_BODY_BYTES);
+
+  if (!parsed.ok) {
+    return parsed.response;
+  }
+
   const apiKey = getOpenRouterApiKey();
 
   if (!apiKey) {
@@ -382,22 +494,75 @@ export async function POST(request: Request) {
     );
   }
 
-  const body: unknown = await request.json().catch(() => null);
   const user = await getCurrentUser();
-  const payload = body as Record<string, unknown>;
-  const requestedDeckId = normalizeText(payload.deckId);
-  const scope = normalizeText(payload.scope);
+  const payload =
+    parsed.value && typeof parsed.value === "object"
+      ? (parsed.value as Record<string, unknown>)
+      : {};
+  const requestedDeckId = normalizeBoundedText(payload.deckId, {
+    field: "deckId",
+    maxLength: MAX_DECK_ID_CHARS,
+  });
+
+  if (!requestedDeckId.ok) {
+    return requestedDeckId.response;
+  }
+
+  const scope = normalizeBoundedText(payload.scope, {
+    field: "scope",
+    maxLength: MAX_SCOPE_CHARS,
+  });
+
+  if (!scope.ok) {
+    return scope.response;
+  }
+
   const files = normalizeFiles(payload.files);
-  const difficulty = normalizeText(payload.difficulty) || "Mixed";
+
+  if (!files.ok) {
+    return files.response;
+  }
+
+  const difficulty = normalizeBoundedText(payload.difficulty, {
+    field: "difficulty",
+    maxLength: MAX_DIFFICULTY_CHARS,
+  });
+
+  if (!difficulty.ok) {
+    return difficulty.response;
+  }
+
   const count = normalizeQuestionCount(payload.count);
   const existingQuestions = normalizeExistingQuestions(payload.existingQuestions);
+
+  if (!existingQuestions.ok) {
+    return existingQuestions.response;
+  }
+
   const modalQuestions = normalizeExistingQuestionContexts(payload.modalQuestions);
 
-  if (!scope && files.length === 0) {
+  if (!modalQuestions.ok) {
+    return modalQuestions.response;
+  }
+
+  if (!scope.value && files.value.length === 0) {
     return NextResponse.json(
       { ok: false, error: "Add a topic or attach context before generating." },
       { status: 400 },
     );
+  }
+
+  const rateLimitResponse = consumeUserRateLimit({
+    userId: user.id,
+    route: "questions-generate",
+    rules: [
+      { name: "minute", max: 5, windowMs: 60_000 },
+      { name: "day", max: 40, windowMs: 24 * 60 * 60_000 },
+    ],
+  });
+
+  if (rateLimitResponse) {
+    return rateLimitResponse;
   }
 
   await ensureQuestionsDatabase();
@@ -406,7 +571,7 @@ export async function POST(request: Request) {
   try {
     deckId = await resolveOwnedDeckId({
       userId: user.id,
-      deckId: requestedDeckId || undefined,
+      deckId: requestedDeckId.value || undefined,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Deck not found.";
@@ -417,7 +582,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const context = buildContext({ scope, files });
+  const context = buildContext({ scope: scope.value, files: files.value });
   const contextSummary = await summarizeGenerationContext({
     apiKey,
     context,
@@ -452,17 +617,17 @@ export async function POST(request: Request) {
           role: "user",
           content: [
             `Generate exactly ${count} recall questions.`,
-            `Difficulty: ${difficulty}.`,
-            existingQuestions.size > 0
-              ? `Existing questions to avoid:\n${Array.from(existingQuestions)
+            `Difficulty: ${difficulty.value || "Mixed"}.`,
+            existingQuestions.value.size > 0
+              ? `Existing questions to avoid:\n${Array.from(existingQuestions.value)
                   .slice(0, 200)
                   .join("\n")}`
               : "",
-            modalQuestions.length > 0
+            modalQuestions.value.length > 0
               ? [
                   "Questions already generated in the current modal review queue:",
                   JSON.stringify(
-                    modalQuestions.map((item) => ({
+                    modalQuestions.value.map((item) => ({
                       question: item.question,
                       conciseAnswer: item.conciseAnswer,
                       coverageLabel: item.coverageLabel,
@@ -517,7 +682,7 @@ export async function POST(request: Request) {
 
   const generated = normalizeGeneratedQuestions(
     extractJsonObject(content),
-    existingQuestions,
+    existingQuestions.value,
   ).slice(0, count);
 
   return NextResponse.json({
