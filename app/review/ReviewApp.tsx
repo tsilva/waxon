@@ -57,13 +57,17 @@ type NextQuestionResponse = {
   queueRemaining: number;
 };
 
+type LearnPanelMode = "review" | "learn";
+
 type PrefetchedNextQuestion = {
+  mode: LearnPanelMode;
   excludeQuestionId: string | null;
   excludeQuestion: string;
   data: NextQuestionResponse;
 };
 
 type NextQuestionPrefetch = {
+  mode: LearnPanelMode;
   excludeQuestionId: string | null;
   excludeQuestion: string;
   abortController: AbortController;
@@ -260,8 +264,6 @@ type QueueSortKey = "review-date" | "creation-date";
 
 type DeckSortKey = "updated" | "due" | "name";
 
-type LearnPanelMode = "review" | "learn";
-
 type DeckManagementItem = {
   id: string;
   name: string;
@@ -374,10 +376,15 @@ type PendingSpeechCommand = {
 };
 
 function nextQuestionUrl(input: {
+  mode?: LearnPanelMode;
   excludeQuestionId?: string | null;
   excludeQuestion?: string | null;
 } = {}) {
   const params = new URLSearchParams();
+
+  if (input.mode) {
+    params.set("mode", input.mode);
+  }
 
   if (input.excludeQuestionId) {
     params.set("excludeQuestionId", input.excludeQuestionId);
@@ -393,6 +400,7 @@ function nextQuestionUrl(input: {
 }
 
 async function fetchNextQuestionData(input: {
+  mode?: LearnPanelMode;
   excludeQuestionId?: string | null;
   excludeQuestion?: string | null;
   signal?: AbortSignal;
@@ -1594,6 +1602,10 @@ export default function ReviewApp({
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
   const questionIdRef = useRef(currentQuestionId);
+  const pendingLearnSourceRef = useRef<{
+    deckId: string | null;
+    question: string | null;
+  } | null>(null);
   const queueStageRef = useRef<HTMLElement | null>(null);
   const queueListRef = useRef<HTMLOListElement | null>(null);
   const queueLoadedLimitRef = useRef(
@@ -1950,7 +1962,7 @@ export default function ReviewApp({
           body: JSON.stringify({
             name: nextName,
             coverage: deckDraftCoverage,
-            ...(isCreatingDeck ? { inReviewRotation: false } : {}),
+            ...(isCreatingDeck ? { inReviewRotation: true } : {}),
           }),
         },
       );
@@ -2278,6 +2290,7 @@ export default function ReviewApp({
   }, [appendQuestion]);
 
   const prefetchNextQuestion = useCallback((
+    mode: LearnPanelMode,
     excludeQuestionId: string | null,
     excludeQuestion: string | null,
   ) => {
@@ -2289,6 +2302,7 @@ export default function ReviewApp({
     }
 
     if (
+      prefetchedNextQuestionRef.current?.mode === mode &&
       prefetchedNextQuestionRef.current?.excludeQuestionId ===
         normalizedQuestionId &&
       prefetchedNextQuestionRef.current?.excludeQuestion === normalizedQuestion
@@ -2297,6 +2311,7 @@ export default function ReviewApp({
     }
 
     if (
+      nextQuestionPrefetchRef.current?.mode === mode &&
       nextQuestionPrefetchRef.current?.excludeQuestionId ===
         normalizedQuestionId &&
       nextQuestionPrefetchRef.current?.excludeQuestion === normalizedQuestion
@@ -2309,11 +2324,13 @@ export default function ReviewApp({
 
     const abortController = new AbortController();
     const promise = fetchNextQuestionData({
+      mode,
       excludeQuestionId: normalizedQuestionId,
       excludeQuestion: normalizedQuestion,
       signal: abortController.signal,
     })
       .then((data): PrefetchedNextQuestion => ({
+        mode,
         excludeQuestionId: normalizedQuestionId,
         excludeQuestion: normalizedQuestion,
         data,
@@ -2330,6 +2347,7 @@ export default function ReviewApp({
       });
 
     const request: NextQuestionPrefetch = {
+      mode,
       excludeQuestionId: normalizedQuestionId,
       excludeQuestion: normalizedQuestion,
       abortController,
@@ -2356,12 +2374,17 @@ export default function ReviewApp({
   }, []);
 
   const takePrefetchedNextQuestion = useCallback(
-    async (excludeQuestionId: string | null, excludeQuestion: string) => {
+    async (
+      mode: LearnPanelMode,
+      excludeQuestionId: string | null,
+      excludeQuestion: string,
+    ) => {
       const normalizedQuestionId = excludeQuestionId?.trim() || null;
       const normalizedQuestion = excludeQuestion.trim();
       const cachedQuestion = prefetchedNextQuestionRef.current;
 
       if (
+        cachedQuestion?.mode === mode &&
         cachedQuestion?.excludeQuestionId === normalizedQuestionId &&
         cachedQuestion?.excludeQuestion === normalizedQuestion
       ) {
@@ -2372,6 +2395,7 @@ export default function ReviewApp({
       const pendingPrefetch = nextQuestionPrefetchRef.current;
 
       if (
+        pendingPrefetch?.mode !== mode ||
         pendingPrefetch?.excludeQuestionId !== normalizedQuestionId ||
         pendingPrefetch?.excludeQuestion !== normalizedQuestion
       ) {
@@ -2385,7 +2409,8 @@ export default function ReviewApp({
       }
 
       if (
-        prefetched?.excludeQuestionId !== normalizedQuestionId ||
+        prefetched?.mode !== mode ||
+        prefetched.excludeQuestionId !== normalizedQuestionId ||
         prefetched.excludeQuestion !== normalizedQuestion
       ) {
         return null;
@@ -2398,11 +2423,13 @@ export default function ReviewApp({
   );
 
   const loadNextQuestion = useCallback(async (options?: {
+    mode?: LearnPanelMode;
     excludeQuestionId?: string | null;
     excludeQuestion?: string | null;
     surfaceError?: boolean;
   }) => {
     const surfaceError = options?.surfaceError ?? true;
+    const mode = options?.mode ?? learnPanelMode;
 
     setIsLoadingQuestion(true);
     setQuestion(null);
@@ -2415,6 +2442,7 @@ export default function ReviewApp({
 
     try {
       const data = await fetchNextQuestionData({
+        mode,
         excludeQuestionId: options?.excludeQuestionId,
         excludeQuestion: options?.excludeQuestion,
       });
@@ -2431,7 +2459,7 @@ export default function ReviewApp({
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [applyNextQuestion]);
+  }, [applyNextQuestion, learnPanelMode]);
 
   const queueStatusUrl = useCallback((limit: number) => {
     const params = new URLSearchParams({
@@ -2525,8 +2553,8 @@ export default function ReviewApp({
       return;
     }
 
-    prefetchNextQuestion(currentQuestionId, question);
-  }, [currentQuestionId, prefetchNextQuestion, question]);
+    prefetchNextQuestion(learnPanelMode, currentQuestionId, question);
+  }, [currentQuestionId, learnPanelMode, prefetchNextQuestion, question]);
 
   useEffect(() => {
     return () => {
@@ -2827,7 +2855,11 @@ export default function ReviewApp({
       );
 
       const prefetchedQuestion =
-        await takePrefetchedNextQuestion(submittedQuestionId, submittedQuestion);
+        await takePrefetchedNextQuestion(
+          learnPanelMode,
+          submittedQuestionId,
+          submittedQuestion,
+        );
 
       if (prefetchedQuestion) {
         applyNextQuestion({
@@ -2836,6 +2868,7 @@ export default function ReviewApp({
         });
       } else {
         await loadNextQuestion({
+          mode: learnPanelMode,
           excludeQuestionId: submittedQuestionId,
           excludeQuestion: submittedQuestion,
         });
@@ -2869,6 +2902,7 @@ export default function ReviewApp({
     applyNextQuestion,
     clearPendingSpeechCommand,
     currentDeckId,
+    learnPanelMode,
     loadNextQuestion,
     takePrefetchedNextQuestion,
   ]);
@@ -2894,6 +2928,7 @@ export default function ReviewApp({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          mode: learnPanelMode,
           questionId: activeQuestionId,
           question: activeQuestion,
         }),
@@ -2915,7 +2950,7 @@ export default function ReviewApp({
       );
       return false;
     }
-  }, [applyNextQuestion, clearPendingSpeechCommand]);
+  }, [applyNextQuestion, clearPendingSpeechCommand, learnPanelMode]);
 
   const handleSpeechText = useCallback(
     async (transcript: string) => {
@@ -3598,6 +3633,13 @@ export default function ReviewApp({
   const scheduledReviewCount = reviewQueue.filter(
     (item) => item.status === "scheduled",
   ).length;
+  const learnTargetDeckId = currentDeckId || selectedDeckDetailId || selectedDeckId || null;
+  const learnQueueRemaining = reviewQueue.filter(
+    (item) =>
+      item.status === "now" &&
+      item.reviewHistory.length === 0 &&
+      (!learnTargetDeckId || item.deckId === learnTargetDeckId),
+  ).length;
   const nextScheduledReview = reviewQueue.find(
     (item) => item.status === "scheduled",
   );
@@ -3713,14 +3755,21 @@ export default function ReviewApp({
     setLearnTopUpMessage(null);
 
     try {
+      const pendingLearnSource = pendingLearnSourceRef.current;
+      const targetDeckId =
+        currentDeckId ||
+        pendingLearnSource?.deckId ||
+        selectedDeckDetailId ||
+        selectedDeckId ||
+        undefined;
       const response = await fetch("/api/questions/learn", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          deckId: currentDeckId,
-          currentQuestion: questionRef.current,
+          deckId: targetDeckId,
+          currentQuestion: questionRef.current ?? pendingLearnSource?.question,
           previousAnswers: learnPreviousAnswerPayload,
         }),
       });
@@ -3738,12 +3787,13 @@ export default function ReviewApp({
             ? "1 question added"
             : `${data.added} questions added`,
         );
+        pendingLearnSourceRef.current = null;
         await loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
 
         if (!questionRef.current) {
-          await loadNextQuestion({ surfaceError: false });
+          await loadNextQuestion({ mode: "learn", surfaceError: false });
         } else {
-          prefetchNextQuestion(currentQuestionId, questionRef.current);
+          prefetchNextQuestion(learnPanelMode, currentQuestionId, questionRef.current);
         }
       } else {
         learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
@@ -3766,9 +3816,12 @@ export default function ReviewApp({
     currentDeckId,
     currentQuestionId,
     learnPreviousAnswerPayload,
+    learnPanelMode,
     loadNextQuestion,
     loadStatus,
     prefetchNextQuestion,
+    selectedDeckDetailId,
+    selectedDeckId,
   ]);
 
   useEffect(() => {
@@ -3781,7 +3834,7 @@ export default function ReviewApp({
       return;
     }
 
-    if (question && queueRemaining >= LEARN_QUEUE_TARGET_REMAINING) {
+    if (question && learnQueueRemaining >= LEARN_QUEUE_TARGET_REMAINING) {
       return;
     }
 
@@ -3791,10 +3844,39 @@ export default function ReviewApp({
     isLoadingQuestion,
     isSubmitting,
     learnPanelMode,
+    learnQueueRemaining,
     question,
-    queueRemaining,
     topUpLearnQueue,
   ]);
+
+  const switchLearnPanelMode = useCallback((nextMode: LearnPanelMode) => {
+    if (learnPanelMode === nextMode) {
+      return;
+    }
+
+    pendingLearnSourceRef.current =
+      nextMode === "learn"
+        ? {
+            deckId: currentDeckId,
+            question,
+          }
+        : null;
+    setLearnPanelMode(nextMode);
+    setLearnTopUpMessage(null);
+    prefetchedNextQuestionRef.current = null;
+    nextQuestionPrefetchRef.current?.abortController.abort();
+    nextQuestionPrefetchRef.current = null;
+    setAnswer("");
+    answerRef.current = "";
+    setSpeechPreview("");
+
+    void loadNextQuestion({
+      mode: nextMode,
+      excludeQuestionId: currentQuestionId,
+      excludeQuestion: question,
+      surfaceError: false,
+    });
+  }, [currentDeckId, currentQuestionId, learnPanelMode, loadNextQuestion, question]);
 
   const selectedQuestionStats = useMemo<QuestionStats | null>(() => {
     if (!selectedQuestion) {
@@ -4249,8 +4331,7 @@ export default function ReviewApp({
                 type="button"
                 aria-pressed={learnPanelMode === "review"}
                 onClick={() => {
-                  setLearnPanelMode("review");
-                  setLearnTopUpMessage(null);
+                  switchLearnPanelMode("review");
                 }}
               >
                 Review
@@ -4262,8 +4343,7 @@ export default function ReviewApp({
                 type="button"
                 aria-pressed={learnPanelMode === "learn"}
                 onClick={() => {
-                  setLearnPanelMode("learn");
-                  setLearnTopUpMessage(null);
+                  switchLearnPanelMode("learn");
                 }}
               >
                 Learn

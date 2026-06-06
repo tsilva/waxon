@@ -64,6 +64,14 @@ type Submission = {
 
 type QueueStatusSubscriber = (status: QueueStatusSnapshot) => void;
 
+type NextQuestionMode = "review" | "learn";
+
+type NextQuestionInput = {
+  mode?: NextQuestionMode;
+  excludeQuestionId?: string | null;
+  excludeQuestion?: string | null;
+};
+
 type LatestEvaluation = {
   score: number;
   justification: string;
@@ -116,6 +124,15 @@ function questionKey(input: {
   question: string;
 }): string {
   return input.questionId ?? `question:${input.question}`;
+}
+
+function matchesNextQuestionMode(
+  question: DueQuestion,
+  mode: NextQuestionMode,
+): boolean {
+  const hasReviewHistory = parseReviews(question.reviews).length > 0;
+
+  return mode === "learn" ? !hasReviewHistory : hasReviewHistory;
 }
 
 function resetQueueStateForUser(userId: string): void {
@@ -1070,20 +1087,14 @@ export async function peekNextQuestion(): Promise<{
   deckName: string | null;
   queueRemaining: number;
 }>;
-export async function peekNextQuestion(input: {
-  excludeQuestionId?: string | null;
-  excludeQuestion?: string | null;
-}): Promise<{
+export async function peekNextQuestion(input: NextQuestionInput): Promise<{
   questionId: string | null;
   question: string | null;
   deckId: string | null;
   deckName: string | null;
   queueRemaining: number;
 }>;
-export async function peekNextQuestion(input: {
-  excludeQuestionId?: string | null;
-  excludeQuestion?: string | null;
-} = {}): Promise<{
+export async function peekNextQuestion(input: NextQuestionInput = {}): Promise<{
   questionId: string | null;
   question: string | null;
   deckId: string | null;
@@ -1093,12 +1104,17 @@ export async function peekNextQuestion(input: {
   const user = await initializeQueue();
   await refreshIfEmpty(user.id);
   await refreshIfEarlierDueQuestionExists(user.id);
+  const mode = input.mode ?? "review";
   const excludedQuestionKey = input.excludeQuestionId?.trim() || null;
   const excludedQuestion = input.excludeQuestion?.trim() || null;
+  const matchingQueue = state.queue.filter(
+    (item) =>
+      matchesNextQuestionMode(item, mode) &&
+      !state.inFlightQuestionKeys.has(questionKey(item)),
+  );
   const nextQuestion =
-    state.queue.find(
+    matchingQueue.find(
       (item) =>
-        !state.inFlightQuestionKeys.has(questionKey(item)) &&
         item.questionId !== excludedQuestionKey &&
         item.question !== excludedQuestion,
     ) ?? null;
@@ -1108,11 +1124,12 @@ export async function peekNextQuestion(input: {
     question: nextQuestion?.question ?? null,
     deckId: nextQuestion?.deckId ?? null,
     deckName: nextQuestion?.deckName ?? null,
-    queueRemaining: state.queue.length,
+    queueRemaining: matchingQueue.length,
   };
 }
 
 export async function skipQuestion(input: {
+  mode?: NextQuestionMode;
   questionId?: string | null;
   question: string;
 }): Promise<{
@@ -1133,7 +1150,7 @@ export async function skipQuestion(input: {
     void broadcastQueueStatus();
   }
 
-  return peekNextQuestion();
+  return peekNextQuestion({ mode: input.mode });
 }
 
 export async function submitAnswer(input: {
@@ -1229,6 +1246,7 @@ export async function submitAnswer(input: {
 export async function addQuestionsToDeck(input: {
   questions: Array<string | QuestionInput>;
   deckId?: string;
+  sourceQuestion?: string | null;
 }): Promise<{ added: number; rejected: number }> {
   const user = await initializeQueue();
   const deckId = await resolveOwnedDeckId({
@@ -1257,7 +1275,7 @@ export async function addQuestionsToDeck(input: {
       questionProvenance:
         provenanceByQuestion.get(candidate.question.toLowerCase()) ?? "",
     })),
-    sourceQuestion: null,
+    sourceQuestion: input.sourceQuestion ?? null,
     now: Date.now(),
     deckId,
     userId: user.id,
