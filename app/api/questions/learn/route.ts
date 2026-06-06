@@ -138,7 +138,12 @@ function normalizeGeneratedQuestions(value: unknown): LearnQuestionPayload[] {
 function buildLearnSystemPrompt(questionQualityReference: string): string {
   return [
     "You generate new spaced-repetition questions while a learner is in learn mode.",
-    "Generate questions that fit the deck goal and respond to gaps, weak answers, missing steps, or adjacent recall targets shown by recent previous answers.",
+    "Learn mode introduces new material at the learner's current frontier; it is not for reviewing previously answered cards.",
+    "When the deck has no existing questions or answers, assume the learner is an absolute beginner and generate the first prerequisite recall targets for the deck goal.",
+    "For sequential domains, generate the earliest uncovered items in the natural teaching order, one small recall target at a time.",
+    "For writing systems or alphabets, start with the first symbol-sound mapping and ask for the romanized reading before later symbols or combinations.",
+    "For a deck like Japanese - Hiragana, the first questions should be beginner kana-to-romaji recall, such as asking for the romaji reading of the simplest first kana, before moving through the rest of hiragana.",
+    "When the deck already has questions, continue from the earliest uncovered prerequisite or adjacent recall target shown by the deck goal, existing questions, and recent previous answers.",
     "Every generated question must follow the shared question-quality reference below.",
     "Each question must include a concise expected answer for dedupe embeddings.",
     "Each question must include questionProvenance: a short reason why this question was generated from the deck goal and previous answers.",
@@ -359,6 +364,7 @@ export async function POST(request: Request) {
   const result = await addQuestionsToDeck({
     questions: questionInputs,
     deckId: targetDeck.id,
+    sourceQuestion: currentQuestion || null,
   });
 
   return NextResponse.json({

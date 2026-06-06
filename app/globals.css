@@ -1543,12 +1543,15 @@ textarea {
   width: 22px;
   height: 22px;
   margin-left: 2px;
+  padding: 0;
   border: 1px solid rgb(227 218 196 / 64%);
   border-radius: 999px;
   background: rgb(251 248 240 / 58%);
   color: rgb(109 99 91 / 58%);
   cursor: pointer;
+  line-height: 0;
   opacity: 0.78;
+  vertical-align: middle;
   transition:
     background-color 140ms ease,
     border-color 140ms ease,
@@ -1557,6 +1560,7 @@ textarea {
 }
 
 .question-details-trigger svg {
+  display: block;
   width: 13px;
   height: 13px;
   color: currentColor;
