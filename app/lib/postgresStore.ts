@@ -1266,6 +1266,43 @@ function toEvaluationPhase(value: string | null): EvaluationPhase | null {
     : null;
 }
 
+function toEvaluationQueueItem(row: {
+  id: string;
+  traceId: string;
+  deckId: string;
+  question: string;
+  answer: string;
+  status: string;
+  phase: string | null;
+  lastActivityAt: number;
+  submittedAt: number;
+  score: number | null;
+  justification: string | null;
+  answerSummary: string | null;
+  nextDue: number | null;
+  resolvedAt: number | null;
+}): EvaluationQueueItem {
+  const status = row.status === "resolved" ? "resolved" : "grading";
+
+  return {
+    id: row.id,
+    traceId: row.traceId,
+    questionId: null,
+    deckId: row.deckId,
+    question: row.question,
+    answer: row.answer,
+    status,
+    phase: status === "grading" ? toEvaluationPhase(row.phase) : null,
+    lastActivityAt: row.lastActivityAt,
+    submittedAt: row.submittedAt,
+    score: row.score,
+    justification: row.justification,
+    answerSummary: row.answerSummary,
+    resolvedAt: row.resolvedAt,
+    nextDue: row.nextDue,
+  };
+}
+
 export async function createAnswerEvaluationRecord(input: {
   id: string;
   traceId: string;
@@ -1398,27 +1435,52 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
         Number.isFinite(row.submittedAt) &&
         Number.isFinite(row.lastActivityAt),
     )
-    .map((row) => {
-      const status = row.status === "resolved" ? "resolved" : "grading";
+    .map(toEvaluationQueueItem);
+}
 
-      return {
-        id: row.id,
-        traceId: row.traceId,
-        questionId: null,
-        deckId: row.deckId,
-        question: row.question,
-        answer: row.answer,
-        status,
-        phase: status === "grading" ? toEvaluationPhase(row.phase) : null,
-        lastActivityAt: row.lastActivityAt,
-        submittedAt: row.submittedAt,
-        score: row.score,
-        justification: row.justification,
-        answerSummary: row.answerSummary,
-        resolvedAt: row.resolvedAt,
-        nextDue: row.nextDue,
-      } satisfies EvaluationQueueItem;
-    });
+export async function getAnswerEvaluationsByIds(input: UserContextInput & {
+  ids: string[];
+}): Promise<EvaluationQueueItem[]> {
+  const context = await ensureSeedData(input);
+  const ids = Array.from(new Set(input.ids.map((id) => id.trim()).filter(Boolean)));
+
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const rows = await db
+    .select({
+      id: answerEvaluations.id,
+      traceId: answerEvaluations.traceId,
+      deckId: answerEvaluations.deckId,
+      question: answerEvaluations.question,
+      answer: answerEvaluations.rawAnswer,
+      status: answerEvaluations.status,
+      phase: answerEvaluations.phase,
+      lastActivityAt: answerEvaluations.lastActivityAt,
+      submittedAt: answerEvaluations.submittedAt,
+      score: answerEvaluations.score,
+      justification: answerEvaluations.justification,
+      answerSummary: answerEvaluations.answerSummary,
+      nextDue: answerEvaluations.nextDue,
+      resolvedAt: answerEvaluations.resolvedAt,
+    })
+    .from(answerEvaluations)
+    .where(
+      and(
+        eq(answerEvaluations.userId, context.userId),
+        inArray(answerEvaluations.id, ids),
+      ),
+    )
+    .orderBy(desc(answerEvaluations.submittedAt));
+
+  return rows
+    .filter(
+      (row) =>
+        Number.isFinite(row.submittedAt) &&
+        Number.isFinite(row.lastActivityAt),
+    )
+    .map(toEvaluationQueueItem);
 }
 
 export async function saveReferenceAnswer(input: {
