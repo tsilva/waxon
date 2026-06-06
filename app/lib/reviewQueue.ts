@@ -1250,7 +1250,6 @@ export async function addQuestionsToDeck(input: {
   questions: Array<string | QuestionInput>;
   deckId?: string;
   sourceQuestion?: string | null;
-  skipSemanticDedupe?: boolean;
 }): Promise<{ added: number; rejected: number }> {
   const user = await initializeQueue();
   const deckId = await resolveOwnedDeckId({
@@ -1258,26 +1257,11 @@ export async function addQuestionsToDeck(input: {
     deckId: input.deckId,
   });
 
-  const gateResult = input.skipSemanticDedupe
-    ? null
-    : await gateNovelQuestions(input.questions, {
-        operation: "add_questions_gate",
-        userId: user.id,
-        deckId,
-      });
-  const acceptedQuestions =
-    gateResult?.accepted ??
-    input.questions.map((question) =>
-      typeof question === "string"
-        ? {
-            question,
-            conciseAnswer: "",
-          }
-        : {
-            question: question.question,
-            conciseAnswer: question.conciseAnswer ?? "",
-          },
-    );
+  const gateResult = await gateNovelQuestions(input.questions, {
+    operation: "add_questions_gate",
+    userId: user.id,
+    deckId,
+  });
   const provenanceByQuestion = new Map(
     input.questions
       .filter((question): question is QuestionInput => typeof question !== "string")
@@ -1288,7 +1272,7 @@ export async function addQuestionsToDeck(input: {
   );
 
   const addedQuestions = await upsertDueQuestions({
-    questions: acceptedQuestions.map((candidate) => ({
+    questions: gateResult.accepted.map((candidate) => ({
       question: candidate.question,
       conciseAnswer: candidate.conciseAnswer,
       questionProvenance:
@@ -1300,20 +1284,18 @@ export async function addQuestionsToDeck(input: {
     userId: user.id,
   });
 
-  if (gateResult) {
-    await upsertQuestionEmbeddings({
-      embeddings: gateResult.accepted.map((candidate) => ({
-        question: candidate.question,
-        embeddingModel: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
-        embeddingKind: DEDUPE_EMBEDDING_KIND,
-        sourceVersion: DEDUPE_SOURCE_VERSION,
-        sourceHash: candidate.sourceHash,
-        embedding: candidate.embedding,
-      })),
-      deckId,
-      userId: user.id,
-    });
-  }
+  await upsertQuestionEmbeddings({
+    embeddings: gateResult.accepted.map((candidate) => ({
+      question: candidate.question,
+      embeddingModel: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+      embeddingKind: DEDUPE_EMBEDDING_KIND,
+      sourceVersion: DEDUPE_SOURCE_VERSION,
+      sourceHash: candidate.sourceHash,
+      embedding: candidate.embedding,
+    })),
+    deckId,
+    userId: user.id,
+  });
 
   const targetDeck = (await listDecks({ userId: user.id })).find(
     (deck) => deck.id === deckId,
@@ -1329,7 +1311,7 @@ export async function addQuestionsToDeck(input: {
 
   return {
     added: addedQuestions.length,
-    rejected: gateResult?.rejected.length ?? 0,
+    rejected: gateResult.rejected.length,
   };
 }
 

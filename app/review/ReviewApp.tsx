@@ -3948,7 +3948,7 @@ export default function ReviewApp({
         setLearnTopUpMessage(
           data.rejected > 0
             ? "Generated questions were duplicates"
-            : "No beginner questions generated",
+            : "No learn questions generated",
         );
       }
     } catch (topUpError) {

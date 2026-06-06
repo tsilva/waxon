@@ -37,54 +37,6 @@ const MAX_JUSTIFICATION_CHARS = 2_000;
 const MAX_PREVIOUS_ANSWERS = 12;
 const MAX_EXISTING_CONTEXT_QUESTIONS = 160;
 const MAX_PROVENANCE_CHARS = 360;
-const HIRAGANA_CURRICULUM = [
-  ["あ", "a"],
-  ["い", "i"],
-  ["う", "u"],
-  ["え", "e"],
-  ["お", "o"],
-  ["か", "ka"],
-  ["き", "ki"],
-  ["く", "ku"],
-  ["け", "ke"],
-  ["こ", "ko"],
-  ["さ", "sa"],
-  ["し", "shi"],
-  ["す", "su"],
-  ["せ", "se"],
-  ["そ", "so"],
-  ["た", "ta"],
-  ["ち", "chi"],
-  ["つ", "tsu"],
-  ["て", "te"],
-  ["と", "to"],
-  ["な", "na"],
-  ["に", "ni"],
-  ["ぬ", "nu"],
-  ["ね", "ne"],
-  ["の", "no"],
-  ["は", "ha"],
-  ["ひ", "hi"],
-  ["ふ", "fu"],
-  ["へ", "he"],
-  ["ほ", "ho"],
-  ["ま", "ma"],
-  ["み", "mi"],
-  ["む", "mu"],
-  ["め", "me"],
-  ["も", "mo"],
-  ["や", "ya"],
-  ["ゆ", "yu"],
-  ["よ", "yo"],
-  ["ら", "ra"],
-  ["り", "ri"],
-  ["る", "ru"],
-  ["れ", "re"],
-  ["ろ", "ro"],
-  ["わ", "wa"],
-  ["を", "o"],
-  ["ん", "n"],
-] as const;
 
 type PreviousAnswerContext = {
   question: string;
@@ -97,10 +49,6 @@ type LearnQuestionPayload = {
   question: string;
   conciseAnswer: string;
   questionProvenance: string;
-};
-
-type ExistingQuestionContext = {
-  question: string;
 };
 
 function normalizeText(value: unknown, maxLength: number): string {
@@ -197,44 +145,24 @@ function normalizeGeneratedQuestions(
   return normalized.slice(0, questionCount);
 }
 
-function isHiraganaDeck(deck: DeckSummary): boolean {
-  return `${deck.name} ${deck.coverage ?? ""}`.toLowerCase().includes("hiragana");
-}
-
-function buildHiraganaLearnQuestions(
-  existingQuestions: ExistingQuestionContext[],
-  questionCount: number,
-): LearnQuestionPayload[] {
-  const existingQuestionText = existingQuestions
-    .map((question) => question.question)
-    .join("\n");
-
-  return HIRAGANA_CURRICULUM
-    .map(([kana, romaji], index) => ({ index, kana, romaji }))
-    .filter(({ kana }) => !existingQuestionText.includes(kana))
-    .slice(0, questionCount)
-    .map(({ index, kana, romaji }) => ({
-      question: `Hiragana ${index + 1}: what is the romaji reading of ${kana}?`,
-      conciseAnswer: `${kana} is read as ${romaji}.`,
-      questionProvenance:
-        "Next beginner hiragana kana-to-romaji recall target.",
-    }));
-}
-
 function buildLearnSystemPrompt(questionQualityReference: string): string {
   return [
-    "You generate new spaced-repetition questions while a learner is in learn mode.",
-    "Learn mode introduces new material at the learner's current frontier; it is not for reviewing previously answered cards.",
-    "When the deck has no existing questions or answers, assume the learner is an absolute beginner and generate the first prerequisite recall targets for the deck goal.",
-    "For sequential domains, generate the earliest uncovered items in the natural teaching order, one small recall target at a time.",
-    "For writing systems or alphabets, start with the first symbol-sound mapping and ask for the romanized reading before later symbols or combinations.",
-    "For a deck like Japanese - Hiragana, the first questions should be beginner kana-to-romaji recall, such as asking for the romaji reading of the simplest first kana, before moving through the rest of hiragana.",
-    "When the deck already has questions, continue from the earliest uncovered prerequisite or adjacent recall target shown by the deck goal, existing questions, and recent previous answers.",
+    "You are Waxon's generic learn-mode curriculum planner.",
+    "Generate the best next new spaced-repetition questions for the learner's current frontier in any deck.",
+    "Do not rely on topic-specific hardcoded curricula. Infer the natural learning order from the deck goal, existing questions, and target-deck answer history.",
+    "Learn mode introduces new material, fills gaps, and pushes boundaries. It is not for reviewing already-scheduled cards unless a weak answer shows an uncovered prerequisite gap.",
+    "If the deck has no questions and no target-deck answers, assume a complete beginner and generate the simplest prerequisite recall targets for the deck goal.",
+    "If the deck has history, choose the next questions by balancing three priorities: repair demonstrated weak prerequisites, fill uncovered gaps near known material, and advance one small step beyond what the learner has answered well.",
+    "Use scores as evidence: scores 0-5 show gaps or misconceptions, 6-8 show partial knowledge to stabilize, and 9-10 show material that can be built on.",
+    "Prefer small, single-target recall questions. Each question should teach or test one new durable fact, distinction, operation, symbol, rule, or concept.",
+    "For sequential domains, infer the earliest uncovered prerequisite from context rather than jumping ahead.",
+    "For conceptual domains, start with definitions and minimal contrasts before mechanisms, edge cases, or synthesis.",
+    "For procedural domains, start with the smallest operation or decision step before multi-step tasks.",
+    "Do not duplicate existing deck questions, paraphrase them as new questions, or generate broad survey prompts.",
     "Every generated question must follow the shared question-quality reference below.",
     "Each question must include a concise expected answer for dedupe embeddings.",
-    "Each question must include questionProvenance: a short reason why this question was generated from the deck goal and previous answers.",
-    "The provenance must come from this same generation call and must not reveal the answer.",
-    "Avoid duplicate or near-duplicate recall targets from the existing deck questions.",
+    "Each question must include questionProvenance: a short reason tied to the deck goal, existing coverage, and learner performance.",
+    "The provenance must explain the learning decision without revealing the answer.",
     "Return JSON only with this exact shape:",
     '{"questions":[{"question":"...","conciseAnswer":"short expected answer","questionProvenance":"why this question was generated"}]}',
     "Shared question-quality reference:",
@@ -385,27 +313,6 @@ export async function POST(request: Request) {
       ? currentQuestion || null
       : null;
 
-  if (isHiraganaDeck(activeTargetDeck)) {
-    const questions = buildHiraganaLearnQuestions(
-      existingQuestions,
-      questionCount,
-    );
-    const result = await addQuestionsToDeck({
-      questions,
-      deckId: activeTargetDeck.id,
-      sourceQuestion,
-      skipSemanticDedupe: true,
-    });
-
-    return NextResponse.json({
-      ok: true,
-      model: "waxon/hiragana-curriculum",
-      added: result.added,
-      rejected: result.rejected,
-      questions,
-    });
-  }
-
   const questionQualityReference = getQuestionQualityReference();
   const { response, body } = await openRouterChatCompletion({
     apiKey,
@@ -436,12 +343,13 @@ export async function POST(request: Request) {
             currentQuestion
               ? ["Current question being answered:", currentQuestion].join("\n")
               : "",
-            "Previous questions and answers:",
+            "Recent in-session answers from the current Learn context:",
             JSON.stringify(
-              [...previousAnswers, ...persistedPreviousAnswers].slice(
-                0,
-                MAX_PREVIOUS_ANSWERS,
-              ),
+              previousAnswers.slice(0, MAX_PREVIOUS_ANSWERS),
+            ),
+            "Recent target-deck answer attempts and scores:",
+            JSON.stringify(
+              persistedPreviousAnswers.slice(0, MAX_PREVIOUS_ANSWERS),
             ),
             "Existing deck questions to avoid:",
             JSON.stringify(
