@@ -14,6 +14,9 @@ export default withSentryConfig(nextConfig, {
   project: "waxon",
   silent: !process.env.CI,
   widenClientFileUpload: true,
+  sourcemaps: {
+    disable: true,
+  },
   tunnelRoute: "/monitoring",
 
   webpack: {

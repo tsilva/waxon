@@ -8,7 +8,6 @@ import {
   getQueuedQuestionsPage,
   getQuestionSnapshotById,
   getRecentQuestionAttempts,
-  getQuestionSnapshot,
   listDecks,
   resolveAnswerEvaluationRecord,
   readQuestionsWithEmbeddings,
@@ -35,7 +34,6 @@ import {
 } from "./embeddingSource";
 import {
   getCurrentUser,
-  getDeckIdForUser,
   type AuthenticatedUser,
 } from "./auth";
 import { gateNovelQuestions } from "./semanticDedupe";
@@ -991,6 +989,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
     savedEvaluationResult = result;
     setPhase("saving-evaluation");
     const persisted = await applyEvaluationToPostgres({
+      questionId: submission.questionId ?? undefined,
       question: submission.question,
       answer: submission.answer,
       answerSummary: result.answerSummary,
@@ -1204,27 +1203,53 @@ export async function skipQuestion(input: {
 }
 
 export async function submitAnswer(input: {
-  questionId?: string | null;
+  questionId: string;
   question: string;
   answer: string;
 }): Promise<{ evaluationId: string; traceId: string }> {
   const user = await initializeQueue();
+  const requestedQuestionId = input.questionId.trim();
 
-  const queued = removeFromQueue(input);
-  const snapshot =
-    queued ??
-    (input.questionId
-      ? await getQuestionSnapshotById(input.questionId, { userId: user.id })
-      : await getQuestionSnapshot(input.question, { userId: user.id }));
+  if (!requestedQuestionId) {
+    throw new Error("questionId is required.");
+  }
+
+  const snapshot = await getQuestionSnapshotById(requestedQuestionId, {
+    userId: user.id,
+  });
+
+  if (!snapshot) {
+    throw new Error("Question not found.");
+  }
+
+  const snapshotDeck = (await listDecks({ userId: user.id })).find(
+    (deck) => deck.id === snapshot.deckId,
+  );
+
+  if (!snapshotDeck?.inReviewRotation) {
+    throw new Error("Question is not in review.");
+  }
+
+  const normalizedInputQuestion = input.question.trim().replace(/\s+/g, " ");
+  const normalizedSnapshotQuestion = snapshot.question.trim().replace(/\s+/g, " ");
+
+  if (normalizedInputQuestion !== normalizedSnapshotQuestion) {
+    throw new Error("Question mismatch.");
+  }
+
+  const queued = removeFromQueue({
+    questionId: snapshot.questionId,
+    question: snapshot.question,
+  });
   const submittedAt = Date.now();
   const traceId = crypto.randomUUID();
-  const questionId = snapshot?.questionId ?? input.questionId ?? null;
-  const deckId = snapshot?.deckId ?? getDeckIdForUser(user.id);
+  const questionId = snapshot.questionId;
+  const deckId = snapshot.deckId;
   const evaluation = createEvaluationItem({
     traceId,
     questionId,
     deckId,
-    question: input.question,
+    question: snapshot.question,
     answer: input.answer,
     submittedAt,
   });
@@ -1233,14 +1258,16 @@ export async function submitAnswer(input: {
   await createAnswerEvaluationRecord({
     id: evaluation.id,
     traceId,
-    userId: snapshot?.userId ?? user.id,
+    userId: snapshot.userId,
     deckId,
-    question: input.question,
+    question: snapshot.question,
     answer: input.answer,
     submittedAt,
   });
   state.pendingEvaluations += 1;
-  state.inFlightQuestionKeys.add(questionKey({ questionId, question: input.question }));
+  state.inFlightQuestionKeys.add(
+    questionKey({ questionId, question: snapshot.question }),
+  );
   logQueueFlushStatus("submitted-answer");
   void broadcastQueueStatus();
 
@@ -1248,13 +1275,13 @@ export async function submitAnswer(input: {
     evaluationId: evaluation.id,
     traceId,
     questionId,
-    question: input.question,
+    question: snapshot.question,
     queuedQuestion: queued,
-    userId: snapshot?.userId ?? user.id,
+    userId: snapshot.userId,
     deckId,
     answer: input.answer,
     submittedAt,
-    previousReviews: snapshot?.reviews ?? "",
+    previousReviews: snapshot.reviews,
   } satisfies Submission;
 
   after(() => processEvaluation(submission));

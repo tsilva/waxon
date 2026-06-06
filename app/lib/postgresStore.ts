@@ -1084,9 +1084,8 @@ export async function getQueuedQuestionsPage(
   ).filter(Boolean);
   const whereClause = and(
     eq(decks.userId, context.userId),
-    input.deckId
-      ? eq(questions.deckId, input.deckId)
-      : eq(decks.inReviewRotation, true),
+    eq(decks.inReviewRotation, true),
+    input.deckId ? eq(questions.deckId, input.deckId) : sql`true`,
     isNull(decks.archivedAt),
     excludeQuestionIds.length > 0
       ? notInArray(questions.id, excludeQuestionIds)
