@@ -88,6 +88,10 @@ type QueueStatusResponse = {
   deckEmbeddingPlot: DeckEmbeddingPlotResponse;
 };
 
+type EvaluationStatusResponse = {
+  evaluations: EvaluationQueueItem[];
+};
+
 type ReferenceAnswerResponse = {
   answer: string;
 };
@@ -466,7 +470,8 @@ const QUEUE_PAGE_GROWTH_FACTOR = 1.75;
 const QUEUE_ROW_ESTIMATED_HEIGHT = 132;
 const QUEUE_ROW_OVERSCAN = 14;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
-const STALE_EVALUATION_GRADING_MS = 45_000;
+const STALE_EVALUATION_GRADING_MS = 120_000;
+const EVALUATION_STATUS_POLL_MS = 750;
 
 function createEmptyDeckEmbeddingPlot(): DeckEmbeddingPlotResponse {
   return {
@@ -2603,6 +2608,83 @@ export default function ReviewApp({
     queueStatusStreamUrl,
     selectedDeckDetailId,
   ]);
+
+  const gradingEvaluationIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          messages
+            .filter(
+              (message): message is Extract<ChatMessage, { kind: "answer" }> =>
+                message.kind === "answer" && message.status === "grading",
+            )
+            .map((message) => message.evaluationId),
+        ),
+      ),
+    [messages],
+  );
+  const gradingEvaluationIdsKey = gradingEvaluationIds.join(",");
+
+  useEffect(() => {
+    if (!gradingEvaluationIdsKey) {
+      return;
+    }
+
+    let isActive = true;
+    const ids = gradingEvaluationIdsKey.split(",").filter(Boolean);
+
+    async function pollEvaluationStatus() {
+      const params = new URLSearchParams();
+
+      for (const id of ids) {
+        params.append("evaluationId", id);
+      }
+
+      try {
+        const response = await fetch(`/api/evaluation-status?${params.toString()}`, {
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = (await response.json()) as EvaluationStatusResponse;
+
+        if (!isActive || data.evaluations.length === 0) {
+          return;
+        }
+
+        setEvaluations((current) => {
+          const byId = new Map(current.map((evaluation) => [evaluation.id, evaluation]));
+
+          for (const evaluation of data.evaluations) {
+            byId.set(evaluation.id, evaluation);
+          }
+
+          return Array.from(byId.values()).sort((left, right) => {
+            const leftTime = left.resolvedAt ?? left.submittedAt;
+            const rightTime = right.resolvedAt ?? right.submittedAt;
+
+            return leftTime - rightTime || left.id.localeCompare(right.id);
+          });
+        });
+      } catch {
+        // Evaluation polling is best-effort; SSE and manual refresh can still recover.
+      }
+    }
+
+    void pollEvaluationStatus();
+    const interval = window.setInterval(
+      () => void pollEvaluationStatus(),
+      EVALUATION_STATUS_POLL_MS,
+    );
+
+    return () => {
+      isActive = false;
+      window.clearInterval(interval);
+    };
+  }, [gradingEvaluationIdsKey]);
 
   useEffect(() => {
     setMessages((current) => {
