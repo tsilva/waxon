@@ -505,7 +505,7 @@ const QUEUE_ROW_OVERSCAN = 14;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 const STALE_EVALUATION_GRADING_MS = 120_000;
 const EVALUATION_STATUS_POLL_MS = 750;
-const LEARN_QUEUE_TARGET_REMAINING = 2;
+const LEARN_QUEUE_TARGET_REMAINING = 6;
 const LEARN_TOP_UP_COOLDOWN_MS = 20_000;
 
 function createEmptyDeckEmbeddingPlot(): DeckEmbeddingPlotResponse {
@@ -1606,6 +1606,7 @@ export default function ReviewApp({
     deckId: string | null;
     question: string | null;
   } | null>(null);
+  const topUpLearnQueueRef = useRef<(() => Promise<void>) | null>(null);
   const queueStageRef = useRef<HTMLElement | null>(null);
   const queueListRef = useRef<HTMLOListElement | null>(null);
   const queueLoadedLimitRef = useRef(
@@ -2862,18 +2863,29 @@ export default function ReviewApp({
           submittedQuestionId,
           submittedQuestion,
         );
+      let nextQuestionData: NextQuestionResponse | null = null;
 
       if (prefetchedQuestion) {
-        applyNextQuestion({
+        nextQuestionData = {
           ...prefetchedQuestion,
           queueRemaining: Math.max(0, prefetchedQuestion.queueRemaining - 1),
-        });
+        };
+        applyNextQuestion(nextQuestionData);
       } else {
-        await loadNextQuestion({
+        nextQuestionData = await loadNextQuestion({
           mode: learnPanelMode,
           excludeQuestionId: submittedQuestionId,
           excludeQuestion: submittedQuestion,
         });
+      }
+
+      if (learnPanelMode === "learn" && !nextQuestionData?.question) {
+        pendingLearnSourceRef.current = {
+          deckId: currentDeckId,
+          question: submittedQuestion,
+        };
+        learnTopUpCooldownUntilRef.current = 0;
+        await topUpLearnQueueRef.current?.();
       }
 
       return true;
@@ -3829,6 +3841,10 @@ export default function ReviewApp({
     selectedDeckDetailId,
     selectedDeckId,
   ]);
+
+  useEffect(() => {
+    topUpLearnQueueRef.current = topUpLearnQueue;
+  }, [topUpLearnQueue]);
 
   useEffect(() => {
     if (
