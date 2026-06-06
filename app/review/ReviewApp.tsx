@@ -61,6 +61,7 @@ type LearnPanelMode = "review" | "learn";
 
 type PrefetchedNextQuestion = {
   mode: LearnPanelMode;
+  deckId: string | null;
   excludeQuestionId: string | null;
   excludeQuestion: string;
   data: NextQuestionResponse;
@@ -68,6 +69,7 @@ type PrefetchedNextQuestion = {
 
 type NextQuestionPrefetch = {
   mode: LearnPanelMode;
+  deckId: string | null;
   excludeQuestionId: string | null;
   excludeQuestion: string;
   abortController: AbortController;
@@ -223,6 +225,7 @@ const REVIEW_TAB_PATHS: Record<ActiveTab, string> = {
   review: "/review",
   queue: "/decks",
 };
+const LEARN_TARGET_DECK_STORAGE_KEY = "waxon:learn-target-deck-id";
 
 type ReviewRouteState = {
   activeTab: ActiveTab;
@@ -231,6 +234,26 @@ type ReviewRouteState = {
 
 function deckPath(deckSlug?: string | null): string {
   return deckSlug ? `/decks/${encodeURIComponent(deckSlug)}` : REVIEW_TAB_PATHS.queue;
+}
+
+function getStoredLearnTargetDeckId() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.sessionStorage.getItem(LEARN_TARGET_DECK_STORAGE_KEY);
+}
+
+function storeLearnTargetDeckId(deckId: string | null) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (deckId) {
+    window.sessionStorage.setItem(LEARN_TARGET_DECK_STORAGE_KEY, deckId);
+  } else {
+    window.sessionStorage.removeItem(LEARN_TARGET_DECK_STORAGE_KEY);
+  }
 }
 
 function getReviewRouteStateFromPathname(pathname: string): ReviewRouteState | null {
@@ -377,6 +400,7 @@ type PendingSpeechCommand = {
 
 function nextQuestionUrl(input: {
   mode?: LearnPanelMode;
+  deckId?: string | null;
   excludeQuestionId?: string | null;
   excludeQuestion?: string | null;
 } = {}) {
@@ -384,6 +408,10 @@ function nextQuestionUrl(input: {
 
   if (input.mode) {
     params.set("mode", input.mode);
+  }
+
+  if (input.deckId) {
+    params.set("deckId", input.deckId);
   }
 
   if (input.excludeQuestionId) {
@@ -401,6 +429,7 @@ function nextQuestionUrl(input: {
 
 async function fetchNextQuestionData(input: {
   mode?: LearnPanelMode;
+  deckId?: string | null;
   excludeQuestionId?: string | null;
   excludeQuestion?: string | null;
   signal?: AbortSignal;
@@ -505,7 +534,7 @@ const QUEUE_ROW_OVERSCAN = 14;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 const STALE_EVALUATION_GRADING_MS = 120_000;
 const EVALUATION_STATUS_POLL_MS = 750;
-const LEARN_QUEUE_TARGET_REMAINING = 6;
+const LEARN_QUEUE_TARGET_REMAINING = 2;
 const LEARN_TOP_UP_COOLDOWN_MS = 20_000;
 
 function createEmptyDeckEmbeddingPlot(): DeckEmbeddingPlotResponse {
@@ -1606,6 +1635,12 @@ export default function ReviewApp({
     deckId: string | null;
     question: string | null;
   } | null>(null);
+  const learnTopUpSatisfiedKeyRef = useRef<string | null>(null);
+  const learnTargetDeckIdRef = useRef<string | null>(
+    cachedSessionRef.current?.selectedDeckDetailId ??
+      cachedSessionRef.current?.selectedDeckId ??
+      null,
+  );
   const topUpLearnQueueRef = useRef<(() => Promise<void>) | null>(null);
   const queueStageRef = useRef<HTMLElement | null>(null);
   const queueListRef = useRef<HTMLOListElement | null>(null);
@@ -1829,6 +1864,19 @@ export default function ReviewApp({
     setIsQuestionGeneratorOpen(true);
   }, []);
 
+  const rememberLearnTargetDeck = useCallback((deckId: string | null) => {
+    learnTargetDeckIdRef.current = deckId;
+    storeLearnTargetDeckId(deckId);
+  }, []);
+
+  useEffect(() => {
+    if (learnTargetDeckIdRef.current) {
+      return;
+    }
+
+    learnTargetDeckIdRef.current = getStoredLearnTargetDeckId();
+  }, []);
+
   const selectedDeck =
     decks.find((deck) => deck.id === selectedDeckId) ?? decks[0] ?? null;
   const selectedDeckDetail =
@@ -1984,6 +2032,7 @@ export default function ReviewApp({
           ...currentDecks,
         ]);
         setSelectedDeckId(savedDeck.id);
+        rememberLearnTargetDeck(savedDeck.id);
       } else {
         setDecks((currentDecks) =>
           currentDecks.map((deck) =>
@@ -2018,6 +2067,7 @@ export default function ReviewApp({
     isDeckDraftNameDuplicate,
     isDeckSaving,
     navigateToTab,
+    rememberLearnTargetDeck,
     selectedDeckDetailId,
   ]);
 
@@ -2086,6 +2136,7 @@ export default function ReviewApp({
       setSelectedDeckId(deck.id);
       setSelectedDeckDetailId(deck.id);
       setRouteDeckSlug(deck.slug);
+      rememberLearnTargetDeck(deck.id);
 
       if (shouldReset) {
         resetDeckQueueState();
@@ -2097,7 +2148,7 @@ export default function ReviewApp({
         setActiveTab("queue");
       }
     },
-    [navigateToTab, resetDeckQueueState, selectedDeckDetailId],
+    [navigateToTab, rememberLearnTargetDeck, resetDeckQueueState, selectedDeckDetailId],
   );
 
   const closeDeckQueue = useCallback(() => {
@@ -2290,11 +2341,25 @@ export default function ReviewApp({
     }
   }, [appendQuestion]);
 
+  const getNextQuestionDeckId = useCallback(
+    (mode: LearnPanelMode) =>
+      mode === "learn"
+        ? selectedDeckDetailId ||
+          learnTargetDeckIdRef.current ||
+          (questionRef.current ? currentDeckId : selectedDeckId) ||
+          currentDeckId ||
+          selectedDeckId ||
+          null
+        : null,
+    [currentDeckId, selectedDeckDetailId, selectedDeckId],
+  );
+
   const prefetchNextQuestion = useCallback((
     mode: LearnPanelMode,
     excludeQuestionId: string | null,
     excludeQuestion: string | null,
   ) => {
+    const deckId = getNextQuestionDeckId(mode);
     const normalizedQuestionId = excludeQuestionId?.trim() || null;
     const normalizedQuestion = excludeQuestion?.trim();
 
@@ -2304,6 +2369,7 @@ export default function ReviewApp({
 
     if (
       prefetchedNextQuestionRef.current?.mode === mode &&
+      prefetchedNextQuestionRef.current?.deckId === deckId &&
       prefetchedNextQuestionRef.current?.excludeQuestionId ===
         normalizedQuestionId &&
       prefetchedNextQuestionRef.current?.excludeQuestion === normalizedQuestion
@@ -2313,6 +2379,7 @@ export default function ReviewApp({
 
     if (
       nextQuestionPrefetchRef.current?.mode === mode &&
+      nextQuestionPrefetchRef.current?.deckId === deckId &&
       nextQuestionPrefetchRef.current?.excludeQuestionId ===
         normalizedQuestionId &&
       nextQuestionPrefetchRef.current?.excludeQuestion === normalizedQuestion
@@ -2326,12 +2393,14 @@ export default function ReviewApp({
     const abortController = new AbortController();
     const promise = fetchNextQuestionData({
       mode,
+      deckId,
       excludeQuestionId: normalizedQuestionId,
       excludeQuestion: normalizedQuestion,
       signal: abortController.signal,
     })
       .then((data): PrefetchedNextQuestion => ({
         mode,
+        deckId,
         excludeQuestionId: normalizedQuestionId,
         excludeQuestion: normalizedQuestion,
         data,
@@ -2349,6 +2418,7 @@ export default function ReviewApp({
 
     const request: NextQuestionPrefetch = {
       mode,
+      deckId,
       excludeQuestionId: normalizedQuestionId,
       excludeQuestion: normalizedQuestion,
       abortController,
@@ -2372,7 +2442,7 @@ export default function ReviewApp({
         prefetchedNextQuestionRef.current = prefetched;
       }
     });
-  }, []);
+  }, [getNextQuestionDeckId]);
 
   const takePrefetchedNextQuestion = useCallback(
     async (
@@ -2380,12 +2450,14 @@ export default function ReviewApp({
       excludeQuestionId: string | null,
       excludeQuestion: string,
     ) => {
+      const deckId = getNextQuestionDeckId(mode);
       const normalizedQuestionId = excludeQuestionId?.trim() || null;
       const normalizedQuestion = excludeQuestion.trim();
       const cachedQuestion = prefetchedNextQuestionRef.current;
 
       if (
         cachedQuestion?.mode === mode &&
+        cachedQuestion?.deckId === deckId &&
         cachedQuestion?.excludeQuestionId === normalizedQuestionId &&
         cachedQuestion?.excludeQuestion === normalizedQuestion
       ) {
@@ -2397,6 +2469,7 @@ export default function ReviewApp({
 
       if (
         pendingPrefetch?.mode !== mode ||
+        pendingPrefetch.deckId !== deckId ||
         pendingPrefetch?.excludeQuestionId !== normalizedQuestionId ||
         pendingPrefetch?.excludeQuestion !== normalizedQuestion
       ) {
@@ -2411,6 +2484,7 @@ export default function ReviewApp({
 
       if (
         prefetched?.mode !== mode ||
+        prefetched.deckId !== deckId ||
         prefetched.excludeQuestionId !== normalizedQuestionId ||
         prefetched.excludeQuestion !== normalizedQuestion
       ) {
@@ -2420,7 +2494,7 @@ export default function ReviewApp({
       prefetchedNextQuestionRef.current = null;
       return prefetched.data;
     },
-    [],
+    [getNextQuestionDeckId],
   );
 
   const loadNextQuestion = useCallback(async (options?: {
@@ -2444,6 +2518,7 @@ export default function ReviewApp({
     try {
       const data = await fetchNextQuestionData({
         mode,
+        deckId: getNextQuestionDeckId(mode),
         excludeQuestionId: options?.excludeQuestionId,
         excludeQuestion: options?.excludeQuestion,
       });
@@ -2462,7 +2537,7 @@ export default function ReviewApp({
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [applyNextQuestion, learnPanelMode]);
+  }, [applyNextQuestion, getNextQuestionDeckId, learnPanelMode]);
 
   const queueStatusUrl = useCallback((limit: number) => {
     const params = new URLSearchParams({
@@ -3631,12 +3706,20 @@ export default function ReviewApp({
       };
     });
 
-  const previousAnswers = [
-    ...sessionPreviousAnswers,
-    ...evaluationPreviousAnswers,
-    ...recentAttemptPreviousAnswers,
-    ...historicalPreviousAnswers,
-  ];
+  const previousAnswers = useMemo(
+    () => [
+      ...sessionPreviousAnswers,
+      ...evaluationPreviousAnswers,
+      ...recentAttemptPreviousAnswers,
+      ...historicalPreviousAnswers,
+    ],
+    [
+      evaluationPreviousAnswers,
+      historicalPreviousAnswers,
+      recentAttemptPreviousAnswers,
+      sessionPreviousAnswers,
+    ],
+  );
   const hasPreviousAnswers = previousAnswers.length > 0;
   const visiblePreviousAnswers = isPreviousExpanded
     ? previousAnswers
@@ -3647,7 +3730,12 @@ export default function ReviewApp({
   const scheduledReviewCount = reviewQueue.filter(
     (item) => item.status === "scheduled",
   ).length;
-  const learnTargetDeckId = currentDeckId || selectedDeckDetailId || selectedDeckId || null;
+  const learnTargetDeckId =
+    selectedDeckDetailId ||
+    learnTargetDeckIdRef.current ||
+    currentDeckId ||
+    selectedDeckId ||
+    null;
   const learnQueueRemaining = reviewQueue.filter(
     (item) =>
       item.status === "now" &&
@@ -3747,12 +3835,16 @@ export default function ReviewApp({
         0,
         COLLAPSED_PREVIOUS_ANSWER_LIMIT - visiblePreviousAnswers.length,
       );
-  const learnPreviousAnswerPayload = previousAnswers.slice(0, 12).map((item) => ({
-    question: item.question,
-    answer: item.answer ?? "",
-    score: item.score,
-    justification: item.justification ?? "",
-  }));
+  const learnPreviousAnswerPayload = useMemo(
+    () =>
+      previousAnswers.slice(0, 12).map((item) => ({
+        question: item.question,
+        answer: item.answer ?? "",
+        score: item.score,
+        justification: item.justification ?? "",
+      })),
+    [previousAnswers],
+  );
 
   const topUpLearnQueue = useCallback(async () => {
     const now = Date.now();
@@ -3773,11 +3865,48 @@ export default function ReviewApp({
     try {
       const pendingLearnSource = pendingLearnSourceRef.current;
       const targetDeckId =
-        currentDeckId ||
-        pendingLearnSource?.deckId ||
         selectedDeckDetailId ||
+        pendingLearnSource?.deckId ||
+        learnTargetDeckIdRef.current ||
+        (questionRef.current ? currentDeckId : selectedDeckId) ||
+        currentDeckId ||
         selectedDeckId ||
         undefined;
+      const currentTargetQuestion =
+        targetDeckId && currentDeckId === targetDeckId ? questionRef.current : null;
+      const topUpKey = [
+        targetDeckId ?? "",
+        currentQuestionId ?? "",
+        currentTargetQuestion ?? "",
+      ].join("\n");
+
+      if (learnTopUpSatisfiedKeyRef.current === topUpKey) {
+        return;
+      }
+
+      const nextQuestionData = await fetchNextQuestionData({
+        mode: "learn",
+        deckId: targetDeckId,
+        excludeQuestionId: currentTargetQuestion ? currentQuestionId : null,
+        excludeQuestion: currentTargetQuestion,
+      });
+      const readyQuestionCount = nextQuestionData.queueRemaining;
+
+      if (readyQuestionCount >= LEARN_QUEUE_TARGET_REMAINING) {
+        learnTopUpSatisfiedKeyRef.current = topUpKey;
+        setLearnTopUpMessage("Queue ready");
+        pendingLearnSourceRef.current = null;
+
+        if (!currentTargetQuestion && nextQuestionData.question) {
+          applyNextQuestion(nextQuestionData);
+        } else if (currentTargetQuestion) {
+          prefetchNextQuestion("learn", currentQuestionId, currentTargetQuestion);
+        }
+
+        return;
+      }
+
+      const questionsNeeded = LEARN_QUEUE_TARGET_REMAINING - readyQuestionCount;
       const response = await fetch("/api/questions/learn", {
         method: "POST",
         headers: {
@@ -3785,7 +3914,9 @@ export default function ReviewApp({
         },
         body: JSON.stringify({
           deckId: targetDeckId,
+          sourceDeckId: currentDeckId || pendingLearnSource?.deckId,
           currentQuestion: questionRef.current ?? pendingLearnSource?.question,
+          count: questionsNeeded,
           previousAnswers: learnPreviousAnswerPayload,
         }),
       });
@@ -3798,6 +3929,7 @@ export default function ReviewApp({
       }
 
       if (data.added > 0) {
+        learnTopUpSatisfiedKeyRef.current = null;
         setLearnTopUpMessage(
           data.added === 1
             ? "1 question added"
@@ -3806,10 +3938,10 @@ export default function ReviewApp({
         pendingLearnSourceRef.current = null;
         await loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
 
-        if (!questionRef.current) {
+        if (!currentTargetQuestion) {
           await loadNextQuestion({ mode: "learn", surfaceError: false });
         } else {
-          prefetchNextQuestion(learnPanelMode, currentQuestionId, questionRef.current);
+          prefetchNextQuestion("learn", currentQuestionId, currentTargetQuestion);
         }
       } else {
         learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
@@ -3833,8 +3965,8 @@ export default function ReviewApp({
   }, [
     currentDeckId,
     currentQuestionId,
+    applyNextQuestion,
     learnPreviousAnswerPayload,
-    learnPanelMode,
     loadNextQuestion,
     loadStatus,
     prefetchNextQuestion,
@@ -3879,7 +4011,12 @@ export default function ReviewApp({
     pendingLearnSourceRef.current =
       nextMode === "learn"
         ? {
-            deckId: currentDeckId,
+            deckId:
+              selectedDeckDetailId ||
+              learnTargetDeckIdRef.current ||
+              currentDeckId ||
+              selectedDeckId ||
+              null,
             question,
           }
         : null;
@@ -3911,6 +4048,8 @@ export default function ReviewApp({
     learnPanelMode,
     loadNextQuestion,
     question,
+    selectedDeckDetailId,
+    selectedDeckId,
     topUpLearnQueue,
   ]);
 
@@ -4387,10 +4526,11 @@ export default function ReviewApp({
             </div>
             {learnPanelMode === "learn" ? (
               <p className="learn-mode-status" aria-live="polite">
-                {isLearnTopUpPending
-                  ? "Generating..."
-                  : learnTopUpMessage ??
-                    (question ? "Queue ready" : "Finding first question...")}
+                {question
+                  ? "Queue ready"
+                  : isLearnTopUpPending
+                    ? "Generating..."
+                    : learnTopUpMessage ?? "Finding first question..."}
               </p>
             ) : null}
           </div>

@@ -28,7 +28,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const OPENROUTER_MODEL = process.env.LLM_MODEL || "openai/gpt-5.5";
-const LEARN_BATCH_SIZE = 8;
+const LEARN_BATCH_SIZE = 2;
 const MAX_LEARN_BODY_BYTES = 48 * 1024;
 const MAX_DECK_ID_CHARS = 200;
 const MAX_QUESTION_CHARS = 1_200;
@@ -37,6 +37,54 @@ const MAX_JUSTIFICATION_CHARS = 2_000;
 const MAX_PREVIOUS_ANSWERS = 12;
 const MAX_EXISTING_CONTEXT_QUESTIONS = 160;
 const MAX_PROVENANCE_CHARS = 360;
+const HIRAGANA_CURRICULUM = [
+  ["あ", "a"],
+  ["い", "i"],
+  ["う", "u"],
+  ["え", "e"],
+  ["お", "o"],
+  ["か", "ka"],
+  ["き", "ki"],
+  ["く", "ku"],
+  ["け", "ke"],
+  ["こ", "ko"],
+  ["さ", "sa"],
+  ["し", "shi"],
+  ["す", "su"],
+  ["せ", "se"],
+  ["そ", "so"],
+  ["た", "ta"],
+  ["ち", "chi"],
+  ["つ", "tsu"],
+  ["て", "te"],
+  ["と", "to"],
+  ["な", "na"],
+  ["に", "ni"],
+  ["ぬ", "nu"],
+  ["ね", "ne"],
+  ["の", "no"],
+  ["は", "ha"],
+  ["ひ", "hi"],
+  ["ふ", "fu"],
+  ["へ", "he"],
+  ["ほ", "ho"],
+  ["ま", "ma"],
+  ["み", "mi"],
+  ["む", "mu"],
+  ["め", "me"],
+  ["も", "mo"],
+  ["や", "ya"],
+  ["ゆ", "yu"],
+  ["よ", "yo"],
+  ["ら", "ra"],
+  ["り", "ri"],
+  ["る", "ru"],
+  ["れ", "re"],
+  ["ろ", "ro"],
+  ["わ", "wa"],
+  ["を", "o"],
+  ["ん", "n"],
+] as const;
 
 type PreviousAnswerContext = {
   question: string;
@@ -49,6 +97,10 @@ type LearnQuestionPayload = {
   question: string;
   conciseAnswer: string;
   questionProvenance: string;
+};
+
+type ExistingQuestionContext = {
+  question: string;
 };
 
 function normalizeText(value: unknown, maxLength: number): string {
@@ -93,7 +145,16 @@ function normalizePreviousAnswers(value: unknown): PreviousAnswerContext[] {
   return normalized;
 }
 
-function normalizeGeneratedQuestions(value: unknown): LearnQuestionPayload[] {
+function normalizeQuestionCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(LEARN_BATCH_SIZE, Math.max(1, Math.floor(value)))
+    : LEARN_BATCH_SIZE;
+}
+
+function normalizeGeneratedQuestions(
+  value: unknown,
+  questionCount: number,
+): LearnQuestionPayload[] {
   if (!value || typeof value !== "object") {
     return [];
   }
@@ -133,7 +194,31 @@ function normalizeGeneratedQuestions(value: unknown): LearnQuestionPayload[] {
     });
   }
 
-  return normalized.slice(0, LEARN_BATCH_SIZE);
+  return normalized.slice(0, questionCount);
+}
+
+function isHiraganaDeck(deck: DeckSummary): boolean {
+  return `${deck.name} ${deck.coverage ?? ""}`.toLowerCase().includes("hiragana");
+}
+
+function buildHiraganaLearnQuestions(
+  existingQuestions: ExistingQuestionContext[],
+  questionCount: number,
+): LearnQuestionPayload[] {
+  const existingQuestionText = existingQuestions
+    .map((question) => question.question)
+    .join("\n");
+
+  return HIRAGANA_CURRICULUM
+    .map(([kana, romaji], index) => ({ index, kana, romaji }))
+    .filter(({ kana }) => !existingQuestionText.includes(kana))
+    .slice(0, questionCount)
+    .map(({ index, kana, romaji }) => ({
+      question: `Hiragana ${index + 1}: what is the romaji reading of ${kana}?`,
+      conciseAnswer: `${kana} is read as ${romaji}.`,
+      questionProvenance:
+        "Next beginner hiragana kana-to-romaji recall target.",
+    }));
 }
 
 function buildLearnSystemPrompt(questionQualityReference: string): string {
@@ -197,12 +282,21 @@ export async function POST(request: Request) {
     field: "deckId",
     maxLength: MAX_DECK_ID_CHARS,
   });
+  const requestedSourceDeckId = normalizeBoundedText(payload.sourceDeckId, {
+    field: "sourceDeckId",
+    maxLength: MAX_DECK_ID_CHARS,
+  });
 
   if (!requestedDeckId.ok) {
     return requestedDeckId.response;
   }
 
+  if (!requestedSourceDeckId.ok) {
+    return requestedSourceDeckId.response;
+  }
+
   const currentQuestion = normalizeText(payload.currentQuestion, MAX_QUESTION_CHARS);
+  const questionCount = normalizeQuestionCount(payload.count);
   const previousAnswers = normalizePreviousAnswers(payload.previousAnswers);
 
   const rateLimitResponse = consumeUserRateLimit({
@@ -235,6 +329,19 @@ export async function POST(request: Request) {
         { ok: false, error: message },
         { status: message === "Deck not found." ? 404 : 500 },
       );
+    }
+  }
+
+  let sourceDeckId = "";
+
+  if (requestedSourceDeckId.value) {
+    try {
+      sourceDeckId = await resolveOwnedDeckId({
+        userId: user.id,
+        deckId: requestedSourceDeckId.value,
+      });
+    } catch {
+      sourceDeckId = "";
     }
   }
 
@@ -273,6 +380,32 @@ export async function POST(request: Request) {
     score: attempt.score,
     justification: attempt.justification,
   }));
+  const sourceQuestion =
+    sourceDeckId && sourceDeckId === activeTargetDeck.id
+      ? currentQuestion || null
+      : null;
+
+  if (isHiraganaDeck(activeTargetDeck)) {
+    const questions = buildHiraganaLearnQuestions(
+      existingQuestions,
+      questionCount,
+    );
+    const result = await addQuestionsToDeck({
+      questions,
+      deckId: activeTargetDeck.id,
+      sourceQuestion,
+      skipSemanticDedupe: true,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      model: "waxon/hiragana-curriculum",
+      added: result.added,
+      rejected: result.rejected,
+      questions,
+    });
+  }
+
   const questionQualityReference = getQuestionQualityReference();
   const { response, body } = await openRouterChatCompletion({
     apiKey,
@@ -284,7 +417,7 @@ export async function POST(request: Request) {
     body: {
       model: OPENROUTER_MODEL,
       temperature: 0.35,
-      max_tokens: 2400,
+      max_tokens: 1200,
       response_format: { type: "json_object" },
       messages: [
         {
@@ -294,7 +427,7 @@ export async function POST(request: Request) {
         {
           role: "user",
           content: [
-            `Generate exactly ${LEARN_BATCH_SIZE} new questions.`,
+            `Generate exactly ${questionCount} new questions.`,
             "Deck:",
             JSON.stringify({
               name: targetDeck.name,
@@ -346,7 +479,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const questions = normalizeGeneratedQuestions(extractJsonObject(content));
+  const questions = normalizeGeneratedQuestions(
+    extractJsonObject(content),
+    questionCount,
+  );
 
   if (questions.length === 0) {
     return NextResponse.json({
@@ -366,7 +502,7 @@ export async function POST(request: Request) {
   const result = await addQuestionsToDeck({
     questions: questionInputs,
     deckId: activeTargetDeck.id,
-    sourceQuestion: currentQuestion || null,
+    sourceQuestion,
   });
 
   return NextResponse.json({
