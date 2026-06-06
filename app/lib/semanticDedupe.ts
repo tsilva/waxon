@@ -17,7 +17,7 @@ import {
 } from "./embeddingSource";
 import { generateConciseAnswers } from "./conciseAnswer";
 import { extractJsonObject } from "./jsonObject";
-import { readQuestions, type QuestionInput } from "./postgresStore";
+import type { QuestionInput } from "./postgresStore";
 import { vectorLiteral } from "./vectorLiteral";
 
 export type NovelQuestionCandidate = {
@@ -322,6 +322,36 @@ async function loadExternalNeighbors(
   return neighborsByCandidate;
 }
 
+async function loadExistingQuestionsBySlug(
+  candidates: NovelQuestionCandidate[],
+  deckId: string,
+): Promise<Map<string, string>> {
+  const slugs = Array.from(
+    new Set(candidates.map((candidate) => questionSlug(candidate.question))),
+  ).filter(Boolean);
+
+  if (slugs.length === 0) {
+    return new Map();
+  }
+
+  const result = await pool.query(
+    `
+      SELECT question_slug, question
+      FROM questions
+      WHERE deck_id = $1
+        AND question_slug = ANY($2::text[])
+    `,
+    [deckId, slugs],
+  );
+
+  return new Map(
+    result.rows.map((row: { question_slug: string; question: string }) => [
+      row.question_slug,
+      row.question,
+    ]),
+  );
+}
+
 function addBatchNeighbors(
   candidates: CandidateForJudgment[],
 ): CandidateForJudgment[] {
@@ -481,6 +511,7 @@ export async function gateNovelQuestions(
   input: Array<string | QuestionInput>,
   trace: Partial<OpenRouterTraceContext> = {},
 ): Promise<NovelQuestionGateResult> {
+  const deckId = trace.deckId?.trim() || DEFAULT_DECK_ID;
   const normalized = await ensureConciseAnswers(normalizeQuestionInput(input), trace);
   const candidatesWithAnswers = normalized.filter(
     (candidate) => candidate.conciseAnswer.trim().length > 0,
@@ -497,11 +528,9 @@ export async function gateNovelQuestions(
     return { accepted: [], rejected };
   }
 
-  const existingQuestions = await readQuestions(
-    trace.userId ? { userId: trace.userId } : {},
-  );
-  const existingBySlug = new Map(
-    existingQuestions.map((row) => [questionSlug(row.question), row.question]),
+  const existingBySlug = await loadExistingQuestionsBySlug(
+    candidatesWithAnswers,
+    deckId,
   );
   const candidatesToCheck = candidatesWithAnswers.filter((candidate) => {
     const duplicate = existingBySlug.get(questionSlug(candidate.question));
