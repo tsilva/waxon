@@ -17,6 +17,7 @@ import {
   listDecks,
   readQuestions,
   resolveOwnedDeckId,
+  updateDeck,
   type DeckSummary,
   type QuestionInput,
 } from "@/app/lib/postgresStore";
@@ -250,18 +251,19 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!targetDeck.inReviewRotation) {
-    return NextResponse.json(
-      { ok: false, error: "Learn mode can only add to decks in review." },
-      { status: 400 },
-    );
-  }
+  const activeTargetDeck = targetDeck.inReviewRotation
+    ? targetDeck
+    : await updateDeck({
+        deckId: targetDeck.id,
+        userId: user.id,
+        inReviewRotation: true,
+      });
 
   const [existingQuestions, persistedAttempts] = await Promise.all([
-    readQuestions({ userId: user.id, deckId: targetDeck.id }),
+    readQuestions({ userId: user.id, deckId: activeTargetDeck.id }),
     getRecentQuestionAttempts({
       userId: user.id,
-      deckId: targetDeck.id,
+      deckId: activeTargetDeck.id,
       limit: MAX_PREVIOUS_ANSWERS,
     }),
   ]);
@@ -277,7 +279,7 @@ export async function POST(request: Request) {
     trace: {
       operation: "learn_mode_generate_questions",
       userId: user.id,
-      deckId: targetDeck.id,
+      deckId: activeTargetDeck.id,
     },
     body: {
       model: OPENROUTER_MODEL,
@@ -363,7 +365,7 @@ export async function POST(request: Request) {
   }));
   const result = await addQuestionsToDeck({
     questions: questionInputs,
-    deckId: targetDeck.id,
+    deckId: activeTargetDeck.id,
     sourceQuestion: currentQuestion || null,
   });
 

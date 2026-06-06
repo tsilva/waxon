@@ -2448,6 +2448,7 @@ export default function ReviewApp({
       });
       applyNextQuestion(data);
       hasLoadedQuestionRef.current = true;
+      return data;
     } catch (loadError) {
       if (surfaceError) {
         setError(
@@ -2456,6 +2457,7 @@ export default function ReviewApp({
             : "Failed to load the next question.",
         );
       }
+      return null;
     } finally {
       setIsLoadingQuestion(false);
     }
@@ -3743,10 +3745,12 @@ export default function ReviewApp({
   const topUpLearnQueue = useCallback(async () => {
     const now = Date.now();
 
-    if (
-      isLearnTopUpPendingRef.current ||
-      now < learnTopUpCooldownUntilRef.current
-    ) {
+    if (isLearnTopUpPendingRef.current) {
+      return;
+    }
+
+    if (now < learnTopUpCooldownUntilRef.current) {
+      setLearnTopUpMessage("Waiting to retry");
       return;
     }
 
@@ -3798,7 +3802,9 @@ export default function ReviewApp({
       } else {
         learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
         setLearnTopUpMessage(
-          data.rejected > 0 ? "Generated questions were duplicates" : null,
+          data.rejected > 0
+            ? "Generated questions were duplicates"
+            : "No beginner questions generated",
         );
       }
     } catch (topUpError) {
@@ -3870,13 +3876,27 @@ export default function ReviewApp({
     answerRef.current = "";
     setSpeechPreview("");
 
-    void loadNextQuestion({
-      mode: nextMode,
-      excludeQuestionId: currentQuestionId,
-      excludeQuestion: question,
-      surfaceError: false,
-    });
-  }, [currentDeckId, currentQuestionId, learnPanelMode, loadNextQuestion, question]);
+    void (async () => {
+      const data = await loadNextQuestion({
+        mode: nextMode,
+        excludeQuestionId: currentQuestionId,
+        excludeQuestion: question,
+        surfaceError: false,
+      });
+
+      if (nextMode === "learn" && !data?.question) {
+        learnTopUpCooldownUntilRef.current = 0;
+        await topUpLearnQueue();
+      }
+    })();
+  }, [
+    currentDeckId,
+    currentQuestionId,
+    learnPanelMode,
+    loadNextQuestion,
+    question,
+    topUpLearnQueue,
+  ]);
 
   const selectedQuestionStats = useMemo<QuestionStats | null>(() => {
     if (!selectedQuestion) {
@@ -4353,7 +4373,8 @@ export default function ReviewApp({
               <p className="learn-mode-status" aria-live="polite">
                 {isLearnTopUpPending
                   ? "Generating..."
-                  : learnTopUpMessage ?? "Queue ready"}
+                  : learnTopUpMessage ??
+                    (question ? "Queue ready" : "Finding first question...")}
               </p>
             ) : null}
           </div>
@@ -4393,10 +4414,18 @@ export default function ReviewApp({
                 </>
               ) : (
                 <div className="resting-state">
-                  <p className="resting-kicker">Review complete</p>
-                  <h2 className="resting-title">You&apos;re caught up.</h2>
+                  <p className="resting-kicker">
+                    {learnPanelMode === "learn" ? "Learn mode" : "Review complete"}
+                  </p>
+                  <h2 className="resting-title">
+                    {learnPanelMode === "learn"
+                      ? "Finding your first question."
+                      : "You're caught up."}
+                  </h2>
                   <p className="resting-copy">
-                    No questions are due right now.
+                    {learnPanelMode === "learn"
+                      ? "Waxon is preparing new questions for this deck."
+                      : "No questions are due right now."}
                   </p>
 
                   <dl className="resting-metrics" aria-label="Review status">
@@ -4429,7 +4458,15 @@ export default function ReviewApp({
                     <button
                       className="resting-secondary"
                       type="button"
-                      onClick={() => void loadNextQuestion({ surfaceError: false })}
+                      onClick={() => {
+                        if (learnPanelMode === "learn") {
+                          learnTopUpCooldownUntilRef.current = 0;
+                          void topUpLearnQueue();
+                          return;
+                        }
+
+                        void loadNextQuestion({ surfaceError: false });
+                      }}
                     >
                       Refresh
                     </button>
