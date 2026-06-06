@@ -7,10 +7,11 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const mode = url.searchParams.get("mode") === "learn" ? "learn" : "review";
+  const deckId = url.searchParams.get("deckId");
   const excludeQuestionId = url.searchParams.get("excludeQuestionId");
   const excludeQuestion = url.searchParams.get("excludeQuestion");
 
   return NextResponse.json(
-    await peekNextQuestion({ mode, excludeQuestionId, excludeQuestion }),
+    await peekNextQuestion({ mode, deckId, excludeQuestionId, excludeQuestion }),
   );
 }
