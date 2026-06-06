@@ -45,6 +45,7 @@ export type QuestionRow = {
   reviews: string;
   next_due: number;
   generated_from_question: string | null;
+  question_provenance: string;
   last_answer: string;
   last_answer_summary: string;
   concise_answer: string;
@@ -61,6 +62,7 @@ export type DueQuestion = {
   reviews: string;
   nextDue: number;
   generatedFromQuestion: string | null;
+  questionProvenance: string | null;
   lastAnswer: string | null;
   lastAnswerSummary: string | null;
   conciseAnswer: string | null;
@@ -93,6 +95,7 @@ export type PersistedEvaluation = {
   reviews: string;
   nextDue: number;
   generatedFromQuestion: string | null;
+  questionProvenance: string | null;
   lastAnswer: string | null;
   lastAnswerSummary: string | null;
   conciseAnswer: string | null;
@@ -104,8 +107,6 @@ const EVALUATION_PHASES = new Set<EvaluationPhase>([
   "queued",
   "evaluating-answer",
   "saving-evaluation",
-  "gating-probes",
-  "saving-probes",
   "finalizing",
 ]);
 
@@ -120,6 +121,7 @@ export type DeckSummary = {
   id: string;
   name: string;
   slug: string;
+  coverage: string;
   inReviewRotation: boolean;
   archivedAt: number | null;
   createdAt: number;
@@ -254,6 +256,7 @@ function toDueQuestion(row: QuestionRow): DueQuestion {
     reviews: row.reviews,
     nextDue: row.next_due,
     generatedFromQuestion: row.generated_from_question || null,
+    questionProvenance: row.question_provenance || null,
     lastAnswer: row.last_answer || null,
     lastAnswerSummary: row.last_answer_summary || null,
     conciseAnswer: row.concise_answer || null,
@@ -544,6 +547,7 @@ async function selectQuestionRows(
       reviews: questions.reviews,
       next_due: questions.nextDue,
       generated_from_question: questions.generatedFromQuestion,
+      question_provenance: questions.questionProvenance,
       last_answer: questions.lastAnswer,
       last_answer_summary: questions.lastAnswerSummary,
       concise_answer: questions.conciseAnswer,
@@ -609,6 +613,7 @@ function toDeckSummary(row: {
   id: string;
   name: string;
   slug: string;
+  coverage: string;
   inReviewRotation: boolean;
   archivedAt: number | null;
   createdAt: number;
@@ -621,6 +626,7 @@ function toDeckSummary(row: {
     id: row.id,
     name: row.name,
     slug: row.slug,
+    coverage: row.coverage,
     inReviewRotation: row.inReviewRotation,
     archivedAt: row.archivedAt,
     createdAt: row.createdAt,
@@ -641,6 +647,7 @@ export async function listDecks(
       id: decks.id,
       name: decks.name,
       slug: decks.slug,
+      coverage: decks.coverage,
       inReviewRotation: decks.inReviewRotation,
       archivedAt: decks.archivedAt,
       createdAt: decks.createdAt,
@@ -657,6 +664,7 @@ export async function listDecks(
       decks.id,
       decks.name,
       decks.slug,
+      decks.coverage,
       decks.inReviewRotation,
       decks.archivedAt,
       decks.createdAt,
@@ -669,11 +677,13 @@ export async function listDecks(
 
 export async function createDeck(input: {
   name: string;
+  coverage?: string;
   inReviewRotation?: boolean;
   userId?: string;
 }): Promise<DeckSummary> {
   const context = await ensureSeedData(input);
   const name = input.name.trim();
+  const coverage = input.coverage?.trim() ?? "";
 
   if (!name) {
     throw new Error("Deck name is required.");
@@ -690,6 +700,7 @@ export async function createDeck(input: {
     userId: context.userId,
     name,
     slug,
+    coverage,
     inReviewRotation: input.inReviewRotation ?? false,
     createdAt: now,
     updatedAt: now,
@@ -709,6 +720,7 @@ export async function createDeck(input: {
 export async function updateDeck(input: {
   deckId: string;
   name?: string;
+  coverage?: string;
   inReviewRotation?: boolean;
   userId?: string;
 }): Promise<DeckSummary> {
@@ -742,6 +754,7 @@ export async function updateDeck(input: {
     .update(decks)
     .set({
       ...(nextName ? { name: nextName } : {}),
+      ...(input.coverage === undefined ? {} : { coverage: input.coverage.trim() }),
       ...(input.inReviewRotation === undefined
         ? {}
         : { inReviewRotation: input.inReviewRotation }),
@@ -832,6 +845,7 @@ export async function readQuestionsWithEmbeddings(input: {
       reviews: questions.reviews,
       next_due: questions.nextDue,
       generated_from_question: questions.generatedFromQuestion,
+      question_provenance: questions.questionProvenance,
       last_answer: questions.lastAnswer,
       last_answer_summary: questions.lastAnswerSummary,
       concise_answer: questions.conciseAnswer,
@@ -888,6 +902,7 @@ export async function readQuestionsWithEmbeddings(input: {
         reviews: row.reviews,
         next_due: row.next_due,
         generated_from_question: row.generated_from_question,
+        question_provenance: row.question_provenance,
         last_answer: row.last_answer,
         last_answer_summary: row.last_answer_summary,
         concise_answer: row.concise_answer,
@@ -1111,6 +1126,7 @@ export async function getQueuedQuestionsPage(
       reviews: questions.reviews,
       next_due: questions.nextDue,
       generated_from_question: questions.generatedFromQuestion,
+      question_provenance: questions.questionProvenance,
       last_answer: questions.lastAnswer,
       last_answer_summary: questions.lastAnswerSummary,
       concise_answer: questions.conciseAnswer,
@@ -1516,6 +1532,7 @@ export async function saveReferenceAnswer(input: {
 export type QuestionInput = {
   question: string;
   conciseAnswer?: string | null;
+  questionProvenance?: string | null;
 };
 
 function normalizeGeneratedQuestions(
@@ -1540,6 +1557,10 @@ function normalizeGeneratedQuestions(
         typeof item === "string"
           ? ""
           : (item.conciseAnswer ?? "").trim().replace(/\s+/g, " "),
+      questionProvenance:
+        typeof item === "string"
+          ? ""
+          : (item.questionProvenance ?? "").trim().replace(/\s+/g, " "),
     });
   }
 
@@ -1573,19 +1594,21 @@ export async function upsertDueQuestions(input: {
         questionSlug: questionSlug(question.question),
         nextDue: now,
         generatedFromQuestion: input.sourceQuestion,
+        questionProvenance: question.questionProvenance ?? "",
         conciseAnswer: question.conciseAnswer ?? "",
         createdAt: now,
         updatedAt: now,
       })),
     )
-	    .onConflictDoUpdate({
-	      target: [questions.deckId, questions.questionSlug],
+    .onConflictDoUpdate({
+      target: [questions.deckId, questions.questionSlug],
       set: {
         nextDue: now,
         generatedFromQuestion: sql`coalesce(
           ${questions.generatedFromQuestion},
           excluded.generated_from_question
         )`,
+        questionProvenance: sql`coalesce(nullif(${questions.questionProvenance}, ''), excluded.question_provenance)`,
         conciseAnswer: sql`coalesce(nullif(${questions.conciseAnswer}, ''), excluded.concise_answer)`,
         updatedAt: now,
       },
@@ -1626,6 +1649,7 @@ export async function applyEvaluationToPostgres(input: {
         reviews: questions.reviews,
         next_due: questions.nextDue,
         generated_from_question: questions.generatedFromQuestion,
+        question_provenance: questions.questionProvenance,
         last_answer: questions.lastAnswer,
         last_answer_summary: questions.lastAnswerSummary,
         concise_answer: questions.conciseAnswer,
@@ -1729,6 +1753,7 @@ export async function applyEvaluationToPostgres(input: {
       reviews,
       nextDue: roundedNextDue,
       generatedFromQuestion: row.generated_from_question || null,
+      questionProvenance: row.question_provenance || null,
       lastAnswer: input.answer || null,
       lastAnswerSummary: input.answerSummary || null,
       referenceAnswer: row.reference_answer || null,

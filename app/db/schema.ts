@@ -105,6 +105,7 @@ export const decks = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
+    coverage: text("coverage").notNull().default(""),
     inReviewRotation: boolean("in_review_rotation").notNull().default(true),
     archivedAt: bigint("archived_at", { mode: "number" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
@@ -115,6 +116,7 @@ export const decks = pgTable(
     check("decks_id_nonempty_check", sql`length(trim(${table.id})) > 0`),
     check("decks_name_nonempty_check", sql`length(trim(${table.name})) > 0`),
     check("decks_slug_nonempty_check", sql`length(trim(${table.slug})) > 0`),
+    check("decks_coverage_length_check", sql`length(${table.coverage}) <= 2000`),
     check("decks_created_at_check", sql`${table.createdAt} >= 0`),
     check(
       "decks_updated_at_check",
@@ -135,6 +137,7 @@ export const questions = pgTable(
     reviews: text("reviews").notNull().default(""),
     nextDue: bigint("next_due", { mode: "number" }).notNull().default(0),
     generatedFromQuestion: text("generated_from_question"),
+    questionProvenance: text("question_provenance").notNull().default(""),
     lastAnswer: text("last_answer").notNull().default(""),
     lastAnswerSummary: text("last_answer_summary").notNull().default(""),
     conciseAnswer: text("concise_answer").notNull().default(""),
@@ -354,8 +357,6 @@ export const answerEvaluations = pgTable(
         'queued',
         'evaluating-answer',
         'saving-evaluation',
-        'gating-probes',
-        'saving-probes',
         'finalizing'
       )`,
     ),

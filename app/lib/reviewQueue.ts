@@ -23,7 +23,6 @@ import {
   evaluateAnswer,
   EVALUATION_TIMEOUT_MS,
   failedEvaluation,
-  PROBING_QUESTION_SCORE_THRESHOLD,
   type EvaluationResult,
 } from "./evaluateAnswer";
 import { parseReviews, reinsertionDelay } from "./scheduler";
@@ -630,6 +629,7 @@ async function getReviewQueueItems(
           msUntilDue,
           status: msUntilDue <= 0 ? "now" : "scheduled",
           generatedFromQuestion: item.generatedFromQuestion,
+          questionProvenance: item.questionProvenance,
           reviewHistory,
           lastScore: latest?.score ?? lastReview?.score ?? null,
           lastAnswer: item.lastAnswer,
@@ -766,28 +766,28 @@ function restoreFailedQuestion(question: DueQuestion | null): void {
   logQueueFlushStatus("restored-failed-evaluation-question");
 }
 
-function enqueueProbingQuestions(probingQuestions: DueQuestion[]): void {
-  if (probingQuestions.length === 0) {
+function enqueueAddedQuestions(questions: DueQuestion[]): void {
+  if (questions.length === 0) {
     return;
   }
 
-  const dueProbingQuestions = probingQuestions.filter(
+  const dueAddedQuestions = questions.filter(
     (question) => !state.inFlightQuestionKeys.has(questionKey(question)),
   );
 
-  if (dueProbingQuestions.length === 0) {
+  if (dueAddedQuestions.length === 0) {
     return;
   }
 
-  const probeQuestionKeys = new Set(
-    dueProbingQuestions.map((question) => questionKey(question)),
+  const addedQuestionKeys = new Set(
+    dueAddedQuestions.map((question) => questionKey(question)),
   );
 
   state.queue = [
-    ...dueProbingQuestions,
-    ...state.queue.filter((question) => !probeQuestionKeys.has(questionKey(question))),
+    ...dueAddedQuestions,
+    ...state.queue.filter((question) => !addedQuestionKeys.has(questionKey(question))),
   ];
-  logQueueFlushStatus("queued-probing-questions");
+  logQueueFlushStatus("queued-added-questions");
 }
 
 function persistEvaluationFailure(
@@ -1025,6 +1025,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
           nextDue: persisted.nextDue,
           createdAt: persisted.createdAt,
           generatedFromQuestion: persisted.generatedFromQuestion,
+          questionProvenance: persisted.questionProvenance,
           lastAnswer: persisted.lastAnswer,
           lastAnswerSummary: persisted.lastAnswerSummary,
           conciseAnswer: persisted.conciseAnswer,
@@ -1032,73 +1033,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
         },
         result.score,
       );
-
-      if (
-        result.score <= PROBING_QUESTION_SCORE_THRESHOLD &&
-        result.probingQuestions.length > 0
-      ) {
-        try {
-          setPhase("gating-probes");
-          const sourceQuestionKey = submission.question.trim().toLowerCase();
-          const gateResult = await gateNovelQuestions(
-            result.probingQuestions.filter(
-              (question) => question.trim().toLowerCase() !== sourceQuestionKey,
-            ),
-            {
-              operation: "probing_question_gate",
-              userId: persisted.userId,
-              deckId: persisted.deckId,
-              question: submission.question,
-            },
-          );
-          if (isFinished) {
-            return;
-          }
-
-          setPhase("saving-probes");
-          const probingQuestions = await upsertDueQuestions({
-            questions: gateResult.accepted.map((candidate) => ({
-              question: candidate.question,
-              conciseAnswer: candidate.conciseAnswer,
-            })),
-            sourceQuestion: submission.question,
-            now: resolvedAt,
-            deckId: persisted.deckId,
-            userId: persisted.userId,
-          });
-
-          if (isFinished) {
-            return;
-          }
-
-          await upsertQuestionEmbeddings({
-            embeddings: gateResult.accepted.map((candidate) => ({
-              question: candidate.question,
-              embeddingModel:
-                process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
-              embeddingKind: DEDUPE_EMBEDDING_KIND,
-              sourceVersion: DEDUPE_SOURCE_VERSION,
-              sourceHash: candidate.sourceHash,
-              embedding: candidate.embedding,
-            })),
-            deckId: persisted.deckId,
-            userId: persisted.userId,
-          });
-
-          if (isFinished) {
-            return;
-          }
-
-          enqueueProbingQuestions(probingQuestions);
-        } catch (error) {
-          console.info("[waxon] probing question insertion failed", {
-            question: submission.question,
-            phase: currentPhase,
-            elapsedMs: Date.now() - startedAt,
-            error: error instanceof Error ? error.message : "unknown error",
-          });
-        }
-      }
     } else {
       await persistEvaluationResolution({
         evaluationId: submission.evaluationId,
@@ -1307,11 +1241,21 @@ export async function addQuestionsToDeck(input: {
     userId: user.id,
     deckId,
   });
+  const provenanceByQuestion = new Map(
+    input.questions
+      .filter((question): question is QuestionInput => typeof question !== "string")
+      .map((question) => [
+        question.question.trim().replace(/\s+/g, " ").toLowerCase(),
+        question.questionProvenance?.trim().replace(/\s+/g, " ") ?? "",
+      ]),
+  );
 
   const addedQuestions = await upsertDueQuestions({
     questions: gateResult.accepted.map((candidate) => ({
       question: candidate.question,
       conciseAnswer: candidate.conciseAnswer,
+      questionProvenance:
+        provenanceByQuestion.get(candidate.question.toLowerCase()) ?? "",
     })),
     sourceQuestion: null,
     now: Date.now(),
@@ -1337,7 +1281,7 @@ export async function addQuestionsToDeck(input: {
   );
 
   if (targetDeck?.inReviewRotation) {
-    enqueueProbingQuestions(addedQuestions);
+    enqueueAddedQuestions(addedQuestions);
   } else {
     invalidateReviewQueue();
   }

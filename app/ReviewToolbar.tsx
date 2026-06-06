@@ -104,7 +104,7 @@ export function ReviewToolbar({
             aria-controls="review-panel"
             onClick={onReviewClick}
           >
-            Review
+            Learn
           </Link>
           <Link
             className={tabClass(activeTab === "decks")}

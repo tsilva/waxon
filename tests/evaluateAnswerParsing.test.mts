@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   parseEvaluation,
   parseScore,
-  PROBING_QUESTION_SCORE_THRESHOLD,
 } from "../app/lib/evaluateAnswerParsing.ts";
 
 test("parseScore accepts only finite numeric scores and normalizes to 0-10 integers", () => {
@@ -34,7 +33,6 @@ test("parseEvaluation assigns the normalized numeric score returned by the evalu
     score: 7,
     justification: "Mostly correct.",
     answerSummary: "Correct but incomplete",
-    probingQuestions: [],
   });
 });
 
@@ -53,7 +51,6 @@ test("parseEvaluation fails closed when score is missing or not numeric", () => 
     score: null,
     justification: "LLM evaluation failed or returned invalid score.",
     answerSummary: "fallback answer",
-    probingQuestions: [],
   });
 });
 
@@ -65,7 +62,6 @@ test("parseEvaluation fails closed on invalid JSON", () => {
     score: null,
     justification: "LLM evaluation failed or returned invalid JSON.",
     answerSummary: "fallback answer",
-    probingQuestions: [],
   });
 });
 
@@ -80,26 +76,18 @@ test("parseEvaluation accepts fenced JSON responses", () => {
     score: 10,
     justification: "Complete.",
     answerSummary: "Precise answer",
-    probingQuestions: [],
   });
 });
 
-test("parseEvaluation keeps sanitized probing questions only for low scores", () => {
-  const longQuestion = `${"x".repeat(221)}?`;
+test("parseEvaluation ignores probing question fields", () => {
   const result = parseEvaluation(
     JSON.stringify({
-      score: PROBING_QUESTION_SCORE_THRESHOLD,
+      score: 2,
       justification: "Important gaps.",
       conciseAnswer: "Partial answer",
       probingQuestions: [
         "  What step is missing?  ",
         "what step is missing?",
-        "",
-        42,
-        longQuestion,
-        "How does the sign change?",
-        "Why is the denominator squared?",
-        "This fourth valid question should be dropped.",
       ],
     }),
     "fallback answer",
@@ -107,14 +95,9 @@ test("parseEvaluation keeps sanitized probing questions only for low scores", ()
 
   assert.deepEqual(result, {
     status: "graded",
-    score: PROBING_QUESTION_SCORE_THRESHOLD,
+    score: 2,
     justification: "Important gaps.",
     answerSummary: "Partial answer",
-    probingQuestions: [
-      "What step is missing?",
-      "How does the sign change?",
-      "Why is the denominator squared?",
-    ],
   });
 });
 
@@ -158,6 +141,5 @@ test("parseEvaluation uses a concise fallback summary for blank answers", () => 
     score: 1,
     justification: "Mostly absent.",
     answerSummary: "(blank)",
-    probingQuestions: [],
   });
 });

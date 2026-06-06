@@ -1,4 +1,3 @@
-import { getQuestionQualityReference } from "./questionQualityReference";
 import {
   beginLlmTrace,
   finishLlmTrace,
@@ -12,14 +11,11 @@ import {
 import {
   failedEvaluation,
   parseEvaluation,
-  PROBING_QUESTION_SCORE_THRESHOLD,
 } from "./evaluateAnswerParsing";
 import type { EvaluationResult } from "./evaluateAnswerParsing";
-import type { ExistingQuestionNeighbor } from "./questionNeighbors";
 
 export {
   failedEvaluation,
-  PROBING_QUESTION_SCORE_THRESHOLD,
   type EvaluationResult,
   type FailedEvaluationResult,
   type GradedEvaluationResult,
@@ -37,7 +33,6 @@ export type EvaluateAnswerInput = {
 
 export const EVALUATION_TIMEOUT_MS = 60_000;
 const BROWSER_SMOKE_CORRECT_TOKEN = "browser-smoke-correct-token";
-const MAX_CONTEXT_TEXT_CHARS = 220;
 
 function isBrowserSmokeEvaluatorEnabled(): boolean {
   return (
@@ -56,9 +51,6 @@ async function evaluateBrowserSmokeAnswer(
     score: isCorrect ? 10 : 2,
     justification: isCorrect ? "Contains the expected smoke token." : "Missing the expected smoke token.",
     answerSummary: input.answer.trim() || "(blank)",
-    probingQuestions: isCorrect
-      ? []
-      : ["What exact token should a browser smoke answer include?"],
   };
   const traceId = input.traceId ?? crypto.randomUUID();
   const pendingTrace = beginLlmTrace({
@@ -88,44 +80,10 @@ async function evaluateBrowserSmokeAnswer(
   return result;
 }
 
-function truncateContextText(value: string): string {
-  const normalized = value.trim().replace(/\s+/g, " ");
-
-  if (normalized.length <= MAX_CONTEXT_TEXT_CHARS) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, MAX_CONTEXT_TEXT_CHARS - 3).trim()}...`;
-}
-
-function formatNeighborContext(neighbors: ExistingQuestionNeighbor[]): string {
-  if (neighbors.length === 0) {
-    return "No similar existing questions were available.";
-  }
-
-  return neighbors
-    .map((neighbor, index) =>
-      [
-        `${index + 1}. Question: ${truncateContextText(neighbor.question)}`,
-        `   Expected answer: ${
-          neighbor.conciseAnswer
-            ? truncateContextText(neighbor.conciseAnswer)
-            : "(not available)"
-        }`,
-        `   Similarity: ${neighbor.similarity.toFixed(4)}`,
-      ].join("\n"),
-    )
-    .join("\n");
-}
-
 function buildSystemPrompt(): string {
-  const questionQualityReference = getQuestionQualityReference();
-
   return `You are grading a free-text recall answer.
 
-Grade the answer from 0 to 10. In the same response, generate extra
-probingQuestions only when the score is ${PROBING_QUESTION_SCORE_THRESHOLD} or
-lower.
+Grade the answer from 0 to 10.
 
 Scoring:
 0 = no useful knowledge or completely wrong
@@ -144,61 +102,21 @@ math symbols or formulas.
 
 Keep justification very concise: one sentence, 12 words maximum.
 
-Shared question-quality reference for probingQuestions:
-${questionQualityReference}
-
-If score is ${PROBING_QUESTION_SCORE_THRESHOLD} or lower, include 0 to 3
-probingQuestions. Generate a probing question only when both gates pass:
-1. The user's answer directly demonstrates the specific misconception, missing
-   step, gap, or confusion being tested.
-2. The nearby existing deck questions do not already cover the same atomic
-   recall target.
-Do not generate prerequisite, adjacent, boundary-case, or "deeper" questions
-unless the user's answer specifically demonstrates that uncovered gap. Each
-probing question must follow the shared reference. If no candidate passes both
-gates, probingQuestions must be an empty array. If score is above
-${PROBING_QUESTION_SCORE_THRESHOLD}, probingQuestions must be an empty array.
-
 Return strict JSON only:
 {
   "score": number,
   "justification": string,
-  "answerSummary": string,
-  "probingQuestions": string[]
+  "answerSummary": string
 }`;
 }
 
-function buildUserPrompt(
-  input: EvaluateAnswerInput,
-  similarExistingQuestions: ExistingQuestionNeighbor[],
-): string {
+function buildUserPrompt(input: EvaluateAnswerInput): string {
   return [
     "Grade this submitted flashcard answer.",
     `Question: ${input.question}`,
     `User answer: ${input.answer}`,
     `Previous review history: ${input.previousReviews}`,
-    "Similar existing questions near the source question:",
-    formatNeighborContext(similarExistingQuestions),
   ].join("\n\n");
-}
-
-async function loadSimilarExistingQuestionContext(
-  input: EvaluateAnswerInput,
-): Promise<ExistingQuestionNeighbor[]> {
-  try {
-    const { loadExistingQuestionNeighbors } = await import("./questionNeighbors");
-
-    return await loadExistingQuestionNeighbors({
-      question: input.question,
-      deckId: input.deckId,
-    });
-  } catch (error) {
-    console.info("[waxon] probing question neighbor retrieval skipped", {
-      question: input.question,
-      error: error instanceof Error ? error.message : "unknown error",
-    });
-    return [];
-  }
 }
 
 export async function evaluateAnswer(
@@ -233,8 +151,6 @@ export async function evaluateAnswer(
     );
   }
 
-  const similarExistingQuestions = await loadSimilarExistingQuestionContext(input);
-
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | null = null;
   const resetIdleTimeout = () => {
@@ -268,7 +184,7 @@ export async function evaluateAnswer(
           },
           {
             role: "user",
-            content: buildUserPrompt(input, similarExistingQuestions),
+            content: buildUserPrompt(input),
           },
         ],
         response_format: {

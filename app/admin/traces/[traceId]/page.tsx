@@ -2,8 +2,6 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { getCurrentUser } from "@/app/lib/auth";
-import { listLlmTraceInteractions } from "@/app/lib/llmTraceStore";
-import { peekNextQuestion } from "@/app/lib/reviewQueue";
 import { AdminPageClient } from "../../AdminPageClient";
 import {
   ADMIN_VIEW_STATE_COOKIE,
@@ -32,8 +30,8 @@ export default async function AdminTracePage({
   return (
     <AdminPageClient
       currentUser={currentUser}
-      initialInteractions={await listLlmTraceInteractions()}
-      initialDueCount={(await peekNextQuestion()).queueRemaining}
+      initialInteractions={[]}
+      initialDueCount={0}
       initialViewState={initialViewState}
       selectedTraceId={traceId}
     />

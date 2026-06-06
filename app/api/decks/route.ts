@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { createDeck, listDecks } from "@/app/lib/postgresStore";
+import { normalizeBoundedText } from "@/app/lib/apiLimits";
 import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const MAX_DECK_COVERAGE_CHARS = 2000;
 
 export async function GET() {
   try {
@@ -25,9 +28,14 @@ export async function POST(request: Request) {
   const body: unknown = await request.json().catch(() => null);
   const payload = body as Partial<{
     name: unknown;
+    coverage: unknown;
     inReviewRotation: unknown;
   }>;
   const name = typeof payload.name === "string" ? payload.name.trim() : "";
+  const coverage = normalizeBoundedText(payload.coverage, {
+    field: "coverage",
+    maxLength: MAX_DECK_COVERAGE_CHARS,
+  });
 
   if (!name) {
     return NextResponse.json(
@@ -36,9 +44,14 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!coverage.ok) {
+    return coverage.response;
+  }
+
   try {
     const deck = await createDeck({
       name,
+      coverage: coverage.value,
       inReviewRotation:
         typeof payload.inReviewRotation === "boolean"
           ? payload.inReviewRotation

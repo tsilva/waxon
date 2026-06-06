@@ -20,8 +20,6 @@ export type EvaluationPhase =
   | "queued"
   | "evaluating-answer"
   | "saving-evaluation"
-  | "gating-probes"
-  | "saving-probes"
   | "finalizing";
 
 export type EvaluationQueueItem = {
@@ -52,6 +50,7 @@ export type ReviewQueueItem = {
   msUntilDue: number;
   status: "now" | "scheduled";
   generatedFromQuestion: string | null;
+  questionProvenance: string | null;
   reviewHistory: ReviewHistoryEntry[];
   lastScore: number | null;
   lastAnswer: string | null;
