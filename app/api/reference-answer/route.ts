@@ -4,6 +4,7 @@ import {
   hasReferenceAnswerExplanation,
 } from "@/app/lib/referenceAnswer";
 import {
+  getQuestionSnapshotById,
   getQuestionSnapshot,
   saveReferenceAnswer,
 } from "@/app/lib/postgresStore";
@@ -14,6 +15,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const body: unknown = await request.json().catch(() => null);
   const payload = body as Partial<{
+    questionId: unknown;
     question: unknown;
   }>;
 
@@ -25,7 +27,13 @@ export async function POST(request: Request) {
   }
 
   const question = payload.question.trim();
-  const snapshot = await getQuestionSnapshot(question);
+  const questionId =
+    typeof payload.questionId === "string" && payload.questionId.trim()
+      ? payload.questionId.trim()
+      : null;
+  const snapshot = questionId
+    ? await getQuestionSnapshotById(questionId)
+    : await getQuestionSnapshot(question);
   const cachedAnswer = snapshot?.referenceAnswer?.trim() ?? "";
 
   if (cachedAnswer && hasReferenceAnswerExplanation(cachedAnswer)) {
@@ -40,6 +48,7 @@ export async function POST(request: Request) {
 
   if (!answer.startsWith("Reference answer is unavailable")) {
     await saveReferenceAnswer({
+      questionId: snapshot?.questionId ?? questionId ?? undefined,
       question,
       answer,
       now: Date.now(),

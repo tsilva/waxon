@@ -5,6 +5,7 @@ export type ReviewHistoryEntry = {
 
 export type QuestionAttempt = {
   id: number;
+  questionId: string;
   deckId: string;
   question: string;
   rawAnswer: string;
@@ -26,6 +27,7 @@ export type EvaluationPhase =
 export type EvaluationQueueItem = {
   id: string;
   traceId: string;
+  questionId: string | null;
   deckId: string | null;
   question: string;
   answer: string | null;
@@ -41,6 +43,7 @@ export type EvaluationQueueItem = {
 };
 
 export type ReviewQueueItem = {
+  questionId: string;
   deckId: string;
   deckName: string;
   question: string;

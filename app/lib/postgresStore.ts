@@ -6,14 +6,17 @@ import {
   count,
   desc,
   eq,
+  gte,
   inArray,
   isNull,
   lte,
   notInArray,
+  or,
   sql,
 } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import {
+  answerEvaluations,
   decks,
   questionAttempts,
   questionEmbeddings,
@@ -28,7 +31,11 @@ import {
 } from "./auth";
 import { scheduleNextReview, serializeReviews } from "./scheduler";
 import { questionSlug } from "./questionSlug";
-import type { QuestionAttempt } from "./reviewTypes";
+import type {
+  EvaluationPhase,
+  EvaluationQueueItem,
+  QuestionAttempt,
+} from "./reviewTypes";
 
 export type QuestionRow = {
   question_id: string;
@@ -47,6 +54,7 @@ export type QuestionRow = {
 };
 
 export type DueQuestion = {
+  questionId: string;
   deckId: string;
   deckName: string;
   userId: string;
@@ -78,6 +86,7 @@ export type QuestionWithEmbeddings = QuestionRow & {
 };
 
 export type PersistedEvaluation = {
+  questionId: string;
   deckId: string;
   deckName: string;
   userId: string;
@@ -91,6 +100,15 @@ export type PersistedEvaluation = {
   referenceAnswer: string | null;
   createdAt: number;
 } | null;
+
+const EVALUATION_PHASES = new Set<EvaluationPhase>([
+  "queued",
+  "evaluating-answer",
+  "saving-evaluation",
+  "gating-probes",
+  "saving-probes",
+  "finalizing",
+]);
 
 export type QueuedQuestionsSortKey = "review-date" | "creation-date";
 
@@ -229,6 +247,7 @@ async function resolveUserContext(input: UserContextInput = {}): Promise<UserCon
 
 function toDueQuestion(row: QuestionRow): DueQuestion {
   return {
+    questionId: row.question_id,
     deckId: row.deck_id,
     deckName: row.deck_name,
     userId: row.user_id,
@@ -1054,15 +1073,15 @@ export async function getDueQuestions(
 
 export async function getQueuedQuestionsPage(
   input: UserContextInput & {
-    excludeQuestions?: string[];
+    excludeQuestionIds?: string[];
     limit: number;
     offset: number;
     sortKey: QueuedQuestionsSortKey;
   },
 ): Promise<QueuedQuestionsPage> {
   const context = await ensureSeedData(input);
-  const excludeQuestions = Array.from(
-    new Set(input.excludeQuestions ?? []),
+  const excludeQuestionIds = Array.from(
+    new Set(input.excludeQuestionIds ?? []),
   ).filter(Boolean);
   const whereClause = and(
     eq(decks.userId, context.userId),
@@ -1070,8 +1089,8 @@ export async function getQueuedQuestionsPage(
       ? eq(questions.deckId, input.deckId)
       : eq(decks.inReviewRotation, true),
     isNull(decks.archivedAt),
-    excludeQuestions.length > 0
-      ? notInArray(questions.question, excludeQuestions)
+    excludeQuestionIds.length > 0
+      ? notInArray(questions.id, excludeQuestionIds)
       : sql`true`,
   );
   const orderBy =
@@ -1125,15 +1144,28 @@ export async function getQuestionSnapshot(
   return row ? toDueQuestion(row) : null;
 }
 
+export async function getQuestionSnapshotById(
+  questionId: string,
+  input: UserContextInput = {},
+): Promise<DueQuestion | null> {
+  const [row] = await selectQuestionRows(eq(questions.id, questionId), {
+    ...input,
+    deckScope: "all",
+  });
+
+  return row ? toDueQuestion(row) : null;
+}
+
 export async function getQuestionAttempts(
   question: string,
-  input: UserContextInput = {},
+  input: UserContextInput & { questionId?: string } = {},
 ): Promise<QuestionAttempt[]> {
   const context = await ensureSeedData(input);
 
   const rows = await db
     .select({
       id: questionAttempts.id,
+      questionId: questionAttempts.questionId,
       deckId: questionAttempts.deckId,
       question: questionAttempts.question,
       rawAnswer: questionAttempts.rawAnswer,
@@ -1153,7 +1185,9 @@ export async function getQuestionAttempts(
             .from(decks)
             .where(eq(decks.userId, context.userId)),
         ),
-        eq(questionAttempts.question, question),
+        input.questionId
+          ? eq(questionAttempts.questionId, input.questionId)
+          : eq(questionAttempts.question, question),
       ),
     )
     .orderBy(asc(questionAttempts.submittedAt), asc(questionAttempts.id));
@@ -1190,6 +1224,7 @@ export async function getRecentQuestionAttempts(
   const rows = await db
     .select({
       id: questionAttempts.id,
+      questionId: questionAttempts.questionId,
       deckId: questionAttempts.deckId,
       question: questionAttempts.question,
       rawAnswer: questionAttempts.rawAnswer,
@@ -1226,7 +1261,169 @@ export async function getRecentQuestionAttempts(
   );
 }
 
+function toEvaluationPhase(value: string | null): EvaluationPhase | null {
+  return value && EVALUATION_PHASES.has(value as EvaluationPhase)
+    ? (value as EvaluationPhase)
+    : null;
+}
+
+export async function createAnswerEvaluationRecord(input: {
+  id: string;
+  traceId: string;
+  userId: string;
+  deckId: string;
+  question: string;
+  answer: string;
+  submittedAt: number;
+}): Promise<void> {
+  await ensureSeedData({ userId: input.userId });
+  const now = Math.round(input.submittedAt);
+
+  await db.insert(answerEvaluations).values({
+    id: input.id,
+    traceId: input.traceId,
+    userId: input.userId,
+    deckId: input.deckId,
+    question: input.question,
+    rawAnswer: input.answer,
+    status: "grading",
+    phase: "queued",
+    lastActivityAt: now,
+    submittedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+export async function updateAnswerEvaluationPhase(input: {
+  id: string;
+  phase: EvaluationPhase;
+  now?: number;
+}): Promise<void> {
+  const now = Math.round(input.now ?? Date.now());
+
+  await db
+    .update(answerEvaluations)
+    .set({
+      phase: input.phase,
+      lastActivityAt: now,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(answerEvaluations.id, input.id),
+        eq(answerEvaluations.status, "grading"),
+      ),
+    );
+}
+
+export async function resolveAnswerEvaluationRecord(input: {
+  id: string;
+  score: number | null;
+  justification: string;
+  answerSummary: string;
+  nextDue: number | null;
+  resolvedAt: number;
+}): Promise<void> {
+  const resolvedAt = Math.round(input.resolvedAt);
+
+  await db
+    .update(answerEvaluations)
+    .set({
+      status: "resolved",
+      phase: null,
+      lastActivityAt: resolvedAt,
+      score: input.score,
+      justification: input.justification,
+      answerSummary: input.answerSummary,
+      nextDue: input.nextDue === null ? null : Math.round(input.nextDue),
+      resolvedAt,
+      updatedAt: resolvedAt,
+    })
+    .where(eq(answerEvaluations.id, input.id));
+}
+
+export async function getVisibleAnswerEvaluations(input: UserContextInput & {
+  activeSince: number;
+  resolvedSince: number;
+  limit: number;
+}): Promise<EvaluationQueueItem[]> {
+  const context = await ensureSeedData(input);
+  const deckWhereClause = input.deckId
+    ? eq(decks.id, input.deckId)
+    : and(eq(decks.inReviewRotation, true), isNull(decks.archivedAt));
+  const activeSince = Math.round(input.activeSince);
+  const resolvedSince = Math.round(input.resolvedSince);
+
+  const rows = await db
+    .select({
+      id: answerEvaluations.id,
+      traceId: answerEvaluations.traceId,
+      deckId: answerEvaluations.deckId,
+      question: answerEvaluations.question,
+      answer: answerEvaluations.rawAnswer,
+      status: answerEvaluations.status,
+      phase: answerEvaluations.phase,
+      lastActivityAt: answerEvaluations.lastActivityAt,
+      submittedAt: answerEvaluations.submittedAt,
+      score: answerEvaluations.score,
+      justification: answerEvaluations.justification,
+      answerSummary: answerEvaluations.answerSummary,
+      nextDue: answerEvaluations.nextDue,
+      resolvedAt: answerEvaluations.resolvedAt,
+    })
+    .from(answerEvaluations)
+    .innerJoin(decks, eq(decks.id, answerEvaluations.deckId))
+    .where(
+      and(
+        eq(answerEvaluations.userId, context.userId),
+        deckWhereClause,
+        or(
+          and(
+            eq(answerEvaluations.status, "grading"),
+            gte(answerEvaluations.submittedAt, activeSince),
+          ),
+          and(
+            eq(answerEvaluations.status, "resolved"),
+            gte(answerEvaluations.resolvedAt, resolvedSince),
+          ),
+        ),
+      ),
+    )
+    .orderBy(desc(answerEvaluations.submittedAt))
+    .limit(Math.max(0, Math.floor(input.limit)));
+
+  return rows
+    .filter(
+      (row) =>
+        Number.isFinite(row.submittedAt) &&
+        Number.isFinite(row.lastActivityAt),
+    )
+    .map((row) => {
+      const status = row.status === "resolved" ? "resolved" : "grading";
+
+      return {
+        id: row.id,
+        traceId: row.traceId,
+        questionId: null,
+        deckId: row.deckId,
+        question: row.question,
+        answer: row.answer,
+        status,
+        phase: status === "grading" ? toEvaluationPhase(row.phase) : null,
+        lastActivityAt: row.lastActivityAt,
+        submittedAt: row.submittedAt,
+        score: row.score,
+        justification: row.justification,
+        answerSummary: row.answerSummary,
+        resolvedAt: row.resolvedAt,
+        nextDue: row.nextDue,
+      } satisfies EvaluationQueueItem;
+    });
+}
+
 export async function saveReferenceAnswer(input: {
+  questionId?: string;
   question: string;
   answer: string;
   now: number;
@@ -1249,7 +1446,9 @@ export async function saveReferenceAnswer(input: {
             .from(decks)
             .where(eq(decks.userId, context.userId)),
         ),
-        eq(questions.question, input.question),
+        input.questionId
+          ? eq(questions.id, input.questionId)
+          : eq(questions.question, input.question),
       ),
     );
 }
@@ -1344,6 +1543,7 @@ export async function upsertDueQuestions(input: {
 }
 
 export async function applyEvaluationToPostgres(input: {
+  questionId?: string;
   question: string;
   answer: string;
   answerSummary: string;
@@ -1379,7 +1579,9 @@ export async function applyEvaluationToPostgres(input: {
           eq(decks.userId, context.userId),
           eq(decks.inReviewRotation, true),
           isNull(decks.archivedAt),
-          eq(questions.question, input.question),
+          input.questionId
+            ? eq(questions.id, input.questionId)
+            : eq(questions.question, input.question),
         ),
       )
       .for("update");
@@ -1435,7 +1637,7 @@ export async function applyEvaluationToPostgres(input: {
       .where(
         and(
           eq(questions.deckId, row.deck_id),
-          eq(questions.question, input.question),
+          eq(questions.id, row.question_id),
         ),
       );
 
@@ -1444,7 +1646,7 @@ export async function applyEvaluationToPostgres(input: {
       .values({
         deckId: row.deck_id,
         questionId: row.question_id,
-        question: input.question,
+        question: row.question,
         rawAnswer: input.answer,
         answerSummary: input.answerSummary,
         score: input.score,
@@ -1462,7 +1664,7 @@ export async function applyEvaluationToPostgres(input: {
       attemptId: attempt.id,
       deckId: row.deck_id,
       questionId: row.question_id,
-      question: input.question,
+      question: row.question,
       score: input.score,
       submittedAt: Math.round(input.submittedAt),
       resolvedAt: Math.round(input.now),
@@ -1470,6 +1672,7 @@ export async function applyEvaluationToPostgres(input: {
     });
 
     return {
+      questionId: row.question_id,
       deckId: row.deck_id,
       deckName: row.deck_name,
       userId: row.user_id,

@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const body: unknown = await request.json().catch(() => null);
   const payload = body as Partial<{
+    questionId: unknown;
     question: unknown;
     answer: unknown;
   }>;
@@ -22,7 +23,12 @@ export async function POST(request: Request) {
     );
   }
 
+  const questionId =
+    typeof payload.questionId === "string" && payload.questionId.trim()
+      ? payload.questionId.trim()
+      : null;
   const result = await submitAnswer({
+    questionId,
     question: payload.question,
     answer: payload.answer,
   });

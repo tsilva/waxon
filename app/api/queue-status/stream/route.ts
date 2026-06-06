@@ -9,6 +9,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const encoder = new TextEncoder();
+const GRADING_REFRESH_MS = 750;
 
 function encodeStatusEvent(status: QueueStatusSnapshot): Uint8Array {
   return encoder.encode(`event: status\ndata: ${JSON.stringify(status)}\n\n`);
@@ -16,7 +17,11 @@ function encodeStatusEvent(status: QueueStatusSnapshot): Uint8Array {
 
 function nextRefreshDelay(status: QueueStatusSnapshot): number | null {
   const now = Date.now();
+  const hasGradingEvaluation = status.evaluations.some(
+    (evaluation) => evaluation.status === "grading",
+  );
   const delays = [
+    ...(hasGradingEvaluation ? [GRADING_REFRESH_MS] : []),
     ...status.reviewQueue
       .map((item) => item.msUntilDue)
       .filter((delay) => delay > 0),
