@@ -85,6 +85,13 @@
       "when": 1780693000000,
       "tag": "0012_answer_evaluations",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1780693100000,
+      "tag": "0013_drop_question_reviews",
+      "breakpoints": true
     }
   ]
 }
