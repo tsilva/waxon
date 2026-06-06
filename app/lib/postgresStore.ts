@@ -20,7 +20,6 @@ import {
   decks,
   questionAttempts,
   questionEmbeddings,
-  questionReviews,
   questions,
   users,
 } from "@/app/db/schema";
@@ -648,11 +647,11 @@ export async function listDecks(
       updatedAt: decks.updatedAt,
       cardCount: sql<number>`count(distinct ${questions.id})`,
       dueCount: sql<number>`count(distinct ${questions.id}) filter (where ${questions.nextDue} <= ${now})`,
-      lastReviewedAt: sql<number | null>`max(${questionReviews.resolvedAt})`,
+      lastReviewedAt: sql<number | null>`max(${questionAttempts.resolvedAt})`,
     })
     .from(decks)
     .leftJoin(questions, eq(questions.deckId, decks.id))
-    .leftJoin(questionReviews, eq(questionReviews.deckId, decks.id))
+    .leftJoin(questionAttempts, eq(questionAttempts.deckId, decks.id))
     .where(and(eq(decks.userId, context.userId), isNull(decks.archivedAt)))
     .groupBy(
       decks.id,
@@ -1592,12 +1591,12 @@ export async function applyEvaluationToPostgres(input: {
 
     const previousReviewRows = await tx
       .select({
-        ts: questionReviews.resolvedAt,
-        score: questionReviews.score,
+        ts: questionAttempts.resolvedAt,
+        score: questionAttempts.score,
       })
-      .from(questionReviews)
-      .where(eq(questionReviews.questionId, row.question_id))
-      .orderBy(desc(questionReviews.resolvedAt), desc(questionReviews.id))
+      .from(questionAttempts)
+      .where(eq(questionAttempts.questionId, row.question_id))
+      .orderBy(desc(questionAttempts.resolvedAt), desc(questionAttempts.id))
       .limit(10);
     const previousReviews = previousReviewRows
       .reverse()
@@ -1659,17 +1658,6 @@ export async function applyEvaluationToPostgres(input: {
     if (!attempt) {
       throw new Error("Question attempt was not saved");
     }
-
-    await tx.insert(questionReviews).values({
-      attemptId: attempt.id,
-      deckId: row.deck_id,
-      questionId: row.question_id,
-      question: row.question,
-      score: input.score,
-      submittedAt: Math.round(input.submittedAt),
-      resolvedAt: Math.round(input.now),
-      createdAt: Math.round(input.now),
-    });
 
     return {
       questionId: row.question_id,

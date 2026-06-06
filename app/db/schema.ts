@@ -300,60 +300,6 @@ export const questionEmbeddings = pgTable(
   ],
 );
 
-export const questionReviews = pgTable(
-  "question_reviews",
-  {
-    id: serial("id").primaryKey(),
-    attemptId: integer("attempt_id")
-      .notNull()
-      .references(() => questionAttempts.id, { onDelete: "cascade" }),
-    deckId: text("deck_id")
-      .notNull()
-      .references(() => decks.id, { onDelete: "cascade" }),
-    questionId: uuid("question_id")
-      .notNull()
-      .references(() => questions.id, { onDelete: "cascade" }),
-    question: text("question").notNull(),
-    score: integer("score").notNull(),
-    submittedAt: bigint("submitted_at", { mode: "number" }).notNull(),
-    resolvedAt: bigint("resolved_at", { mode: "number" }).notNull(),
-    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
-  },
-  (table) => [
-    unique("question_reviews_attempt_id_unique").on(table.attemptId),
-    foreignKey({
-      name: "question_reviews_deck_question_id_fk",
-      columns: [table.deckId, table.questionId],
-      foreignColumns: [questions.deckId, questions.id],
-    }).onDelete("cascade"),
-    foreignKey({
-      name: "question_reviews_question_id_question_fk",
-      columns: [table.questionId, table.question],
-      foreignColumns: [questions.id, questions.question],
-    }).onDelete("cascade"),
-    index("question_reviews_deck_question_submitted_idx").on(
-      table.deckId,
-      table.question,
-      table.submittedAt.desc(),
-    ),
-    index("question_reviews_question_id_submitted_idx").on(
-      table.questionId,
-      table.submittedAt.desc(),
-    ),
-    index("question_reviews_question_id_resolved_idx").on(
-      table.questionId,
-      table.resolvedAt.desc(),
-    ),
-    check("question_reviews_score_check", sql`${table.score} BETWEEN 0 AND 10`),
-    check("question_reviews_submitted_at_check", sql`${table.submittedAt} >= 0`),
-    check(
-      "question_reviews_resolved_at_check",
-      sql`${table.resolvedAt} >= ${table.submittedAt}`,
-    ),
-    check("question_reviews_created_at_check", sql`${table.createdAt} >= 0`),
-  ],
-);
-
 export const answerEvaluations = pgTable(
   "answer_evaluations",
   {
