@@ -13,10 +13,13 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
   useState,
+  type CSSProperties,
+  type ReactNode,
 } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import type { AuthenticatedUser } from "@/app/lib/auth";
@@ -82,8 +85,27 @@ type AdminTracesResponse = {
   dueCount: number;
 };
 
+type JsonTokenKind =
+  | "boolean"
+  | "key"
+  | "null"
+  | "number"
+  | "plain"
+  | "punctuation"
+  | "string";
+
+type JsonToken = {
+  kind: JsonTokenKind;
+  text: string;
+};
+
+type ResponsePayloadViewMode = "json" | "markdown";
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MAX_TRACE_INTERACTIONS = 200;
+const adminSkeletonMetricRows = Array.from({ length: 4 }, (_, index) => index);
+const adminSkeletonChartBars = [68, 118, 88, 154, 104, 132, 78];
+const adminSkeletonTableRows = Array.from({ length: 6 }, (_, index) => index);
 
 const callTypeLabels: Record<CallType, string> = {
   answer_eval: "answer eval",
@@ -690,6 +712,417 @@ function formatCallResponse(call: LlmCall, interaction: TraceInteraction): strin
   );
 }
 
+function parseJsonPayload(payload: string): unknown | null {
+  try {
+    return JSON.parse(payload);
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeJsonPayload(payload: string): {
+  parsed: unknown | null;
+  text: string;
+} {
+  const parsed = parseJsonPayload(payload);
+
+  if (parsed === null) {
+    return {
+      parsed: null,
+      text: payload,
+    };
+  }
+
+  return {
+    parsed,
+    text: JSON.stringify(parsed, null, 2),
+  };
+}
+
+function tokenizeJson(text: string): JsonToken[] {
+  const tokens: JsonToken[] = [];
+  const matcher =
+    /("(?:\\.|[^"\\])*")|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b|[{}\[\],:]/g;
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = matcher.exec(text)) !== null) {
+    if (match.index > cursor) {
+      tokens.push({
+        kind: "plain",
+        text: text.slice(cursor, match.index),
+      });
+    }
+
+    const token = match[0];
+    const nextText = text.slice(matcher.lastIndex);
+    const isKey = token.startsWith("\"") && /^\s*:/.test(nextText);
+    let kind: JsonTokenKind = "plain";
+
+    if (isKey) {
+      kind = "key";
+    } else if (token.startsWith("\"")) {
+      kind = "string";
+    } else if (/^-?\d/.test(token)) {
+      kind = "number";
+    } else if (token === "true" || token === "false") {
+      kind = "boolean";
+    } else if (token === "null") {
+      kind = "null";
+    } else {
+      kind = "punctuation";
+    }
+
+    tokens.push({ kind, text: token });
+    cursor = matcher.lastIndex;
+  }
+
+  if (cursor < text.length) {
+    tokens.push({
+      kind: "plain",
+      text: text.slice(cursor),
+    });
+  }
+
+  return tokens;
+}
+
+function JsonPayloadView({ payload }: { payload: string }) {
+  const { parsed, text } = normalizeJsonPayload(payload);
+
+  if (parsed === null) {
+    return (
+      <pre className="admin-call-payload-pre">
+        <code>{text}</code>
+      </pre>
+    );
+  }
+
+  return (
+    <pre className="admin-call-payload-pre admin-json-payload">
+      <code>
+        {tokenizeJson(text).map((token, index) => (
+          <span
+            className={`admin-json-token admin-json-token-${token.kind}`}
+            key={`${token.kind}-${index}`}
+          >
+            {token.text}
+          </span>
+        ))}
+      </code>
+    </pre>
+  );
+}
+
+function contentPartsToText(content: unknown): string | null {
+  if (typeof content === "string") {
+    return content.trim() ? content : null;
+  }
+
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  const text = content
+    .map((part) => {
+      if (typeof part === "string") {
+        return part;
+      }
+
+      if (!isRecord(part)) {
+        return "";
+      }
+
+      if (typeof part.text === "string") {
+        return part.text;
+      }
+
+      if (typeof part.content === "string") {
+        return part.content;
+      }
+
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n\n");
+
+  return text.trim() ? text : null;
+}
+
+function firstChoiceContent(payload: unknown): string | null {
+  if (!isRecord(payload) || !Array.isArray(payload.choices)) {
+    return null;
+  }
+
+  for (const choice of payload.choices) {
+    if (!isRecord(choice)) {
+      continue;
+    }
+
+    if (isRecord(choice.message)) {
+      const messageContent = contentPartsToText(choice.message.content);
+
+      if (messageContent) {
+        return messageContent;
+      }
+    }
+
+    const choiceText = contentPartsToText(choice.text);
+
+    if (choiceText) {
+      return choiceText;
+    }
+  }
+
+  return null;
+}
+
+function humanizeJsonKey(key: string): string {
+  return key
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function stringifyMarkdownValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (value === null) {
+    return "null";
+  }
+
+  return `\`${JSON.stringify(value)}\``;
+}
+
+function jsonContentToMarkdown(content: string): string {
+  const parsedContent = parseJsonPayload(content);
+
+  if (!isRecord(parsedContent)) {
+    return content;
+  }
+
+  return Object.entries(parsedContent)
+    .map(([key, value]) => {
+      if (Array.isArray(value)) {
+        if (value.length === 0) {
+          return `**${humanizeJsonKey(key)}:** none`;
+        }
+
+        return [
+          `**${humanizeJsonKey(key)}:**`,
+          ...value.map((item) => `- ${stringifyMarkdownValue(item)}`),
+        ].join("\n");
+      }
+
+      return `**${humanizeJsonKey(key)}:** ${stringifyMarkdownValue(value)}`;
+    })
+    .join("\n\n");
+}
+
+function extractResponseMarkdown(payload: string): string | null {
+  const parsed = parseJsonPayload(payload);
+
+  if (!parsed) {
+    return null;
+  }
+
+  const candidates = [parsed];
+
+  if (isRecord(parsed) && parsed.body) {
+    const body =
+      typeof parsed.body === "string" ? parseJsonPayload(parsed.body) : parsed.body;
+
+    if (body) {
+      candidates.unshift(body);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const choiceContent = firstChoiceContent(candidate);
+
+    if (choiceContent) {
+      return jsonContentToMarkdown(choiceContent);
+    }
+
+    if (isRecord(candidate)) {
+      const directContent =
+        contentPartsToText(candidate.markdown) ??
+        contentPartsToText(candidate.content) ??
+        contentPartsToText(candidate.output_text);
+
+      if (directContent) {
+        return jsonContentToMarkdown(directContent);
+      }
+    }
+  }
+
+  return null;
+}
+
+function findClosingDelimiter(
+  text: string,
+  delimiter: string,
+  startIndex: number,
+): number {
+  let index = startIndex;
+
+  while (index < text.length) {
+    const closeIndex = text.indexOf(delimiter, index);
+
+    if (closeIndex === -1) {
+      return -1;
+    }
+
+    if (text[closeIndex - 1] !== "\\") {
+      return closeIndex;
+    }
+
+    index = closeIndex + delimiter.length;
+  }
+
+  return -1;
+}
+
+function renderTraceInlineMarkdown(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let index = 0;
+
+  while (index < text.length) {
+    if (text.startsWith("**", index)) {
+      const closeIndex = findClosingDelimiter(text, "**", index + 2);
+
+      if (closeIndex > index) {
+        nodes.push(
+          <strong key={`strong-${index}`}>
+            {renderTraceInlineMarkdown(text.slice(index + 2, closeIndex))}
+          </strong>,
+        );
+        index = closeIndex + 2;
+        continue;
+      }
+    }
+
+    if (text[index] === "`") {
+      const closeIndex = findClosingDelimiter(text, "`", index + 1);
+
+      if (closeIndex > index) {
+        nodes.push(
+          <code className="markdown-inline-code" key={`code-${index}`}>
+            {text.slice(index + 1, closeIndex)}
+          </code>,
+        );
+        index = closeIndex + 1;
+        continue;
+      }
+    }
+
+    if (
+      text[index] === "*" &&
+      text[index + 1] !== "*" &&
+      text[index - 1] !== "*"
+    ) {
+      const closeIndex = findClosingDelimiter(text, "*", index + 1);
+
+      if (closeIndex > index) {
+        nodes.push(
+          <em key={`em-${index}`}>
+            {renderTraceInlineMarkdown(text.slice(index + 1, closeIndex))}
+          </em>,
+        );
+        index = closeIndex + 1;
+        continue;
+      }
+    }
+
+    const nextSpecial = text.slice(index + 1).search(/(\*\*|`|\*)/);
+    const endIndex =
+      nextSpecial === -1 ? text.length : index + 1 + nextSpecial;
+
+    nodes.push(text.slice(index, endIndex));
+    index = endIndex;
+  }
+
+  return nodes;
+}
+
+function TraceMarkdownContent({ text }: { text: string }) {
+  const blocks = text.trim().split(/\n{2,}/);
+
+  return (
+    <div className="admin-call-markdown markdown-content">
+      {blocks.map((block, index) => {
+        const trimmedBlock = block.trim();
+        const lines = trimmedBlock.split("\n");
+
+        if (trimmedBlock.startsWith("```") && trimmedBlock.endsWith("```")) {
+          const codeLines = lines.slice(1, -1);
+
+          return (
+            <pre className="admin-call-markdown-code" key={`code-${index}`}>
+              <code>{codeLines.join("\n")}</code>
+            </pre>
+          );
+        }
+
+        if (/^#{1,3}\s+/.test(trimmedBlock)) {
+          return (
+            <h3 className="admin-call-markdown-heading" key={`h-${index}`}>
+              {renderTraceInlineMarkdown(trimmedBlock.replace(/^#{1,3}\s+/, ""))}
+            </h3>
+          );
+        }
+
+        if (lines.every((line) => /^[-*]\s+/.test(line.trim()))) {
+          return (
+            <ul className="markdown-list" key={`ul-${index}`}>
+              {lines.map((line, lineIndex) => (
+                <li key={`${line}-${lineIndex}`}>
+                  {renderTraceInlineMarkdown(line.trim().slice(2))}
+                </li>
+              ))}
+            </ul>
+          );
+        }
+
+        if (lines.every((line) => /^\d+\.\s+/.test(line.trim()))) {
+          return (
+            <ol className="markdown-list" key={`ol-${index}`}>
+              {lines.map((line, lineIndex) => (
+                <li key={`${line}-${lineIndex}`}>
+                  {renderTraceInlineMarkdown(
+                    line.trim().replace(/^\d+\.\s+/, ""),
+                  )}
+                </li>
+              ))}
+            </ol>
+          );
+        }
+
+        return (
+          <p className="markdown-paragraph" key={`p-${index}`}>
+            {lines.map((line, lineIndex) => (
+              <Fragment key={`${line}-${lineIndex}`}>
+                {lineIndex > 0 ? <br /> : null}
+                {renderTraceInlineMarkdown(line)}
+              </Fragment>
+            ))}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 function stackSegmentPath({
   x,
   y,
@@ -877,6 +1310,103 @@ function CostChart({ interactions }: { interactions: TraceInteraction[] }) {
   );
 }
 
+function AdminLoadingPlaceholders() {
+  return (
+    <div
+      className="admin-loading-stage"
+      aria-busy="true"
+      aria-label="Loading admin traces"
+    >
+      <section className="admin-metrics" aria-label="Loading current range totals">
+        {adminSkeletonMetricRows.map((row) => (
+          <div className="admin-skeleton-metric" key={row}>
+            <span className="admin-skeleton-line admin-skeleton-line-small" />
+            <span className="admin-skeleton-line admin-skeleton-line-large" />
+            <span className="admin-skeleton-line admin-skeleton-line-small" />
+          </div>
+        ))}
+      </section>
+
+      <section className="admin-chart-panel" aria-labelledby="admin-loading-cost-heading">
+        <div className="admin-section-heading">
+          <div>
+            <h2 id="admin-loading-cost-heading">Cost per day</h2>
+            <p>Stratified by call type.</p>
+          </div>
+          <div className="admin-legend admin-skeleton-legend" aria-hidden="true">
+            {(Object.keys(callTypeLabels) as CallType[]).map((callType) => (
+              <span key={callType}>
+                <i />
+                {callTypeLabels[callType]}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="admin-chart-scroll">
+          <div className="admin-cost-chart admin-skeleton-chart">
+            {adminSkeletonChartBars.map((height, index) => (
+              <span
+                className="admin-skeleton-bar"
+                key={`${height}-${index}`}
+                style={{ "--bar-height": `${height}px` } as CSSProperties}
+              />
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="admin-table-panel" aria-labelledby="admin-loading-table-heading">
+        <div className="admin-section-heading admin-table-heading">
+          <div>
+            <h2 id="admin-loading-table-heading">Trace groups</h2>
+            <p>Expand an interaction to inspect the individual LLM calls.</p>
+          </div>
+          <div className="admin-filter-row" aria-hidden="true">
+            <span className="admin-skeleton-filter" />
+            <span className="admin-skeleton-filter" />
+            <span className="admin-skeleton-search" />
+          </div>
+        </div>
+
+        <div className="admin-table-scroll">
+          <div
+            className="admin-trace-table admin-skeleton-table"
+            role="table"
+            aria-label="Loading trace groups"
+          >
+            <div className="admin-trace-header" role="row">
+              <span role="columnheader">Interaction</span>
+              <span role="columnheader">Started</span>
+              <span role="columnheader">Calls</span>
+              <span role="columnheader">Tokens</span>
+              <span role="columnheader">Cost</span>
+              <span role="columnheader">Latency</span>
+              <span role="columnheader">Status</span>
+            </div>
+
+            {adminSkeletonTableRows.map((row) => (
+              <div className="admin-trace-group" key={row} role="rowgroup">
+                <div className="admin-trace-row" role="row">
+                  <span className="admin-skeleton-stack">
+                    <span className="admin-skeleton-line admin-skeleton-title" />
+                    <span className="admin-skeleton-line admin-skeleton-meta" />
+                  </span>
+                  <span className="admin-skeleton-line admin-skeleton-meta" />
+                  <span className="admin-skeleton-line admin-skeleton-meta" />
+                  <span className="admin-skeleton-line admin-skeleton-meta" />
+                  <span className="admin-skeleton-line admin-skeleton-meta" />
+                  <span className="admin-skeleton-line admin-skeleton-meta" />
+                  <span className="admin-skeleton-pill" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function AdminPageClient({
   currentUser,
   initialInteractions,
@@ -909,6 +1439,9 @@ export function AdminPageClient({
     () => resolvedInitialViewState.dueCount,
   );
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(
+    () => initialInteractions.length === 0,
+  );
   const menuAvatarUrl = clerkUser?.imageUrl || currentUser.avatarUrl;
   const menuLabel =
     clerkUser?.fullName ||
@@ -949,6 +1482,8 @@ export function AdminPageClient({
   const [selectedCallId, setSelectedCallId] = useState<string | null>(
     selectedTraceId,
   );
+  const [responsePayloadViewMode, setResponsePayloadViewMode] =
+    useState<ResponsePayloadViewMode>("json");
 
   const refreshTraces = useCallback(async () => {
     setIsRefreshing(true);
@@ -984,6 +1519,7 @@ export function AdminPageClient({
       });
     } finally {
       setIsRefreshing(false);
+      setIsInitialLoading(false);
     }
   }, []);
 
@@ -994,6 +1530,7 @@ export function AdminPageClient({
 
   const openTracePanel = useCallback((callId: string, interactionId: string) => {
     setSelectedCallId(callId);
+    setResponsePayloadViewMode("json");
     setExpandedInteractionId(interactionId);
     updateAdminHistory(`/admin/traces/${encodeURIComponent(callId)}`);
   }, []);
@@ -1109,6 +1646,36 @@ export function AdminPageClient({
     return null;
   }, [selectedCallId, traceInteractions]);
 
+  const selectedRequestPayload = useMemo(() => {
+    if (!selectedCallContext) {
+      return "";
+    }
+
+    return formatCallRequest(
+      selectedCallContext.call,
+      selectedCallContext.interaction,
+    );
+  }, [selectedCallContext]);
+
+  const selectedResponsePayload = useMemo(() => {
+    if (!selectedCallContext) {
+      return "";
+    }
+
+    return formatCallResponse(
+      selectedCallContext.call,
+      selectedCallContext.interaction,
+    );
+  }, [selectedCallContext]);
+
+  const selectedResponseMarkdown = useMemo(() => {
+    if (!selectedResponsePayload) {
+      return null;
+    }
+
+    return extractResponseMarkdown(selectedResponsePayload);
+  }, [selectedResponsePayload]);
+
   useEffect(() => {
     setTraceInteractions((current) =>
       mergeTraceInteractions(
@@ -1140,6 +1707,7 @@ export function AdminPageClient({
     }
 
     setSelectedCallId(selectedTraceId);
+    setResponsePayloadViewMode("json");
   }, [selectedTraceId]);
 
   useEffect(() => {
@@ -1277,188 +1845,202 @@ export function AdminPageClient({
             </div>
           </section>
 
-          <section className="admin-metrics" aria-label="Current range totals">
-            <div>
-              <span>Total cost</span>
-              <strong>{formatCurrency(totals.cost)}</strong>
-              <small>{rangeLabel}</small>
-            </div>
-            <div>
-              <span>LLM calls</span>
-              <strong>{formatNumber(totals.calls)}</strong>
-              <small>{formatNumber(totals.tokens)} tokens</small>
-            </div>
-            <div>
-              <span>Interactions</span>
-              <strong>{formatNumber(totals.interactions)}</strong>
-              <small>{filteredInteractions.length} visible groups</small>
-            </div>
-            <div>
-              <span>Avg / interaction</span>
-              <strong>{formatCurrency(averageCost)}</strong>
-              <small>{Math.round(totals.latencyMs / Math.max(1, totals.calls))}ms avg call</small>
-            </div>
-          </section>
+          {isInitialLoading ? (
+            <AdminLoadingPlaceholders />
+          ) : (
+            <>
+              <section className="admin-metrics" aria-label="Current range totals">
+                <div>
+                  <span>Total cost</span>
+                  <strong>{formatCurrency(totals.cost)}</strong>
+                  <small>{rangeLabel}</small>
+                </div>
+                <div>
+                  <span>LLM calls</span>
+                  <strong>{formatNumber(totals.calls)}</strong>
+                  <small>{formatNumber(totals.tokens)} tokens</small>
+                </div>
+                <div>
+                  <span>Interactions</span>
+                  <strong>{formatNumber(totals.interactions)}</strong>
+                  <small>{filteredInteractions.length} visible groups</small>
+                </div>
+                <div>
+                  <span>Avg / interaction</span>
+                  <strong>{formatCurrency(averageCost)}</strong>
+                  <small>
+                    {Math.round(totals.latencyMs / Math.max(1, totals.calls))}ms avg call
+                  </small>
+                </div>
+              </section>
 
-          <section className="admin-chart-panel" aria-labelledby="admin-cost-heading">
-            <div className="admin-section-heading">
-              <div>
-                <h2 id="admin-cost-heading">Cost per day</h2>
-                <p>Stratified by call type.</p>
-              </div>
-              <div className="admin-legend">
-                {(Object.keys(callTypeLabels) as CallType[]).map((callType) => (
-                  <span key={callType}>
-                    <i style={{ backgroundColor: callTypeColors[callType] }} />
-                    {callTypeLabels[callType]}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div className="admin-chart-scroll">
-              <CostChart interactions={filteredInteractions} />
-            </div>
-          </section>
-
-          <section className="admin-table-panel" aria-labelledby="admin-table-heading">
-            <div className="admin-section-heading admin-table-heading">
-              <div>
-                <h2 id="admin-table-heading">Trace groups</h2>
-                <p>Expand an interaction to inspect the individual LLM calls.</p>
-              </div>
-              <div className="admin-filter-row">
-                <label>
-                  <SlidersHorizontal aria-hidden="true" />
-                  <select
-                    value={typeFilter}
-                    onChange={(event) => setTypeFilter(event.target.value as "all" | CallType)}
-                    aria-label="Filter by call type"
-                  >
-                    <option value="all">type: all</option>
-                    {(Object.keys(callTypeLabels) as CallType[]).map((callType) => (
-                      <option key={callType} value={callType}>
-                        type: {callTypeLabels[callType]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <CheckCircle2 aria-hidden="true" />
-                  <select
-                    value={statusFilter}
-                    onChange={(event) =>
-                      setStatusFilter(event.target.value as "all" | TraceStatus)
-                    }
-                    aria-label="Filter by status"
-                  >
-                    <option value="all">status: all</option>
-                    <option value="ok">status: ok</option>
-                    <option value="pending">status: pending</option>
-                    <option value="error">status: error</option>
-                  </select>
-                </label>
-                <label className="admin-search-field">
-                  <Search aria-hidden="true" />
-                  <input
-                    type="search"
-                    value={searchTerm}
-                    placeholder="search trace id"
-                    onChange={(event) => setSearchTerm(event.target.value)}
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="admin-table-scroll">
-            <div className="admin-trace-table" role="table" aria-label="Trace groups">
-              <div className="admin-trace-header" role="row">
-                <span role="columnheader">Interaction</span>
-                {[
-                  ["startedAt", "Started"],
-                  ["calls", "Calls"],
-                  ["tokens", "Tokens"],
-                  ["cost", "Cost"],
-                  ["latency", "Latency"],
-                  ["status", "Status"],
-                ].map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    role="columnheader"
-                    onClick={() => updateSort(key as SortKey)}
-                  >
-                    {label}
-                    <ArrowDownUp aria-hidden="true" />
-                  </button>
-                ))}
-              </div>
-
-              {filteredInteractions.map((interaction) => {
-                const summary = sumInteraction(interaction);
-                const isExpanded = expandedInteractionId === interaction.id;
-
-                return (
-                  <div
-                    className={`admin-trace-group ${
-                      isExpanded ? "admin-trace-group-expanded" : ""
-                    }`}
-                    key={interaction.id}
-                    role="rowgroup"
-                  >
-                    <button
-                      className="admin-trace-row admin-trace-group-row"
-                      type="button"
-                      aria-expanded={isExpanded}
-                      onClick={() =>
-                        setExpandedInteractionId(isExpanded ? "" : interaction.id)
-                      }
-                    >
-                      <span className="admin-interaction-cell">
-                        <ChevronDown aria-hidden="true" />
-                        <strong>{interaction.title}</strong>
-                        <small>{interaction.kind} · {interaction.id}</small>
-                      </span>
-                      <span>{formatStartedAt(interaction.startedAt)}</span>
-                      <span>{summary.calls}</span>
-                      <span>{formatNumber(summary.tokens)}</span>
-                      <span>{formatCurrency(summary.cost)}</span>
-                      <span>{(summary.latencyMs / 1000).toFixed(1)}s</span>
-                      <StatusPill status={interaction.status} />
-                    </button>
-
-                    {isExpanded ? (
-                      <div className="admin-call-list">
-                        {interaction.calls.map((call) => (
-                          <Link
-                            className="admin-call-row"
-                            key={call.id}
-                            href={`/admin/traces/${encodeURIComponent(call.id)}`}
-                            aria-label={`Open LLM call details for ${call.operation}`}
-                            onClick={(event) => {
-                              event.preventDefault();
-                              openTracePanel(call.id, interaction.id);
-                            }}
-                          >
-                            <span className="admin-call-name">
-                              <strong>{call.operation}</strong>
-                              <small>{call.model} · {call.id}</small>
-                            </span>
-                            <span>{callTypeLabels[call.callType]}</span>
-                            <span>{formatNumber(call.inputTokens)} in</span>
-                            <span>{formatNumber(call.outputTokens)} out</span>
-                            <span>{formatCurrency(call.cost)}</span>
-                            <span>{(call.latencyMs / 1000).toFixed(1)}s</span>
-                            <StatusPill status={call.status} />
-                          </Link>
-                        ))}
-                      </div>
-                    ) : null}
+              <section className="admin-chart-panel" aria-labelledby="admin-cost-heading">
+                <div className="admin-section-heading">
+                  <div>
+                    <h2 id="admin-cost-heading">Cost per day</h2>
+                    <p>Stratified by call type.</p>
                   </div>
-                );
-              })}
-            </div>
-            </div>
-          </section>
+                  <div className="admin-legend">
+                    {(Object.keys(callTypeLabels) as CallType[]).map((callType) => (
+                      <span key={callType}>
+                        <i style={{ backgroundColor: callTypeColors[callType] }} />
+                        {callTypeLabels[callType]}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="admin-chart-scroll">
+                  <CostChart interactions={filteredInteractions} />
+                </div>
+              </section>
+
+              <section className="admin-table-panel" aria-labelledby="admin-table-heading">
+                <div className="admin-section-heading admin-table-heading">
+                  <div>
+                    <h2 id="admin-table-heading">Trace groups</h2>
+                    <p>Expand an interaction to inspect the individual LLM calls.</p>
+                  </div>
+                  <div className="admin-filter-row">
+                    <label>
+                      <SlidersHorizontal aria-hidden="true" />
+                      <select
+                        value={typeFilter}
+                        onChange={(event) =>
+                          setTypeFilter(event.target.value as "all" | CallType)
+                        }
+                        aria-label="Filter by call type"
+                      >
+                        <option value="all">type: all</option>
+                        {(Object.keys(callTypeLabels) as CallType[]).map((callType) => (
+                          <option key={callType} value={callType}>
+                            type: {callTypeLabels[callType]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <CheckCircle2 aria-hidden="true" />
+                      <select
+                        value={statusFilter}
+                        onChange={(event) =>
+                          setStatusFilter(event.target.value as "all" | TraceStatus)
+                        }
+                        aria-label="Filter by status"
+                      >
+                        <option value="all">status: all</option>
+                        <option value="ok">status: ok</option>
+                        <option value="pending">status: pending</option>
+                        <option value="error">status: error</option>
+                      </select>
+                    </label>
+                    <label className="admin-search-field">
+                      <Search aria-hidden="true" />
+                      <input
+                        type="search"
+                        value={searchTerm}
+                        placeholder="search trace id"
+                        onChange={(event) => setSearchTerm(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="admin-table-scroll">
+                  <div className="admin-trace-table" role="table" aria-label="Trace groups">
+                    <div className="admin-trace-header" role="row">
+                      <span role="columnheader">Interaction</span>
+                      {[
+                        ["startedAt", "Started"],
+                        ["calls", "Calls"],
+                        ["tokens", "Tokens"],
+                        ["cost", "Cost"],
+                        ["latency", "Latency"],
+                        ["status", "Status"],
+                      ].map(([key, label]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          role="columnheader"
+                          onClick={() => updateSort(key as SortKey)}
+                        >
+                          {label}
+                          <ArrowDownUp aria-hidden="true" />
+                        </button>
+                      ))}
+                    </div>
+
+                    {filteredInteractions.map((interaction) => {
+                      const summary = sumInteraction(interaction);
+                      const isExpanded = expandedInteractionId === interaction.id;
+
+                      return (
+                        <div
+                          className={`admin-trace-group ${
+                            isExpanded ? "admin-trace-group-expanded" : ""
+                          }`}
+                          key={interaction.id}
+                          role="rowgroup"
+                        >
+                          <button
+                            className="admin-trace-row admin-trace-group-row"
+                            type="button"
+                            aria-expanded={isExpanded}
+                            onClick={() =>
+                              setExpandedInteractionId(isExpanded ? "" : interaction.id)
+                            }
+                          >
+                            <span className="admin-interaction-cell">
+                              <ChevronDown aria-hidden="true" />
+                              <strong>{interaction.title}</strong>
+                              <small>
+                                {interaction.kind} · {interaction.id}
+                              </small>
+                            </span>
+                            <span>{formatStartedAt(interaction.startedAt)}</span>
+                            <span>{summary.calls}</span>
+                            <span>{formatNumber(summary.tokens)}</span>
+                            <span>{formatCurrency(summary.cost)}</span>
+                            <span>{(summary.latencyMs / 1000).toFixed(1)}s</span>
+                            <StatusPill status={interaction.status} />
+                          </button>
+
+                          {isExpanded ? (
+                            <div className="admin-call-list">
+                              {interaction.calls.map((call) => (
+                                <Link
+                                  className="admin-call-row"
+                                  key={call.id}
+                                  href={`/admin/traces/${encodeURIComponent(call.id)}`}
+                                  aria-label={`Open LLM call details for ${call.operation}`}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    openTracePanel(call.id, interaction.id);
+                                  }}
+                                >
+                                  <span className="admin-call-name">
+                                    <strong>{call.operation}</strong>
+                                    <small>
+                                      {call.model} · {call.id}
+                                    </small>
+                                  </span>
+                                  <span>{callTypeLabels[call.callType]}</span>
+                                  <span>{formatNumber(call.inputTokens)} in</span>
+                                  <span>{formatNumber(call.outputTokens)} out</span>
+                                  <span>{formatCurrency(call.cost)}</span>
+                                  <span>{(call.latencyMs / 1000).toFixed(1)}s</span>
+                                  <StatusPill status={call.status} />
+                                </Link>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </section>
+            </>
+          )}
         </div>
       </section>
       {selectedCallContext ? (
@@ -1533,20 +2115,55 @@ export function AdminPageClient({
                   <h3>Request sent</h3>
                   <span>{formatNumber(selectedCallContext.call.inputTokens)} tokens</span>
                 </div>
-                <pre>{formatCallRequest(
-                  selectedCallContext.call,
-                  selectedCallContext.interaction,
-                )}</pre>
+                <JsonPayloadView payload={selectedRequestPayload} />
               </section>
               <section className="admin-call-payload-panel">
                 <div className="admin-call-payload-heading">
                   <h3>Response received</h3>
-                  <span>{formatNumber(selectedCallContext.call.outputTokens)} tokens</span>
+                  <div className="admin-call-payload-heading-actions">
+                    {selectedResponseMarkdown ? (
+                      <div
+                        className="admin-call-payload-toggle"
+                        role="group"
+                        aria-label="Response payload view"
+                      >
+                        <button
+                          className={
+                            responsePayloadViewMode === "json"
+                              ? "admin-call-payload-toggle-active"
+                              : ""
+                          }
+                          type="button"
+                          aria-pressed={responsePayloadViewMode === "json"}
+                          onClick={() => setResponsePayloadViewMode("json")}
+                        >
+                          JSON
+                        </button>
+                        <button
+                          className={
+                            responsePayloadViewMode === "markdown"
+                              ? "admin-call-payload-toggle-active"
+                              : ""
+                          }
+                          type="button"
+                          aria-pressed={responsePayloadViewMode === "markdown"}
+                          onClick={() => setResponsePayloadViewMode("markdown")}
+                        >
+                          Markdown
+                        </button>
+                      </div>
+                    ) : null}
+                    <span>
+                      {formatNumber(selectedCallContext.call.outputTokens)} tokens
+                    </span>
+                  </div>
                 </div>
-                <pre>{formatCallResponse(
-                  selectedCallContext.call,
-                  selectedCallContext.interaction,
-                )}</pre>
+                {responsePayloadViewMode === "markdown" &&
+                selectedResponseMarkdown ? (
+                  <TraceMarkdownContent text={selectedResponseMarkdown} />
+                ) : (
+                  <JsonPayloadView payload={selectedResponsePayload} />
+                )}
               </section>
             </div>
           </section>

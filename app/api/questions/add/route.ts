@@ -37,12 +37,17 @@ export async function POST(request: Request) {
       const record = question as {
         question: string;
         conciseAnswer?: unknown;
+        questionProvenance?: unknown;
       };
 
       return {
         question: record.question,
         conciseAnswer:
           typeof record.conciseAnswer === "string" ? record.conciseAnswer : "",
+        questionProvenance:
+          typeof record.questionProvenance === "string"
+            ? record.questionProvenance
+            : "",
       };
     },
   );
