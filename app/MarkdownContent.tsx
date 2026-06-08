@@ -29,6 +29,13 @@ type MarkdownContentProps = InlineMarkdownOptions & {
   headingClassName?: string;
 };
 
+type MarkdownBlockOptions = Required<
+  Pick<
+    MarkdownContentProps,
+    "codeBlockClassName" | "enableCodeBlocks" | "enableHeadings" | "enableMath" | "headingClassName"
+  >
+>;
+
 const mathSymbolMap: Record<string, string> = {
   alpha: "α",
   beta: "β",
@@ -293,6 +300,96 @@ export function MarkdownInline({
   );
 }
 
+function renderMarkdownBlock(
+  block: string,
+  key: string,
+  options: MarkdownBlockOptions,
+): ReactNode {
+  const trimmedBlock = block.trim();
+  const lines = trimmedBlock.split("\n");
+  const firstLine = lines[0]?.trim() ?? "";
+
+  if (
+    options.enableCodeBlocks &&
+    trimmedBlock.startsWith("```") &&
+    trimmedBlock.endsWith("```")
+  ) {
+    const codeLines = lines.slice(1, -1);
+
+    return (
+      <pre className={options.codeBlockClassName} key={`code-${key}`}>
+        <code>{codeLines.join("\n")}</code>
+      </pre>
+    );
+  }
+
+  if (
+    options.enableMath &&
+    trimmedBlock.startsWith("$$") &&
+    trimmedBlock.endsWith("$$")
+  ) {
+    return (
+      <p className="markdown-paragraph" key={`display-${key}`}>
+        <MathExpression display expression={trimmedBlock.slice(2, -2)} />
+      </p>
+    );
+  }
+
+  if (options.enableHeadings && /^#{1,3}\s+/.test(firstLine)) {
+    const rest = lines.slice(1).join("\n").trim();
+
+    return (
+      <Fragment key={`hblock-${key}`}>
+        <h3 className={options.headingClassName}>
+          {renderInlineMarkdown(firstLine.replace(/^#{1,3}\s+/, ""), {
+            enableMath: options.enableMath,
+          })}
+        </h3>
+        {rest ? renderMarkdownBlock(rest, `${key}-body`, options) : null}
+      </Fragment>
+    );
+  }
+
+  if (lines.every((line) => /^[-*]\s+/.test(line.trim()))) {
+    return (
+      <ul className="markdown-list" key={`ul-${key}`}>
+        {lines.map((line, lineIndex) => (
+          <li key={`${line}-${lineIndex}`}>
+            {renderInlineMarkdown(line.trim().slice(2), {
+              enableMath: options.enableMath,
+            })}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  if (lines.every((line) => /^\d+\.\s+/.test(line.trim()))) {
+    return (
+      <ol className="markdown-list" key={`ol-${key}`}>
+        {lines.map((line, lineIndex) => (
+          <li key={`${line}-${lineIndex}`}>
+            {renderInlineMarkdown(line.trim().replace(/^\d+\.\s+/, ""), {
+              enableMath: options.enableMath,
+            })}
+          </li>
+        ))}
+      </ol>
+    );
+  }
+
+  return (
+    <p className="markdown-paragraph" key={`p-${key}`}>
+      {lines.map((line, lineIndex) => (
+        <Fragment key={`${line}-${lineIndex}`}>
+          {lineIndex > 0 ? <br /> : null}
+          {renderInlineMarkdown(line, { enableMath: options.enableMath })}
+        </Fragment>
+      ))}
+    </p>
+  );
+}
+
 export function MarkdownContent({
   className,
   codeBlockClassName = "markdown-code",
@@ -303,87 +400,19 @@ export function MarkdownContent({
   text,
 }: MarkdownContentProps) {
   const blocks = text.trim().split(/\n{2,}/);
+  const options: MarkdownBlockOptions = {
+    codeBlockClassName,
+    enableCodeBlocks,
+    enableHeadings,
+    enableMath,
+    headingClassName,
+  };
 
   return (
     <div className={`markdown-content ${className}`}>
-      {blocks.map((block, index) => {
-        const trimmedBlock = block.trim();
-        const lines = trimmedBlock.split("\n");
-
-        if (
-          enableCodeBlocks &&
-          trimmedBlock.startsWith("```") &&
-          trimmedBlock.endsWith("```")
-        ) {
-          const codeLines = lines.slice(1, -1);
-
-          return (
-            <pre className={codeBlockClassName} key={`code-${index}`}>
-              <code>{codeLines.join("\n")}</code>
-            </pre>
-          );
-        }
-
-        if (
-          enableMath &&
-          trimmedBlock.startsWith("$$") &&
-          trimmedBlock.endsWith("$$")
-        ) {
-          return (
-            <p className="markdown-paragraph" key={`display-${index}`}>
-              <MathExpression display expression={trimmedBlock.slice(2, -2)} />
-            </p>
-          );
-        }
-
-        if (enableHeadings && /^#{1,3}\s+/.test(trimmedBlock)) {
-          return (
-            <h3 className={headingClassName} key={`h-${index}`}>
-              {renderInlineMarkdown(trimmedBlock.replace(/^#{1,3}\s+/, ""), {
-                enableMath,
-              })}
-            </h3>
-          );
-        }
-
-        if (lines.every((line) => /^[-*]\s+/.test(line.trim()))) {
-          return (
-            <ul className="markdown-list" key={`ul-${index}`}>
-              {lines.map((line, lineIndex) => (
-                <li key={`${line}-${lineIndex}`}>
-                  {renderInlineMarkdown(line.trim().slice(2), { enableMath })}
-                </li>
-              ))}
-            </ul>
-          );
-        }
-
-        if (lines.every((line) => /^\d+\.\s+/.test(line.trim()))) {
-          return (
-            <ol className="markdown-list" key={`ol-${index}`}>
-              {lines.map((line, lineIndex) => (
-                <li key={`${line}-${lineIndex}`}>
-                  {renderInlineMarkdown(
-                    line.trim().replace(/^\d+\.\s+/, ""),
-                    { enableMath },
-                  )}
-                </li>
-              ))}
-            </ol>
-          );
-        }
-
-        return (
-          <p className="markdown-paragraph" key={`p-${index}`}>
-            {lines.map((line, lineIndex) => (
-              <Fragment key={`${line}-${lineIndex}`}>
-                {lineIndex > 0 ? <br /> : null}
-                {renderInlineMarkdown(line, { enableMath })}
-              </Fragment>
-            ))}
-          </p>
-        );
-      })}
+      {blocks.map((block, index) =>
+        renderMarkdownBlock(block, String(index), options),
+      )}
     </div>
   );
 }

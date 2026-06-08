@@ -14,6 +14,7 @@ import {
   listDecks,
 } from "@/app/lib/postgresStore";
 import { getOpenRouterChatConfig } from "@/app/lib/openRouter";
+import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
 import { addQuestionsToDeck } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
           ok: true,
           phase: "memory",
           status: "Updating deck memory",
-          progress: 8,
+          progress: 0,
           generated: 0,
           total: count,
         });
@@ -107,7 +108,7 @@ export async function POST(request: Request) {
           ok: true,
           phase: "generating",
           status: "Streaming question generation",
-          progress: 18,
+          progress: 0,
           generated: 0,
           total: count,
           memoryUpdated: memoryResult.updated,
@@ -128,10 +129,10 @@ export async function POST(request: Request) {
                 questions.length === 1
                   ? "1 question extracted from stream"
                   : `${questions.length} questions extracted from stream`,
-              progress: Math.min(
-                72,
-                18 + Math.round((questions.length / count) * 54),
-              ),
+              progress: calculateQuestionExtractionProgress({
+                generated: questions.length,
+                total: count,
+              }),
               generated: questions.length,
               total: count,
               latestQuestion: questions.at(-1)?.question ?? null,
@@ -143,7 +144,10 @@ export async function POST(request: Request) {
           ok: true,
           phase: "processing",
           status: "Checking duplicates and adding questions",
-          progress: 82,
+          progress: calculateQuestionExtractionProgress({
+            generated: generation.questions.length,
+            total: count,
+          }),
           generated: generation.questions.length,
           total: count,
         });
@@ -157,7 +161,10 @@ export async function POST(request: Request) {
           ok: true,
           phase: "complete",
           status: "Questions added",
-          progress: 100,
+          progress: calculateQuestionExtractionProgress({
+            generated: generation.questions.length,
+            total: count,
+          }),
           model: generation.model,
           deckId: rotationDeck.id,
           deckName: rotationDeck.name,

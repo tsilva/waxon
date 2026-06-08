@@ -3,6 +3,7 @@
 import { LogOut, User, UserCog } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useEffect,
   useRef,
@@ -43,8 +44,15 @@ export function ReviewToolbar({
   onManageAccount,
   onSignOut,
 }: ReviewToolbarProps) {
+  const router = useRouter();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (showAdmin) {
+      router.prefetch("/admin");
+    }
+  }, [router, showAdmin]);
 
   useEffect(() => {
     if (!isUserMenuOpen) {
@@ -124,6 +132,8 @@ export function ReviewToolbar({
               role="tab"
               aria-selected={activeTab === "admin"}
               onClick={onAdminClick}
+              onFocus={() => router.prefetch("/admin")}
+              onPointerEnter={() => router.prefetch("/admin")}
             >
               Admin
             </Link>

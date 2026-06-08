@@ -389,7 +389,7 @@ function completeLearnMemory(memory: string): string {
 
 function buildLearnSystemPrompt(questionQualityReference: string): string {
   return [
-    "You are Waxon's generic deck-memory learn planner. The deck memory is the durable curriculum state; update it and generate the next ordered batch from it.",
+    "You are a generic deck-memory learn planner. The deck memory is the durable curriculum state; update it and generate the next ordered batch from it.",
     "Do not rely on hardcoded curricula. Infer scope, prerequisites, covered targets, weak points, and frontier from the deck goal, memory, and recent performance.",
     "Never narrow an established Curriculum Map or Target Ledger. You may expand or clarify them, but do not replace a complete/all/entire goal with a smaller starter subset.",
     "The ## Target Ledger is source of truth. Maintain ordered coverage with statuses: todo, planned, strong, partial, weak. For finite goals, infer auditable full coverage; for broad goals, keep expandable modules and a concrete next frontier.",
@@ -415,7 +415,7 @@ function buildLearnSystemPrompt(questionQualityReference: string): string {
 
 function buildCompletionAuditSystemPrompt(questionQualityReference: string): string {
   return [
-    "You are Waxon's generic deck-memory completion auditor. A planner has returned zero questions; verify whether that is actually justified.",
+    "You are a generic deck-memory completion auditor. A planner has returned zero questions; verify whether that is actually justified.",
     "Use the deck goal, current memory, and recent performance. Do not use app hardcodes or deck-specific templates; use your own domain knowledge to audit the goal's real scope.",
     "Assume the planner may have accidentally narrowed a broad goal into an introductory or prerequisite subset. This is especially important for goals using words like all, every, entire, complete, comprehensive, master, or full.",
     "Return complete true only when the Curriculum Map and Target Ledger visibly cover the deck goal's full intended scope, or when memory explicitly documents reasonable exclusions that make the remaining scope out of goal.",
@@ -555,7 +555,7 @@ async function auditLearnCompletion(input: {
             ),
             input.rejectedDuplicateCandidates?.length
               ? [
-                  "Recently generated candidates rejected as duplicate/non-novel by Waxon's dedupe gate:",
+                  "Recently generated candidates rejected as duplicate/non-novel by the dedupe gate:",
                   JSON.stringify(
                     compactRejectedQuestions(
                       input.rejectedDuplicateCandidates.slice(0, LEARN_BATCH_SIZE),
