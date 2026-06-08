@@ -24,6 +24,12 @@ export const dynamic = "force-dynamic";
 const OPENROUTER_MODEL = process.env.LLM_MODEL?.trim() ?? "";
 const MAX_TOP_UP_BODY_BYTES = 16 * 1024;
 
+function encodeStreamEvent(event: string, data: Record<string, unknown>): Uint8Array {
+  return new TextEncoder().encode(
+    `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`,
+  );
+}
+
 export async function POST(request: Request) {
   const parsed = await readJsonBodyWithLimit(request, MAX_TOP_UP_BODY_BYTES);
 
@@ -79,34 +85,112 @@ export async function POST(request: Request) {
     );
   }
 
-  const memoryResult = await refreshDeckMemory({
-    apiKey,
-    model: OPENROUTER_MODEL,
-    userId: user.id,
-    deckId: rotationDeck.id,
-    reason: "before_generation",
-  });
-  const generation = await generateBulkQuestionsFromMemory({
-    apiKey,
-    model: OPENROUTER_MODEL,
-    userId: user.id,
-    deck: memoryResult.deck,
-    memory: memoryResult.memory,
-    count,
-  });
-  const result = await addQuestionsToDeck({
-    questions: generation.questions,
-    deckId: rotationDeck.id,
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (event: string, data: Record<string, unknown>) => {
+        controller.enqueue(encodeStreamEvent(event, data));
+      };
+
+      try {
+        send("progress", {
+          ok: true,
+          phase: "memory",
+          status: "Updating deck memory",
+          progress: 8,
+          generated: 0,
+          total: count,
+        });
+
+        const memoryResult = await refreshDeckMemory({
+          apiKey,
+          model: OPENROUTER_MODEL,
+          userId: user.id,
+          deckId: rotationDeck.id,
+          reason: "before_generation",
+        });
+
+        send("progress", {
+          ok: true,
+          phase: "generating",
+          status: "Streaming question generation",
+          progress: 18,
+          generated: 0,
+          total: count,
+          memoryUpdated: memoryResult.updated,
+        });
+
+        const generation = await generateBulkQuestionsFromMemory({
+          apiKey,
+          model: OPENROUTER_MODEL,
+          userId: user.id,
+          deck: memoryResult.deck,
+          memory: memoryResult.memory,
+          count,
+          onPartialQuestions: (questions) => {
+            send("progress", {
+              ok: true,
+              phase: "generating",
+              status:
+                questions.length === 1
+                  ? "1 question extracted from stream"
+                  : `${questions.length} questions extracted from stream`,
+              progress: Math.min(
+                72,
+                18 + Math.round((questions.length / count) * 54),
+              ),
+              generated: questions.length,
+              total: count,
+              latestQuestion: questions.at(-1)?.question ?? null,
+            });
+          },
+        });
+
+        send("progress", {
+          ok: true,
+          phase: "processing",
+          status: "Checking duplicates and adding questions",
+          progress: 82,
+          generated: generation.questions.length,
+          total: count,
+        });
+
+        const result = await addQuestionsToDeck({
+          questions: generation.questions,
+          deckId: rotationDeck.id,
+        });
+
+        send("complete", {
+          ok: true,
+          phase: "complete",
+          status: "Questions added",
+          progress: 100,
+          model: generation.model,
+          deckId: rotationDeck.id,
+          deckName: rotationDeck.name,
+          memoryUpdated: memoryResult.updated,
+          generated: generation.questions.length,
+          added: result.added,
+          rejected: result.rejected,
+        });
+      } catch (error) {
+        send("error", {
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Could not generate questions.",
+        });
+      } finally {
+        controller.close();
+      }
+    },
   });
 
-  return NextResponse.json({
-    ok: true,
-    model: generation.model,
-    deckId: rotationDeck.id,
-    deckName: rotationDeck.name,
-    memoryUpdated: memoryResult.updated,
-    generated: generation.questions.length,
-    added: result.added,
-    rejected: result.rejected,
+  return new Response(stream, {
+    headers: {
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "Content-Type": "text/event-stream; charset=utf-8",
+    },
   });
 }

@@ -9,6 +9,16 @@ export type LlmTraceCallType =
 
 export type LlmTraceStatus = "ok" | "pending" | "error";
 
+export type LlmTraceInteractionKind =
+  | "Answer evaluation"
+  | "Question generation"
+  | "Reference answer"
+  | "Embedding"
+  | "Deck memory"
+  | "Quality gate"
+  | "Summarization"
+  | "Other";
+
 export type LlmTraceCall = {
   id: string;
   operation: string;
@@ -27,7 +37,7 @@ export type LlmTraceCall = {
 export type LlmTraceInteraction = {
   id: string;
   title: string;
-  kind: "Answer submitted" | "Question generation" | "Reference answer";
+  kind: LlmTraceInteractionKind;
   startedAt: string;
   status: LlmTraceStatus;
   calls: LlmTraceCall[];
@@ -66,15 +76,25 @@ globalForTraceStore.waxonLlmTraces = state;
 globalForTraceStore.waxonEnsureLlmTraceTable ??= null;
 
 export function classifyLlmCallType(operation: string): LlmTraceCallType {
-  if (operation.includes("embedding")) {
+  const normalizedOperation = operation.toLowerCase();
+
+  if (normalizedOperation.includes("embedding")) {
     return "embedding";
   }
 
-  if (operation.includes("generate") || operation.includes("dedupe")) {
+  if (
+    normalizedOperation.includes("generate") ||
+    normalizedOperation.includes("dedupe") ||
+    normalizedOperation.includes("gate")
+  ) {
     return "question_generation";
   }
 
-  if (operation.includes("reference") || operation.includes("summary")) {
+  if (
+    normalizedOperation.includes("reference") ||
+    normalizedOperation.includes("summary") ||
+    normalizedOperation.includes("memory")
+  ) {
     return "summarization";
   }
 
@@ -83,16 +103,41 @@ export function classifyLlmCallType(operation: string): LlmTraceCallType {
 
 export function classifyLlmInteractionKind(
   operation: string,
-): LlmTraceInteraction["kind"] {
-  if (operation.includes("generate") || operation.includes("dedupe")) {
-    return "Question generation";
+): LlmTraceInteractionKind {
+  const normalizedOperation = operation.toLowerCase();
+
+  if (normalizedOperation.includes("evaluate_answer")) {
+    return "Answer evaluation";
   }
 
-  if (operation.includes("reference")) {
+  if (normalizedOperation.includes("embedding")) {
+    return "Embedding";
+  }
+
+  if (normalizedOperation.includes("gate")) {
+    return "Quality gate";
+  }
+
+  if (normalizedOperation.includes("memory")) {
+    return "Deck memory";
+  }
+
+  if (normalizedOperation.includes("reference")) {
     return "Reference answer";
   }
 
-  return "Answer submitted";
+  if (
+    normalizedOperation.includes("generate") ||
+    normalizedOperation.includes("dedupe")
+  ) {
+    return "Question generation";
+  }
+
+  if (normalizedOperation.includes("summary")) {
+    return "Summarization";
+  }
+
+  return "Other";
 }
 
 export function beginLlmTrace(input: {
@@ -113,10 +158,7 @@ export function beginLlmTrace(input: {
     operation: input.operation,
     model: input.model,
     callType: classifyLlmCallType(input.operation),
-    title:
-      kind === "Answer submitted"
-        ? `Answer submitted: ${titleSubject}`
-        : `${kind}: ${titleSubject}`,
+    title: `${kind}: ${titleSubject}`,
     kind,
     startedAt,
     requestPayload: JSON.stringify(input.requestBody, null, 2),
@@ -151,6 +193,23 @@ export function beginLlmTrace(input: {
   ].slice(0, MAX_TRACE_INTERACTIONS);
 
   return pending;
+}
+
+export async function recordPendingLlmTrace(input: {
+  traceId: string;
+  operation: string;
+  model: string;
+  question?: string | null;
+  requestBody: unknown;
+}): Promise<void> {
+  const pendingTrace = beginLlmTrace(input);
+  const interaction = state.interactions.find(
+    (candidate) => candidate.id === pendingTrace.traceId,
+  );
+
+  if (interaction) {
+    await persistTraceInteraction(interaction, { throwOnError: true });
+  }
 }
 
 export async function finishLlmTrace(
@@ -289,8 +348,13 @@ function mergeTraceInteractions(
 
 async function persistTraceInteraction(
   interaction: LlmTraceInteraction,
+  options: { throwOnError?: boolean } = {},
 ): Promise<void> {
   if (!process.env.DATABASE_URL) {
+    if (options.throwOnError) {
+      throw new Error("DATABASE_URL is required to persist LLM traces.");
+    }
+
     return;
   }
 
@@ -321,6 +385,12 @@ async function persistTraceInteraction(
       traceId: interaction.id,
       error: error instanceof Error ? error.message : "unknown error",
     });
+
+    if (options.throwOnError) {
+      throw new Error("Could not persist pending LLM trace.", {
+        cause: error,
+      });
+    }
   }
 }
 
@@ -353,7 +423,16 @@ async function createLlmTraceTable(
       "updated_at" bigint DEFAULT (extract(epoch from now()) * 1000)::bigint NOT NULL,
       CONSTRAINT "llm_trace_interactions_id_nonempty_check" CHECK (length(trim("id")) > 0),
       CONSTRAINT "llm_trace_interactions_title_nonempty_check" CHECK (length(trim("title")) > 0),
-      CONSTRAINT "llm_trace_interactions_kind_check" CHECK ("kind" IN ('Answer submitted', 'Question generation', 'Reference answer')),
+      CONSTRAINT "llm_trace_interactions_kind_check" CHECK ("kind" IN (
+        'Answer evaluation',
+        'Question generation',
+        'Reference answer',
+        'Embedding',
+        'Deck memory',
+        'Quality gate',
+        'Summarization',
+        'Other'
+      )),
       CONSTRAINT "llm_trace_interactions_status_check" CHECK ("status" IN ('ok', 'pending', 'error')),
       CONSTRAINT "llm_trace_interactions_started_at_check" CHECK ("started_at" >= 0),
       CONSTRAINT "llm_trace_interactions_updated_at_check" CHECK ("updated_at" >= "started_at")
@@ -415,7 +494,7 @@ function rowToTraceInteraction(
   return {
     id: row.id,
     title: row.title,
-    kind: isTraceInteractionKind(row.kind) ? row.kind : "Answer submitted",
+    kind: isTraceInteractionKind(row.kind) ? row.kind : "Other",
     startedAt: new Date(row.startedAt).toISOString(),
     status: isTraceStatus(row.status) ? row.status : "error",
     calls: calls.filter(isTraceCall),
@@ -432,9 +511,14 @@ function isTraceInteractionKind(
   value: string,
 ): value is LlmTraceInteraction["kind"] {
   return (
-    value === "Answer submitted" ||
+    value === "Answer evaluation" ||
     value === "Question generation" ||
-    value === "Reference answer"
+    value === "Reference answer" ||
+    value === "Embedding" ||
+    value === "Deck memory" ||
+    value === "Quality gate" ||
+    value === "Summarization" ||
+    value === "Other"
   );
 }
 

@@ -147,6 +147,7 @@ function extractStreamingDeltaText(chunk: unknown): string {
 async function parseOpenRouterStream(
   response: Response,
   onActivity?: () => void,
+  onTextDelta?: (delta: string) => void,
 ): Promise<OpenRouterChatResponse> {
   if (!response.body) {
     return (await parseOpenRouterJson(response)) as OpenRouterChatResponse;
@@ -188,6 +189,7 @@ async function parseOpenRouterStream(
 
       if (deltaText) {
         content += deltaText;
+        onTextDelta?.(deltaText);
         onActivity?.();
       }
     }
@@ -264,6 +266,7 @@ export async function openRouterChatCompletion(input: {
   trace: OpenRouterTraceContext;
   stream?: boolean;
   onActivity?: () => void;
+  onTextDelta?: (delta: string) => void;
 }): Promise<{ response: Response; body: OpenRouterChatResponse }> {
   const traceId = input.trace.traceId ?? crypto.randomUUID();
   const trace = {
@@ -298,7 +301,11 @@ export async function openRouterChatCompletion(input: {
     });
     const parsed =
       body.stream && response.ok
-        ? await parseOpenRouterStream(response, input.onActivity)
+        ? await parseOpenRouterStream(
+            response,
+            input.onActivity,
+            input.onTextDelta,
+          )
         : ((await parseOpenRouterJson(response)) as OpenRouterChatResponse);
 
     await finishLlmTrace(pendingTrace, {

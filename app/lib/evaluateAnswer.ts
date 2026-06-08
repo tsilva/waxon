@@ -151,6 +151,37 @@ export async function evaluateAnswer(
   const exactEvaluation = evaluateExactExpectedAnswer(input);
 
   if (exactEvaluation) {
+    const traceId = input.traceId ?? crypto.randomUUID();
+    const pendingTrace = beginLlmTrace({
+      traceId,
+      operation: "evaluate_answer_exact_match",
+      model: "deterministic-exact-match",
+      question: input.question,
+      requestBody: {
+        question: input.question,
+        answer: input.answer,
+        expectedAnswer: input.expectedAnswer,
+      },
+    });
+
+    await finishLlmTrace(pendingTrace, {
+      ok: true,
+      responseBody: exactEvaluation,
+      usage: {
+        prompt_tokens:
+          input.question.length +
+          input.answer.length +
+          (input.expectedAnswer?.length ?? 0),
+        completion_tokens: exactEvaluation.justification.length,
+        total_tokens:
+          input.question.length +
+          input.answer.length +
+          (input.expectedAnswer?.length ?? 0) +
+          exactEvaluation.justification.length,
+        cost: 0,
+      },
+    });
+
     return exactEvaluation;
   }
 

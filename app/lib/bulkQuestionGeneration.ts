@@ -10,6 +10,7 @@ import {
   type QuestionInput,
 } from "./postgresStore";
 import { getQuestionQualityReference } from "./questionQualityReference";
+import { extractCompleteJsonObjectsFromArrayProperty } from "./streamedJsonArray";
 
 const DEFAULT_BULK_QUESTION_COUNT = 50;
 const MAX_BULK_QUESTION_COUNT = 80;
@@ -19,7 +20,7 @@ const MAX_QUESTION_CHARS = 1_200;
 const MAX_CONCISE_ANSWER_CHARS = 800;
 const MAX_PROVENANCE_CHARS = 360;
 
-type GeneratedQuestionPayload = {
+export type GeneratedQuestionPayload = {
   question: string;
   conciseAnswer: string;
   questionProvenance: string;
@@ -65,7 +66,7 @@ function buildGenerationSystemPrompt(questionQualityReference: string): string {
   ].join("\n\n");
 }
 
-function normalizeGeneratedQuestions(
+export function normalizeGeneratedQuestions(
   value: unknown,
   count: number,
 ): GeneratedQuestionPayload[] {
@@ -120,6 +121,18 @@ function normalizeGeneratedQuestions(
   return normalized.slice(0, count);
 }
 
+export function normalizePartialGeneratedQuestions(
+  text: string,
+  count: number,
+): GeneratedQuestionPayload[] {
+  return normalizeGeneratedQuestions(
+    {
+      questions: extractCompleteJsonObjectsFromArrayProperty(text, "questions"),
+    },
+    count,
+  );
+}
+
 export async function generateBulkQuestionsFromMemory(input: {
   apiKey: string;
   model: string;
@@ -127,6 +140,7 @@ export async function generateBulkQuestionsFromMemory(input: {
   deck: DeckSummary;
   memory: string;
   count: number;
+  onPartialQuestions?: (questions: GeneratedQuestionPayload[]) => void;
 }): Promise<{
   model: string;
   questions: QuestionInput[];
@@ -141,6 +155,8 @@ export async function generateBulkQuestionsFromMemory(input: {
     limit: MAX_RECENT_ATTEMPTS,
   });
   const questionQualityReference = getQuestionQualityReference();
+  let streamedContent = "";
+  let partialQuestionCount = 0;
   const { response, body } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     trace: {
@@ -186,6 +202,23 @@ export async function generateBulkQuestionsFromMemory(input: {
           ].join("\n\n"),
         },
       ],
+    },
+    onTextDelta: (delta) => {
+      streamedContent += delta;
+
+      if (!input.onPartialQuestions) {
+        return;
+      }
+
+      const partialQuestions = normalizePartialGeneratedQuestions(
+        streamedContent,
+        input.count,
+      );
+
+      if (partialQuestions.length > partialQuestionCount) {
+        partialQuestionCount = partialQuestions.length;
+        input.onPartialQuestions(partialQuestions);
+      }
     },
   });
 

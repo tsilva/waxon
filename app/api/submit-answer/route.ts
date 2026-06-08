@@ -93,6 +93,13 @@ export async function POST(request: Request) {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Could not submit answer.";
+    console.error("[waxon] submit answer failed", {
+      error: message,
+      cause:
+        error instanceof Error && error.cause instanceof Error
+          ? error.cause.message
+          : null,
+    });
     const status =
       message === "Question not found." ||
       message === "Question mismatch." ||

@@ -113,6 +113,13 @@
       "when": 1780829000000,
       "tag": "0016_deck_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1780919000000,
+      "tag": "0017_trace_integrity",
+      "breakpoints": true
     }
   ]
 }

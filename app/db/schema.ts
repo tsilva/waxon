@@ -309,7 +309,9 @@ export const answerEvaluations = pgTable(
   "answer_evaluations",
   {
     id: text("id").primaryKey(),
-    traceId: text("trace_id").notNull(),
+    traceId: text("trace_id")
+      .notNull()
+      .references(() => llmTraceInteractions.id, { onDelete: "restrict" }),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -409,7 +411,16 @@ export const llmTraceInteractions = pgTable(
     ),
     check(
       "llm_trace_interactions_kind_check",
-      sql`${table.kind} IN ('Answer submitted', 'Question generation', 'Reference answer')`,
+      sql`${table.kind} IN (
+        'Answer evaluation',
+        'Question generation',
+        'Reference answer',
+        'Embedding',
+        'Deck memory',
+        'Quality gate',
+        'Summarization',
+        'Other'
+      )`,
     ),
     check(
       "llm_trace_interactions_status_check",
