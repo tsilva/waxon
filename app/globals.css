@@ -1385,7 +1385,6 @@ textarea {
 .review-stage {
   display: grid;
   grid-template-rows:
-    auto
     clamp(166px, 24vh, 236px)
     auto
     minmax(18px, auto)
@@ -1416,7 +1415,7 @@ textarea {
 }
 
 .review-stage-resting {
-  grid-template-rows: auto minmax(250px, auto) minmax(0, 1fr);
+  grid-template-rows: minmax(250px, auto) minmax(0, 1fr);
   align-content: start;
 }
 
@@ -1425,7 +1424,7 @@ textarea {
 }
 
 .review-stage-resting .previous-panel {
-  grid-row: 3;
+  grid-row: 2;
 }
 
 .learn-mode-bar {
@@ -1785,6 +1784,10 @@ textarea {
 
 .resting-primary,
 .resting-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: 42px;
   border-radius: 8px;
   padding: 0 16px;
@@ -1797,6 +1800,11 @@ textarea {
   background: var(--accent);
   color: #ffffff;
   box-shadow: 0 12px 24px rgb(166 124 82 / 20%);
+}
+
+.resting-primary svg {
+  width: 16px;
+  height: 16px;
 }
 
 .resting-secondary {
@@ -5815,7 +5823,7 @@ textarea {
   }
 
   .review-stage {
-    grid-template-rows: auto auto auto auto auto;
+    grid-template-rows: auto auto auto auto;
     row-gap: 0;
     min-height: auto;
     padding: 26px 22px 20px;
@@ -5823,7 +5831,7 @@ textarea {
   }
 
   .review-stage-resting {
-    grid-template-rows: auto auto auto;
+    grid-template-rows: auto auto;
   }
 
   .learn-mode-bar {

@@ -375,17 +375,16 @@ type GenerateQuestionsResponse =
       error?: string;
     };
 
-type LearnQuestionsResponse =
+type TopUpQuestionsResponse =
   | {
       ok: true;
       model: string;
+      deckId: string;
+      deckName: string;
+      memoryUpdated: boolean;
+      generated: number;
       added: number;
       rejected: number;
-      questions: Array<{
-        question: string;
-        conciseAnswer?: string;
-        questionProvenance?: string;
-      }>;
     }
   | {
       ok: false;
@@ -534,7 +533,6 @@ const QUEUE_ROW_OVERSCAN = 14;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 const STALE_EVALUATION_GRADING_MS = 120_000;
 const EVALUATION_STATUS_POLL_MS = 750;
-const LEARN_QUEUE_TARGET_REMAINING = 2;
 const LEARN_TOP_UP_COOLDOWN_MS = 20_000;
 
 function createEmptyDeckEmbeddingPlot(): DeckEmbeddingPlotResponse {
@@ -1481,9 +1479,7 @@ export default function ReviewApp({
   const [question, setQuestion] = useState<string | null>(
     () => cachedSessionRef.current?.question ?? null,
   );
-  const [learnPanelMode, setLearnPanelMode] = useState<LearnPanelMode>(
-    () => cachedSessionRef.current?.learnPanelMode ?? "review",
-  );
+  const [learnPanelMode] = useState<LearnPanelMode>("review");
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(
     () => cachedSessionRef.current?.currentQuestionId ?? null,
   );
@@ -3761,18 +3757,6 @@ export default function ReviewApp({
   const scheduledReviewCount = reviewQueue.filter(
     (item) => item.status === "scheduled",
   ).length;
-  const learnTargetDeckId =
-    selectedDeckDetailId ||
-    learnTargetDeckIdRef.current ||
-    currentDeckId ||
-    selectedDeckId ||
-    null;
-  const learnQueueRemaining = reviewQueue.filter(
-    (item) =>
-      item.status === "now" &&
-      item.reviewHistory.length === 0 &&
-      (!learnTargetDeckId || item.deckId === learnTargetDeckId),
-  ).length;
   const nextScheduledReview = reviewQueue.find(
     (item) => item.status === "scheduled",
   );
@@ -3866,17 +3850,6 @@ export default function ReviewApp({
         0,
         COLLAPSED_PREVIOUS_ANSWER_LIMIT - visiblePreviousAnswers.length,
       );
-  const learnPreviousAnswerPayload = useMemo(
-    () =>
-      previousAnswers.slice(0, 12).map((item) => ({
-        question: item.question,
-        answer: item.answer ?? "",
-        score: item.score,
-        justification: item.justification ?? "",
-      })),
-    [previousAnswers],
-  );
-
   const topUpLearnQueue = useCallback(async () => {
     const now = Date.now();
 
@@ -3893,77 +3866,24 @@ export default function ReviewApp({
     isLearnTopUpPendingRef.current = true;
     setIsLearnTopUpPending(true);
     setLearnTopUpMessage(null);
-    setLearnGenerationStatus("Checking the learn queue");
+    setLearnGenerationStatus("Updating deck memory");
 
     try {
-      const pendingLearnSource = pendingLearnSourceRef.current;
-      const targetDeckId =
-        selectedDeckDetailId ||
-        pendingLearnSource?.deckId ||
-        learnTargetDeckIdRef.current ||
-        (questionRef.current ? currentDeckId : selectedDeckId) ||
-        currentDeckId ||
-        selectedDeckId ||
-        undefined;
-      const currentTargetQuestion =
-        targetDeckId && currentDeckId === targetDeckId ? questionRef.current : null;
-      const topUpKey = [
-        targetDeckId ?? "",
-        currentQuestionId ?? "",
-        currentTargetQuestion ?? "",
-      ].join("\n");
-
-      if (learnTopUpSatisfiedKeyRef.current === topUpKey) {
-        return;
-      }
-
-      const nextQuestionData = await fetchNextQuestionData({
-        mode: "learn",
-        deckId: targetDeckId,
-        excludeQuestionId: currentTargetQuestion ? currentQuestionId : null,
-        excludeQuestion: currentTargetQuestion,
-      });
-      const readyQuestionCount = nextQuestionData.queueRemaining;
-
-      if (readyQuestionCount >= LEARN_QUEUE_TARGET_REMAINING) {
-        learnTopUpSatisfiedKeyRef.current = topUpKey;
-        setLearnTopUpMessage("Queue ready");
-        pendingLearnSourceRef.current = null;
-
-        if (!currentTargetQuestion && nextQuestionData.question) {
-          setLearnGenerationStatus("Loading the first question");
-          applyNextQuestion(nextQuestionData);
-        } else if (currentTargetQuestion) {
-          prefetchNextQuestion("learn", currentQuestionId, currentTargetQuestion);
-        }
-
-        return;
-      }
-
-      const questionsNeeded = LEARN_QUEUE_TARGET_REMAINING - readyQuestionCount;
-      setLearnGenerationStatus(
-        questionsNeeded === 1
-          ? "Generating 1 missing question"
-          : `Generating ${questionsNeeded} missing questions`,
-      );
-      const response = await fetch("/api/questions/learn", {
+      setLearnGenerationStatus("Generating new questions");
+      const response = await fetch("/api/questions/top-up", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          deckId: targetDeckId,
-          sourceDeckId: currentDeckId || pendingLearnSource?.deckId,
-          currentQuestion: questionRef.current ?? pendingLearnSource?.question,
-          count: questionsNeeded,
-          previousAnswers: learnPreviousAnswerPayload,
+          count: 50,
         }),
       });
-      const data = (await response.json()) as LearnQuestionsResponse;
+      const data = (await response.json()) as TopUpQuestionsResponse;
 
       if (!response.ok || !data.ok) {
         throw new Error(
-          !data.ok && data.error ? data.error : "Could not generate learn questions.",
+          !data.ok && data.error ? data.error : "Could not generate questions.",
         );
       }
 
@@ -3971,19 +3891,16 @@ export default function ReviewApp({
         learnTopUpSatisfiedKeyRef.current = null;
         setLearnTopUpMessage(
           data.added === 1
-            ? "1 question added"
-            : `${data.added} questions added`,
+            ? `1 question added to ${data.deckName}`
+            : `${data.added} questions added to ${data.deckName}`,
         );
         pendingLearnSourceRef.current = null;
         setLearnGenerationStatus("Refreshing the queue");
         await loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
+        await loadDecks();
 
-        if (!currentTargetQuestion) {
-          setLearnGenerationStatus("Loading the first question");
-          await loadNextQuestion({ mode: "learn", surfaceError: false });
-        } else {
-          prefetchNextQuestion("learn", currentQuestionId, currentTargetQuestion);
-        }
+        setLearnGenerationStatus("Loading the next question");
+        await loadNextQuestion({ mode: "review", surfaceError: false });
       } else {
         learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
         setLearnGenerationStatus(null);
@@ -3999,102 +3916,21 @@ export default function ReviewApp({
       setLearnTopUpMessage(
         topUpError instanceof Error
           ? topUpError.message
-          : "Could not generate learn questions.",
+          : "Could not generate questions.",
       );
     } finally {
       isLearnTopUpPendingRef.current = false;
       setIsLearnTopUpPending(false);
     }
   }, [
-    currentDeckId,
-    currentQuestionId,
-    applyNextQuestion,
-    learnPreviousAnswerPayload,
+    loadDecks,
     loadNextQuestion,
     loadStatus,
-    prefetchNextQuestion,
-    selectedDeckDetailId,
-    selectedDeckId,
   ]);
 
   useEffect(() => {
     topUpLearnQueueRef.current = topUpLearnQueue;
   }, [topUpLearnQueue]);
-
-  useEffect(() => {
-    if (
-      activeTab !== "review" ||
-      learnPanelMode !== "learn" ||
-      isLoadingQuestion ||
-      isSubmitting
-    ) {
-      return;
-    }
-
-    if (question && learnQueueRemaining >= LEARN_QUEUE_TARGET_REMAINING) {
-      return;
-    }
-
-    void topUpLearnQueue();
-  }, [
-    activeTab,
-    isLoadingQuestion,
-    isSubmitting,
-    learnPanelMode,
-    learnQueueRemaining,
-    question,
-    topUpLearnQueue,
-  ]);
-
-  const switchLearnPanelMode = useCallback((nextMode: LearnPanelMode) => {
-    if (learnPanelMode === nextMode) {
-      return;
-    }
-
-    pendingLearnSourceRef.current =
-      nextMode === "learn"
-        ? {
-            deckId:
-              selectedDeckDetailId ||
-              learnTargetDeckIdRef.current ||
-              currentDeckId ||
-              selectedDeckId ||
-              null,
-            question,
-          }
-        : null;
-    setLearnPanelMode(nextMode);
-    setLearnTopUpMessage(null);
-    prefetchedNextQuestionRef.current = null;
-    nextQuestionPrefetchRef.current?.abortController.abort();
-    nextQuestionPrefetchRef.current = null;
-    setAnswer("");
-    answerRef.current = "";
-    setSpeechPreview("");
-
-    void (async () => {
-      const data = await loadNextQuestion({
-        mode: nextMode,
-        excludeQuestionId: currentQuestionId,
-        excludeQuestion: question,
-        surfaceError: false,
-      });
-
-      if (nextMode === "learn" && !data?.question) {
-        learnTopUpCooldownUntilRef.current = 0;
-        await topUpLearnQueue();
-      }
-    })();
-  }, [
-    currentDeckId,
-    currentQuestionId,
-    learnPanelMode,
-    loadNextQuestion,
-    question,
-    selectedDeckDetailId,
-    selectedDeckId,
-    topUpLearnQueue,
-  ]);
 
   const selectedQuestionStats = useMemo<QuestionStats | null>(() => {
     if (!selectedQuestion) {
@@ -4548,34 +4384,6 @@ export default function ReviewApp({
           role="tabpanel"
           aria-labelledby="review-tab"
         >
-          <div className="learn-mode-bar" aria-label="Learning mode">
-            <div className="learn-mode-segmented" role="group" aria-label="Mode">
-              <button
-                className={`learn-mode-option ${
-                  learnPanelMode === "review" ? "learn-mode-option-active" : ""
-                }`}
-                type="button"
-                aria-pressed={learnPanelMode === "review"}
-                onClick={() => {
-                  switchLearnPanelMode("review");
-                }}
-              >
-                Review
-              </button>
-              <button
-                className={`learn-mode-option ${
-                  learnPanelMode === "learn" ? "learn-mode-option-active" : ""
-                }`}
-                type="button"
-                aria-pressed={learnPanelMode === "learn"}
-                onClick={() => {
-                  switchLearnPanelMode("learn");
-                }}
-              >
-                Learn
-              </button>
-            </div>
-          </div>
           <section className="question-area" aria-live="polite">
             <div
               key={isLoadingQuestion ? "loading" : question ?? "empty"}
@@ -4660,17 +4468,15 @@ export default function ReviewApp({
               ) : (
                 <div className="resting-state">
                   <p className="resting-kicker">
-                    {learnPanelMode === "learn" ? "Learn mode" : "Review complete"}
+                    {isLearnTopUpPending ? "Preparing questions" : "Review complete"}
                   </p>
                   <h2 className="resting-title">
-                    {learnPanelMode === "learn"
-                      ? "Finding your first question."
-                      : "You're caught up."}
+                    {isLearnTopUpPending ? "Making the next batch." : "You're caught up."}
                   </h2>
                   <p className="resting-copy">
-                    {learnPanelMode === "learn"
-                      ? "Waxon is preparing new questions for this deck."
-                      : "No questions are due right now."}
+                    {isLearnTopUpPending
+                      ? learnGenerationStatus ?? "Waxon is preparing new questions."
+                      : learnTopUpMessage ?? "No questions are due right now."}
                   </p>
 
                   <dl className="resting-metrics" aria-label="Review status">
@@ -4696,24 +4502,22 @@ export default function ReviewApp({
                     <button
                       className="resting-primary"
                       type="button"
-                      onClick={openQueue}
+                      disabled={isLearnTopUpPending}
+                      onClick={() => {
+                        learnTopUpCooldownUntilRef.current = 0;
+                        void topUpLearnQueue();
+                      }}
                     >
-                      View queue
+                      <Sparkles aria-hidden="true" />
+                      <span>{isLearnTopUpPending ? "Generating..." : "Keep learning"}</span>
                     </button>
                     <button
                       className="resting-secondary"
                       type="button"
-                      onClick={() => {
-                        if (learnPanelMode === "learn") {
-                          learnTopUpCooldownUntilRef.current = 0;
-                          void topUpLearnQueue();
-                          return;
-                        }
-
-                        void loadNextQuestion({ surfaceError: false });
-                      }}
+                      disabled={isLearnTopUpPending}
+                      onClick={openQueue}
                     >
-                      Refresh
+                      View queue
                     </button>
                   </div>
 
