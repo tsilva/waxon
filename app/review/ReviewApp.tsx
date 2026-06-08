@@ -105,6 +105,10 @@ type QueueStatusResponse = {
   deckEmbeddingPlot: DeckEmbeddingPlotResponse;
 };
 
+type ReviewSessionQueueResponse = {
+  items: ReviewQueueItem[];
+};
+
 type StatsResponse = {
   now: number;
   dueCount: number;
@@ -200,6 +204,8 @@ type ReviewSessionSnapshot = {
   learnPanelMode: LearnPanelMode;
   currentQuestionId: string | null;
   question: string | null;
+  currentSessionItem: ReviewQueueItem | null;
+  sessionQueue: ReviewQueueItem[];
   currentDeckId: string | null;
   currentDeckName: string | null;
   answer: string;
@@ -679,6 +685,31 @@ async function fetchNextQuestionData(input: {
     response,
     "Failed to load the next question.",
   );
+}
+
+async function fetchReviewSessionQueue(input: {
+  deckId?: string | null;
+  signal?: AbortSignal;
+} = {}): Promise<ReviewQueueItem[]> {
+  const params = new URLSearchParams();
+
+  if (input.deckId) {
+    params.set("deckId", input.deckId);
+  }
+
+  const response = await fetch(
+    params.size > 0 ? `/api/review-queue?${params.toString()}` : "/api/review-queue",
+    {
+      cache: "no-store",
+      signal: input.signal,
+    },
+  );
+  const data = await readJsonResponse<ReviewSessionQueueResponse>(
+    response,
+    "Failed to load the review queue.",
+  );
+
+  return data.items;
 }
 
 type SpeechStatus =
@@ -1704,6 +1735,13 @@ export default function ReviewApp({
   const [question, setQuestion] = useState<string | null>(
     () => cachedSessionRef.current?.question ?? null,
   );
+  const [currentSessionItem, setCurrentSessionItem] =
+    useState<ReviewQueueItem | null>(
+      () => cachedSessionRef.current?.currentSessionItem ?? null,
+    );
+  const [sessionQueue, setSessionQueue] = useState<ReviewQueueItem[]>(
+    () => cachedSessionRef.current?.sessionQueue ?? [],
+  );
   const [learnPanelMode] = useState<LearnPanelMode>("review");
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(
     () => cachedSessionRef.current?.currentQuestionId ?? null,
@@ -1890,6 +1928,10 @@ export default function ReviewApp({
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
   const questionIdRef = useRef(currentQuestionId);
+  const currentSessionItemRef = useRef(currentSessionItem);
+  const sessionQueueRef = useRef(sessionQueue);
+  const pendingRetryItemsRef = useRef(new Map<string, ReviewQueueItem>());
+  const processedEvaluationIdsRef = useRef(new Set<string>());
   const pendingLearnSourceRef = useRef<{
     deckId: string | null;
     question: string | null;
@@ -2014,6 +2056,15 @@ export default function ReviewApp({
   }, [currentQuestionId]);
 
   useEffect(() => {
+    currentSessionItemRef.current = currentSessionItem;
+  }, [currentSessionItem]);
+
+  useEffect(() => {
+    sessionQueueRef.current = sessionQueue;
+    setQueueRemaining(sessionQueue.length);
+  }, [sessionQueue]);
+
+  useEffect(() => {
     isSubmittingRef.current = isSubmitting;
   }, [isSubmitting]);
 
@@ -2052,6 +2103,8 @@ export default function ReviewApp({
       learnPanelMode,
       currentQuestionId,
       question,
+      currentSessionItem,
+      sessionQueue,
       currentDeckId,
       currentDeckName,
       answer,
@@ -2094,6 +2147,7 @@ export default function ReviewApp({
   }, [
     answer,
     currentQuestionId,
+    currentSessionItem,
     currentDeckId,
     currentDeckName,
     currentUser,
@@ -2127,6 +2181,7 @@ export default function ReviewApp({
     selectedDeckDetailId,
     selectedQuestionId,
     selectedQuestion,
+    sessionQueue,
     speechPreview,
   ]);
 
@@ -2726,6 +2781,7 @@ export default function ReviewApp({
     options?: { appendToMessages?: boolean },
   ) => {
     hasLoadedQuestionRef.current = true;
+    setCurrentSessionItem(null);
     setCurrentQuestionId(data.questionId);
     questionIdRef.current = data.questionId;
     setQuestion(data.question);
@@ -2738,6 +2794,63 @@ export default function ReviewApp({
       appendQuestion(data.question);
     }
   }, [appendQuestion]);
+
+  const applyReviewQueueItem = useCallback((
+    item: ReviewQueueItem | null,
+    options?: { appendToMessages?: boolean },
+  ) => {
+    hasLoadedQuestionRef.current = true;
+    setCurrentSessionItem(item);
+    currentSessionItemRef.current = item;
+    setCurrentQuestionId(item?.questionId ?? null);
+    questionIdRef.current = item?.questionId ?? null;
+    setQuestion(item?.question ?? null);
+    questionRef.current = item?.question ?? null;
+    setCurrentDeckId(item?.deckId ?? null);
+    setCurrentDeckName(item?.deckName ?? null);
+
+    if (item?.question && options?.appendToMessages !== false) {
+      appendQuestion(item.question);
+    }
+  }, [appendQuestion]);
+
+  const advanceReviewSessionQueue = useCallback(async (options?: {
+    surfaceError?: boolean;
+    appendToMessages?: boolean;
+  }) => {
+    const surfaceError = options?.surfaceError ?? true;
+    setIsLoadingQuestion(true);
+    setError(null);
+
+    try {
+      let queue = sessionQueueRef.current;
+
+      if (queue.length === 0) {
+        queue = await fetchReviewSessionQueue();
+      }
+
+      const [nextItem, ...remainingItems] = queue;
+      const nextQueue = nextItem ? remainingItems : [];
+
+      sessionQueueRef.current = nextQueue;
+      setSessionQueue(nextQueue);
+      applyReviewQueueItem(nextItem ?? null, {
+        appendToMessages: options?.appendToMessages,
+      });
+      return nextItem ?? null;
+    } catch (loadError) {
+      if (surfaceError) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Failed to load the next question.",
+        );
+      }
+      return null;
+    } finally {
+      setIsLoadingQuestion(false);
+    }
+  }, [applyReviewQueueItem]);
 
   const getNextQuestionDeckId = useCallback(
     (mode: LearnPanelMode) =>
@@ -2904,6 +3017,13 @@ export default function ReviewApp({
     const surfaceError = options?.surfaceError ?? true;
     const mode = options?.mode ?? learnPanelMode;
 
+    if (mode === "review") {
+      return advanceReviewSessionQueue({
+        surfaceError,
+        appendToMessages: true,
+      });
+    }
+
     setIsLoadingQuestion(true);
     if (mode === "learn") {
       setLearnGenerationStatus("Checking for an available question");
@@ -2938,7 +3058,12 @@ export default function ReviewApp({
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [applyNextQuestion, getNextQuestionDeckId, learnPanelMode]);
+  }, [
+    advanceReviewSessionQueue,
+    applyNextQuestion,
+    getNextQuestionDeckId,
+    learnPanelMode,
+  ]);
 
   const queueStatusUrl = useCallback((limit: number) => {
     const params = new URLSearchParams({
@@ -3113,6 +3238,10 @@ export default function ReviewApp({
       prefetchedNextQuestionRef.current = null;
       nextQuestionPrefetchRef.current?.abortController.abort();
       nextQuestionPrefetchRef.current = null;
+      return;
+    }
+
+    if (learnPanelMode === "review") {
       return;
     }
 
@@ -3329,6 +3458,54 @@ export default function ReviewApp({
   }, [evaluations]);
 
   useEffect(() => {
+    for (const evaluation of evaluations) {
+      if (
+        evaluation.status !== "resolved" ||
+        processedEvaluationIdsRef.current.has(evaluation.id)
+      ) {
+        continue;
+      }
+
+      const retryItem = pendingRetryItemsRef.current.get(evaluation.id);
+
+      if (!retryItem) {
+        continue;
+      }
+
+      processedEvaluationIdsRef.current.add(evaluation.id);
+      pendingRetryItemsRef.current.delete(evaluation.id);
+
+      if (evaluation.score === null || evaluation.score > 6) {
+        continue;
+      }
+
+      const resolvedAt = evaluation.resolvedAt ?? Date.now();
+      const nextDue = evaluation.nextDue ?? resolvedAt;
+      const updatedRetryItem: ReviewQueueItem = {
+        ...retryItem,
+        nextDue,
+        msUntilDue: nextDue - Date.now(),
+        status: nextDue <= Date.now() ? "now" : "scheduled",
+        reviewHistory: [
+          ...retryItem.reviewHistory,
+          {
+            ts: resolvedAt,
+            score: evaluation.score,
+          },
+        ].slice(-10),
+        lastScore: evaluation.score,
+        lastAnswer: evaluation.answer,
+        lastAnswerSummary: evaluation.answerSummary,
+        lastJustification: evaluation.justification,
+      };
+      const nextQueue = [...sessionQueueRef.current, updatedRetryItem];
+
+      sessionQueueRef.current = nextQueue;
+      setSessionQueue(nextQueue);
+    }
+  }, [evaluations]);
+
+  useEffect(() => {
     setMessages((current) => {
       let hasChanged = false;
 
@@ -3373,6 +3550,7 @@ export default function ReviewApp({
     const submittedQuestionId = questionIdRef.current;
     const submittedDeckId = currentDeckId;
     const submittedDeckName = currentDeckName;
+    const submittedSessionItem = currentSessionItemRef.current;
     const submittedAnswer = (answerOverride ?? answerRef.current).trim();
     const submittedAt = Date.now();
     const optimisticEvaluationId = `pending-${submittedAt}-${Math.random()
@@ -3415,20 +3593,23 @@ export default function ReviewApp({
 
     let nextQuestionData: NextQuestionResponse | null = null;
     let hasShownNextQuestion = false;
-    const optimisticNextQuestionPromise = takePrefetchedNextQuestion(
-      learnPanelMode,
-      submittedQuestionId,
-      submittedQuestion,
-    ).then((prefetchedQuestion) => {
-      if (!prefetchedQuestion || submitSequenceRef.current !== submitSequence) {
-        return null;
-      }
+    const optimisticNextQuestionPromise =
+      learnPanelMode === "learn"
+        ? takePrefetchedNextQuestion(
+            learnPanelMode,
+            submittedQuestionId,
+            submittedQuestion,
+          ).then((prefetchedQuestion) => {
+            if (!prefetchedQuestion || submitSequenceRef.current !== submitSequence) {
+              return null;
+            }
 
-      nextQuestionData = prefetchedQuestion;
-      hasShownNextQuestion = true;
-      applyNextQuestion(prefetchedQuestion, { appendToMessages: false });
-      return prefetchedQuestion;
-    });
+            nextQuestionData = prefetchedQuestion;
+            hasShownNextQuestion = true;
+            applyNextQuestion(prefetchedQuestion, { appendToMessages: false });
+            return prefetchedQuestion;
+          })
+        : Promise.resolve(null);
 
     try {
       const response = await fetch("/api/submit-answer", {
@@ -3454,6 +3635,10 @@ export default function ReviewApp({
         );
       }
 
+      if (submittedSessionItem) {
+        pendingRetryItemsRef.current.set(data.evaluationId, submittedSessionItem);
+      }
+
       setMessages((current) =>
         current.map((message) =>
           message.kind === "answer" &&
@@ -3469,20 +3654,24 @@ export default function ReviewApp({
         ),
       );
 
-      if (!hasShownNextQuestion) {
-        nextQuestionData = await optimisticNextQuestionPromise;
-      }
+      if (learnPanelMode === "review") {
+        await advanceReviewSessionQueue({ appendToMessages: true });
+      } else {
+        if (!hasShownNextQuestion) {
+          nextQuestionData = await optimisticNextQuestionPromise;
+        }
 
-      if (hasShownNextQuestion && nextQuestionData?.question) {
-        appendQuestion(nextQuestionData.question);
-      }
+        if (hasShownNextQuestion && nextQuestionData?.question) {
+          appendQuestion(nextQuestionData.question);
+        }
 
-      if (!nextQuestionData) {
-        nextQuestionData = await loadNextQuestion({
-          mode: learnPanelMode,
-          excludeQuestionId: submittedQuestionId,
-          excludeQuestion: submittedQuestion,
-        });
+        if (!nextQuestionData) {
+          nextQuestionData = await loadNextQuestion({
+            mode: learnPanelMode,
+            excludeQuestionId: submittedQuestionId,
+            excludeQuestion: submittedQuestion,
+          }) as NextQuestionResponse | null;
+        }
       }
 
       if (learnPanelMode === "learn" && !nextQuestionData?.question) {
@@ -3506,6 +3695,8 @@ export default function ReviewApp({
       );
       setCurrentQuestionId(submittedQuestionId);
       questionIdRef.current = submittedQuestionId;
+      setCurrentSessionItem(submittedSessionItem);
+      currentSessionItemRef.current = submittedSessionItem;
       setQuestion(submittedQuestion);
       questionRef.current = submittedQuestion;
       setCurrentDeckId(submittedDeckId);
@@ -3523,6 +3714,7 @@ export default function ReviewApp({
       setIsSubmitting(false);
     }
   }, [
+    advanceReviewSessionQueue,
     applyNextQuestion,
     clearPendingSpeechCommand,
     currentDeckId,
@@ -3546,6 +3738,19 @@ export default function ReviewApp({
     answerRef.current = "";
     setSpeechPreview("");
     setError(null);
+
+    if (learnPanelMode === "review") {
+      const skippedItem = currentSessionItemRef.current;
+
+      if (skippedItem) {
+        const nextQueue = [...sessionQueueRef.current, skippedItem];
+        sessionQueueRef.current = nextQueue;
+        setSessionQueue(nextQueue);
+      }
+
+      await advanceReviewSessionQueue({ appendToMessages: true });
+      return true;
+    }
 
     try {
       const response = await fetch("/api/skip-question", {
@@ -3575,7 +3780,12 @@ export default function ReviewApp({
       );
       return false;
     }
-  }, [applyNextQuestion, clearPendingSpeechCommand, learnPanelMode]);
+  }, [
+    advanceReviewSessionQueue,
+    applyNextQuestion,
+    clearPendingSpeechCommand,
+    learnPanelMode,
+  ]);
 
   const handleSpeechText = useCallback(
     async (transcript: string) => {
