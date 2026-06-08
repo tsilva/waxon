@@ -11,7 +11,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 
-type ReviewToolbarTab = "review" | "decks" | "admin";
+type ReviewToolbarTab = "review" | "decks" | "stats" | "admin";
 
 type ReviewToolbarProps = {
   activeTab: ReviewToolbarTab;
@@ -22,6 +22,7 @@ type ReviewToolbarProps = {
   menuEmail: string;
   onReviewClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onDecksClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
+  onStatsClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onAdminClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onManageAccount: () => void;
   onSignOut: () => void;
@@ -40,6 +41,7 @@ export function ReviewToolbar({
   menuEmail,
   onReviewClick,
   onDecksClick,
+  onStatsClick,
   onAdminClick,
   onManageAccount,
   onSignOut,
@@ -142,7 +144,17 @@ export function ReviewToolbar({
       </div>
 
       <div className="reader-actions">
-        <span className="queue-summary">{dueCount} due</span>
+        <Link
+          className={`queue-summary ${
+            activeTab === "stats" ? "queue-summary-active" : ""
+          }`}
+          href="/stats"
+          aria-current={activeTab === "stats" ? "page" : undefined}
+          onClick={onStatsClick}
+          title="Review stats"
+        >
+          {dueCount} due
+        </Link>
         <div className="user-menu" ref={userMenuRef}>
           <button
             className={`user-menu-trigger ${
