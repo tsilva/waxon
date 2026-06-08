@@ -139,6 +139,7 @@ export async function POST(request: Request) {
             });
           },
         });
+        const latestQuestion = generation.questions.at(-1)?.question ?? null;
 
         send("progress", {
           ok: true,
@@ -150,6 +151,7 @@ export async function POST(request: Request) {
           }),
           generated: generation.questions.length,
           total: count,
+          latestQuestion,
         });
 
         const result = await addQuestionsToDeck({
@@ -172,6 +174,7 @@ export async function POST(request: Request) {
           generated: generation.questions.length,
           added: result.added,
           rejected: result.rejected,
+          latestQuestion,
         });
       } catch (error) {
         send("error", {
