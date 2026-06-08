@@ -20,6 +20,7 @@ export type OpenRouterChatRequest = {
   model: string;
   messages: OpenRouterMessage[];
   response_format?: unknown;
+  reasoning?: unknown;
   temperature?: number;
   max_tokens?: number;
   user?: string;

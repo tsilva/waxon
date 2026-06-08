@@ -25,6 +25,7 @@ export type EvaluateAnswerInput = {
   question: string;
   answer: string;
   previousReviews: string;
+  expectedAnswer?: string | null;
   userId?: string | null;
   deckId?: string | null;
   traceId?: string | null;
@@ -33,6 +34,31 @@ export type EvaluateAnswerInput = {
 
 export const EVALUATION_TIMEOUT_MS = 60_000;
 const BROWSER_SMOKE_CORRECT_TOKEN = "browser-smoke-correct-token";
+
+function normalizeExactAnswer(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function evaluateExactExpectedAnswer(
+  input: EvaluateAnswerInput,
+): EvaluationResult | null {
+  const expectedAnswer = input.expectedAnswer?.trim();
+
+  if (!expectedAnswer) {
+    return null;
+  }
+
+  if (normalizeExactAnswer(input.answer) !== normalizeExactAnswer(expectedAnswer)) {
+    return null;
+  }
+
+  return {
+    status: "graded",
+    score: 10,
+    justification: "Matches the expected answer.",
+    answerSummary: input.answer.trim().slice(0, 120) || expectedAnswer,
+  };
+}
 
 function isBrowserSmokeEvaluatorEnabled(): boolean {
   return (
@@ -122,6 +148,12 @@ function buildUserPrompt(input: EvaluateAnswerInput): string {
 export async function evaluateAnswer(
   input: EvaluateAnswerInput,
 ): Promise<EvaluationResult> {
+  const exactEvaluation = evaluateExactExpectedAnswer(input);
+
+  if (exactEvaluation) {
+    return exactEvaluation;
+  }
+
   if (isBrowserSmokeEvaluatorEnabled()) {
     return await evaluateBrowserSmokeAnswer(input);
   }

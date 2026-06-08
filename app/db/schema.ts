@@ -106,6 +106,7 @@ export const decks = pgTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     coverage: text("coverage").notNull().default(""),
+    memory: text("memory").notNull().default(""),
     inReviewRotation: boolean("in_review_rotation").notNull().default(true),
     archivedAt: bigint("archived_at", { mode: "number" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
@@ -117,6 +118,7 @@ export const decks = pgTable(
     check("decks_name_nonempty_check", sql`length(trim(${table.name})) > 0`),
     check("decks_slug_nonempty_check", sql`length(trim(${table.slug})) > 0`),
     check("decks_coverage_length_check", sql`length(${table.coverage}) <= 2000`),
+    check("decks_memory_length_check", sql`length(${table.memory}) <= 12000`),
     check("decks_created_at_check", sql`${table.createdAt} >= 0`),
     check(
       "decks_updated_at_check",

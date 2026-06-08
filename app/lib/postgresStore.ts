@@ -122,6 +122,7 @@ export type DeckSummary = {
   name: string;
   slug: string;
   coverage: string;
+  memory: string;
   inReviewRotation: boolean;
   archivedAt: number | null;
   createdAt: number;
@@ -563,7 +564,7 @@ async function selectQuestionRows(
         whereClause,
       ),
     )
-    .orderBy(asc(questions.nextDue), asc(questions.question));
+    .orderBy(asc(questions.nextDue), asc(questions.createdAt), asc(questions.question));
 
   return rows;
 }
@@ -614,6 +615,7 @@ function toDeckSummary(row: {
   name: string;
   slug: string;
   coverage: string;
+  memory: string;
   inReviewRotation: boolean;
   archivedAt: number | null;
   createdAt: number;
@@ -627,6 +629,7 @@ function toDeckSummary(row: {
     name: row.name,
     slug: row.slug,
     coverage: row.coverage,
+    memory: row.memory,
     inReviewRotation: row.inReviewRotation,
     archivedAt: row.archivedAt,
     createdAt: row.createdAt,
@@ -648,6 +651,7 @@ export async function listDecks(
       name: decks.name,
       slug: decks.slug,
       coverage: decks.coverage,
+      memory: decks.memory,
       inReviewRotation: decks.inReviewRotation,
       archivedAt: decks.archivedAt,
       createdAt: decks.createdAt,
@@ -665,6 +669,7 @@ export async function listDecks(
       decks.name,
       decks.slug,
       decks.coverage,
+      decks.memory,
       decks.inReviewRotation,
       decks.archivedAt,
       decks.createdAt,
@@ -701,6 +706,7 @@ export async function createDeck(input: {
     name,
     slug,
     coverage,
+    memory: "",
     inReviewRotation: input.inReviewRotation ?? false,
     createdAt: now,
     updatedAt: now,
@@ -721,6 +727,7 @@ export async function updateDeck(input: {
   deckId: string;
   name?: string;
   coverage?: string;
+  memory?: string;
   inReviewRotation?: boolean;
   userId?: string;
 }): Promise<DeckSummary> {
@@ -755,6 +762,7 @@ export async function updateDeck(input: {
     .set({
       ...(nextName ? { name: nextName } : {}),
       ...(input.coverage === undefined ? {} : { coverage: input.coverage.trim() }),
+      ...(input.memory === undefined ? {} : { memory: input.memory.trim() }),
       ...(input.inReviewRotation === undefined
         ? {}
         : { inReviewRotation: input.inReviewRotation }),
@@ -1082,7 +1090,12 @@ export async function getDueQuestions(
   return rows
     .map(toDueQuestion)
     .filter((row) => Number.isFinite(row.nextDue) && row.nextDue <= now)
-    .sort((a, b) => a.nextDue - b.nextDue);
+    .sort(
+      (a, b) =>
+        a.nextDue - b.nextDue ||
+        a.createdAt - b.createdAt ||
+        a.question.localeCompare(b.question),
+    );
 }
 
 export async function getQueuedQuestionsPage(
@@ -1109,7 +1122,7 @@ export async function getQueuedQuestionsPage(
   const orderBy =
     input.sortKey === "creation-date"
       ? [desc(questions.createdAt), asc(questions.question)]
-      : [asc(questions.nextDue), asc(questions.question)];
+      : [asc(questions.nextDue), asc(questions.createdAt), asc(questions.question)];
   const [{ value: total = 0 } = { value: 0 }] = await db
     .select({ value: count() })
     .from(questions)
@@ -1588,29 +1601,29 @@ export async function upsertDueQuestions(input: {
   await db
     .insert(questions)
     .values(
-      generatedQuestions.map((question) => ({
+      generatedQuestions.map((question, index) => ({
         deckId: targetDeckId,
         question: question.question,
         questionSlug: questionSlug(question.question),
-        nextDue: now,
+        nextDue: now + index,
         generatedFromQuestion: input.sourceQuestion,
         questionProvenance: question.questionProvenance ?? "",
         conciseAnswer: question.conciseAnswer ?? "",
-        createdAt: now,
-        updatedAt: now,
+        createdAt: now + index,
+        updatedAt: now + index,
       })),
     )
     .onConflictDoUpdate({
       target: [questions.deckId, questions.questionSlug],
       set: {
-        nextDue: now,
+        nextDue: sql`excluded.next_due`,
         generatedFromQuestion: sql`coalesce(
           ${questions.generatedFromQuestion},
           excluded.generated_from_question
         )`,
         questionProvenance: sql`coalesce(nullif(${questions.questionProvenance}, ''), excluded.question_provenance)`,
         conciseAnswer: sql`coalesce(nullif(${questions.conciseAnswer}, ''), excluded.concise_answer)`,
-        updatedAt: now,
+        updatedAt: sql`excluded.updated_at`,
       },
     });
 

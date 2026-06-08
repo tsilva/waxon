@@ -58,6 +58,7 @@ type Submission = {
   userId: string | null;
   deckId: string | null;
   answer: string;
+  expectedAnswer: string | null;
   submittedAt: number;
   previousReviews: string;
 };
@@ -663,7 +664,11 @@ async function getReviewQueueItems(
           return b.createdAt - a.createdAt || a.question.localeCompare(b.question);
         }
 
-        return a.nextDue - b.nextDue || a.question.localeCompare(b.question);
+        return (
+          a.nextDue - b.nextDue ||
+          a.createdAt - b.createdAt ||
+          a.question.localeCompare(b.question)
+        );
       }),
   };
 }
@@ -985,6 +990,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       question: submission.question,
       answer: submission.answer,
       previousReviews: submission.previousReviews,
+      expectedAnswer: submission.expectedAnswer,
       userId: submission.userId,
       deckId: submission.deckId,
       traceId: submission.traceId,
@@ -1234,6 +1240,7 @@ export async function submitAnswer(input: {
     userId: snapshot.userId,
     deckId,
     answer: input.answer,
+    expectedAnswer: snapshot.referenceAnswer || snapshot.conciseAnswer || null,
     submittedAt,
     previousReviews: snapshot.reviews,
   } satisfies Submission;
@@ -1285,14 +1292,16 @@ export async function addQuestionsToDeck(input: {
   });
 
   await upsertQuestionEmbeddings({
-    embeddings: gateResult.accepted.map((candidate) => ({
-      question: candidate.question,
-      embeddingModel: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
-      embeddingKind: DEDUPE_EMBEDDING_KIND,
-      sourceVersion: DEDUPE_SOURCE_VERSION,
-      sourceHash: candidate.sourceHash,
-      embedding: candidate.embedding,
-    })),
+    embeddings: gateResult.accepted
+      .filter((candidate) => candidate.embedding.length > 0)
+      .map((candidate) => ({
+        question: candidate.question,
+        embeddingModel: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+        embeddingKind: DEDUPE_EMBEDDING_KIND,
+        sourceVersion: DEDUPE_SOURCE_VERSION,
+        sourceHash: candidate.sourceHash,
+        embedding: candidate.embedding,
+      })),
     deckId,
     userId: user.id,
   });
