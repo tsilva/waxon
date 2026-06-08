@@ -659,7 +659,7 @@ function formatCallRequest(call: LlmCall, interaction: TraceInteraction): string
         {
           role: "system",
           content:
-            "You are Waxon's LLM trace replay surface. Preserve technical precision and return concise structured output.",
+            "You are an LLM trace replay surface. Preserve technical precision and return concise structured output.",
         },
         {
           role: "user",

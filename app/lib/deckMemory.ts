@@ -176,7 +176,7 @@ export function dedupeMemorySections(memory: string): string {
 
 function buildDeckMemorySystemPrompt(): string {
   return [
-    "You update Waxon deck MEMORY.md files.",
+    "You update deck MEMORY.md files.",
     "The memory is a durable deck-level curriculum asset, not a question-generation response.",
     "Infer the current learning state from the deck goal, current memory, existing questions, and recent answer attempts.",
     "Preserve established scope unless the deck goal clearly requires expanding it. Never narrow a broad or complete goal into only a beginner subset.",

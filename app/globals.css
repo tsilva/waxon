@@ -162,6 +162,7 @@ textarea {
 .load-more-answers,
 .previous-row-empty p,
 .previous-field-label,
+.previous-question-feedback,
 .previous-details-link,
 .stats-history-trace-link,
 .previous-answer,
@@ -1783,6 +1784,7 @@ textarea {
 .learn-generation-panel {
   display: grid;
   align-content: center;
+  justify-items: center;
   gap: 18px;
   width: 100%;
   min-height: 250px;
@@ -1799,7 +1801,10 @@ textarea {
 
 .learn-generation-header {
   display: grid;
+  justify-items: center;
   gap: 10px;
+  width: min(720px, 100%);
+  text-align: center;
 }
 
 .learn-generation-kicker {
@@ -1824,7 +1829,7 @@ textarea {
 
 .learn-generation-status {
   max-width: 620px;
-  margin: -2px 0 0;
+  margin: -2px auto 0;
   color: var(--ink-soft);
   font-size: 18px;
   font-weight: 620;
@@ -1892,8 +1897,10 @@ textarea {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
   align-items: start;
+  justify-content: center;
   gap: 10px;
-  width: min(720px, 100%);
+  width: fit-content;
+  max-width: min(720px, 100%);
   min-height: 46px;
   color: var(--muted-strong);
   font-family: var(--font-ui);
@@ -2270,6 +2277,11 @@ textarea {
   color: var(--ink);
 }
 
+.previous-row-main-button:hover .previous-question-feedback,
+.previous-row-main-button:focus-visible .previous-question-feedback {
+  color: var(--ink-soft);
+}
+
 .previous-row-main-button:focus-visible {
   outline: 2px solid rgb(166 124 82 / 20%);
   outline-offset: 4px;
@@ -2467,6 +2479,25 @@ textarea {
   line-height: 1.35;
 }
 
+.previous-question-feedback {
+  max-width: 78ch;
+  margin: 2px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.previous-question-feedback p {
+  margin: 0;
+}
+
+.previous-question-feedback-pending {
+  color: var(--muted-strong);
+  font-weight: 760;
+}
+
 .previous-answer {
   color: var(--ink);
   font-size: 14px;
@@ -2535,6 +2566,11 @@ textarea {
 .markdown-content {
   display: grid;
   gap: 10px;
+}
+
+.markdown-content.previous-question-feedback {
+  display: block;
+  gap: 0;
 }
 
 .markdown-paragraph {

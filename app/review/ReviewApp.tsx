@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
 import {
   MarkdownContent as SharedMarkdownContent,
   MarkdownInline as SharedMarkdownInline,
@@ -274,6 +275,33 @@ function resizeComposerTextarea(textarea: HTMLTextAreaElement | null): void {
   textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
+async function readJsonResponse<T>(
+  response: Response,
+  fallbackError: string,
+): Promise<T> {
+  const text = await response.text();
+  let data: unknown = {};
+
+  if (text.trim()) {
+    try {
+      data = JSON.parse(text) as unknown;
+    } catch {
+      throw new Error(fallbackError);
+    }
+  }
+
+  if (!response.ok) {
+    const payload = data as { error?: unknown };
+    throw new Error(
+      typeof payload.error === "string" && payload.error.trim()
+        ? payload.error
+        : fallbackError,
+    );
+  }
+
+  return data as T;
+}
+
 function toLearnGenerationProgress(
   payload: Extract<TopUpStreamPayload, { ok: true }>,
   fallbackTotal: number,
@@ -282,12 +310,15 @@ function toLearnGenerationProgress(
     return null;
   }
 
+  const generated = Math.max(0, Math.round(payload.generated ?? 0));
+  const total = Math.max(1, Math.round(payload.total ?? fallbackTotal));
+
   return {
     phase: payload.phase,
     status: payload.status,
-    progress: Math.min(100, Math.max(0, Math.round(payload.progress ?? 0))),
-    generated: Math.max(0, Math.round(payload.generated ?? 0)),
-    total: Math.max(1, Math.round(payload.total ?? fallbackTotal)),
+    progress: calculateQuestionExtractionProgress({ generated, total }),
+    generated,
+    total,
     latestQuestion: payload.latestQuestion ?? null,
   };
 }
@@ -300,11 +331,14 @@ async function parseTopUpResponse(
   const contentType = response.headers.get("content-type") ?? "";
 
   if (!response.body || !contentType.includes("text/event-stream")) {
-    const data = (await response.json()) as TopUpQuestionsResponse;
+    const data = await readJsonResponse<TopUpQuestionsResponse>(
+      response,
+      "Could not generate questions.",
+    );
 
-    if (!response.ok || !data.ok) {
+    if (!data.ok) {
       throw new Error(
-        !data.ok && data.error ? data.error : "Could not generate questions.",
+        data.error ? data.error : "Could not generate questions.",
       );
     }
 
@@ -611,11 +645,10 @@ async function fetchNextQuestionData(input: {
     signal: input.signal,
   });
 
-  if (!response.ok) {
-    throw new Error("Failed to load the next question.");
-  }
-
-  return (await response.json()) as NextQuestionResponse;
+  return await readJsonResponse<NextQuestionResponse>(
+    response,
+    "Failed to load the next question.",
+  );
 }
 
 type SpeechStatus =
@@ -1553,6 +1586,7 @@ export default function ReviewApp({
   const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
+  const submitSequenceRef = useRef(0);
   const shouldRefocusAnswerAfterSubmitRef = useRef(false);
   const keepListeningRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -2353,7 +2387,10 @@ export default function ReviewApp({
     });
   }, []);
 
-  const applyNextQuestion = useCallback((data: NextQuestionResponse) => {
+  const applyNextQuestion = useCallback((
+    data: NextQuestionResponse,
+    options?: { appendToMessages?: boolean },
+  ) => {
     hasLoadedQuestionRef.current = true;
     setCurrentQuestionId(data.questionId);
     questionIdRef.current = data.questionId;
@@ -2363,7 +2400,7 @@ export default function ReviewApp({
     setCurrentDeckName(data.deckName);
     setQueueRemaining(data.queueRemaining);
 
-    if (data.question) {
+    if (data.question && options?.appendToMessages !== false) {
       appendQuestion(data.question);
     }
   }, [appendQuestion]);
@@ -2832,11 +2869,10 @@ export default function ReviewApp({
           cache: "no-store",
         });
 
-        if (!response.ok) {
-          return;
-        }
-
-        const data = (await response.json()) as EvaluationStatusResponse;
+        const data = await readJsonResponse<EvaluationStatusResponse>(
+          response,
+          "Failed to load evaluation status.",
+        );
 
         if (!isActive || data.evaluations.length === 0) {
           return;
@@ -2969,6 +3005,8 @@ export default function ReviewApp({
 
     const submittedQuestion = activeQuestion;
     const submittedQuestionId = questionIdRef.current;
+    const submittedDeckId = currentDeckId;
+    const submittedDeckName = currentDeckName;
     const submittedAnswer = (answerOverride ?? answerRef.current).trim();
     const submittedAt = Date.now();
     const optimisticEvaluationId = `pending-${submittedAt}-${Math.random()
@@ -2977,6 +3015,8 @@ export default function ReviewApp({
     const optimisticMessageId = `answer-${optimisticEvaluationId}`;
 
     isSubmittingRef.current = true;
+    submitSequenceRef.current += 1;
+    const submitSequence = submitSequenceRef.current;
     shouldRefocusAnswerAfterSubmitRef.current = true;
     setIsSubmitting(true);
     setAnswer("");
@@ -3007,6 +3047,23 @@ export default function ReviewApp({
       },
     ]);
 
+    let nextQuestionData: NextQuestionResponse | null = null;
+    let hasShownNextQuestion = false;
+    const optimisticNextQuestionPromise = takePrefetchedNextQuestion(
+      learnPanelMode,
+      submittedQuestionId,
+      submittedQuestion,
+    ).then((prefetchedQuestion) => {
+      if (!prefetchedQuestion || submitSequenceRef.current !== submitSequence) {
+        return null;
+      }
+
+      nextQuestionData = prefetchedQuestion;
+      hasShownNextQuestion = true;
+      applyNextQuestion(prefetchedQuestion, { appendToMessages: false });
+      return prefetchedQuestion;
+    });
+
     try {
       const response = await fetch("/api/submit-answer", {
         method: "POST",
@@ -3020,9 +3077,12 @@ export default function ReviewApp({
         }),
       });
 
-      const data = (await response.json()) as SubmitAnswerResponse;
+      const data = await readJsonResponse<SubmitAnswerResponse>(
+        response,
+        "Failed to submit the answer.",
+      );
 
-      if (!response.ok || !data.ok) {
+      if (!data.ok) {
         throw new Error(
           data.ok === false ? data.error : "Failed to submit the answer.",
         );
@@ -3043,21 +3103,15 @@ export default function ReviewApp({
         ),
       );
 
-      const prefetchedQuestion =
-        await takePrefetchedNextQuestion(
-          learnPanelMode,
-          submittedQuestionId,
-          submittedQuestion,
-        );
-      let nextQuestionData: NextQuestionResponse | null = null;
+      if (!hasShownNextQuestion) {
+        nextQuestionData = await optimisticNextQuestionPromise;
+      }
 
-      if (prefetchedQuestion) {
-        nextQuestionData = {
-          ...prefetchedQuestion,
-          queueRemaining: Math.max(0, prefetchedQuestion.queueRemaining - 1),
-        };
-        applyNextQuestion(nextQuestionData);
-      } else {
+      if (hasShownNextQuestion && nextQuestionData?.question) {
+        appendQuestion(nextQuestionData.question);
+      }
+
+      if (!nextQuestionData) {
         nextQuestionData = await loadNextQuestion({
           mode: learnPanelMode,
           excludeQuestionId: submittedQuestionId,
@@ -3076,6 +3130,7 @@ export default function ReviewApp({
 
       return true;
     } catch (submitError) {
+      submitSequenceRef.current += 1;
       setMessages((current) =>
         current.filter(
           (message) =>
@@ -3086,6 +3141,9 @@ export default function ReviewApp({
       setCurrentQuestionId(submittedQuestionId);
       questionIdRef.current = submittedQuestionId;
       setQuestion(submittedQuestion);
+      questionRef.current = submittedQuestion;
+      setCurrentDeckId(submittedDeckId);
+      setCurrentDeckName(submittedDeckName);
       setAnswer(submittedAnswer);
       answerRef.current = submittedAnswer;
       setError(
@@ -3102,8 +3160,10 @@ export default function ReviewApp({
     applyNextQuestion,
     clearPendingSpeechCommand,
     currentDeckId,
+    currentDeckName,
     learnPanelMode,
     loadNextQuestion,
+    appendQuestion,
     takePrefetchedNextQuestion,
   ]);
 
@@ -3134,11 +3194,10 @@ export default function ReviewApp({
         }),
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to skip the question.");
-      }
-
-      const data = (await response.json()) as NextQuestionResponse;
+      const data = await readJsonResponse<NextQuestionResponse>(
+        response,
+        "Failed to skip the question.",
+      );
       applyNextQuestion(data);
 
       return true;
@@ -3847,7 +3906,7 @@ export default function ReviewApp({
     ({
       phase: "memory",
       status: learnGenerationStatus ?? "Preparing new questions",
-      progress: isLearnTopUpPending ? 8 : 0,
+      progress: 0,
       generated: 0,
       total: 50,
       latestQuestion: null,
@@ -3969,7 +4028,7 @@ export default function ReviewApp({
     setLearnGenerationProgress({
       phase: "memory",
       status: "Updating deck memory",
-      progress: 4,
+      progress: 0,
       generated: 0,
       total: count,
       latestQuestion: null,
@@ -4003,7 +4062,10 @@ export default function ReviewApp({
         setLearnGenerationProgress((currentProgress) => ({
           phase: "complete",
           status: "Refreshing the queue",
-          progress: 96,
+          progress: calculateQuestionExtractionProgress({
+            generated: data.generated,
+            total: currentProgress?.total ?? count,
+          }),
           generated: data.generated,
           total: currentProgress?.total ?? count,
           latestQuestion: currentProgress?.latestQuestion ?? null,
@@ -4015,7 +4077,10 @@ export default function ReviewApp({
         setLearnGenerationProgress((currentProgress) => ({
           phase: "complete",
           status: "Loading the next question",
-          progress: 98,
+          progress: calculateQuestionExtractionProgress({
+            generated: data.generated,
+            total: currentProgress?.total ?? count,
+          }),
           generated: data.generated,
           total: currentProgress?.total ?? count,
           latestQuestion: currentProgress?.latestQuestion ?? null,
@@ -4419,11 +4484,10 @@ export default function ReviewApp({
         }),
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to generate reference answer.");
-      }
-
-      const data = (await response.json()) as ReferenceAnswerResponse;
+      const data = await readJsonResponse<ReferenceAnswerResponse>(
+        response,
+        "Failed to generate reference answer.",
+      );
 
       setReferenceAnswers((current) => ({
         ...current,
@@ -4615,7 +4679,7 @@ export default function ReviewApp({
                     aria-valuemin={0}
                     aria-valuemax={100}
                     aria-valuenow={activeLearnGenerationProgress.progress}
-                    aria-label="Question generation progress"
+                    aria-label="Question extraction progress"
                   >
                     <span
                       style={{
@@ -4635,7 +4699,7 @@ export default function ReviewApp({
                     </div>
                     <div>
                       <dt>{activeLearnGenerationProgress.progress}%</dt>
-                      <dd>progress</dd>
+                      <dd>of requested</dd>
                     </div>
                   </dl>
 
@@ -4835,6 +4899,19 @@ export default function ReviewApp({
                             className="previous-question"
                             text={item.question}
                           />
+                          {isPending ? (
+                            <p
+                              className="previous-question-feedback previous-question-feedback-pending"
+                              aria-live="polite"
+                            >
+                              Evaluating...
+                            </p>
+                          ) : (
+                            <MarkdownContent
+                              className="previous-question-feedback"
+                              text={item.justification ?? "No feedback returned."}
+                            />
+                          )}
                         </div>
 
                         <div
@@ -4854,30 +4931,6 @@ export default function ReviewApp({
                               <p className="previous-answer previous-answer-empty">
                                 No answer text recorded.
                               </p>
-                            )}
-                          </div>
-
-                          <div className="previous-field">
-                            <span className="previous-field-label">
-                              Evaluation
-                            </span>
-                            {isPending ? (
-                              <div className="previous-summary previous-summary-pending">
-                                <p>{formatEvaluationPhase(item.phase)}...</p>
-                                <span>
-                                  {formatEvaluationActivity(
-                                    item.lastActivityAt,
-                                    currentTime,
-                                  )}
-                                </span>
-                              </div>
-                            ) : (
-                              <MarkdownContent
-                                className="previous-summary"
-                                text={
-                                  item.justification ?? "No feedback returned."
-                                }
-                              />
                             )}
                           </div>
                         </div>

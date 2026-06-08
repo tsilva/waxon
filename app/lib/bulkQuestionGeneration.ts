@@ -75,13 +75,13 @@ function buildGenerationMemoryContext(memory: string): string {
 
 function buildGenerationSystemPrompt(questionQualityReference: string): string {
   return [
-    "You generate bulk Waxon questions that continue learning when a review rotation has no due questions.",
+    "You generate bulk learning questions that continue learning when a review rotation has no due questions.",
     "Use the memory excerpts as durable curriculum state. Generate from the first useful Frontier Queue and Target Ledger todo/weak/planned targets in learner order.",
     "Earlier questions must support later dependent questions. Introduce uncovered targets or repair weak/partial targets; no review, recap, or practice duplicates.",
     "Never reveal the answer in the question text. Return compact keys: q=question, a=concise expected answer, p=why this target is next.",
     "Return strict JSON only:",
     '{"questions":[{"q":"...","a":"short expected answer","p":"why now"}]}',
-    "Shared Waxon question-quality reference:",
+    "Shared question-quality reference:",
     questionQualityReference,
   ].join("\n\n");
 }
