@@ -217,6 +217,15 @@ function buildQuestionQualitySummary(questionQualityReference: string): string {
   ].join(" ");
 }
 
+function buildQuestionQualityPromptBlock(questionQualityReference: string): string {
+  return [
+    buildQuestionQualitySummary(questionQualityReference),
+    "Every generated question must follow the shared Waxon question-quality reference below.",
+    "Shared Waxon question-quality reference:",
+    questionQualityReference,
+  ].join("\n\n");
+}
+
 function initialDeckMemory(deck: { name: string; goal: string }): string {
   return [
     "# Deck Memory",
@@ -514,7 +523,7 @@ function buildLearnSystemPrompt(questionQualityReference: string): string {
     "For alphabet, script, or syllabary goals, treat the default scope as character recognition plus the standard/common transliteration named or implied by the goal. Do not expand into example words, spelling rules, particle readings, long-vowel conventions, historical variants, or comparisons between romanization systems unless the goal explicitly asks for those.",
     "The memoryPatch must be a diff: replace or append only changed sections. Do not return the whole memory. Keep sections compact so future prompts remain bounded.",
     "Do not mark newly generated questions as mastered; only update memory from existing memory and answered performance. Dedupe happens after your response.",
-    buildQuestionQualitySummary(questionQualityReference),
+    buildQuestionQualityPromptBlock(questionQualityReference),
     "Return zero questions only when memory and performance show no useful uncovered or weak target remains.",
     "Return JSON only:",
     '{"questions":[{"question":"...","conciseAnswer":"short expected answer","questionProvenance":"why now"}],"memoryPatch":[{"op":"replace_section","heading":"Frontier","body":"- ..."}]}',
@@ -534,7 +543,7 @@ function buildCompletionAuditSystemPrompt(questionQualityReference: string): str
     "Preserve target text exactly in memory for symbols, formulas, code identifiers, names, terms, or other atomic targets. Copy exact target strings from generated questions and answered performance.",
     "Never generate review, recap, or practice duplicates. Only introduce uncovered targets or repair weak targets.",
     `Generate up to ${LEARN_BATCH_SIZE} questions if completion is not justified.`,
-    buildQuestionQualitySummary(questionQualityReference),
+    buildQuestionQualityPromptBlock(questionQualityReference),
     "Return JSON only:",
     '{"complete":false,"reason":"brief audit reason","questions":[{"question":"...","conciseAnswer":"short expected answer","questionProvenance":"why now"}],"memoryPatch":[{"op":"replace_section","heading":"Frontier","body":"- ..."}]}',
   ].join("\n\n");

@@ -2143,11 +2143,14 @@ textarea {
 }
 
 .previous-row-empty p {
+  grid-column: 1 / -1;
+  width: 100%;
   margin: 0;
   color: var(--muted);
   font-size: 15px;
   font-weight: 650;
   line-height: 1.35;
+  text-align: center;
 }
 
 .previous-placeholder-score {
