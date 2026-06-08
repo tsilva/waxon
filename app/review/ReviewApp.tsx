@@ -1625,6 +1625,9 @@ export default function ReviewApp({
   const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
   const [isLearnTopUpPending, setIsLearnTopUpPending] = useState(false);
   const [learnTopUpMessage, setLearnTopUpMessage] = useState<string | null>(null);
+  const [learnGenerationStatus, setLearnGenerationStatus] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [reviewQueueVersion, setReviewQueueVersion] = useState(0);
@@ -1648,8 +1651,10 @@ export default function ReviewApp({
     cachedSessionRef.current?.queueLoadedLimit ?? QUEUE_PAGE_SIZE,
   );
   const isQueuePageLoadingRef = useRef(false);
+  const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
+  const shouldRefocusAnswerAfterSubmitRef = useRef(false);
   const keepListeningRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const pendingSpeechCommandRef = useRef<PendingSpeechCommand | null>(null);
@@ -1756,6 +1761,28 @@ export default function ReviewApp({
   useEffect(() => {
     isQueuePageLoadingRef.current = isQueuePageLoading;
   }, [isQueuePageLoading]);
+
+  useEffect(() => {
+    if (!shouldRefocusAnswerAfterSubmitRef.current) {
+      return;
+    }
+
+    if (activeTab !== "review" || (!isSubmitting && !question)) {
+      shouldRefocusAnswerAfterSubmitRef.current = false;
+      return;
+    }
+
+    if (isSubmitting || !question) {
+      return;
+    }
+
+    shouldRefocusAnswerAfterSubmitRef.current = false;
+    const frameId = window.requestAnimationFrame(() => {
+      answerInputRef.current?.focus();
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeTab, isSubmitting, question]);
 
   useEffect(() => {
     reviewSessionSnapshot = {
@@ -2507,6 +2534,9 @@ export default function ReviewApp({
     const mode = options?.mode ?? learnPanelMode;
 
     setIsLoadingQuestion(true);
+    if (mode === "learn") {
+      setLearnGenerationStatus("Checking for an available question");
+    }
     setQuestion(null);
     questionRef.current = null;
     setCurrentQuestionId(null);
@@ -2869,6 +2899,7 @@ export default function ReviewApp({
     const optimisticMessageId = `answer-${optimisticEvaluationId}`;
 
     isSubmittingRef.current = true;
+    shouldRefocusAnswerAfterSubmitRef.current = true;
     setIsSubmitting(true);
     setAnswer("");
     answerRef.current = "";
@@ -3854,6 +3885,7 @@ export default function ReviewApp({
     }
 
     if (now < learnTopUpCooldownUntilRef.current) {
+      setLearnGenerationStatus(null);
       setLearnTopUpMessage("Waiting to retry");
       return;
     }
@@ -3861,6 +3893,7 @@ export default function ReviewApp({
     isLearnTopUpPendingRef.current = true;
     setIsLearnTopUpPending(true);
     setLearnTopUpMessage(null);
+    setLearnGenerationStatus("Checking the learn queue");
 
     try {
       const pendingLearnSource = pendingLearnSourceRef.current;
@@ -3898,6 +3931,7 @@ export default function ReviewApp({
         pendingLearnSourceRef.current = null;
 
         if (!currentTargetQuestion && nextQuestionData.question) {
+          setLearnGenerationStatus("Loading the first question");
           applyNextQuestion(nextQuestionData);
         } else if (currentTargetQuestion) {
           prefetchNextQuestion("learn", currentQuestionId, currentTargetQuestion);
@@ -3907,6 +3941,11 @@ export default function ReviewApp({
       }
 
       const questionsNeeded = LEARN_QUEUE_TARGET_REMAINING - readyQuestionCount;
+      setLearnGenerationStatus(
+        questionsNeeded === 1
+          ? "Generating 1 missing question"
+          : `Generating ${questionsNeeded} missing questions`,
+      );
       const response = await fetch("/api/questions/learn", {
         method: "POST",
         headers: {
@@ -3936,15 +3975,18 @@ export default function ReviewApp({
             : `${data.added} questions added`,
         );
         pendingLearnSourceRef.current = null;
+        setLearnGenerationStatus("Refreshing the queue");
         await loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
 
         if (!currentTargetQuestion) {
+          setLearnGenerationStatus("Loading the first question");
           await loadNextQuestion({ mode: "learn", surfaceError: false });
         } else {
           prefetchNextQuestion("learn", currentQuestionId, currentTargetQuestion);
         }
       } else {
         learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
+        setLearnGenerationStatus(null);
         setLearnTopUpMessage(
           data.rejected > 0
             ? "Generated questions were duplicates"
@@ -3953,6 +3995,7 @@ export default function ReviewApp({
       }
     } catch (topUpError) {
       learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
+      setLearnGenerationStatus(null);
       setLearnTopUpMessage(
         topUpError instanceof Error
           ? topUpError.message
@@ -4293,6 +4336,14 @@ export default function ReviewApp({
   const hasGeneratorContext =
     generatorScope.trim().length > 0 || generatorFiles.length > 0;
   const isGeneratorReviewStep = generatedQuestions.length > 0;
+  const shouldShowLearnWaitingMask = learnPanelMode === "learn" && !question;
+  const isLearnWaitingBusy = isLoadingQuestion || isLearnTopUpPending;
+  const learnWaitingStatus = isLoadingQuestion
+    ? "Checking for an available question"
+    : learnGenerationStatus ?? learnTopUpMessage ?? "Preparing new questions";
+  const learnWaitingTitle = isLearnWaitingBusy
+    ? "Generating questions"
+    : "No question ready";
 
   useEffect(() => {
     if (!selectedQuestionStats) {
@@ -4524,15 +4575,6 @@ export default function ReviewApp({
                 Learn
               </button>
             </div>
-            {learnPanelMode === "learn" ? (
-              <p className="learn-mode-status" aria-live="polite">
-                {question
-                  ? "Queue ready"
-                  : isLearnTopUpPending
-                    ? "Generating..."
-                    : learnTopUpMessage ?? "Finding first question..."}
-              </p>
-            ) : null}
           </div>
           <section className="question-area" aria-live="polite">
             <div
@@ -4541,7 +4583,54 @@ export default function ReviewApp({
                 !isLoadingQuestion && question ? "question-copy-enter" : ""
               }`}
             >
-              {isLoadingQuestion ? (
+              {shouldShowLearnWaitingMask ? (
+                <div
+                  className="learn-waiting-mask"
+                  aria-busy={isLearnWaitingBusy}
+                >
+                  <div className="learn-waiting-content">
+                    <span className="learn-waiting-icon" aria-hidden="true">
+                      <Sparkles />
+                    </span>
+                    <p className="learn-waiting-kicker">Learn mode</p>
+                    <h2 className="learn-waiting-title">{learnWaitingTitle}</h2>
+                    <p
+                      className="learn-waiting-status"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {learnWaitingStatus}
+                    </p>
+                    {isLearnWaitingBusy ? (
+                      <div className="learn-waiting-progress" aria-hidden="true">
+                        <span />
+                        <span />
+                        <span />
+                      </div>
+                    ) : (
+                      <div className="learn-waiting-actions">
+                        <button
+                          className="resting-primary"
+                          type="button"
+                          onClick={() => {
+                            learnTopUpCooldownUntilRef.current = 0;
+                            void topUpLearnQueue();
+                          }}
+                        >
+                          Retry
+                        </button>
+                        <button
+                          className="resting-secondary"
+                          type="button"
+                          onClick={openQueue}
+                        >
+                          View queue
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : isLoadingQuestion ? (
                 <h2 className="question-title">Loading next question...</h2>
               ) : question ? (
                 <>
@@ -4651,6 +4740,7 @@ export default function ReviewApp({
               <div className="composer-row">
                 <textarea
                   id="answer-input"
+                  ref={answerInputRef}
                   className="composer-input"
                   value={displayedAnswer}
                   onChange={(event) => {
