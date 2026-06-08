@@ -6,6 +6,7 @@ import {
 import {
   extractChatCompletionText,
   getOpenRouterApiKey,
+  getOpenRouterChatModel,
   openRouterChatCompletion,
 } from "./openRouter";
 import {
@@ -190,6 +191,7 @@ export async function evaluateAnswer(
   }
 
   const apiKey = getOpenRouterApiKey();
+  const model = getOpenRouterChatModel() ?? "";
 
   if (!apiKey) {
     const traceId = input.traceId ?? crypto.randomUUID();
@@ -197,7 +199,7 @@ export async function evaluateAnswer(
     await recordFailedLlmTrace({
       traceId,
       operation: "evaluate_answer",
-      model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+      model,
       question: input.question,
       requestBody: {
         question: input.question,
@@ -239,7 +241,7 @@ export async function evaluateAnswer(
         traceId: input.traceId,
       },
       body: {
-        model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+        model,
         messages: [
           {
             role: "system",
@@ -262,7 +264,7 @@ export async function evaluateAnswer(
     if (!response.ok) {
       console.info("[waxon] llm evaluation failed", {
         provider: "openrouter",
-        model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+        model,
         status: response.status,
         statusText: response.statusText,
       });
@@ -276,7 +278,7 @@ export async function evaluateAnswer(
   } catch (error) {
     console.info("[waxon] llm evaluation failed", {
       provider: "openrouter",
-      model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+      model,
       error: error instanceof Error ? error.message : "unknown error",
     });
     if (isAbortError(error)) {

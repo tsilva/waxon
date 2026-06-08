@@ -30,7 +30,7 @@ function createDatabaseClient(): DatabaseClient {
   };
 }
 
-export const databaseClient = globalForDb.waxonDb ?? createDatabaseClient();
+const databaseClient = globalForDb.waxonDb ?? createDatabaseClient();
 globalForDb.waxonDb = databaseClient;
 
 export const db = databaseClient.db;

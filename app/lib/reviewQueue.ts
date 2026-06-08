@@ -4,7 +4,7 @@ import {
   createAnswerEvaluationRecord,
   getDueQuestions,
   getVisibleAnswerEvaluations,
-  getQuestionAttempts,
+  getQuestionAttemptsByQuestionIds,
   getQueuedQuestionsPage,
   getQuestionSnapshotById,
   getRecentQuestionAttempts,
@@ -42,6 +42,7 @@ import type {
   DeckEmbeddingPlotPoint,
   EvaluationPhase,
   EvaluationQueueItem,
+  QuestionAttempt,
   QueueStatusSnapshot,
   ReviewQueueItem,
 } from "./reviewTypes";
@@ -73,6 +74,17 @@ type NextQuestionInput = {
   deckId?: string | null;
   excludeQuestionId?: string | null;
   excludeQuestion?: string | null;
+};
+
+type QueueStatusInput = {
+  deckId?: string;
+  limit?: number;
+  offset?: number;
+  sortKey?: QueuedQuestionsSortKey;
+  includeReviewQueue?: boolean;
+  includeQuestionAttempts?: boolean;
+  includeRecentAttempts?: boolean;
+  includeDeckEmbeddingPlot?: boolean;
 };
 
 type LatestEvaluation = {
@@ -601,6 +613,7 @@ async function getReviewQueueItems(
     limit: number;
     offset: number;
     sortKey: QueuedQuestionsSortKey;
+    includeQuestionAttempts?: boolean;
   },
   now = Date.now(),
 ): Promise<{
@@ -618,17 +631,12 @@ async function getReviewQueueItems(
     sortKey: input.sortKey,
   });
   const queuedQuestions = queuedQuestionsPage.items;
-  const attemptsByQuestionId = new Map(
-    await Promise.all(
-      queuedQuestions.map(async (item) => [
-        item.questionId,
-        await getQuestionAttempts(item.question, {
-          userId,
-          questionId: item.questionId,
-        }),
-      ] as const),
-    ),
-  );
+  const attemptsByQuestionId = input.includeQuestionAttempts === false
+    ? new Map<string, QuestionAttempt[]>()
+    : await getQuestionAttemptsByQuestionIds({
+        userId,
+        questionIds: queuedQuestions.map((item) => item.questionId),
+      });
 
   return {
     total: queuedQuestionsPage.total,
@@ -704,35 +712,6 @@ async function refreshIfEmpty(userId: string): Promise<void> {
     (question) => !state.inFlightQuestionKeys.has(questionKey(question)),
   );
   logQueueFlushStatus("refreshed-empty-queue");
-}
-
-async function refreshIfEarlierDueQuestionExists(userId: string): Promise<void> {
-  const currentQuestion =
-    state.queue.find(
-      (item) => !state.inFlightQuestionKeys.has(questionKey(item)),
-    ) ??
-    null;
-  const dueQuestions = await getDueQuestions(Date.now(), { userId });
-  const earliestDueQuestion =
-    dueQuestions.find(
-      (item) => !state.inFlightQuestionKeys.has(questionKey(item)),
-    ) ??
-    null;
-
-  if (!earliestDueQuestion) {
-    return;
-  }
-
-  if (
-    !currentQuestion ||
-    earliestDueQuestion.nextDue < currentQuestion.nextDue ||
-    !state.queue.some((item) => questionKey(item) === questionKey(earliestDueQuestion))
-  ) {
-    state.queue = dueQuestions.filter(
-      (question) => !state.inFlightQuestionKeys.has(questionKey(question)),
-    );
-    logQueueFlushStatus("refreshed-earlier-due-question");
-  }
 }
 
 function removeFromQueue(input: {
@@ -1111,7 +1090,6 @@ export async function peekNextQuestion(input: NextQuestionInput = {}): Promise<{
 }> {
   const user = await initializeQueue();
   await refreshIfEmpty(user.id);
-  await refreshIfEarlierDueQuestionExists(user.id);
   const mode = input.mode ?? "review";
   const deckId = input.deckId?.trim() || null;
   const excludedQuestionKey = input.excludeQuestionId?.trim() || null;
@@ -1337,36 +1315,78 @@ export async function addQuestionsToDeck(input: {
   };
 }
 
-export async function queueStatus(input: {
+function emptyDeckEmbeddingPlot(): DeckEmbeddingPlot {
+  return {
+    model: null,
+    totalQuestions: 0,
+    embeddedQuestions: 0,
+    points: [],
+  };
+}
+
+export async function deckEmbeddingPlotStatus(input: {
   deckId?: string;
   limit?: number;
   offset?: number;
   sortKey?: QueuedQuestionsSortKey;
-} = {}): Promise<QueueStatusSnapshot> {
+} = {}): Promise<DeckEmbeddingPlot> {
+  const user = await initializeQueue();
+  const limit = Math.min(2_000, Math.max(0, Math.floor(input.limit ?? 48)));
+  const offset = Math.max(0, Math.floor(input.offset ?? 0));
+  const sortKey = input.sortKey ?? "review-date";
+  const reviewQueuePage = await getQueuedQuestionsPage({
+    userId: user.id,
+    deckId: input.deckId,
+    excludeQuestionIds: Array.from(state.inFlightQuestionKeys).filter(
+      (key) => !key.startsWith("question:"),
+    ),
+    limit,
+    offset,
+    sortKey,
+  });
+
+  return getDeckEmbeddingPlot({
+    userId: user.id,
+    deckId: input.deckId,
+    questions: reviewQueuePage.items.map((item) => item.question),
+    totalQuestions: reviewQueuePage.total,
+  });
+}
+
+export async function queueStatus(input: QueueStatusInput = {}): Promise<QueueStatusSnapshot> {
   const user = await initializeQueue();
   await refreshIfEmpty(user.id);
   const now = Date.now();
   const limit = Math.min(2_000, Math.max(0, Math.floor(input.limit ?? 24)));
   const offset = Math.max(0, Math.floor(input.offset ?? 0));
   const sortKey = input.sortKey ?? "review-date";
-  const reviewQueuePage = await getReviewQueueItems(user.id, {
-    deckId: input.deckId,
-    limit,
-    offset,
-    sortKey,
-  });
-  const recentAttempts = await getRecentQuestionAttempts({
-    userId: user.id,
-    deckScope: input.deckId ? undefined : "rotation",
-    deckId: input.deckId,
-    limit: 24,
-  });
-  const deckEmbeddingPlot = await getDeckEmbeddingPlot({
-    userId: user.id,
-    deckId: input.deckId,
-    questions: reviewQueuePage.items.map((item) => item.question),
-    totalQuestions: reviewQueuePage.total,
-  });
+  const includeReviewQueue = input.includeReviewQueue ?? true;
+  const includeRecentAttempts = input.includeRecentAttempts ?? true;
+  const reviewQueuePage = includeReviewQueue
+    ? await getReviewQueueItems(user.id, {
+        deckId: input.deckId,
+        limit,
+        offset,
+        sortKey,
+        includeQuestionAttempts: input.includeQuestionAttempts,
+      })
+    : { items: [], total: 0 };
+  const recentAttempts = includeRecentAttempts
+    ? await getRecentQuestionAttempts({
+        userId: user.id,
+        deckScope: input.deckId ? undefined : "rotation",
+        deckId: input.deckId,
+        limit: 24,
+      })
+    : [];
+  const deckEmbeddingPlot = input.includeDeckEmbeddingPlot
+    ? await getDeckEmbeddingPlot({
+        userId: user.id,
+        deckId: input.deckId,
+        questions: reviewQueuePage.items.map((item) => item.question),
+        totalQuestions: reviewQueuePage.total,
+      })
+    : emptyDeckEmbeddingPlot();
   const persistedEvaluations = await getVisibleAnswerEvaluations({
     userId: user.id,
     deckId: input.deckId,

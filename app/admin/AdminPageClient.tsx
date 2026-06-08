@@ -13,17 +13,16 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import {
-  Fragment,
   useCallback,
   useEffect,
   useMemo,
   useState,
   type CSSProperties,
-  type ReactNode,
 } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import type { AuthenticatedUser } from "@/app/lib/auth";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import {
   ADMIN_VIEW_STATE_COOKIE,
@@ -1034,157 +1033,16 @@ function extractRequestMarkdownMessages(payload: string): RequestMarkdownMessage
   return [];
 }
 
-function findClosingDelimiter(
-  text: string,
-  delimiter: string,
-  startIndex: number,
-): number {
-  let index = startIndex;
-
-  while (index < text.length) {
-    const closeIndex = text.indexOf(delimiter, index);
-
-    if (closeIndex === -1) {
-      return -1;
-    }
-
-    if (text[closeIndex - 1] !== "\\") {
-      return closeIndex;
-    }
-
-    index = closeIndex + delimiter.length;
-  }
-
-  return -1;
-}
-
-function renderTraceInlineMarkdown(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let index = 0;
-
-  while (index < text.length) {
-    if (text.startsWith("**", index)) {
-      const closeIndex = findClosingDelimiter(text, "**", index + 2);
-
-      if (closeIndex > index) {
-        nodes.push(
-          <strong key={`strong-${index}`}>
-            {renderTraceInlineMarkdown(text.slice(index + 2, closeIndex))}
-          </strong>,
-        );
-        index = closeIndex + 2;
-        continue;
-      }
-    }
-
-    if (text[index] === "`") {
-      const closeIndex = findClosingDelimiter(text, "`", index + 1);
-
-      if (closeIndex > index) {
-        nodes.push(
-          <code className="markdown-inline-code" key={`code-${index}`}>
-            {text.slice(index + 1, closeIndex)}
-          </code>,
-        );
-        index = closeIndex + 1;
-        continue;
-      }
-    }
-
-    if (
-      text[index] === "*" &&
-      text[index + 1] !== "*" &&
-      text[index - 1] !== "*"
-    ) {
-      const closeIndex = findClosingDelimiter(text, "*", index + 1);
-
-      if (closeIndex > index) {
-        nodes.push(
-          <em key={`em-${index}`}>
-            {renderTraceInlineMarkdown(text.slice(index + 1, closeIndex))}
-          </em>,
-        );
-        index = closeIndex + 1;
-        continue;
-      }
-    }
-
-    const nextSpecial = text.slice(index + 1).search(/(\*\*|`|\*)/);
-    const endIndex =
-      nextSpecial === -1 ? text.length : index + 1 + nextSpecial;
-
-    nodes.push(text.slice(index, endIndex));
-    index = endIndex;
-  }
-
-  return nodes;
-}
-
 function TraceMarkdownContent({ text }: { text: string }) {
-  const blocks = text.trim().split(/\n{2,}/);
-
   return (
-    <div className="admin-call-markdown markdown-content">
-      {blocks.map((block, index) => {
-        const trimmedBlock = block.trim();
-        const lines = trimmedBlock.split("\n");
-
-        if (trimmedBlock.startsWith("```") && trimmedBlock.endsWith("```")) {
-          const codeLines = lines.slice(1, -1);
-
-          return (
-            <pre className="admin-call-markdown-code" key={`code-${index}`}>
-              <code>{codeLines.join("\n")}</code>
-            </pre>
-          );
-        }
-
-        if (/^#{1,3}\s+/.test(trimmedBlock)) {
-          return (
-            <h3 className="admin-call-markdown-heading" key={`h-${index}`}>
-              {renderTraceInlineMarkdown(trimmedBlock.replace(/^#{1,3}\s+/, ""))}
-            </h3>
-          );
-        }
-
-        if (lines.every((line) => /^[-*]\s+/.test(line.trim()))) {
-          return (
-            <ul className="markdown-list" key={`ul-${index}`}>
-              {lines.map((line, lineIndex) => (
-                <li key={`${line}-${lineIndex}`}>
-                  {renderTraceInlineMarkdown(line.trim().slice(2))}
-                </li>
-              ))}
-            </ul>
-          );
-        }
-
-        if (lines.every((line) => /^\d+\.\s+/.test(line.trim()))) {
-          return (
-            <ol className="markdown-list" key={`ol-${index}`}>
-              {lines.map((line, lineIndex) => (
-                <li key={`${line}-${lineIndex}`}>
-                  {renderTraceInlineMarkdown(
-                    line.trim().replace(/^\d+\.\s+/, ""),
-                  )}
-                </li>
-              ))}
-            </ol>
-          );
-        }
-
-        return (
-          <p className="markdown-paragraph" key={`p-${index}`}>
-            {lines.map((line, lineIndex) => (
-              <Fragment key={`${line}-${lineIndex}`}>
-                {lineIndex > 0 ? <br /> : null}
-                {renderTraceInlineMarkdown(line)}
-              </Fragment>
-            ))}
-          </p>
-        );
-      })}
-    </div>
+    <MarkdownContent
+      className="admin-call-markdown"
+      codeBlockClassName="admin-call-markdown-code"
+      enableCodeBlocks
+      enableHeadings
+      headingClassName="admin-call-markdown-heading"
+      text={text}
+    />
   );
 }
 

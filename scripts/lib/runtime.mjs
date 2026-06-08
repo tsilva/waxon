@@ -28,6 +28,24 @@ export function requireEnv(name, fallbackName) {
   return value;
 }
 
+export function requireOpenRouterApiKey() {
+  return requireEnv("OPENROUTER_API_KEY", "LLM_API_KEY");
+}
+
+export function openRouterChatModel() {
+  return process.env.LLM_MODEL?.trim() || "openai/gpt-5.5";
+}
+
+export function createDatabasePool(Pool) {
+  const connectionString = requireEnv("DATABASE_URL_UNPOOLED", "DATABASE_URL");
+
+  return new Pool({ connectionString });
+}
+
+export function logSavedProgress(saved, total) {
+  console.log(`Saved ${saved}/${total}`);
+}
+
 export function chunks(items, size) {
   const result = [];
 

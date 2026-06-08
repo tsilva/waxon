@@ -156,11 +156,9 @@ textarea {
 .resting-metrics dd,
 .resting-primary,
 .resting-secondary,
-.composer-label,
 .speech-status,
 .error-message,
 .previous-header h2,
-.previous-empty,
 .load-more-answers,
 .previous-row-empty p,
 .previous-field-label,
@@ -1427,66 +1425,6 @@ textarea {
   grid-row: 2;
 }
 
-.learn-mode-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  width: min(1080px, 100%);
-  min-height: 38px;
-  margin: 0 auto;
-}
-
-.learn-mode-segmented {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  border: 1px solid rgb(227 218 196 / 78%);
-  border-radius: 8px;
-  padding: 3px;
-  background: rgb(245 238 224 / 56%);
-}
-
-.learn-mode-option {
-  display: inline-grid;
-  place-items: center;
-  min-width: 78px;
-  height: 30px;
-  border: 0;
-  border-radius: 6px;
-  padding: 0 12px;
-  background: transparent;
-  color: var(--muted-strong);
-  cursor: pointer;
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 780;
-  line-height: 1;
-}
-
-.learn-mode-option-active {
-  background: rgb(255 255 255 / 82%);
-  color: var(--ink);
-  box-shadow: inset 0 0 0 1px rgb(227 218 196 / 68%);
-}
-
-.learn-mode-option:hover,
-.learn-mode-option:focus-visible {
-  color: var(--ink);
-  outline: 2px solid rgb(166 124 82 / 14%);
-  outline-offset: 2px;
-}
-
-.learn-mode-status {
-  margin: 0;
-  color: var(--muted);
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 720;
-  line-height: 1.2;
-  text-align: right;
-}
-
 .question-copy {
   width: 100%;
   min-width: 0;
@@ -1978,17 +1916,6 @@ textarea {
   margin: 0 auto;
 }
 
-.composer-label {
-  display: none;
-  margin: 0 0 10px 2px;
-  color: var(--muted-strong);
-  font-size: 12px;
-  font-weight: 820;
-  letter-spacing: 0.1em;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
 .composer-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
@@ -2183,13 +2110,6 @@ textarea {
   font-size: 16px;
   font-weight: 720;
   line-height: 1.2;
-}
-
-.previous-empty {
-  margin: 0;
-  color: var(--muted);
-  font-size: 15px;
-  font-weight: 650;
 }
 
 .previous-list {
@@ -3861,8 +3781,7 @@ textarea {
   line-height: 1;
 }
 
-.generator-primary-action,
-.generator-secondary-action {
+.generator-primary-action {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3876,8 +3795,7 @@ textarea {
   line-height: 1;
 }
 
-.generator-primary-action svg,
-.generator-secondary-action svg {
+.generator-primary-action svg {
   width: 15px;
   height: 15px;
   flex: 0 0 auto;
@@ -3986,20 +3904,6 @@ textarea {
   box-shadow: 0 12px 24px rgb(166 124 82 / 18%);
 }
 
-.generator-secondary-action {
-  border: 1px solid rgb(227 218 196 / 82%);
-  background: rgb(255 255 255 / 70%);
-  color: var(--ink-soft);
-}
-
-.generator-secondary-action:hover,
-.generator-secondary-action:focus-visible {
-  border-color: rgb(166 124 82 / 36%);
-  background: #ffffff;
-  outline: 3px solid rgb(166 124 82 / 14%);
-  outline-offset: 2px;
-}
-
 .generator-primary-action:hover,
 .generator-primary-action:focus-visible {
   background: #5f4e41;
@@ -4007,8 +3911,7 @@ textarea {
   outline-offset: 2px;
 }
 
-.generator-primary-action:disabled,
-.generator-secondary-action:disabled {
+.generator-primary-action:disabled {
   cursor: not-allowed;
   opacity: 0.52;
 }
@@ -4050,19 +3953,6 @@ textarea {
   font-size: 12px;
   font-weight: 720;
   line-height: 1.25;
-}
-
-.generator-review-empty {
-  display: grid;
-  place-items: center;
-  min-height: 210px;
-  padding: 22px;
-  color: var(--muted);
-  text-align: center;
-}
-
-.generator-review-empty p {
-  margin: 0;
 }
 
 .generator-question-list {
@@ -6035,29 +5925,6 @@ textarea {
     grid-template-rows: auto auto;
   }
 
-  .learn-mode-bar {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 8px;
-    width: 100%;
-    max-width: calc(100vw - 44px);
-    margin-bottom: 18px;
-  }
-
-  .learn-mode-segmented {
-    width: 100%;
-  }
-
-  .learn-mode-option {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
-  .learn-mode-status {
-    min-height: 15px;
-    text-align: left;
-  }
-
   .question-area {
     width: 100%;
     max-width: calc(100vw - 44px);
@@ -6475,8 +6342,7 @@ textarea {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .generator-primary-action,
-  .generator-secondary-action {
+  .generator-primary-action {
     min-width: 0;
   }
 

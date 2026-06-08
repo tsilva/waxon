@@ -781,35 +781,6 @@ export async function updateDeck(input: {
   return deck;
 }
 
-export async function archiveDeck(input: {
-  deckId: string;
-  userId?: string;
-}): Promise<void> {
-  const context = await ensureSeedData(input);
-  const currentDeck = (await listDecks({ userId: context.userId })).find(
-    (deck) => deck.id === input.deckId,
-  );
-
-  if (!currentDeck) {
-    throw new Error("Deck not found.");
-  }
-
-  if (currentDeck.id === context.deckId) {
-    throw new Error("The current Deep Learning deck cannot be archived.");
-  }
-
-  const now = Math.round(Date.now());
-
-  await db
-    .update(decks)
-    .set({
-      archivedAt: now,
-      inReviewRotation: false,
-      updatedAt: now,
-    })
-    .where(and(eq(decks.id, input.deckId), eq(decks.userId, context.userId)));
-}
-
 export async function deleteDeck(input: {
   deckId: string;
   userId?: string;
@@ -1248,6 +1219,68 @@ export async function getQuestionAttempts(
       Number.isFinite(attempt.submittedAt) &&
       Number.isFinite(attempt.resolvedAt),
   );
+}
+
+export async function getQuestionAttemptsByQuestionIds(
+  input: UserContextInput & { questionIds: string[] },
+): Promise<Map<string, QuestionAttempt[]>> {
+  const context = await ensureSeedData(input);
+  const questionIds = Array.from(new Set(input.questionIds)).filter(Boolean);
+
+  if (questionIds.length === 0) {
+    return new Map();
+  }
+
+  const rows = await db
+    .select({
+      id: questionAttempts.id,
+      questionId: questionAttempts.questionId,
+      deckId: questionAttempts.deckId,
+      question: questionAttempts.question,
+      rawAnswer: questionAttempts.rawAnswer,
+      answerSummary: questionAttempts.answerSummary,
+      score: questionAttempts.score,
+      justification: questionAttempts.justification,
+      submittedAt: questionAttempts.submittedAt,
+      resolvedAt: questionAttempts.resolvedAt,
+    })
+    .from(questionAttempts)
+    .where(
+      and(
+        inArray(
+          questionAttempts.deckId,
+          db
+            .select({ id: decks.id })
+            .from(decks)
+            .where(eq(decks.userId, context.userId)),
+        ),
+        inArray(questionAttempts.questionId, questionIds),
+      ),
+    )
+    .orderBy(
+      asc(questionAttempts.questionId),
+      asc(questionAttempts.submittedAt),
+      asc(questionAttempts.id),
+    );
+  const attemptsByQuestionId = new Map<string, QuestionAttempt[]>();
+
+  for (const attempt of rows) {
+    if (
+      !Number.isFinite(attempt.id) ||
+      !Number.isFinite(attempt.score) ||
+      !Number.isFinite(attempt.submittedAt) ||
+      !Number.isFinite(attempt.resolvedAt)
+    ) {
+      continue;
+    }
+
+    const attempts = attemptsByQuestionId.get(attempt.questionId) ?? [];
+
+    attempts.push(attempt);
+    attemptsByQuestionId.set(attempt.questionId, attempts);
+  }
+
+  return attemptsByQuestionId;
 }
 
 export async function getRecentQuestionAttempts(
