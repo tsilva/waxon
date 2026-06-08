@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { archiveDeck, updateDeck } from "@/app/lib/postgresStore";
+import { deleteDeck, updateDeck } from "@/app/lib/postgresStore";
 import { normalizeBoundedText } from "@/app/lib/apiLimits";
 import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 
@@ -73,14 +73,14 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const { deckId } = await context.params;
 
   try {
-    await archiveDeck({ deckId });
+    await deleteDeck({ deckId });
     invalidateReviewQueue();
 
     return NextResponse.json({
       ok: true,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Could not archive deck.";
+    const message = error instanceof Error ? error.message : "Could not delete deck.";
 
     return NextResponse.json(
       { ok: false, error: message },

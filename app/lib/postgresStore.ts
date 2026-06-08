@@ -810,6 +810,28 @@ export async function archiveDeck(input: {
     .where(and(eq(decks.id, input.deckId), eq(decks.userId, context.userId)));
 }
 
+export async function deleteDeck(input: {
+  deckId: string;
+  userId?: string;
+}): Promise<void> {
+  const context = await ensureSeedData(input);
+  const currentDeck = (await listDecks({ userId: context.userId })).find(
+    (deck) => deck.id === input.deckId,
+  );
+
+  if (!currentDeck) {
+    throw new Error("Deck not found.");
+  }
+
+  if (currentDeck.id === context.deckId) {
+    throw new Error("The current Deep Learning deck cannot be deleted.");
+  }
+
+  await db
+    .delete(decks)
+    .where(and(eq(decks.id, input.deckId), eq(decks.userId, context.userId)));
+}
+
 export async function readQuestions(
   input: UserContextInput = {},
 ): Promise<QuestionRow[]> {

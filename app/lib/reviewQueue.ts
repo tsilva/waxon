@@ -25,6 +25,7 @@ import {
   failedEvaluation,
   type EvaluationResult,
 } from "./evaluateAnswer";
+import { recordPendingLlmTrace } from "./llmTraceStore";
 import { parseReviews, reinsertionDelay } from "./scheduler";
 import {
   DEDUPE_EMBEDDING_KIND,
@@ -1215,6 +1216,18 @@ export async function submitAnswer(input: {
   });
 
   state.evaluations = [...state.evaluations, evaluation].slice(-50);
+  await recordPendingLlmTrace({
+    traceId,
+    operation: "evaluate_answer",
+    model: "pending-evaluation",
+    question: snapshot.question,
+    requestBody: {
+      evaluationId: evaluation.id,
+      questionId,
+      deckId,
+      submittedAt,
+    },
+  });
   await createAnswerEvaluationRecord({
     id: evaluation.id,
     traceId,

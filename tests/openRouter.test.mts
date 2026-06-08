@@ -5,6 +5,7 @@ import {
   openRouterEmbeddings,
 } from "../app/lib/openRouter.ts";
 import {
+  classifyLlmInteractionKind,
   listLlmTraceInteractions,
   recordFailedLlmTrace,
 } from "../app/lib/llmTraceStore.ts";
@@ -49,6 +50,14 @@ test("openRouterChatCompletion sends user and deck trace identifiers", async () 
   assert.equal(trace?.user_id, "user-123");
   assert.equal(trace?.deck_id, "deck-456");
   assert.equal(trace?.question_preview, "What should traces include?");
+});
+
+test("classifyLlmInteractionKind uses explicit non-answer trace kinds", () => {
+  assert.equal(classifyLlmInteractionKind("evaluate_answer"), "Answer evaluation");
+  assert.equal(classifyLlmInteractionKind("add_questions_gate"), "Quality gate");
+  assert.equal(classifyLlmInteractionKind("refresh_deck_memory"), "Deck memory");
+  assert.equal(classifyLlmInteractionKind("question_embedding"), "Embedding");
+  assert.equal(classifyLlmInteractionKind("test_operation"), "Other");
 });
 
 test("openRouterEmbeddings sends user and deck trace identifiers", async () => {

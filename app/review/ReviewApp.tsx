@@ -76,11 +76,16 @@ type NextQuestionPrefetch = {
   promise: Promise<PrefetchedNextQuestion | null>;
 };
 
-type SubmitAnswerResponse = {
-  ok: boolean;
-  evaluationId: string;
-  traceId: string;
-};
+type SubmitAnswerResponse =
+  | {
+      ok: true;
+      evaluationId: string;
+      traceId: string;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
 
 type QueueStatusResponse = {
   queueRemaining: number;
@@ -256,6 +261,134 @@ function storeLearnTargetDeckId(deckId: string | null) {
   }
 }
 
+function resizeComposerTextarea(textarea: HTMLTextAreaElement | null): void {
+  if (!textarea) {
+    return;
+  }
+
+  textarea.style.height = "auto";
+  textarea.style.height = `${textarea.scrollHeight}px`;
+}
+
+function toLearnGenerationProgress(
+  payload: Extract<TopUpStreamPayload, { ok: true }>,
+  fallbackTotal: number,
+): LearnGenerationProgress | null {
+  if (!payload.phase || !payload.status) {
+    return null;
+  }
+
+  return {
+    phase: payload.phase,
+    status: payload.status,
+    progress: Math.min(100, Math.max(0, Math.round(payload.progress ?? 0))),
+    generated: Math.max(0, Math.round(payload.generated ?? 0)),
+    total: Math.max(1, Math.round(payload.total ?? fallbackTotal)),
+    latestQuestion: payload.latestQuestion ?? null,
+  };
+}
+
+async function parseTopUpResponse(
+  response: Response,
+  fallbackTotal: number,
+  onProgress: (progress: LearnGenerationProgress) => void,
+): Promise<Extract<TopUpQuestionsResponse, { ok: true }>> {
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (!response.body || !contentType.includes("text/event-stream")) {
+    const data = (await response.json()) as TopUpQuestionsResponse;
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        !data.ok && data.error ? data.error : "Could not generate questions.",
+      );
+    }
+
+    return data;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completed: Extract<TopUpQuestionsResponse, { ok: true }> | null = null;
+
+  const parseEvent = (eventText: string) => {
+    const lines = eventText.split("\n");
+    const eventName =
+      lines
+        .find((line) => line.startsWith("event:"))
+        ?.slice("event:".length)
+        .trim() ?? "message";
+    const dataText = lines
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice("data:".length).trimStart())
+      .join("\n");
+
+    if (!dataText) {
+      return;
+    }
+
+    const payload = JSON.parse(dataText) as TopUpStreamPayload;
+
+    if (!payload.ok) {
+      throw new Error(payload.error ?? "Could not generate questions.");
+    }
+
+    const progress = toLearnGenerationProgress(payload, fallbackTotal);
+
+    if (progress) {
+      onProgress(progress);
+    }
+
+    if (eventName === "complete") {
+      completed = {
+        ok: true,
+        model: payload.model ?? "",
+        deckId: payload.deckId ?? "",
+        deckName: payload.deckName ?? "deck",
+        memoryUpdated: Boolean(payload.memoryUpdated),
+        generated: Math.max(0, Math.round(payload.generated ?? 0)),
+        added: Math.max(0, Math.round(payload.added ?? 0)),
+        rejected: Math.max(0, Math.round(payload.rejected ?? 0)),
+      };
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+
+    let eventBoundary = buffer.indexOf("\n\n");
+
+    while (eventBoundary !== -1) {
+      parseEvent(buffer.slice(0, eventBoundary));
+      buffer = buffer.slice(eventBoundary + 2);
+      eventBoundary = buffer.indexOf("\n\n");
+    }
+  }
+
+  buffer += decoder.decode();
+
+  if (buffer.trim()) {
+    parseEvent(buffer);
+  }
+
+  if (!response.ok) {
+    throw new Error("Could not generate questions.");
+  }
+
+  if (!completed) {
+    throw new Error("Question generation stream ended before completion.");
+  }
+
+  return completed;
+}
+
 function getReviewRouteStateFromPathname(pathname: string): ReviewRouteState | null {
   if (pathname === REVIEW_TAB_PATHS.review) {
     return {
@@ -385,6 +518,42 @@ type TopUpQuestionsResponse =
       generated: number;
       added: number;
       rejected: number;
+    }
+  | {
+      ok: false;
+      error?: string;
+    };
+
+type LearnGenerationPhase =
+  | "memory"
+  | "generating"
+  | "processing"
+  | "complete";
+
+type LearnGenerationProgress = {
+  phase: LearnGenerationPhase;
+  status: string;
+  progress: number;
+  generated: number;
+  total: number;
+  latestQuestion: string | null;
+};
+
+type TopUpStreamPayload =
+  | {
+      ok: true;
+      phase?: LearnGenerationPhase;
+      status?: string;
+      progress?: number;
+      generated?: number;
+      total?: number;
+      latestQuestion?: string | null;
+      model?: string;
+      deckId?: string;
+      deckName?: string;
+      memoryUpdated?: boolean;
+      added?: number;
+      rejected?: number;
     }
   | {
       ok: false;
@@ -1553,6 +1722,7 @@ export default function ReviewApp({
   );
   const [isDecksLoading, setIsDecksLoading] = useState(false);
   const [isDeckSaving, setIsDeckSaving] = useState(false);
+  const [isDeckDeleting, setIsDeckDeleting] = useState(false);
   const [deckPageMessage, setDeckPageMessage] = useState<string | null>(null);
   const [deckEditorMessage, setDeckEditorMessage] = useState<string | null>(null);
   const [deckEmbeddingPlot, setDeckEmbeddingPlot] =
@@ -1624,6 +1794,8 @@ export default function ReviewApp({
   const [learnGenerationStatus, setLearnGenerationStatus] = useState<string | null>(
     null,
   );
+  const [learnGenerationProgress, setLearnGenerationProgress] =
+    useState<LearnGenerationProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [reviewQueueVersion, setReviewQueueVersion] = useState(0);
@@ -1917,7 +2089,7 @@ export default function ReviewApp({
   const deckDraftNameMessage = isDeckDraftNameDuplicate
     ? "Deck name already exists."
     : deckEditorMessage;
-  const isDeckEditorBusy = isDeckSaving;
+  const isDeckEditorBusy = isDeckSaving || isDeckDeleting;
   const canSaveDeckDraft =
     !isDeckEditorBusy && deckDraftNameKey.length > 0 && !isDeckDraftNameDuplicate;
   const visibleDecks = useMemo(() => {
@@ -2180,6 +2352,106 @@ export default function ReviewApp({
     resetDeckQueueState();
     navigateToTab("queue");
   }, [navigateToTab, resetDeckQueueState]);
+
+  const deleteEditingDeck = useCallback(async () => {
+    if (!editingDeck || isCreatingDeck || isDeckDeleting) {
+      return;
+    }
+
+    const shouldDelete = window.confirm(
+      `Delete "${editingDeck.name}" and all of its questions, answers, review history, and embeddings? This cannot be undone.`,
+    );
+
+    if (!shouldDelete) {
+      return;
+    }
+
+    const deckId = editingDeck.id;
+    const deckName = editingDeck.name;
+    const nextDecks = decks.filter((deck) => deck.id !== deckId);
+    const wasOpenDeck = selectedDeckDetailId === deckId;
+    const wasCurrentQuestionDeck = currentDeckId === deckId;
+
+    setDeckEditorMessage(null);
+    setDeckPageMessage(null);
+    setIsDeckDeleting(true);
+
+    try {
+      const response = await fetch(`/api/decks/${encodeURIComponent(deckId)}`, {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as DeckMutationResponse;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Could not delete deck.");
+      }
+
+      setDecks(nextDecks);
+      setSelectedDeckId((currentDeckIdValue) =>
+        currentDeckIdValue === deckId
+          ? nextDecks[0]?.id ?? ""
+          : currentDeckIdValue,
+      );
+      rememberLearnTargetDeck(null);
+      setEvaluations((currentEvaluations) =>
+        currentEvaluations.filter((evaluation) => evaluation.deckId !== deckId),
+      );
+      setMessages((currentMessages) =>
+        currentMessages.filter(
+          (message) => message.kind !== "answer" || message.deckId !== deckId,
+        ),
+      );
+
+      if (wasCurrentQuestionDeck) {
+        prefetchedNextQuestionRef.current = null;
+        nextQuestionPrefetchRef.current?.abortController.abort();
+        nextQuestionPrefetchRef.current = null;
+        hasLoadedQuestionRef.current = false;
+        setQuestion(null);
+        questionRef.current = null;
+        setCurrentQuestionId(null);
+        questionIdRef.current = null;
+        setCurrentDeckId(null);
+        setCurrentDeckName(null);
+        setAnswer("");
+        setSpeechPreview("");
+        setMessages([]);
+        setQueueRemaining(0);
+      }
+
+      if (wasOpenDeck) {
+        setSelectedDeckDetailId(null);
+        setRouteDeckSlug(null);
+        resetDeckQueueState();
+        navigateToTab("queue");
+      }
+
+      setSelectedQuestionId(null);
+      setSelectedQuestion(null);
+      setIsCreatingDeck(false);
+      setEditingDeckId(null);
+      setReviewQueueVersion((currentVersion) => currentVersion + 1);
+      setDeckPageMessage(`Deleted ${deckName}.`);
+    } catch (deleteError) {
+      setDeckEditorMessage(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Could not delete deck.",
+      );
+    } finally {
+      setIsDeckDeleting(false);
+    }
+  }, [
+    currentDeckId,
+    decks,
+    editingDeck,
+    isCreatingDeck,
+    isDeckDeleting,
+    navigateToTab,
+    rememberLearnTargetDeck,
+    resetDeckQueueState,
+    selectedDeckDetailId,
+  ]);
 
   const hasPendingEvaluationActivity =
     evaluations.some((evaluation) => evaluation.status === "grading") ||
@@ -2938,11 +3210,13 @@ export default function ReviewApp({
         }),
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to submit the answer.");
-      }
-
       const data = (await response.json()) as SubmitAnswerResponse;
+
+      if (!response.ok || !data.ok) {
+        throw new Error(
+          data.ok === false ? data.error : "Failed to submit the answer.",
+        );
+      }
 
       setMessages((current) =>
         current.map((message) =>
@@ -3243,6 +3517,10 @@ export default function ReviewApp({
   const isSpeechActive =
     speechStatus === "starting" ||
     speechStatus === "listening";
+
+  useEffect(() => {
+    resizeComposerTextarea(answerInputRef.current);
+  }, [displayedAnswer, question]);
 
   function handleAnswerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
@@ -3754,6 +4032,16 @@ export default function ReviewApp({
   const hasHiddenPreviousAnswers =
     previousAnswers.length > visiblePreviousAnswers.length;
   const isReviewResting = !isLoadingQuestion && !question;
+  const activeLearnGenerationProgress =
+    learnGenerationProgress ??
+    ({
+      phase: "memory",
+      status: learnGenerationStatus ?? "Preparing new questions",
+      progress: isLearnTopUpPending ? 8 : 0,
+      generated: 0,
+      total: 50,
+      latestQuestion: null,
+    } satisfies LearnGenerationProgress);
   const scheduledReviewCount = reviewQueue.filter(
     (item) => item.status === "scheduled",
   ).length;
@@ -3852,6 +4140,7 @@ export default function ReviewApp({
       );
   const topUpLearnQueue = useCallback(async () => {
     const now = Date.now();
+    const count = 50;
 
     if (isLearnTopUpPendingRef.current) {
       return;
@@ -3867,25 +4156,30 @@ export default function ReviewApp({
     setIsLearnTopUpPending(true);
     setLearnTopUpMessage(null);
     setLearnGenerationStatus("Updating deck memory");
+    setLearnGenerationProgress({
+      phase: "memory",
+      status: "Updating deck memory",
+      progress: 4,
+      generated: 0,
+      total: count,
+      latestQuestion: null,
+    });
 
     try {
-      setLearnGenerationStatus("Generating new questions");
       const response = await fetch("/api/questions/top-up", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Accept: "text/event-stream",
         },
         body: JSON.stringify({
-          count: 50,
+          count,
         }),
       });
-      const data = (await response.json()) as TopUpQuestionsResponse;
-
-      if (!response.ok || !data.ok) {
-        throw new Error(
-          !data.ok && data.error ? data.error : "Could not generate questions.",
-        );
-      }
+      const data = await parseTopUpResponse(response, count, (progress) => {
+        setLearnGenerationProgress(progress);
+        setLearnGenerationStatus(progress.status);
+      });
 
       if (data.added > 0) {
         learnTopUpSatisfiedKeyRef.current = null;
@@ -3896,14 +4190,31 @@ export default function ReviewApp({
         );
         pendingLearnSourceRef.current = null;
         setLearnGenerationStatus("Refreshing the queue");
+        setLearnGenerationProgress((currentProgress) => ({
+          phase: "complete",
+          status: "Refreshing the queue",
+          progress: 96,
+          generated: data.generated,
+          total: currentProgress?.total ?? count,
+          latestQuestion: currentProgress?.latestQuestion ?? null,
+        }));
         await loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
         await loadDecks();
 
         setLearnGenerationStatus("Loading the next question");
+        setLearnGenerationProgress((currentProgress) => ({
+          phase: "complete",
+          status: "Loading the next question",
+          progress: 98,
+          generated: data.generated,
+          total: currentProgress?.total ?? count,
+          latestQuestion: currentProgress?.latestQuestion ?? null,
+        }));
         await loadNextQuestion({ mode: "review", surfaceError: false });
       } else {
         learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
         setLearnGenerationStatus(null);
+        setLearnGenerationProgress(null);
         setLearnTopUpMessage(
           data.rejected > 0
             ? "Generated questions were duplicates"
@@ -3913,6 +4224,7 @@ export default function ReviewApp({
     } catch (topUpError) {
       learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
       setLearnGenerationStatus(null);
+      setLearnGenerationProgress(null);
       setLearnTopUpMessage(
         topUpError instanceof Error
           ? topUpError.message
@@ -3921,6 +4233,7 @@ export default function ReviewApp({
     } finally {
       isLearnTopUpPendingRef.current = false;
       setIsLearnTopUpPending(false);
+      setLearnGenerationProgress(null);
     }
   }, [
     loadDecks,
@@ -4465,18 +4778,75 @@ export default function ReviewApp({
                     text={question}
                   />
                 </>
+              ) : isLearnTopUpPending ? (
+                <div
+                  className="learn-generation-panel"
+                  aria-busy="true"
+                  aria-labelledby="learn-generation-title"
+                >
+                  <div className="learn-generation-header">
+                    <p className="learn-generation-kicker">
+                      Preparing questions
+                    </p>
+                    <h2
+                      className="learn-generation-title"
+                      id="learn-generation-title"
+                    >
+                      Making the next batch.
+                    </h2>
+                    <p className="learn-generation-status" aria-live="polite">
+                      {activeLearnGenerationProgress.status}
+                    </p>
+                  </div>
+
+                  <div
+                    className="learn-generation-progress"
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={activeLearnGenerationProgress.progress}
+                    aria-label="Question generation progress"
+                  >
+                    <span
+                      style={{
+                        width: `${activeLearnGenerationProgress.progress}%`,
+                      }}
+                    />
+                  </div>
+
+                  <dl className="learn-generation-detail-grid">
+                    <div>
+                      <dt>{activeLearnGenerationProgress.generated}</dt>
+                      <dd>extracted</dd>
+                    </div>
+                    <div>
+                      <dt>{activeLearnGenerationProgress.total}</dt>
+                      <dd>requested</dd>
+                    </div>
+                    <div>
+                      <dt>{activeLearnGenerationProgress.progress}%</dt>
+                      <dd>progress</dd>
+                    </div>
+                  </dl>
+
+                  <div className="learn-generation-stream">
+                    <span className="pending-spinner" aria-hidden="true" />
+                    <p>
+                      {activeLearnGenerationProgress.latestQuestion ??
+                        "Waiting for the first complete streamed question."}
+                    </p>
+                  </div>
+                </div>
               ) : (
                 <div className="resting-state">
                   <p className="resting-kicker">
-                    {isLearnTopUpPending ? "Preparing questions" : "Review complete"}
+                    Review complete
                   </p>
                   <h2 className="resting-title">
-                    {isLearnTopUpPending ? "Making the next batch." : "You're caught up."}
+                    {"You're caught up."}
                   </h2>
                   <p className="resting-copy">
-                    {isLearnTopUpPending
-                      ? learnGenerationStatus ?? "Waxon is preparing new questions."
-                      : learnTopUpMessage ?? "No questions are due right now."}
+                    {learnTopUpMessage ?? "No questions are due right now."}
                   </p>
 
                   <dl className="resting-metrics" aria-label="Review status">
@@ -4509,7 +4879,7 @@ export default function ReviewApp({
                       }}
                     >
                       <Sparkles aria-hidden="true" />
-                      <span>{isLearnTopUpPending ? "Generating..." : "Keep learning"}</span>
+                      <span>Keep learning</span>
                     </button>
                     <button
                       className="resting-secondary"
@@ -4552,6 +4922,7 @@ export default function ReviewApp({
                     setSpeechPreview("");
                     setAnswer(event.target.value);
                     answerRef.current = event.target.value;
+                    resizeComposerTextarea(event.currentTarget);
                   }}
                   onKeyDown={handleAnswerKeyDown}
                   placeholder="Your answer"
@@ -5167,24 +5538,40 @@ export default function ReviewApp({
             </div>
 
             <div className="deck-editor-actions">
-              <button
-                className="resting-secondary"
-                type="button"
-                disabled={isDeckEditorBusy}
-                onClick={() => {
-                  setIsCreatingDeck(false);
-                  setEditingDeckId(null);
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                className="resting-primary"
-                type="submit"
-                disabled={!canSaveDeckDraft}
-              >
-                {isDeckSaving ? "Saving..." : "Save"}
-              </button>
+              {!isCreatingDeck && editingDeck ? (
+                <button
+                  className="deck-delete-link"
+                  type="button"
+                  disabled={isDeckEditorBusy}
+                  onClick={() => {
+                    void deleteEditingDeck();
+                  }}
+                >
+                  {isDeckDeleting ? "Deleting..." : "Delete deck"}
+                </button>
+              ) : (
+                <span className="deck-editor-action-spacer" aria-hidden="true" />
+              )}
+              <div className="deck-editor-action-buttons">
+                <button
+                  className="resting-secondary"
+                  type="button"
+                  disabled={isDeckEditorBusy}
+                  onClick={() => {
+                    setIsCreatingDeck(false);
+                    setEditingDeckId(null);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="resting-primary"
+                  type="submit"
+                  disabled={!canSaveDeckDraft}
+                >
+                  {isDeckSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
             </div>
           </form>
         </div>

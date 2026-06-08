@@ -56,7 +56,15 @@ type LlmCall = {
 type TraceInteraction = {
   id: string;
   title: string;
-  kind: "Answer submitted" | "Question generation" | "Reference answer";
+  kind:
+    | "Answer evaluation"
+    | "Question generation"
+    | "Reference answer"
+    | "Embedding"
+    | "Deck memory"
+    | "Quality gate"
+    | "Summarization"
+    | "Other";
   startedAt: string;
   status: TraceStatus;
   calls: LlmCall[];
@@ -124,8 +132,8 @@ const callTypeColors: Record<CallType, string> = {
 const demoTraceInteractions: TraceInteraction[] = [
   {
     id: "int-2039",
-    title: "Answer submitted: data augmentation",
-    kind: "Answer submitted",
+    title: "Answer evaluation: data augmentation",
+    kind: "Answer evaluation",
     startedAt: "2026-06-05T09:12:00.000Z",
     status: "ok",
     calls: [
@@ -226,8 +234,8 @@ const demoTraceInteractions: TraceInteraction[] = [
   },
   {
     id: "int-2037",
-    title: "Answer submitted: optimizer momentum",
-    kind: "Answer submitted",
+    title: "Answer evaluation: optimizer momentum",
+    kind: "Answer evaluation",
     startedAt: "2026-06-04T10:21:00.000Z",
     status: "ok",
     calls: [
@@ -301,8 +309,8 @@ const demoTraceInteractions: TraceInteraction[] = [
   },
   {
     id: "int-2034",
-    title: "Answer submitted: PCA reconstruction",
-    kind: "Answer submitted",
+    title: "Answer evaluation: PCA reconstruction",
+    kind: "Answer evaluation",
     startedAt: "2026-05-31T11:15:00.000Z",
     status: "ok",
     calls: [
@@ -343,8 +351,8 @@ const demoTraceInteractions: TraceInteraction[] = [
   },
   {
     id: "int-2032",
-    title: "Answer submitted: activation functions",
-    kind: "Answer submitted",
+    title: "Answer evaluation: activation functions",
+    kind: "Answer evaluation",
     startedAt: "2026-05-25T08:44:00.000Z",
     status: "ok",
     calls: [
