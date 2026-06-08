@@ -48,6 +48,11 @@ const mathSymbolMap: Record<string, string> = {
   mu: "μ",
   nabla: "∇",
   partial: "∂",
+  cdot: "·",
+  le: "≤",
+  ge: "≥",
+  neq: "≠",
+  times: "×",
   theta: "θ",
 };
 

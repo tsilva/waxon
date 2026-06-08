@@ -22,6 +22,7 @@ import {
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import type { AuthenticatedUser } from "@/app/lib/auth";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import {
@@ -1590,6 +1591,8 @@ export function AdminPageClient({
 
     return null;
   }, [selectedCallId, traceInteractions]);
+
+  usePageScrollLock(Boolean(selectedCallContext));
 
   const selectedRequestPayload = useMemo(() => {
     if (!selectedCallContext) {

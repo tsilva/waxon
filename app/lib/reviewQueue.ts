@@ -6,6 +6,7 @@ import {
   getVisibleAnswerEvaluations,
   getQuestionAttemptsByQuestionIds,
   getQueuedQuestionsPage,
+  getQueuedQuestionsByEmbeddingProximityPage,
   getQuestionSnapshotById,
   getRecentQuestionAttempts,
   listDecks,
@@ -28,15 +29,21 @@ import {
 import { recordPendingLlmTrace } from "./llmTraceStore";
 import { parseReviews } from "./scheduler";
 import {
+  DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
   DEFAULT_EMBEDDING_MODEL,
+  normalizeEmbeddingText,
 } from "./embeddingSource";
 import {
   getCurrentUser,
   type AuthenticatedUser,
 } from "./auth";
 import { gateNovelQuestions } from "./semanticDedupe";
+import {
+  getOpenRouterApiKey,
+  openRouterEmbeddings,
+} from "./openRouter";
 import type {
   DeckEmbeddingPlot,
   DeckEmbeddingPlotPoint,
@@ -50,6 +57,7 @@ import type {
 export const RESOLVED_JUDGING_VISIBLE_MS = 5 * 60_000;
 const EVALUATION_PROCESSING_TIMEOUT_MS = EVALUATION_TIMEOUT_MS;
 const ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS = 5 * 60_000;
+const QUEUE_SEARCH_TOP_K = 200;
 
 type Submission = {
   evaluationId: string;
@@ -81,6 +89,7 @@ type QueueStatusInput = {
   limit?: number;
   offset?: number;
   sortKey?: QueuedQuestionsSortKey;
+  query?: string;
   includeReviewQueue?: boolean;
   includeQuestionAttempts?: boolean;
   includeRecentAttempts?: boolean;
@@ -91,6 +100,7 @@ type LatestEvaluation = {
   score: number;
   justification: string;
   answerSummary: string;
+  correctAnswer: string | null;
   resolvedAt: number;
 };
 
@@ -242,6 +252,7 @@ function createEvaluationItem(input: {
     score: null,
     justification: null,
     answerSummary: null,
+    correctAnswer: null,
     resolvedAt: null,
     nextDue: null,
   };
@@ -265,6 +276,7 @@ function resolveEvaluationItem(
   item.score = result.score;
   item.justification = result.justification;
   item.answerSummary = result.answerSummary;
+  item.correctAnswer = result.correctAnswer;
   item.resolvedAt = Date.now();
   item.nextDue = nextDue;
 
@@ -273,6 +285,7 @@ function resolveEvaluationItem(
       score: result.score,
       justification: result.justification,
       answerSummary: result.answerSummary,
+      correctAnswer: result.correctAnswer,
       resolvedAt: item.resolvedAt,
     };
   }
@@ -613,6 +626,7 @@ async function getReviewQueueItems(
     limit: number;
     offset: number;
     sortKey: QueuedQuestionsSortKey;
+    query?: string;
     includeQuestionAttempts?: boolean;
   },
   now = Date.now(),
@@ -620,16 +634,32 @@ async function getReviewQueueItems(
   items: ReviewQueueItem[];
   total: number;
 }> {
-  const queuedQuestionsPage = await getQueuedQuestionsPage({
-    userId,
-    deckId: input.deckId,
-    excludeQuestionIds: Array.from(state.inFlightQuestionKeys).filter(
-      (key) => !key.startsWith("question:"),
-    ),
-    limit: input.limit,
-    offset: input.offset,
-    sortKey: input.sortKey,
-  });
+  const searchQuery = normalizeEmbeddingText(input.query ?? "");
+  const excludeQuestionIds = Array.from(state.inFlightQuestionKeys).filter(
+    (key) => !key.startsWith("question:"),
+  );
+  const queuedQuestionsPage = searchQuery
+    ? await getQueuedQuestionsByEmbeddingProximityPage({
+        userId,
+        deckId: input.deckId,
+        excludeQuestionIds,
+        queryEmbedding: await embedQueueSearchQuery({
+          query: searchQuery,
+          userId,
+          deckId: input.deckId ?? null,
+        }),
+        limit: input.limit,
+        offset: input.offset,
+        maxResults: QUEUE_SEARCH_TOP_K,
+      })
+    : await getQueuedQuestionsPage({
+        userId,
+        deckId: input.deckId,
+        excludeQuestionIds,
+        limit: input.limit,
+        offset: input.offset,
+        sortKey: input.sortKey,
+      });
   const queuedQuestions = queuedQuestionsPage.items;
   const attemptsByQuestionId = input.includeQuestionAttempts === false
     ? new Map<string, QuestionAttempt[]>()
@@ -637,20 +667,21 @@ async function getReviewQueueItems(
         userId,
         questionIds: queuedQuestions.map((item) => item.questionId),
       });
+  const items = queuedQuestions.map((item) => {
+    const latest = state.latestByQuestionKey[questionKey(item)];
+
+    return toReviewQueueItem(item, {
+      now,
+      latest,
+      attempts: attemptsByQuestionId.get(item.questionId) ?? [],
+    });
+  });
 
   return {
     total: queuedQuestionsPage.total,
-    items: queuedQuestions
-      .map((item) => {
-        const latest = state.latestByQuestionKey[questionKey(item)];
-
-        return toReviewQueueItem(item, {
-          now,
-          latest,
-          attempts: attemptsByQuestionId.get(item.questionId) ?? [],
-        });
-      })
-      .sort((a, b) => {
+    items: searchQuery
+      ? items
+      : items.sort((a, b) => {
         if (input.sortKey === "creation-date") {
           return b.createdAt - a.createdAt || a.question.localeCompare(b.question);
         }
@@ -662,6 +693,53 @@ async function getReviewQueueItems(
         );
       }),
   };
+}
+
+async function embedQueueSearchQuery(input: {
+  query: string;
+  userId: string;
+  deckId: string | null;
+}): Promise<number[]> {
+  const apiKey = getOpenRouterApiKey();
+
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required.");
+  }
+
+  const { response, body } = await openRouterEmbeddings({
+    apiKey,
+    trace: {
+      operation: "queue_search_embedding",
+      userId: input.userId,
+      deckId: input.deckId,
+      question: input.query,
+    },
+    body: {
+      model: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+      input: [input.query],
+      encoding_format: "float",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenRouter embedding request failed (${response.status}).`);
+  }
+
+  const embedding = body.data?.[0]?.embedding;
+
+  if (!Array.isArray(embedding) || embedding.length !== DEDUPE_EMBEDDING_DIMENSIONS) {
+    throw new Error("OpenRouter returned an unexpected search embedding.");
+  }
+
+  return embedding.map((component, index) => {
+    const value = Number(component);
+
+    if (!Number.isFinite(value)) {
+      throw new Error(`Search embedding contains a non-finite value at ${index}.`);
+    }
+
+    return value;
+  });
 }
 
 function toReviewQueueItem(
@@ -691,7 +769,7 @@ function toReviewQueueItem(
     lastScore: input.latest?.score ?? lastReview?.score ?? null,
     lastAnswer: item.lastAnswer,
     lastAnswerSummary: input.latest?.answerSummary ?? item.lastAnswerSummary,
-    conciseAnswer: item.conciseAnswer,
+    conciseAnswer: input.latest?.correctAnswer ?? item.conciseAnswer,
     referenceAnswer: item.referenceAnswer,
     lastJustification: input.latest?.justification ?? null,
     attempts: input.attempts ?? [],
@@ -776,6 +854,18 @@ function restoreFailedQuestion(question: DueQuestion | null): void {
     ...state.queue.filter((item) => questionKey(item) !== questionKey(question)),
   ];
   logQueueFlushStatus("restored-failed-evaluation-question");
+}
+
+function appendRetryQuestion(question: DueQuestion | null): void {
+  if (!question) {
+    return;
+  }
+
+  state.queue = [
+    ...state.queue.filter((item) => questionKey(item) !== questionKey(question)),
+    question,
+  ];
+  logQueueFlushStatus("appended-retry-question");
 }
 
 function persistEvaluationFailure(
@@ -982,6 +1072,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       question: submission.question,
       answer: submission.answer,
       answerSummary: result.answerSummary,
+      correctAnswer: result.correctAnswer,
       justification: result.justification,
       score: result.score,
       submittedAt: submission.submittedAt,
@@ -994,13 +1085,19 @@ async function processEvaluation(submission: Submission): Promise<void> {
     }
 
     if (persisted) {
+      const evaluationNextDue = result.score < 10 ? null : persisted.nextDue;
+
       await persistEvaluationResolution({
         evaluationId: submission.evaluationId,
         result,
-        nextDue: persisted.nextDue,
+        nextDue: evaluationNextDue,
         resolvedAt,
       });
-      savedEvaluationNextDue = persisted.nextDue;
+      savedEvaluationNextDue = evaluationNextDue;
+
+      if (result.score < 10) {
+        appendRetryQuestion(persisted);
+      }
     } else {
       await persistEvaluationResolution({
         evaluationId: submission.evaluationId,
@@ -1011,7 +1108,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
     }
 
     setPhase("finalizing");
-    finishEvaluation(result, persisted?.nextDue ?? null, {
+    finishEvaluation(result, savedEvaluationNextDue, {
       restoreQuestion: false,
       logAction: "evaluation-finished",
     });
@@ -1153,7 +1250,6 @@ export async function submitAnswer(input: {
     submittedAt,
   });
 
-  state.evaluations = [...state.evaluations, evaluation].slice(-50);
   await recordPendingLlmTrace({
     traceId,
     operation: "evaluate_answer",
@@ -1175,6 +1271,9 @@ export async function submitAnswer(input: {
     answer: input.answer,
     submittedAt,
   });
+  state.evaluations = [...state.evaluations, evaluation].slice(-50);
+  const queuedQuestion = removeFromQueue(snapshot);
+  state.inFlightQuestionKeys.add(questionKey(snapshot));
   state.pendingEvaluations += 1;
   logQueueFlushStatus("submitted-answer");
   void broadcastQueueStatus();
@@ -1184,11 +1283,11 @@ export async function submitAnswer(input: {
     traceId,
     questionId,
     question: snapshot.question,
-    queuedQuestion: null,
+    queuedQuestion: queuedQuestion ?? snapshot,
     userId: snapshot.userId,
     deckId,
     answer: input.answer,
-    expectedAnswer: snapshot.referenceAnswer || snapshot.conciseAnswer || null,
+    expectedAnswer: snapshot.conciseAnswer || null,
     submittedAt,
     previousReviews: snapshot.reviews,
   } satisfies Submission;
@@ -1303,7 +1402,9 @@ export async function deckEmbeddingPlotStatus(input: {
 export async function queueStatus(input: QueueStatusInput = {}): Promise<QueueStatusSnapshot> {
   const user = await getCurrentUser();
   const now = Date.now();
-  const limit = Math.min(2_000, Math.max(0, Math.floor(input.limit ?? 24)));
+  const query = normalizeEmbeddingText(input.query ?? "");
+  const limitCap = query ? QUEUE_SEARCH_TOP_K : 2_000;
+  const limit = Math.min(limitCap, Math.max(0, Math.floor(input.limit ?? 24)));
   const offset = Math.max(0, Math.floor(input.offset ?? 0));
   const sortKey = input.sortKey ?? "review-date";
   const includeReviewQueue = input.includeReviewQueue ?? true;
@@ -1314,6 +1415,7 @@ export async function queueStatus(input: QueueStatusInput = {}): Promise<QueueSt
         limit,
         offset,
         sortKey,
+        query,
         includeQuestionAttempts: input.includeQuestionAttempts,
       })
     : { items: [], total: 0 };

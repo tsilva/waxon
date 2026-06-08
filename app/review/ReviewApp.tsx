@@ -7,6 +7,7 @@ import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
 import { DAY } from "@/app/lib/scheduler";
+import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import {
   MarkdownContent as SharedMarkdownContent,
   MarkdownInline as SharedMarkdownInline,
@@ -126,20 +127,11 @@ type EvaluationStatusResponse = {
   evaluations: EvaluationQueueItem[];
 };
 
-type ReferenceAnswerResponse = {
-  answer: string;
-};
-
 type UserProfileResponse = {
   id: string;
   displayName: string;
   email: string;
   avatarUrl: string | null;
-};
-
-type ReferenceAnswerState = {
-  status: "loading" | "resolved" | "error";
-  answer: string;
 };
 
 type HoveredEmbeddingPoint = DeckEmbeddingPlotPoint & {
@@ -174,6 +166,7 @@ type ChatMessage =
       score: number | null;
       justification: string | null;
       answerSummary: string | null;
+      correctAnswer: string | null;
       nextDue: number | null;
       resolvedAt: number | null;
     };
@@ -187,6 +180,7 @@ type PreviousAnswerItem = {
   lastActivityAt: number | null;
   score: number | null;
   justification: string | null;
+  correctAnswer: string | null;
   traceId: string | null;
   timestamp: number | null;
   timeLabel: string;
@@ -220,6 +214,8 @@ type ReviewSessionSnapshot = {
     end: number;
   };
   queueSortKey: QueueSortKey;
+  queueSearchInput: string;
+  queueSearchQuery: string;
   decks: DeckManagementItem[];
   selectedDeckId: string;
   deckSearchQuery: string;
@@ -231,7 +227,6 @@ type ReviewSessionSnapshot = {
   deckDraftCoverage: string;
   deckEmbeddingPlot: DeckEmbeddingPlotResponse;
   messages: ChatMessage[];
-  referenceAnswers: Record<string, ReferenceAnswerState>;
   isPreviousExpanded: boolean;
   expandedPreviousAnswerIds: Set<string>;
   selectedQuestionId: string | null;
@@ -246,6 +241,7 @@ type ReviewSessionSnapshot = {
   hasLoadedQueueStatus: boolean;
   hasLoadedDecks: boolean;
   loadedQueueSortKey: QueueSortKey | null;
+  loadedQueueSearchQuery: string | null;
   queueLoadedLimit: number;
 };
 
@@ -778,6 +774,7 @@ type AnswerHistoryEntry = {
   answerSummary: string | null;
   score: number | null;
   justification: string | null;
+  correctAnswer: string | null;
   traceId: string | null;
   submittedAt: number;
   resolvedAt: number | null;
@@ -1732,6 +1729,11 @@ export default function ReviewApp({
       ? cachedSessionRef.current?.loadedQueueSortKey ?? null
       : null,
   );
+  const loadedQueueSearchQueryRef = useRef<string | null>(
+    canUseCachedQueueState
+      ? cachedSessionRef.current?.loadedQueueSearchQuery ?? null
+      : null,
+  );
   const [question, setQuestion] = useState<string | null>(
     () => cachedSessionRef.current?.question ?? null,
   );
@@ -1807,6 +1809,12 @@ export default function ReviewApp({
   const [queueSortKey, setQueueSortKey] = useState<QueueSortKey>(
     () => cachedSessionRef.current?.queueSortKey ?? "review-date",
   );
+  const [queueSearchInput, setQueueSearchInput] = useState(
+    () => cachedSessionRef.current?.queueSearchInput ?? "",
+  );
+  const [queueSearchQuery, setQueueSearchQuery] = useState(
+    () => cachedSessionRef.current?.queueSearchQuery ?? "",
+  );
   const [decks, setDecks] = useState<DeckManagementItem[]>(
     () => cachedSessionRef.current?.decks ?? initialDecks,
   );
@@ -1862,9 +1870,6 @@ export default function ReviewApp({
   const [routeDeckSlug, setRouteDeckSlug] = useState<string | null>(
     initialActiveTab === "queue" ? initialDeckSlug : null,
   );
-  const [referenceAnswers, setReferenceAnswers] = useState<
-    Record<string, ReferenceAnswerState>
-  >(() => cachedSessionRef.current?.referenceAnswers ?? {});
   const [isPreviousExpanded, setIsPreviousExpanded] = useState(
     () => cachedSessionRef.current?.isPreviousExpanded ?? false,
   );
@@ -1952,6 +1957,7 @@ export default function ReviewApp({
   );
   const loadedDeckEmbeddingPlotKeyRef = useRef<string | null>(null);
   const isQueuePageLoadingRef = useRef(false);
+  const queueStatusRequestIdRef = useRef(0);
   const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
@@ -2116,6 +2122,8 @@ export default function ReviewApp({
       reviewQueueTotal,
       queueVirtualRange,
       queueSortKey,
+      queueSearchInput,
+      queueSearchQuery,
       decks,
       selectedDeckId,
       deckSearchQuery,
@@ -2127,7 +2135,6 @@ export default function ReviewApp({
       deckDraftCoverage,
       deckEmbeddingPlot,
       messages,
-      referenceAnswers,
       isPreviousExpanded,
       expandedPreviousAnswerIds: new Set(expandedPreviousAnswerIds),
       selectedQuestionId,
@@ -2142,6 +2149,7 @@ export default function ReviewApp({
       hasLoadedQueueStatus: hasLoadedQueueStatusRef.current,
       hasLoadedDecks: hasLoadedDecksRef.current,
       loadedQueueSortKey: loadedQueueSortKeyRef.current,
+      loadedQueueSearchQuery: loadedQueueSearchQueryRef.current,
       queueLoadedLimit: queueLoadedLimitRef.current,
     };
   }, [
@@ -2170,11 +2178,12 @@ export default function ReviewApp({
     isPreviousExpanded,
     messages,
     question,
+    queueSearchInput,
+    queueSearchQuery,
     queueRemaining,
     queueSortKey,
     queueVirtualRange,
     recentAttempts,
-    referenceAnswers,
     reviewQueue,
     reviewQueueTotal,
     selectedDeckId,
@@ -2193,21 +2202,27 @@ export default function ReviewApp({
     [],
   );
 
+  const resetQuestionGenerator = useCallback(() => {
+    setGeneratorScope("");
+    setGeneratorQuestionCount(DEFAULT_GENERATED_QUESTION_COUNT);
+    setGeneratorFiles([]);
+    setGeneratedQuestions([]);
+    setGeneratorMessage(null);
+  }, []);
+
   const closeQuestionGenerator = useCallback(() => {
     if (isGeneratingQuestions) {
       return;
     }
 
     setIsQuestionGeneratorOpen(false);
-    setGeneratedQuestions([]);
-    setGeneratorMessage(null);
-  }, [isGeneratingQuestions]);
+    resetQuestionGenerator();
+  }, [isGeneratingQuestions, resetQuestionGenerator]);
 
   const openQuestionGenerator = useCallback(() => {
-    setGeneratedQuestions([]);
-    setGeneratorMessage(null);
+    resetQuestionGenerator();
     setIsQuestionGeneratorOpen(true);
-  }, []);
+  }, [resetQuestionGenerator]);
 
   const rememberLearnTargetDeck = useCallback((deckId: string | null) => {
     learnTargetDeckIdRef.current = deckId;
@@ -2469,9 +2484,12 @@ export default function ReviewApp({
     loadedDeckEmbeddingPlotKeyRef.current = null;
     hasLoadedQueueStatusRef.current = false;
     loadedQueueSortKeyRef.current = null;
+    loadedQueueSearchQueryRef.current = null;
     setReviewQueue([]);
     setRecentAttempts([]);
     setReviewQueueTotal(0);
+    setQueueSearchInput("");
+    setQueueSearchQuery("");
     setDeckEmbeddingPlot(createEmptyDeckEmbeddingPlot());
     setQueueVirtualRange({
       start: 0,
@@ -3065,6 +3083,20 @@ export default function ReviewApp({
     learnPanelMode,
   ]);
 
+  const normalizedQueueSearchInput = useMemo(
+    () => queueSearchInput.trim().replace(/\s+/g, " "),
+    [queueSearchInput],
+  );
+  const isQueueSearchActive = queueSearchQuery.length > 0;
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setQueueSearchQuery(normalizedQueueSearchInput);
+    }, 450);
+
+    return () => window.clearTimeout(timeout);
+  }, [normalizedQueueSearchInput]);
+
   const queueStatusUrl = useCallback((limit: number) => {
     const params = new URLSearchParams({
       limit: String(Math.max(0, Math.floor(limit))),
@@ -3077,8 +3109,12 @@ export default function ReviewApp({
       params.set("deckId", selectedDeckDetailId);
     }
 
+    if (queueSearchQuery) {
+      params.set("query", queueSearchQuery);
+    }
+
     return `/api/queue-status?${params.toString()}`;
-  }, [queueSortKey, selectedDeckDetailId]);
+  }, [queueSearchQuery, queueSortKey, selectedDeckDetailId]);
 
   const queueStatusStreamUrl = useCallback((limit: number) => {
     const params = new URLSearchParams({
@@ -3121,6 +3157,7 @@ export default function ReviewApp({
     );
     hasLoadedQueueStatusRef.current = true;
     loadedQueueSortKeyRef.current = queueSortKey;
+    loadedQueueSearchQueryRef.current = queueSearchQuery;
     if (
       data.deckEmbeddingPlot &&
       (data.deckEmbeddingPlot.model ||
@@ -3130,13 +3167,12 @@ export default function ReviewApp({
     ) {
       setDeckEmbeddingPlot(data.deckEmbeddingPlot);
     }
-  }, [queueSortKey]);
+  }, [queueSearchQuery, queueSortKey]);
 
   const loadStatus = useCallback(async (limit = QUEUE_PAGE_SIZE) => {
-    if (isQueuePageLoadingRef.current) {
-      return;
-    }
+    const requestId = queueStatusRequestIdRef.current + 1;
 
+    queueStatusRequestIdRef.current = requestId;
     isQueuePageLoadingRef.current = true;
     setIsQueuePageLoading(true);
 
@@ -3150,12 +3186,16 @@ export default function ReviewApp({
       }
 
       const data = (await response.json()) as QueueStatusResponse;
-      applyQueueStatus(data);
+      if (queueStatusRequestIdRef.current === requestId) {
+        applyQueueStatus(data);
+      }
     } catch {
       // Status is informational; keep the review loop usable if polling fails.
     } finally {
-      isQueuePageLoadingRef.current = false;
-      setIsQueuePageLoading(false);
+      if (queueStatusRequestIdRef.current === requestId) {
+        isQueuePageLoadingRef.current = false;
+        setIsQueuePageLoading(false);
+      }
     }
   }, [applyQueueStatus, queueStatusUrl]);
 
@@ -3261,7 +3301,8 @@ export default function ReviewApp({
 
     const shouldLoadQueueStatus =
       !hasLoadedQueueStatusRef.current ||
-      loadedQueueSortKeyRef.current !== queueSortKey;
+      loadedQueueSortKeyRef.current !== queueSortKey ||
+      loadedQueueSearchQueryRef.current !== queueSearchQuery;
 
     if (shouldLoadQueueStatus) {
       queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
@@ -3275,6 +3316,10 @@ export default function ReviewApp({
         end: QUEUE_PAGE_SIZE,
       });
       void loadStatus(QUEUE_PAGE_SIZE);
+    }
+
+    if (isQueueSearchActive) {
+      return;
     }
 
     const events = new EventSource(
@@ -3301,7 +3346,9 @@ export default function ReviewApp({
   }, [
     activeTab,
     applyQueueStatus,
+    isQueueSearchActive,
     loadStatus,
+    queueSearchQuery,
     queueSortKey,
     queueStatusStreamUrl,
     selectedDeckDetailId,
@@ -3428,6 +3475,7 @@ export default function ReviewApp({
           message.score === evaluation.score &&
           message.justification === evaluation.justification &&
           message.answerSummary === evaluation.answerSummary &&
+          message.correctAnswer === evaluation.correctAnswer &&
           message.nextDue === evaluation.nextDue &&
           message.resolvedAt === evaluation.resolvedAt &&
           message.deckId === evaluation.deckId &&
@@ -3446,6 +3494,7 @@ export default function ReviewApp({
           score: evaluation.score,
           justification: evaluation.justification,
           answerSummary: evaluation.answerSummary,
+          correctAnswer: evaluation.correctAnswer,
           nextDue: evaluation.nextDue,
           resolvedAt: evaluation.resolvedAt,
           deckId: evaluation.deckId,
@@ -3475,7 +3524,7 @@ export default function ReviewApp({
       processedEvaluationIdsRef.current.add(evaluation.id);
       pendingRetryItemsRef.current.delete(evaluation.id);
 
-      if (evaluation.score === null || evaluation.score > 6) {
+      if (evaluation.score === null || evaluation.score >= 10) {
         continue;
       }
 
@@ -3496,14 +3545,20 @@ export default function ReviewApp({
         lastScore: evaluation.score,
         lastAnswer: evaluation.answer,
         lastAnswerSummary: evaluation.answerSummary,
+        conciseAnswer: evaluation.correctAnswer ?? retryItem.conciseAnswer,
         lastJustification: evaluation.justification,
       };
+      if (!questionRef.current && sessionQueueRef.current.length === 0) {
+        applyReviewQueueItem(updatedRetryItem);
+        continue;
+      }
+
       const nextQueue = [...sessionQueueRef.current, updatedRetryItem];
 
       sessionQueueRef.current = nextQueue;
       setSessionQueue(nextQueue);
     }
-  }, [evaluations]);
+  }, [applyReviewQueueItem, evaluations]);
 
   useEffect(() => {
     setMessages((current) => {
@@ -3529,6 +3584,7 @@ export default function ReviewApp({
           justification:
             "Evaluation did not finish. Try submitting the answer again.",
           answerSummary: message.answer,
+          correctAnswer: message.correctAnswer,
           resolvedAt: currentTime,
           nextDue: null,
         };
@@ -3586,6 +3642,7 @@ export default function ReviewApp({
         score: null,
         justification: null,
         answerSummary: null,
+        correctAnswer: null,
         nextDue: null,
         resolvedAt: null,
       },
@@ -4156,7 +4213,7 @@ export default function ReviewApp({
       setGeneratedQuestions((current) => [...candidates, ...current]);
       setGeneratorMessage(
         candidates.length > 0
-          ? `${candidates.length} generated by ${data.model}.`
+          ? `${candidates.length} generated.`
           : "OpenRouter returned no new questions.",
       );
     } catch (generateError) {
@@ -4315,6 +4372,7 @@ export default function ReviewApp({
         lastActivityAt: message.lastActivityAt,
         score: message.score,
         justification: message.justification,
+        correctAnswer: message.correctAnswer,
         traceId: message.traceId,
         timestamp,
         timeLabel:
@@ -4354,6 +4412,7 @@ export default function ReviewApp({
         lastActivityAt: evaluation.lastActivityAt,
         score: evaluation.score,
         justification: evaluation.justification,
+        correctAnswer: evaluation.correctAnswer,
         traceId: evaluation.traceId,
         timestamp,
         timeLabel:
@@ -4399,6 +4458,7 @@ export default function ReviewApp({
       lastActivityAt: null,
       score: attempt.score,
       justification: attempt.justification,
+      correctAnswer: attempt.correctAnswer,
       traceId: null,
       timestamp: attempt.resolvedAt || attempt.submittedAt,
       timeLabel: formatRelativeTime(
@@ -4450,6 +4510,7 @@ export default function ReviewApp({
         justification:
           item.lastJustification ??
           "Covers the core idea; a few details could be sharper.",
+        correctAnswer: item.conciseAnswer,
         traceId: null,
         timestamp,
         timeLabel: formatRelativeTime(timestamp, currentTime),
@@ -4500,6 +4561,10 @@ export default function ReviewApp({
     (item) => item.status === "scheduled",
   );
   const sortedReviewQueue = useMemo(() => {
+    if (isQueueSearchActive) {
+      return reviewQueue;
+    }
+
     return [...reviewQueue].sort((a, b) => {
       const dateComparison =
         queueSortKey === "review-date"
@@ -4508,7 +4573,7 @@ export default function ReviewApp({
 
       return dateComparison || a.question.localeCompare(b.question);
     });
-  }, [queueSortKey, reviewQueue]);
+  }, [isQueueSearchActive, queueSortKey, reviewQueue]);
   const hasMoreReviewQueue = reviewQueue.length < reviewQueueTotal;
   const loadMoreQueueRows = useCallback(() => {
     if (isQueuePageLoadingRef.current || !hasMoreReviewQueue) {
@@ -4797,6 +4862,7 @@ export default function ReviewApp({
         id: `attempt-${attempt.id}`,
         rawAnswer: attempt.rawAnswer || "(blank)",
         answerSummary: attempt.answerSummary || null,
+        correctAnswer: attempt.correctAnswer,
         score: attempt.score,
         justification: attempt.justification || null,
         traceId: null,
@@ -4816,6 +4882,7 @@ export default function ReviewApp({
           id: `session-${message.evaluationId}`,
           rawAnswer: message.answer,
           answerSummary: message.answerSummary,
+          correctAnswer: message.correctAnswer,
           score: message.score,
           justification: message.justification,
           traceId: message.traceId,
@@ -4851,6 +4918,7 @@ export default function ReviewApp({
         id: `evaluation-${evaluation.id}`,
         rawAnswer: evaluation.answer || "(blank)",
         answerSummary: evaluation.answerSummary,
+        correctAnswer: evaluation.correctAnswer,
         score: evaluation.score,
         justification: evaluation.justification,
         traceId: evaluation.traceId,
@@ -4913,20 +4981,14 @@ export default function ReviewApp({
     selectedQuestion,
   ]);
 
-  const selectedReferenceAnswerState = selectedQuestionStats
-    ? referenceAnswers[selectedQuestionStats.question]
-    : undefined;
-  const selectedReferenceAnswer =
-    selectedQuestionStats?.referenceAnswer ??
-    (selectedReferenceAnswerState?.status === "resolved"
-      ? selectedReferenceAnswerState.answer
-      : null);
-  const isGeneratingReferenceAnswer =
-    selectedReferenceAnswerState?.status === "loading";
-  const referenceAnswerError =
-    selectedReferenceAnswerState?.status === "error"
-      ? selectedReferenceAnswerState.answer
-      : null;
+  usePageScrollLock(
+    isCreatingDeck ||
+      Boolean(editingDeck) ||
+      isQuestionGeneratorOpen ||
+      isSettingsOpen ||
+      Boolean(selectedQuestionStats),
+  );
+
   const generatedQuestionCounts = generatedQuestions.reduce(
     (counts, item) => {
       counts[item.status] += 1;
@@ -5022,88 +5084,6 @@ export default function ReviewApp({
     queueVirtualRange.end,
     selectedDeckDetailId,
   ]);
-
-  async function generateReferenceAnswer(
-    questionToAnswer: string,
-    questionIdToAnswer: string | null,
-  ) {
-    const storedAnswer =
-      reviewQueue.find((item) =>
-        questionIdToAnswer
-          ? item.questionId === questionIdToAnswer
-          : item.question === questionToAnswer,
-      )
-        ?.referenceAnswer ?? null;
-
-    if (storedAnswer) {
-      setReferenceAnswers((current) => ({
-        ...current,
-        [questionToAnswer]: {
-          status: "resolved",
-          answer: storedAnswer,
-        },
-      }));
-      return;
-    }
-
-    setReferenceAnswers((current) => ({
-      ...current,
-      [questionToAnswer]: {
-        status: "loading",
-        answer: "Generating reference answer...",
-      },
-    }));
-
-    try {
-      const response = await fetch("/api/reference-answer", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          questionId: questionIdToAnswer,
-          question: questionToAnswer,
-        }),
-      });
-
-      const data = await readJsonResponse<ReferenceAnswerResponse>(
-        response,
-        "Failed to generate reference answer.",
-      );
-
-      setReferenceAnswers((current) => ({
-        ...current,
-        [questionToAnswer]: {
-          status: "resolved",
-          answer: data.answer,
-        },
-      }));
-      setReviewQueue((current) =>
-        current.map((queueItem) =>
-          (questionIdToAnswer
-            ? queueItem.questionId === questionIdToAnswer
-            : queueItem.question === questionToAnswer)
-            ? {
-                ...queueItem,
-                referenceAnswer: data.answer.startsWith(
-                  "Reference answer is unavailable",
-                )
-                  ? queueItem.referenceAnswer
-                  : data.answer,
-              }
-            : queueItem,
-        ),
-      );
-    } catch {
-      setReferenceAnswers((current) => ({
-        ...current,
-        [questionToAnswer]: {
-          status: "error",
-          answer: "Reference answer is unavailable right now.",
-        },
-      }));
-    }
-  }
 
   return (
     <main
@@ -5506,16 +5486,18 @@ export default function ReviewApp({
                           id={detailId}
                         >
                           <div className="previous-field">
-                            <span className="previous-field-label">Answer</span>
-                            {item.answer ? (
+                            <span className="previous-field-label">
+                              Correct answer
+                            </span>
+                            {item.correctAnswer ? (
                               <MarkdownInline
                                 as="p"
                                 className="previous-answer"
-                                text={item.answer}
+                                text={item.correctAnswer}
                               />
                             ) : (
                               <p className="previous-answer previous-answer-empty">
-                                No answer text recorded.
+                                No correct answer recorded.
                               </p>
                             )}
                           </div>
@@ -5705,17 +5687,40 @@ export default function ReviewApp({
                   <Sparkles aria-hidden="true" />
                   <span>Generate</span>
                 </button>
+                <label className="queue-search-label">
+                  <span className="sr-only">Search cards by meaning</span>
+                  <span className="queue-search-shell">
+                    <Search aria-hidden="true" />
+                    <input
+                      className="queue-search-input"
+                      type="search"
+                      value={queueSearchInput}
+                      onChange={(event) => setQueueSearchInput(event.target.value)}
+                      placeholder="Search cards"
+                    />
+                  </span>
+                </label>
                 <label className="queue-sort-label">
                   Sort by
                   <span className="queue-sort-select-shell">
                     <select
                       className="queue-sort-select"
-                      value={queueSortKey}
-                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                        setQueueSortKey(event.target.value as QueueSortKey)
-                      }
+                      value={isQueueSearchActive ? "proximity" : queueSortKey}
+                      onChange={(event: ChangeEvent<HTMLSelectElement>) => {
+                        const nextValue = event.target.value;
+
+                        if (
+                          nextValue === "review-date" ||
+                          nextValue === "creation-date"
+                        ) {
+                          setQueueSortKey(nextValue);
+                        }
+                      }}
                       aria-label="Sort queue"
                     >
+                      {isQueueSearchActive ? (
+                        <option value="proximity">Proximity</option>
+                      ) : null}
                       <option value="review-date">Review date</option>
                       <option value="creation-date">Creation date</option>
                     </select>
@@ -5728,7 +5733,9 @@ export default function ReviewApp({
                 <p className="queue-empty">
                   {isQueuePageLoading || !hasLoadedQueueStatusRef.current
                     ? "Loading queue..."
-                    : "No active cards."}
+                    : isQueueSearchActive
+                      ? "No matching cards."
+                      : "No active cards."}
                 </p>
               ) : (
                 <ol className="queue-list" ref={queueListRef}>
@@ -5814,7 +5821,9 @@ export default function ReviewApp({
                     <li className="queue-loading-row" aria-live="polite">
                       {isQueuePageLoading
                         ? "Loading more cards..."
-                        : `${reviewQueue.length}/${reviewQueueTotal} loaded`}
+                        : isQueueSearchActive
+                          ? `${reviewQueue.length}/${reviewQueueTotal} matches loaded`
+                          : `${reviewQueue.length}/${reviewQueueTotal} loaded`}
                     </li>
                   ) : null}
                 </ol>
@@ -6640,36 +6649,6 @@ export default function ReviewApp({
                   />
                 </div>
               ) : null}
-              <div className="stats-feedback">
-                <div className="stats-reference-header">
-                  <span>LLM answer</span>
-                  {!selectedReferenceAnswer ? (
-                    <button
-                      className="stats-generate-answer"
-                      type="button"
-                      onClick={() =>
-                        void generateReferenceAnswer(
-                          selectedQuestionStats.question,
-                          selectedQuestionStats.questionId,
-                        )
-                      }
-                      disabled={isGeneratingReferenceAnswer}
-                    >
-                      {isGeneratingReferenceAnswer
-                        ? "Generating..."
-                        : "Generate answer"}
-                    </button>
-                  ) : null}
-                </div>
-                {selectedReferenceAnswer ? (
-                  <MarkdownContent
-                    className="stats-feedback-copy"
-                    text={selectedReferenceAnswer}
-                  />
-                ) : referenceAnswerError ? (
-                  <p className="stats-reference-empty">{referenceAnswerError}</p>
-                ) : null}
-              </div>
             </div>
           </section>
         </div>

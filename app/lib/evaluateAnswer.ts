@@ -58,6 +58,7 @@ function evaluateExactExpectedAnswer(
     score: 10,
     justification: "Matches the expected answer.",
     answerSummary: input.answer.trim().slice(0, 120) || expectedAnswer,
+    correctAnswer: expectedAnswer,
   };
 }
 
@@ -78,6 +79,7 @@ async function evaluateBrowserSmokeAnswer(
     score: isCorrect ? 10 : 2,
     justification: isCorrect ? "Contains the expected smoke token." : "Missing the expected smoke token.",
     answerSummary: input.answer.trim() || "(blank)",
+    correctAnswer: BROWSER_SMOKE_CORRECT_TOKEN,
   };
   const traceId = input.traceId ?? crypto.randomUUID();
   const pendingTrace = beginLlmTrace({
@@ -127,13 +129,17 @@ the user's answer to be, not the ideal corrected answer. Keep it concise,
 faithful to the user's meaning, and 12 words maximum. Preserve important
 math symbols or formulas.
 
+Also emit correctAnswer: the concise correct answer you expected for this
+question, not the user's answer. Keep it direct and 24 words maximum.
+
 Keep justification very concise: one sentence, 12 words maximum.
 
 Return strict JSON only:
 {
   "score": number,
   "justification": string,
-  "answerSummary": string
+  "answerSummary": string,
+  "correctAnswer": string
 }`;
 }
 
@@ -141,9 +147,12 @@ function buildUserPrompt(input: EvaluateAnswerInput): string {
   return [
     "Grade this submitted flashcard answer.",
     `Question: ${input.question}`,
+    input.expectedAnswer
+      ? `Stored expected answer: ${input.expectedAnswer}`
+      : null,
     `User answer: ${input.answer}`,
     `Previous review history: ${input.previousReviews}`,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 export async function evaluateAnswer(
@@ -274,7 +283,11 @@ export async function evaluateAnswer(
       );
     }
 
-    return parseEvaluation(extractChatCompletionText(body), input.answer);
+    return parseEvaluation(
+      extractChatCompletionText(body),
+      input.answer,
+      input.expectedAnswer ?? null,
+    );
   } catch (error) {
     console.info("[waxon] llm evaluation failed", {
       provider: "openrouter",

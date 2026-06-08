@@ -33,6 +33,7 @@ test("parseEvaluation assigns the normalized numeric score returned by the evalu
     score: 7,
     justification: "Mostly correct.",
     answerSummary: "Correct but incomplete",
+    correctAnswer: null,
   });
 });
 
@@ -51,6 +52,7 @@ test("parseEvaluation fails closed when score is missing or not numeric", () => 
     score: null,
     justification: "LLM evaluation failed or returned invalid score.",
     answerSummary: "fallback answer",
+    correctAnswer: null,
   });
 });
 
@@ -62,6 +64,7 @@ test("parseEvaluation fails closed on invalid JSON", () => {
     score: null,
     justification: "LLM evaluation failed or returned invalid JSON.",
     answerSummary: "fallback answer",
+    correctAnswer: null,
   });
 });
 
@@ -76,10 +79,11 @@ test("parseEvaluation accepts fenced JSON responses", () => {
     score: 10,
     justification: "Complete.",
     answerSummary: "Precise answer",
+    correctAnswer: null,
   });
 });
 
-test("parseEvaluation ignores probing question fields", () => {
+test("parseEvaluation keeps conciseAnswer as the correct answer field", () => {
   const result = parseEvaluation(
     JSON.stringify({
       score: 2,
@@ -97,7 +101,28 @@ test("parseEvaluation ignores probing question fields", () => {
     status: "graded",
     score: 2,
     justification: "Important gaps.",
-    answerSummary: "Partial answer",
+    answerSummary: "fallback answer",
+    correctAnswer: "Partial answer",
+  });
+});
+
+test("parseEvaluation reads correctAnswer without replacing answerSummary", () => {
+  const result = parseEvaluation(
+    JSON.stringify({
+      score: 8,
+      justification: "Good recall.",
+      answerSummary: "User gave the core distinction",
+      correctAnswer: "A linear threshold classifier.",
+    }),
+    "fallback answer",
+  );
+
+  assert.deepEqual(result, {
+    status: "graded",
+    score: 8,
+    justification: "Good recall.",
+    answerSummary: "User gave the core distinction",
+    correctAnswer: "A linear threshold classifier.",
   });
 });
 
@@ -141,5 +166,6 @@ test("parseEvaluation uses a concise fallback summary for blank answers", () => 
     score: 1,
     justification: "Mostly absent.",
     answerSummary: "(blank)",
+    correctAnswer: null,
   });
 });
