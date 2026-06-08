@@ -547,7 +547,25 @@ export async function gateNovelQuestions(
     return true;
   });
 
-  const embeddedCandidates = await buildCandidateEmbeddings(candidatesToCheck, trace);
+  let embeddedCandidates: CandidateWithEmbedding[];
+
+  try {
+    embeddedCandidates = await buildCandidateEmbeddings(candidatesToCheck, trace);
+  } catch (error) {
+    console.info("[waxon] semantic dedupe embedding unavailable; using exact dedupe only", {
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+
+    return {
+      accepted: candidatesToCheck.map((candidate) => ({
+        ...candidate,
+        embedding: [],
+        sourceHash: questionDedupeSourceHash(candidate),
+      })),
+      rejected,
+    };
+  }
+
   const externalNeighbors = await loadExternalNeighbors(embeddedCandidates, trace);
   const candidatesForJudgment = addBatchNeighbors(
     embeddedCandidates.map((candidate) => ({
@@ -555,7 +573,24 @@ export async function gateNovelQuestions(
       neighbors: externalNeighbors.get(candidate.id) ?? [],
     })),
   );
-  const decisions = await judgeDuplicateBatch(candidatesForJudgment, trace);
+  let decisions: Map<string, { duplicateOf: string | null; rationale: string }>;
+
+  try {
+    decisions = await judgeDuplicateBatch(candidatesForJudgment, trace);
+  } catch (error) {
+    console.info("[waxon] semantic dedupe judge unavailable; accepting embedded candidates", {
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+    decisions = new Map(
+      candidatesForJudgment.map((candidate) => [
+        candidate.id,
+        {
+          duplicateOf: null,
+          rationale: "Semantic duplicate judge unavailable.",
+        },
+      ]),
+    );
+  }
   const rejectedCandidateIds = new Set<string>();
   const accepted: AcceptedQuestionCandidate[] = [];
 
