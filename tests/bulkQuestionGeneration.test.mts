@@ -27,3 +27,19 @@ test("extractCompleteJsonObjectsFromArrayProperty handles braces inside strings"
     1,
   );
 });
+
+test("extractCompleteJsonObjectsFromArrayProperty extracts compact generated question keys", () => {
+  assert.deepEqual(
+    extractCompleteJsonObjectsFromArrayProperty(
+      '{"questions":[{"q":"What does weight decay penalize?","a":"Large weights","p":"next regularization target"}]}',
+      "questions",
+    ),
+    [
+      {
+        q: "What does weight decay penalize?",
+        a: "Large weights",
+        p: "next regularization target",
+      },
+    ],
+  );
+});
