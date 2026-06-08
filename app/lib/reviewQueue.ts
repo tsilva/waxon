@@ -134,7 +134,7 @@ function matchesNextQuestionMode(
 ): boolean {
   const hasReviewHistory = parseReviews(question.reviews).length > 0;
 
-  return mode === "learn" ? !hasReviewHistory : hasReviewHistory;
+  return mode === "learn" ? !hasReviewHistory : true;
 }
 
 function resetQueueStateForUser(userId: string): void {

@@ -2,6 +2,7 @@ import {
   clerkMiddleware,
   createRouteMatcher,
 } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 
 const isProtectedRoute = createRouteMatcher([
@@ -12,6 +13,18 @@ const isProtectedRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
+  if (request.nextUrl.pathname === "/") {
+    if (isLocalTestAuthEnabled()) {
+      return NextResponse.redirect(new URL("/review", request.url));
+    }
+
+    const { userId } = await auth();
+
+    if (userId) {
+      return NextResponse.redirect(new URL("/review", request.url));
+    }
+  }
+
   if (isProtectedRoute(request) && !isLocalTestAuthEnabled()) {
     await auth.protect();
   }
