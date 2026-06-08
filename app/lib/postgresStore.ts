@@ -14,7 +14,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { db } from "@/app/db/client";
+import { db, pool } from "@/app/db/client";
 import {
   answerEvaluations,
   decks,
@@ -30,11 +30,18 @@ import {
 } from "./auth";
 import { scheduleNextReview, serializeReviews } from "./scheduler";
 import { questionSlug } from "./questionSlug";
+import {
+  DEDUPE_EMBEDDING_DIMENSIONS,
+  DEDUPE_EMBEDDING_KIND,
+  DEDUPE_SOURCE_VERSION,
+  DEFAULT_EMBEDDING_MODEL,
+} from "./embeddingSource";
 import type {
   EvaluationPhase,
   EvaluationQueueItem,
   QuestionAttempt,
 } from "./reviewTypes";
+import { vectorLiteral } from "./vectorLiteral";
 
 export type QuestionRow = {
   question_id: string;
@@ -1152,6 +1159,180 @@ export async function getQueuedQuestionsPage(
   };
 }
 
+function rawQuestionRowToDueQuestion(row: {
+  question_id: string;
+  deck_id: string;
+  deck_name: string;
+  user_id: string;
+  question: string;
+  reviews: string;
+  next_due: number | string;
+  generated_from_question: string | null;
+  question_provenance: string;
+  last_answer: string;
+  last_answer_summary: string;
+  concise_answer: string;
+  reference_answer: string;
+  created_at: number | string;
+}): DueQuestion {
+  return toDueQuestion({
+    ...row,
+    next_due: Number(row.next_due),
+    created_at: Number(row.created_at),
+  });
+}
+
+export async function getQueuedQuestionsByEmbeddingProximityPage(
+  input: UserContextInput & {
+    queryEmbedding: number[];
+    excludeQuestionIds?: string[];
+    limit: number;
+    offset: number;
+    maxResults: number;
+    embeddingModel?: string;
+    embeddingKind?: string;
+    sourceVersion?: number;
+  },
+): Promise<QueuedQuestionsPage> {
+  const context = await ensureSeedData(input);
+  const targetDeckId = input.deckId
+    ? await resolveTargetDeckId(context, input.deckId)
+    : null;
+  const queryEmbedding = normalizeEmbedding(input.queryEmbedding);
+
+  if (queryEmbedding.length !== DEDUPE_EMBEDDING_DIMENSIONS) {
+    throw new Error("Search query embedding has an unexpected dimension.");
+  }
+
+  const model = normalizeEmbeddingModel(
+    input.embeddingModel ?? process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+  );
+  const embeddingKind = input.embeddingKind?.trim() || DEDUPE_EMBEDDING_KIND;
+  const sourceVersion = input.sourceVersion ?? DEDUPE_SOURCE_VERSION;
+  const excludeQuestionIds = Array.from(
+    new Set(input.excludeQuestionIds ?? []),
+  ).filter(Boolean);
+  const maxResults = Math.max(0, Math.floor(input.maxResults));
+  const offset = Math.max(0, Math.floor(input.offset));
+  const requestedLimit = Math.max(0, Math.floor(input.limit));
+  const buildWhereClause = (input: {
+    userIndex: number;
+    modelIndex: number;
+    kindIndex: number;
+    versionIndex: number;
+    startIndex: number;
+  }) => {
+    const params: unknown[] = [];
+    const clauses = [
+      `d.user_id = $${input.userIndex}`,
+      `d.in_review_rotation = true`,
+      `d.archived_at IS NULL`,
+      `qe.embedding_model = $${input.modelIndex}`,
+      `qe.embedding_kind = $${input.kindIndex}`,
+      `qe.source_version = $${input.versionIndex}`,
+      `qe.is_current = true`,
+    ];
+    let paramIndex = input.startIndex;
+
+    if (targetDeckId) {
+      clauses.push(`q.deck_id = $${paramIndex}`);
+      params.push(targetDeckId);
+      paramIndex += 1;
+    }
+
+    if (excludeQuestionIds.length > 0) {
+      clauses.push(
+        `q.id NOT IN (${excludeQuestionIds
+          .map(() => `$${paramIndex++}`)
+          .join(", ")})`,
+      );
+      params.push(...excludeQuestionIds);
+    }
+
+    return {
+      sql: clauses.join("\n        AND "),
+      params,
+    };
+  };
+  const countWhere = buildWhereClause({
+    userIndex: 1,
+    modelIndex: 2,
+    kindIndex: 3,
+    versionIndex: 4,
+    startIndex: 5,
+  });
+  const countResult = await pool.query(
+    `
+      SELECT count(*) AS value
+      FROM question_embeddings qe
+      JOIN questions q ON q.id = qe.question_id AND q.deck_id = qe.deck_id
+      JOIN decks d ON d.id = q.deck_id
+      WHERE ${countWhere.sql}
+    `,
+    [context.userId, model, embeddingKind, sourceVersion, ...countWhere.params],
+  );
+  const total = Math.min(
+    maxResults,
+    Number(countResult.rows[0]?.value ?? 0),
+  );
+  const limit = Math.min(requestedLimit, Math.max(0, maxResults - offset));
+
+  if (limit === 0 || offset >= maxResults) {
+    return { items: [], total };
+  }
+
+  const rowWhere = buildWhereClause({
+    userIndex: 1,
+    modelIndex: 3,
+    kindIndex: 4,
+    versionIndex: 5,
+    startIndex: 6,
+  });
+  const rowsResult = await pool.query(
+    `
+      SELECT
+        q.id AS question_id,
+        q.deck_id,
+        d.name AS deck_name,
+        d.user_id,
+        q.question,
+        q.reviews,
+        q.next_due,
+        q.generated_from_question,
+        q.question_provenance,
+        q.last_answer,
+        q.last_answer_summary,
+        q.concise_answer,
+        q.reference_answer,
+        q.created_at,
+        qe.embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
+          <=> $2::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS}) AS distance
+      FROM question_embeddings qe
+      JOIN questions q ON q.id = qe.question_id AND q.deck_id = qe.deck_id
+      JOIN decks d ON d.id = q.deck_id
+      WHERE ${rowWhere.sql}
+      ORDER BY distance ASC, q.question ASC
+      LIMIT $${6 + rowWhere.params.length}
+      OFFSET $${7 + rowWhere.params.length}
+    `,
+    [
+      context.userId,
+      vectorLiteral(queryEmbedding),
+      model,
+      embeddingKind,
+      sourceVersion,
+      ...rowWhere.params,
+      limit,
+      offset,
+    ],
+  );
+
+  return {
+    items: rowsResult.rows.map(rawQuestionRowToDueQuestion),
+    total,
+  };
+}
+
 export async function getQuestionSnapshot(
   question: string,
   input: UserContextInput = {},
@@ -1190,12 +1371,20 @@ export async function getQuestionAttempts(
       question: questionAttempts.question,
       rawAnswer: questionAttempts.rawAnswer,
       answerSummary: questionAttempts.answerSummary,
+      correctAnswer: questions.conciseAnswer,
       score: questionAttempts.score,
       justification: questionAttempts.justification,
       submittedAt: questionAttempts.submittedAt,
       resolvedAt: questionAttempts.resolvedAt,
     })
     .from(questionAttempts)
+    .innerJoin(
+      questions,
+      and(
+        eq(questions.deckId, questionAttempts.deckId),
+        eq(questions.id, questionAttempts.questionId),
+      ),
+    )
     .where(
       and(
         inArray(
@@ -1239,12 +1428,20 @@ export async function getQuestionAttemptsByQuestionIds(
       question: questionAttempts.question,
       rawAnswer: questionAttempts.rawAnswer,
       answerSummary: questionAttempts.answerSummary,
+      correctAnswer: questions.conciseAnswer,
       score: questionAttempts.score,
       justification: questionAttempts.justification,
       submittedAt: questionAttempts.submittedAt,
       resolvedAt: questionAttempts.resolvedAt,
     })
     .from(questionAttempts)
+    .innerJoin(
+      questions,
+      and(
+        eq(questions.deckId, questionAttempts.deckId),
+        eq(questions.id, questionAttempts.questionId),
+      ),
+    )
     .where(
       and(
         inArray(
@@ -1311,12 +1508,20 @@ export async function getRecentQuestionAttempts(
       question: questionAttempts.question,
       rawAnswer: questionAttempts.rawAnswer,
       answerSummary: questionAttempts.answerSummary,
+      correctAnswer: questions.conciseAnswer,
       score: questionAttempts.score,
       justification: questionAttempts.justification,
       submittedAt: questionAttempts.submittedAt,
       resolvedAt: questionAttempts.resolvedAt,
     })
     .from(questionAttempts)
+    .innerJoin(
+      questions,
+      and(
+        eq(questions.deckId, questionAttempts.deckId),
+        eq(questions.id, questionAttempts.questionId),
+      ),
+    )
     .where(
       and(
         inArray(
@@ -1362,6 +1567,7 @@ function toEvaluationQueueItem(row: {
   score: number | null;
   justification: string | null;
   answerSummary: string | null;
+  correctAnswer: string | null;
   nextDue: number | null;
   resolvedAt: number | null;
 }): EvaluationQueueItem {
@@ -1381,6 +1587,7 @@ function toEvaluationQueueItem(row: {
     score: row.score,
     justification: row.justification,
     answerSummary: row.answerSummary,
+    correctAnswer: row.correctAnswer || null,
     resolvedAt: row.resolvedAt,
     nextDue: row.nextDue,
   };
@@ -1488,11 +1695,19 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
       score: answerEvaluations.score,
       justification: answerEvaluations.justification,
       answerSummary: answerEvaluations.answerSummary,
+      correctAnswer: questions.conciseAnswer,
       nextDue: answerEvaluations.nextDue,
       resolvedAt: answerEvaluations.resolvedAt,
     })
     .from(answerEvaluations)
     .innerJoin(decks, eq(decks.id, answerEvaluations.deckId))
+    .innerJoin(
+      questions,
+      and(
+        eq(questions.deckId, answerEvaluations.deckId),
+        eq(questions.question, answerEvaluations.question),
+      ),
+    )
     .where(
       and(
         eq(answerEvaluations.userId, context.userId),
@@ -1545,10 +1760,18 @@ export async function getAnswerEvaluationsByIds(input: UserContextInput & {
       score: answerEvaluations.score,
       justification: answerEvaluations.justification,
       answerSummary: answerEvaluations.answerSummary,
+      correctAnswer: questions.conciseAnswer,
       nextDue: answerEvaluations.nextDue,
       resolvedAt: answerEvaluations.resolvedAt,
     })
     .from(answerEvaluations)
+    .innerJoin(
+      questions,
+      and(
+        eq(questions.deckId, answerEvaluations.deckId),
+        eq(questions.question, answerEvaluations.question),
+      ),
+    )
     .where(
       and(
         eq(answerEvaluations.userId, context.userId),
@@ -1698,6 +1921,7 @@ export async function applyEvaluationToPostgres(input: {
   question: string;
   answer: string;
   answerSummary: string;
+  correctAnswer: string | null;
   justification: string;
   score: number;
   submittedAt: number;
@@ -1776,6 +2000,9 @@ export async function applyEvaluationToPostgres(input: {
       now: input.now,
     });
     const roundedNextDue = Math.round(nextDue);
+    const correctAnswer = input.correctAnswer?.trim().replace(/\s+/g, " ") ?? "";
+    const conciseAnswer =
+      row.concise_answer || (correctAnswer.length > 0 ? correctAnswer : "");
 
     await tx
       .update(questions)
@@ -1784,6 +2011,7 @@ export async function applyEvaluationToPostgres(input: {
         nextDue: roundedNextDue,
         lastAnswer: input.answer,
         lastAnswerSummary: input.answerSummary,
+        conciseAnswer,
         updatedAt: Math.round(input.now),
       })
       .where(
@@ -1825,7 +2053,7 @@ export async function applyEvaluationToPostgres(input: {
       lastAnswer: input.answer || null,
       lastAnswerSummary: input.answerSummary || null,
       referenceAnswer: row.reference_answer || null,
-      conciseAnswer: row.concise_answer || null,
+      conciseAnswer: conciseAnswer || null,
       createdAt: row.created_at,
     };
   });

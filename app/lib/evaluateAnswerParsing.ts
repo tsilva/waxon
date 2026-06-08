@@ -3,6 +3,7 @@ export type GradedEvaluationResult = {
   score: number;
   justification: string;
   answerSummary: string;
+  correctAnswer: string | null;
 };
 
 export type FailedEvaluationResult = {
@@ -10,13 +11,14 @@ export type FailedEvaluationResult = {
   score: null;
   justification: string;
   answerSummary: string;
+  correctAnswer: null;
 };
 
 export type EvaluationResult = GradedEvaluationResult | FailedEvaluationResult;
 
 const FAILED_EVALUATION_RESULT: Omit<
   FailedEvaluationResult,
-  "answerSummary"
+  "answerSummary" | "correctAnswer"
 > = {
   status: "failed",
   score: null,
@@ -25,6 +27,7 @@ const FAILED_EVALUATION_RESULT: Omit<
 
 const MAX_JUSTIFICATION_WORDS = 12;
 const MAX_ANSWER_SUMMARY_WORDS = 12;
+const MAX_CORRECT_ANSWER_WORDS = 24;
 
 export function parseScore(score: unknown): number | null {
   if (typeof score !== "number" || !Number.isFinite(score)) {
@@ -37,6 +40,7 @@ export function parseScore(score: unknown): number | null {
 export function parseEvaluation(
   rawText: string,
   fallbackAnswer: string,
+  fallbackCorrectAnswer: string | null = null,
 ): EvaluationResult {
   try {
     const json = rawText
@@ -50,6 +54,8 @@ export function parseEvaluation(
       answerSummary?: unknown;
       answer_summary?: unknown;
       conciseAnswer?: unknown;
+      correctAnswer?: unknown;
+      correct_answer?: unknown;
     };
     const score = parseScore(parsed.score);
 
@@ -65,8 +71,12 @@ export function parseEvaluation(
       score,
       justification: conciseJustification(parsed.justification),
       answerSummary: conciseAnswerSummary(
-        parsed.answerSummary ?? parsed.answer_summary ?? parsed.conciseAnswer,
+        parsed.answerSummary ?? parsed.answer_summary,
         fallbackAnswer,
+      ),
+      correctAnswer: conciseCorrectAnswer(
+        parsed.correctAnswer ?? parsed.correct_answer ?? parsed.conciseAnswer,
+        fallbackCorrectAnswer,
       ),
     };
   } catch {
@@ -85,6 +95,7 @@ export function failedEvaluation(
     ...FAILED_EVALUATION_RESULT,
     justification,
     answerSummary: conciseAnswerSummary(fallbackAnswer, fallbackAnswer),
+    correctAnswer: null,
   };
 }
 
@@ -114,4 +125,26 @@ function conciseAnswerSummary(summary: unknown, fallbackAnswer: string): string 
   }
 
   return `${words.slice(0, MAX_ANSWER_SUMMARY_WORDS).join(" ")}...`;
+}
+
+function conciseCorrectAnswer(
+  answer: unknown,
+  fallbackCorrectAnswer: string | null,
+): string | null {
+  const source =
+    typeof answer === "string" && answer.trim()
+      ? answer
+      : fallbackCorrectAnswer?.trim();
+
+  if (!source) {
+    return null;
+  }
+
+  const words = source.trim().replace(/\s+/g, " ").split(" ");
+
+  if (words.length <= MAX_CORRECT_ANSWER_WORDS) {
+    return words.join(" ");
+  }
+
+  return `${words.slice(0, MAX_CORRECT_ANSWER_WORDS).join(" ")}...`;
 }

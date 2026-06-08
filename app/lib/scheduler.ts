@@ -46,22 +46,11 @@ export function scheduleNextReview(input: {
   const previousReview = previousReviews.at(-1);
   const previousInterval = previousReview ? now - previousReview.ts : DAY;
 
-  if (newScore <= 3) {
-    return now + MINUTE;
-  }
-
-  if (newScore <= 5) {
-    return now + 3 * MINUTE;
-  }
-
-  if (newScore === 6) {
-    return now + 15 * MINUTE;
+  if (newScore < 10) {
+    return now;
   }
 
   const successIntervals: Record<number, number> = {
-    7: Math.max(DAY, previousInterval * 1.2),
-    8: Math.max(2 * DAY, previousInterval * 2),
-    9: Math.max(4 * DAY, previousInterval * 3),
     10: Math.max(7 * DAY, previousInterval * 5),
   };
 

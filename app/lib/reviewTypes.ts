@@ -10,6 +10,7 @@ export type QuestionAttempt = {
   question: string;
   rawAnswer: string;
   answerSummary: string;
+  correctAnswer: string | null;
   score: number;
   justification: string;
   submittedAt: number;
@@ -36,6 +37,7 @@ export type EvaluationQueueItem = {
   score: number | null;
   justification: string | null;
   answerSummary: string | null;
+  correctAnswer: string | null;
   resolvedAt: number | null;
   nextDue: number | null;
 };

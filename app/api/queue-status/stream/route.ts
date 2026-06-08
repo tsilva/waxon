@@ -56,11 +56,13 @@ export async function GET(request: Request) {
   const sort = url.searchParams.get("sort");
   const deckId = url.searchParams.get("deckId")?.trim();
   const mode = url.searchParams.get("mode");
+  const query = url.searchParams.get("query")?.trim();
   const statusInput = {
     limit: Number.isFinite(limit) ? limit : undefined,
     offset: Number.isFinite(offset) ? offset : undefined,
     sortKey: sort === "creation-date" ? ("creation-date" as const) : ("review-date" as const),
     deckId: deckId || undefined,
+    query: query || undefined,
     includeReviewQueue:
       mode === "review"
         ? false
