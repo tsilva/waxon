@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import {
   chunks,
   configureNeonWebSocket,
+  createDatabasePool,
   loadLocalEnvFiles,
-  requireEnv,
+  logSavedProgress,
+  requireOpenRouterApiKey,
   vectorLiteral,
 } from "./lib/runtime.mjs";
 
@@ -261,9 +263,8 @@ async function saveEmbeddings(pool, rows, options) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const apiKey = requireEnv("OPENROUTER_API_KEY", "LLM_API_KEY");
-  const connectionString = requireEnv("DATABASE_URL_UNPOOLED", "DATABASE_URL");
-  const pool = new Pool({ connectionString });
+  const apiKey = requireOpenRouterApiKey();
+  const pool = createDatabasePool(Pool);
 
   try {
     const questions = await loadQuestions(pool, options);
@@ -294,7 +295,7 @@ async function main() {
         options,
       );
       saved += batch.length;
-      console.log(`Saved ${saved}/${questions.length}`);
+      logSavedProgress(saved, questions.length);
     }
 
     console.log(

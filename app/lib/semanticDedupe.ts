@@ -2,6 +2,7 @@ import { pool } from "@/app/db/client";
 import {
   extractChatCompletionText,
   getOpenRouterApiKey,
+  getOpenRouterChatModel,
   openRouterChatCompletion,
   openRouterEmbeddings,
   type OpenRouterTraceContext,
@@ -419,6 +420,8 @@ async function judgeDuplicateBatch(
     throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required.");
   }
 
+  const model = getOpenRouterChatModel() ?? "";
+
   for (
     let offset = 0;
     offset < candidatesWithNeighbors.length;
@@ -434,7 +437,7 @@ async function judgeDuplicateBatch(
         question: trace.question,
       },
       body: {
-        model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+        model,
         response_format: { type: "json_object" },
         temperature: 0,
         max_tokens: Math.min(4096, 220 * batch.length + 500),

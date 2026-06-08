@@ -5,6 +5,10 @@ import Link from "next/link";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import {
+  MarkdownContent as SharedMarkdownContent,
+  MarkdownInline as SharedMarkdownInline,
+} from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import type {
   DeckEmbeddingPlot as DeckEmbeddingPlotResponse,
@@ -38,10 +42,9 @@ import {
   CSSProperties,
   DragEvent,
   FormEvent,
-  Fragment,
   KeyboardEvent,
+  type ComponentProps,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -175,6 +178,7 @@ type ActiveTab = "review" | "queue";
 type ReviewAppProps = {
   initialActiveTab?: ActiveTab;
   initialDeckSlug?: string | null;
+  initialDecks?: DeckManagementItem[];
 };
 
 type ReviewSessionSnapshot = {
@@ -688,11 +692,6 @@ type AnswerHistoryEntry = {
   lastActivityAt: number | null;
 };
 
-type MathParseResult = {
-  content: string;
-  nextIndex: number;
-};
-
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
 const QUEUE_PAGE_SIZE = 48;
@@ -717,330 +716,16 @@ const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit|skip)[.!?]*$/i;
 const DEFAULT_GENERATED_QUESTION_COUNT = 5;
 const MAX_GENERATED_QUESTION_COUNT = 10;
 
-const mathSymbolMap: Record<string, string> = {
-  alpha: "\u03b1",
-  beta: "\u03b2",
-  delta: "\u03b4",
-  Delta: "\u0394",
-  epsilon: "\u03b5",
-  eta: "\u03b7",
-  gamma: "\u03b3",
-  lambda: "\u03bb",
-  mu: "\u03bc",
-  nabla: "\u2207",
-  partial: "\u2202",
-  theta: "\u03b8",
-};
-
-function findClosingDelimiter(
-  source: string,
-  delimiter: string,
-  startIndex: number,
+function MarkdownInline(
+  props: Omit<ComponentProps<typeof SharedMarkdownInline>, "enableMath">,
 ) {
-  for (let index = startIndex; index < source.length; index += 1) {
-    if (
-      source.startsWith(delimiter, index) &&
-      source[index - 1] !== "\\"
-    ) {
-      return index;
-    }
-  }
-
-  return -1;
+  return <SharedMarkdownInline enableMath {...props} />;
 }
 
-function readMathGroup(source: string, startIndex: number): MathParseResult | null {
-  if (source[startIndex] !== "{") {
-    return null;
-  }
-
-  let depth = 0;
-
-  for (let index = startIndex; index < source.length; index += 1) {
-    const character = source[index];
-
-    if (character === "{") {
-      depth += 1;
-    } else if (character === "}") {
-      depth -= 1;
-
-      if (depth === 0) {
-        return {
-          content: source.slice(startIndex + 1, index),
-          nextIndex: index + 1,
-        };
-      }
-    }
-  }
-
-  return null;
-}
-
-function readMathAtom(source: string, startIndex: number): MathParseResult {
-  const group = readMathGroup(source, startIndex);
-
-  if (group) {
-    return group;
-  }
-
-  const atomMatch = source.slice(startIndex).match(/^[A-Za-z0-9]+/);
-
-  if (atomMatch) {
-    return {
-      content: atomMatch[0],
-      nextIndex: startIndex + atomMatch[0].length,
-    };
-  }
-
-  return {
-    content: source[startIndex] ?? "",
-    nextIndex: startIndex + 1,
-  };
-}
-
-function renderMathNodes(expression: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let index = 0;
-
-  while (index < expression.length) {
-    if (expression.startsWith("\\frac", index)) {
-      const numerator = readMathGroup(expression, index + "\\frac".length);
-
-      if (numerator) {
-        const denominator = readMathGroup(expression, numerator.nextIndex);
-
-        if (denominator) {
-          nodes.push(
-            <span className="math-fraction" key={`frac-${index}`}>
-              <span className="math-fraction-numerator">
-                {renderMathNodes(numerator.content)}
-              </span>
-              <span className="math-fraction-denominator">
-                {renderMathNodes(denominator.content)}
-              </span>
-            </span>,
-          );
-          index = denominator.nextIndex;
-          continue;
-        }
-      }
-    }
-
-    const character = expression[index];
-
-    if (character === "_" || character === "^") {
-      const atom = readMathAtom(expression, index + 1);
-      const Element = character === "_" ? "sub" : "sup";
-
-      nodes.push(
-        <Element key={`${character}-${index}`}>
-          {renderMathNodes(atom.content)}
-        </Element>,
-      );
-      index = atom.nextIndex;
-      continue;
-    }
-
-    if (character === "\\") {
-      const command = expression.slice(index + 1).match(/^[A-Za-z]+/);
-
-      if (command) {
-        nodes.push(
-          <span className="math-command" key={`command-${index}`}>
-            {mathSymbolMap[command[0]] ?? command[0]}
-          </span>,
-        );
-        index += command[0].length + 1;
-        continue;
-      }
-    }
-
-    nodes.push(character);
-    index += 1;
-  }
-
-  return nodes;
-}
-
-function MathExpression({
-  expression,
-  display = false,
-}: {
-  expression: string;
-  display?: boolean;
-}) {
-  return (
-    <span className={display ? "math-expression display" : "math-expression"}>
-      {renderMathNodes(expression.trim())}
-    </span>
-  );
-}
-
-function renderInlineMarkdown(text: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let index = 0;
-
-  while (index < text.length) {
-    if (text.startsWith("**", index)) {
-      const closeIndex = findClosingDelimiter(text, "**", index + 2);
-
-      if (closeIndex > index) {
-        nodes.push(
-          <strong key={`strong-${index}`}>
-            {renderInlineMarkdown(text.slice(index + 2, closeIndex))}
-          </strong>,
-        );
-        index = closeIndex + 2;
-        continue;
-      }
-    }
-
-    if (text[index] === "`") {
-      const closeIndex = findClosingDelimiter(text, "`", index + 1);
-
-      if (closeIndex > index) {
-        nodes.push(
-          <code className="markdown-inline-code" key={`code-${index}`}>
-            {text.slice(index + 1, closeIndex)}
-          </code>,
-        );
-        index = closeIndex + 1;
-        continue;
-      }
-    }
-
-    if (text[index] === "$" && text[index + 1] !== "$") {
-      const closeIndex = findClosingDelimiter(text, "$", index + 1);
-
-      if (closeIndex > index) {
-        nodes.push(
-          <MathExpression
-            expression={text.slice(index + 1, closeIndex)}
-            key={`math-${index}`}
-          />,
-        );
-        index = closeIndex + 1;
-        continue;
-      }
-    }
-
-    if (
-      text[index] === "*" &&
-      text[index + 1] !== "*" &&
-      text[index - 1] !== "*"
-    ) {
-      const closeIndex = findClosingDelimiter(text, "*", index + 1);
-
-      if (closeIndex > index) {
-        nodes.push(
-          <em key={`em-${index}`}>
-            {renderInlineMarkdown(text.slice(index + 1, closeIndex))}
-          </em>,
-        );
-        index = closeIndex + 1;
-        continue;
-      }
-    }
-
-    const nextSpecial = text
-      .slice(index + 1)
-      .search(/(\*\*|`|\$|\*)/);
-    const endIndex =
-      nextSpecial === -1 ? text.length : index + 1 + nextSpecial;
-
-    nodes.push(text.slice(index, endIndex));
-    index = endIndex;
-  }
-
-  return nodes;
-}
-
-function MarkdownInline({
-  as: Element,
-  className,
-  text,
-}: {
-  as: "h2" | "p";
-  className: string;
-  text: string;
-}) {
-  const lines = text.split("\n");
-
-  return (
-    <Element className={className}>
-      {lines.map((line, index) => (
-        <Fragment key={`${line}-${index}`}>
-          {index > 0 ? <br /> : null}
-          {renderInlineMarkdown(line)}
-        </Fragment>
-      ))}
-    </Element>
-  );
-}
-
-function MarkdownContent({
-  className,
-  text,
-}: {
-  className: string;
-  text: string;
-}) {
-  const blocks = text.trim().split(/\n{2,}/);
-
-  return (
-    <div className={`markdown-content ${className}`}>
-      {blocks.map((block, index) => {
-        const trimmedBlock = block.trim();
-        const lines = trimmedBlock.split("\n");
-
-        if (trimmedBlock.startsWith("$$") && trimmedBlock.endsWith("$$")) {
-          return (
-            <p className="markdown-paragraph" key={`display-${index}`}>
-              <MathExpression
-                display
-                expression={trimmedBlock.slice(2, -2)}
-              />
-            </p>
-          );
-        }
-
-        if (lines.every((line) => /^[-*]\s+/.test(line.trim()))) {
-          return (
-            <ul className="markdown-list" key={`ul-${index}`}>
-              {lines.map((line, lineIndex) => (
-                <li key={`${line}-${lineIndex}`}>
-                  {renderInlineMarkdown(line.trim().slice(2))}
-                </li>
-              ))}
-            </ul>
-          );
-        }
-
-        if (lines.every((line) => /^\d+\.\s+/.test(line.trim()))) {
-          return (
-            <ol className="markdown-list" key={`ol-${index}`}>
-              {lines.map((line, lineIndex) => (
-                <li key={`${line}-${lineIndex}`}>
-                  {renderInlineMarkdown(line.trim().replace(/^\d+\.\s+/, ""))}
-                </li>
-              ))}
-            </ol>
-          );
-        }
-
-        return (
-          <p className="markdown-paragraph" key={`p-${index}`}>
-            {lines.map((line, lineIndex) => (
-              <Fragment key={`${line}-${lineIndex}`}>
-                {lineIndex > 0 ? <br /> : null}
-                {renderInlineMarkdown(line)}
-              </Fragment>
-            ))}
-          </p>
-        );
-      })}
-    </div>
-  );
+function MarkdownContent(
+  props: Omit<ComponentProps<typeof SharedMarkdownContent>, "enableMath">,
+) {
+  return <SharedMarkdownContent enableMath {...props} />;
 }
 
 function formatDurationBadge(msUntilDue: number): string {
@@ -1624,6 +1309,7 @@ function SubmitIcon() {
 export default function ReviewApp({
   initialActiveTab = "review",
   initialDeckSlug = null,
+  initialDecks = [],
 }: ReviewAppProps) {
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
@@ -1633,17 +1319,32 @@ export default function ReviewApp({
     [],
   );
   const cachedSessionRef = useRef(reviewSessionSnapshot);
+  const initialRoutedDeckId =
+    initialActiveTab === "queue" && initialDeckSlug
+      ? initialDecks.find((deck) => deck.slug === initialDeckSlug)?.id ??
+        cachedSessionRef.current?.decks.find(
+          (deck) => deck.slug === initialDeckSlug,
+        )?.id ??
+        null
+      : null;
+  const canUseCachedQueueState =
+    !initialRoutedDeckId ||
+    cachedSessionRef.current?.selectedDeckDetailId === initialRoutedDeckId;
   const hasLoadedQuestionRef = useRef(
     cachedSessionRef.current?.hasLoadedQuestion ?? false,
   );
   const hasLoadedQueueStatusRef = useRef(
-    cachedSessionRef.current?.hasLoadedQueueStatus ?? false,
+    canUseCachedQueueState
+      ? cachedSessionRef.current?.hasLoadedQueueStatus ?? false
+      : false,
   );
   const hasLoadedDecksRef = useRef(
-    cachedSessionRef.current?.hasLoadedDecks ?? false,
+    cachedSessionRef.current?.hasLoadedDecks ?? initialDecks.length > 0,
   );
   const loadedQueueSortKeyRef = useRef<QueueSortKey | null>(
-    cachedSessionRef.current?.loadedQueueSortKey ?? null,
+    canUseCachedQueueState
+      ? cachedSessionRef.current?.loadedQueueSortKey ?? null
+      : null,
   );
   const [question, setQuestion] = useState<string | null>(
     () => cachedSessionRef.current?.question ?? null,
@@ -1673,27 +1374,50 @@ export default function ReviewApp({
     () => cachedSessionRef.current?.evaluations ?? [],
   );
   const [recentAttempts, setRecentAttempts] = useState<QuestionAttempt[]>(
-    () => cachedSessionRef.current?.recentAttempts ?? [],
+    () =>
+      canUseCachedQueueState
+        ? cachedSessionRef.current?.recentAttempts ?? []
+        : [],
   );
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>(
-    () => cachedSessionRef.current?.reviewQueue ?? [],
+    () =>
+      canUseCachedQueueState ? cachedSessionRef.current?.reviewQueue ?? [] : [],
   );
   const [reviewQueueTotal, setReviewQueueTotal] = useState(
-    () => cachedSessionRef.current?.reviewQueueTotal ?? 0,
+    () =>
+      canUseCachedQueueState
+        ? cachedSessionRef.current?.reviewQueueTotal ?? 0
+        : 0,
   );
-  const [isQueuePageLoading, setIsQueuePageLoading] = useState(false);
+  const [isQueuePageLoading, setIsQueuePageLoading] = useState(
+    () =>
+      initialActiveTab === "queue" &&
+      Boolean(initialRoutedDeckId) &&
+      !(
+        canUseCachedQueueState &&
+        (cachedSessionRef.current?.hasLoadedQueueStatus ?? false)
+      ),
+  );
   const [queueVirtualRange, setQueueVirtualRange] = useState({
-    start: cachedSessionRef.current?.queueVirtualRange.start ?? 0,
-    end: cachedSessionRef.current?.queueVirtualRange.end ?? QUEUE_PAGE_SIZE,
+    start: canUseCachedQueueState
+      ? cachedSessionRef.current?.queueVirtualRange.start ?? 0
+      : 0,
+    end: canUseCachedQueueState
+      ? cachedSessionRef.current?.queueVirtualRange.end ?? QUEUE_PAGE_SIZE
+      : QUEUE_PAGE_SIZE,
   });
   const [queueSortKey, setQueueSortKey] = useState<QueueSortKey>(
     () => cachedSessionRef.current?.queueSortKey ?? "review-date",
   );
   const [decks, setDecks] = useState<DeckManagementItem[]>(
-    () => cachedSessionRef.current?.decks ?? [],
+    () => cachedSessionRef.current?.decks ?? initialDecks,
   );
   const [selectedDeckId, setSelectedDeckId] = useState(
-    () => cachedSessionRef.current?.selectedDeckId ?? "",
+    () =>
+      cachedSessionRef.current?.selectedDeckId ??
+      initialRoutedDeckId ??
+      initialDecks[0]?.id ??
+      "",
   );
   const [deckSearchQuery, setDeckSearchQuery] = useState(
     () => cachedSessionRef.current?.deckSearchQuery ?? "",
@@ -1705,7 +1429,7 @@ export default function ReviewApp({
     string | null
   >(() =>
     initialActiveTab === "queue" && initialDeckSlug
-      ? cachedSessionRef.current?.selectedDeckDetailId ?? null
+      ? initialRoutedDeckId ?? cachedSessionRef.current?.selectedDeckDetailId ?? null
       : null,
   );
   const [isCreatingDeck, setIsCreatingDeck] = useState(
@@ -1727,7 +1451,11 @@ export default function ReviewApp({
   const [deckEditorMessage, setDeckEditorMessage] = useState<string | null>(null);
   const [deckEmbeddingPlot, setDeckEmbeddingPlot] =
     useState<DeckEmbeddingPlotResponse>(
-      () => cachedSessionRef.current?.deckEmbeddingPlot ?? createEmptyDeckEmbeddingPlot(),
+      () =>
+        canUseCachedQueueState
+          ? cachedSessionRef.current?.deckEmbeddingPlot ??
+            createEmptyDeckEmbeddingPlot()
+          : createEmptyDeckEmbeddingPlot(),
     );
   const [messages, setMessages] = useState<ChatMessage[]>(
     () => cachedSessionRef.current?.messages ?? [],
@@ -1816,8 +1544,11 @@ export default function ReviewApp({
   const queueStageRef = useRef<HTMLElement | null>(null);
   const queueListRef = useRef<HTMLOListElement | null>(null);
   const queueLoadedLimitRef = useRef(
-    cachedSessionRef.current?.queueLoadedLimit ?? QUEUE_PAGE_SIZE,
+    canUseCachedQueueState
+      ? cachedSessionRef.current?.queueLoadedLimit ?? QUEUE_PAGE_SIZE
+      : QUEUE_PAGE_SIZE,
   );
+  const loadedDeckEmbeddingPlotKeyRef = useRef<string | null>(null);
   const isQueuePageLoadingRef = useRef(false);
   const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -2312,6 +2043,7 @@ export default function ReviewApp({
 
   const resetDeckQueueState = useCallback(() => {
     queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
+    loadedDeckEmbeddingPlotKeyRef.current = null;
     hasLoadedQueueStatusRef.current = false;
     loadedQueueSortKeyRef.current = null;
     setReviewQueue([]);
@@ -2842,6 +2574,7 @@ export default function ReviewApp({
       limit: String(Math.max(0, Math.floor(limit))),
       offset: "0",
       sort: queueSortKey,
+      includeDeckEmbeddingPlot: "0",
     });
 
     if (selectedDeckDetailId) {
@@ -2856,6 +2589,7 @@ export default function ReviewApp({
       limit: String(Math.max(0, Math.floor(limit))),
       offset: "0",
       sort: queueSortKey,
+      includeDeckEmbeddingPlot: "0",
     });
 
     if (selectedDeckDetailId) {
@@ -2863,6 +2597,20 @@ export default function ReviewApp({
     }
 
     return `/api/queue-status/stream?${params.toString()}`;
+  }, [queueSortKey, selectedDeckDetailId]);
+
+  const deckEmbeddingPlotUrl = useCallback((limit: number) => {
+    const params = new URLSearchParams({
+      limit: String(Math.max(0, Math.floor(limit))),
+      offset: "0",
+      sort: queueSortKey,
+    });
+
+    if (selectedDeckDetailId) {
+      params.set("deckId", selectedDeckDetailId);
+    }
+
+    return `/api/deck-embedding-plot?${params.toString()}`;
   }, [queueSortKey, selectedDeckDetailId]);
 
   const applyQueueStatus = useCallback((data: QueueStatusResponse) => {
@@ -2877,9 +2625,15 @@ export default function ReviewApp({
     );
     hasLoadedQueueStatusRef.current = true;
     loadedQueueSortKeyRef.current = queueSortKey;
-    setDeckEmbeddingPlot(
-      data.deckEmbeddingPlot ?? createEmptyDeckEmbeddingPlot(),
-    );
+    if (
+      data.deckEmbeddingPlot &&
+      (data.deckEmbeddingPlot.model ||
+        data.deckEmbeddingPlot.totalQuestions > 0 ||
+        data.deckEmbeddingPlot.embeddedQuestions > 0 ||
+        data.deckEmbeddingPlot.points.length > 0)
+    ) {
+      setDeckEmbeddingPlot(data.deckEmbeddingPlot);
+    }
   }, [queueSortKey]);
 
   const loadStatus = useCallback(async (limit = QUEUE_PAGE_SIZE) => {
@@ -2908,6 +2662,36 @@ export default function ReviewApp({
       setIsQueuePageLoading(false);
     }
   }, [applyQueueStatus, queueStatusUrl]);
+
+  const loadDeckEmbeddingPlot = useCallback(async (limit = QUEUE_PAGE_SIZE) => {
+    if (!selectedDeckDetailId) {
+      return;
+    }
+
+    const normalizedLimit = Math.max(QUEUE_PAGE_SIZE, Math.floor(limit));
+    const plotKey = `${selectedDeckDetailId}:${queueSortKey}:${normalizedLimit}`;
+
+    if (loadedDeckEmbeddingPlotKeyRef.current === plotKey) {
+      return;
+    }
+
+    try {
+      const response = await fetch(deckEmbeddingPlotUrl(normalizedLimit), {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = (await response.json()) as DeckEmbeddingPlotResponse;
+
+      loadedDeckEmbeddingPlotKeyRef.current = plotKey;
+      setDeckEmbeddingPlot(data);
+    } catch {
+      // The queue remains usable without the optional embedding map.
+    }
+  }, [deckEmbeddingPlotUrl, queueSortKey, selectedDeckDetailId]);
 
   useEffect(() => {
     if (activeTab !== "review") {
@@ -2939,15 +2723,21 @@ export default function ReviewApp({
   }, []);
 
   useEffect(() => {
+    if (activeTab !== "queue" || !selectedDeckDetailId) {
+      return;
+    }
+
     const shouldLoadQueueStatus =
       !hasLoadedQueueStatusRef.current ||
       loadedQueueSortKeyRef.current !== queueSortKey;
 
     if (shouldLoadQueueStatus) {
       queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
+      loadedDeckEmbeddingPlotKeyRef.current = null;
       setReviewQueue([]);
       setRecentAttempts([]);
       setReviewQueueTotal(0);
+      setDeckEmbeddingPlot(createEmptyDeckEmbeddingPlot());
       setQueueVirtualRange({
         start: 0,
         end: QUEUE_PAGE_SIZE,
@@ -2977,10 +2767,30 @@ export default function ReviewApp({
 
     return () => events.close();
   }, [
+    activeTab,
     applyQueueStatus,
     loadStatus,
     queueSortKey,
     queueStatusStreamUrl,
+    selectedDeckDetailId,
+  ]);
+
+  useEffect(() => {
+    if (
+      activeTab !== "queue" ||
+      !selectedDeckDetailId ||
+      reviewQueue.length === 0
+    ) {
+      return;
+    }
+
+    void loadDeckEmbeddingPlot(
+      Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current),
+    );
+  }, [
+    activeTab,
+    loadDeckEmbeddingPlot,
+    reviewQueue.length,
     selectedDeckDetailId,
   ]);
 
@@ -5191,7 +5001,9 @@ export default function ReviewApp({
 
               {reviewQueue.length === 0 ? (
                 <p className="queue-empty">
-                  {isQueuePageLoading ? "Loading queue..." : "No active cards."}
+                  {isQueuePageLoading || !hasLoadedQueueStatusRef.current
+                    ? "Loading queue..."
+                    : "No active cards."}
                 </p>
               ) : (
                 <ol className="queue-list" ref={queueListRef}>

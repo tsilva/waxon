@@ -18,7 +18,7 @@ import {
 } from "@/app/lib/postgresStore";
 import {
   extractChatCompletionText,
-  getOpenRouterApiKey,
+  getOpenRouterChatConfig,
   openRouterChatCompletion,
   openRouterEmbeddings,
 } from "@/app/lib/openRouter";
@@ -29,7 +29,6 @@ import { vectorLiteral } from "@/app/lib/vectorLiteral";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const OPENROUTER_MODEL = process.env.LLM_MODEL || "openai/gpt-5.5";
 const MAX_GENERATE_BODY_BYTES = 96 * 1024;
 const MAX_DECK_ID_CHARS = 200;
 const MAX_SCOPE_CHARS = 12_000;
@@ -383,6 +382,7 @@ function buildGenerationContextPrompt(input: {
 
 async function summarizeGenerationContext(input: {
   apiKey: string;
+  model: string;
   context: string;
   userId: string;
   deckId: string;
@@ -395,7 +395,7 @@ async function summarizeGenerationContext(input: {
       deckId: input.deckId,
     },
     body: {
-      model: OPENROUTER_MODEL,
+      model: input.model,
       temperature: 0,
       max_tokens: 500,
       messages: [
@@ -516,14 +516,16 @@ export async function POST(request: Request) {
     return parsed.response;
   }
 
-  const apiKey = getOpenRouterApiKey();
+  const openRouterConfig = getOpenRouterChatConfig();
 
-  if (!apiKey) {
+  if (!openRouterConfig.ok) {
     return NextResponse.json(
-      { ok: false, error: "OPENROUTER_API_KEY is not configured." },
+      { ok: false, error: openRouterConfig.error },
       { status: 500 },
     );
   }
+
+  const { apiKey, model } = openRouterConfig;
 
   const user = await getCurrentUser();
   const payload =
@@ -619,6 +621,7 @@ export async function POST(request: Request) {
       ? context.slice(0, MAX_SUMMARY_CHARS)
       : await summarizeGenerationContext({
           apiKey,
+          model,
           context,
           userId: user.id,
           deckId,
@@ -638,7 +641,7 @@ export async function POST(request: Request) {
       deckId,
     },
     body: {
-      model: OPENROUTER_MODEL,
+      model,
       temperature: 0.35,
       max_tokens: Math.min(4096, 180 * count + 700),
       response_format: { type: "json_object" },
@@ -718,7 +721,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    model: OPENROUTER_MODEL,
+    model,
     questions: generated,
   });
 }

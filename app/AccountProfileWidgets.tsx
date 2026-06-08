@@ -34,7 +34,7 @@ function unmountReactNode(el?: HTMLDivElement) {
   mountedRoots.delete(el);
 }
 
-export function AccountWidgetsIcon() {
+function AccountWidgetsIcon() {
   return <Sparkles aria-hidden="true" />;
 }
 

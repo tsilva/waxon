@@ -13,15 +13,12 @@ import {
   ensureQuestionsDatabase,
   listDecks,
 } from "@/app/lib/postgresStore";
-import {
-  getOpenRouterApiKey,
-} from "@/app/lib/openRouter";
+import { getOpenRouterChatConfig } from "@/app/lib/openRouter";
 import { addQuestionsToDeck } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const OPENROUTER_MODEL = process.env.LLM_MODEL?.trim() ?? "";
 const MAX_TOP_UP_BODY_BYTES = 16 * 1024;
 
 function encodeStreamEvent(event: string, data: Record<string, unknown>): Uint8Array {
@@ -37,21 +34,18 @@ export async function POST(request: Request) {
     return parsed.response;
   }
 
-  const apiKey = getOpenRouterApiKey();
+  const openRouterConfig = getOpenRouterChatConfig({
+    requireConfiguredModel: true,
+  });
 
-  if (!apiKey) {
+  if (!openRouterConfig.ok) {
     return NextResponse.json(
-      { ok: false, error: "OPENROUTER_API_KEY is not configured." },
+      { ok: false, error: openRouterConfig.error },
       { status: 500 },
     );
   }
 
-  if (!OPENROUTER_MODEL) {
-    return NextResponse.json(
-      { ok: false, error: "LLM_MODEL is not configured." },
-      { status: 500 },
-    );
-  }
+  const { apiKey, model } = openRouterConfig;
 
   const user = await getCurrentUser();
   const payload =
@@ -103,7 +97,7 @@ export async function POST(request: Request) {
 
         const memoryResult = await refreshDeckMemory({
           apiKey,
-          model: OPENROUTER_MODEL,
+          model,
           userId: user.id,
           deckId: rotationDeck.id,
           reason: "before_generation",
@@ -121,7 +115,7 @@ export async function POST(request: Request) {
 
         const generation = await generateBulkQuestionsFromMemory({
           apiKey,
-          model: OPENROUTER_MODEL,
+          model,
           userId: user.id,
           deck: memoryResult.deck,
           memory: memoryResult.memory,

@@ -4,6 +4,7 @@ import {
   extractChatCompletionText,
   openRouterChatCompletion,
 } from "./openRouter";
+import { memorySectionBody } from "./deckMemory";
 import {
   getRecentQuestionAttempts,
   readQuestions,
@@ -53,15 +54,6 @@ function normalizeText(value: unknown, maxLength: number): string {
     : "";
 }
 
-function memorySection(memory: string, heading: string): string {
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = memory.match(
-    new RegExp(`^##\\s+${escapedHeading}\\s*$([\\s\\S]*?)(?=^##\\s+|(?![\\s\\S]))`, "imu"),
-  );
-
-  return match?.[1]?.trim() ?? "";
-}
-
 function buildGenerationMemoryContext(memory: string): string {
   const sections = [
     "Goal",
@@ -72,7 +64,7 @@ function buildGenerationMemoryContext(memory: string): string {
     "Completion",
   ]
     .map((heading) => {
-      const body = memorySection(memory, heading);
+      const body = memorySectionBody(memory, heading);
 
       return body ? `## ${heading}\n${body}` : "";
     })

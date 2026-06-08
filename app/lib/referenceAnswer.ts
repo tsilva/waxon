@@ -1,6 +1,7 @@
 import {
   extractChatCompletionText,
   getOpenRouterApiKey,
+  getOpenRouterChatModel,
   openRouterChatCompletion,
 } from "./openRouter";
 
@@ -40,6 +41,7 @@ export async function generateReferenceAnswer(
     return "Reference answer is unavailable because no LLM API key is configured.";
   }
 
+  const model = getOpenRouterChatModel() ?? "";
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
@@ -57,7 +59,7 @@ export async function generateReferenceAnswer(
         question: input.question,
       },
       body: {
-        model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+        model,
         messages: [
           {
             role: "system",
@@ -76,7 +78,7 @@ export async function generateReferenceAnswer(
     if (!response.ok) {
       console.info("[waxon] reference answer request failed", {
         provider: "openrouter",
-        model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+        model,
         status: response.status,
         statusText: response.statusText,
       });
@@ -88,7 +90,7 @@ export async function generateReferenceAnswer(
   } catch (error) {
     console.info("[waxon] reference answer request failed", {
       provider: "openrouter",
-      model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+      model,
       error: error instanceof Error ? error.message : "unknown error",
     });
     return "Reference answer is unavailable right now.";

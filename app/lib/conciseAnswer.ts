@@ -1,6 +1,7 @@
 import {
   extractChatCompletionText,
   getOpenRouterApiKey,
+  getOpenRouterChatModel,
   openRouterChatCompletion,
   type OpenRouterTraceContext,
 } from "./openRouter";
@@ -46,6 +47,7 @@ export async function generateConciseAnswers(
     throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required.");
   }
 
+  const model = getOpenRouterChatModel() ?? "";
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
@@ -63,7 +65,7 @@ export async function generateConciseAnswers(
         question: trace.question ?? (input.length === 1 ? input[0]?.question : null),
       },
       body: {
-        model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+        model,
         response_format: { type: "json_object" },
         temperature: 0,
         max_tokens: Math.min(4096, 140 * input.length + 400),

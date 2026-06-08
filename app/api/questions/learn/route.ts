@@ -5,10 +5,20 @@ import {
   readJsonBodyWithLimit,
 } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
+import {
+  appendMemoryNote,
+  dedupeMemorySections,
+  MAX_DECK_MEMORY_CHARS,
+  memorySectionBody,
+  normalizeDeckMemory,
+  normalizedMemorySectionLines,
+  normalizeMarkdownText,
+  replaceMemorySection,
+} from "@/app/lib/deckMemory";
 import { extractJsonObject } from "@/app/lib/jsonObject";
 import {
   extractChatCompletionText,
-  getOpenRouterApiKey,
+  getOpenRouterChatConfig,
   openRouterChatCompletion,
 } from "@/app/lib/openRouter";
 import {
@@ -26,7 +36,6 @@ import { addQuestionsToDeck } from "@/app/lib/reviewQueue";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const OPENROUTER_MODEL = process.env.LLM_MODEL?.trim() ?? "";
 const LEARN_BATCH_SIZE = 20;
 const MAX_LEARN_BODY_BYTES = 48 * 1024;
 const MAX_DECK_ID_CHARS = 200;
@@ -36,7 +45,6 @@ const MAX_JUSTIFICATION_CHARS = 2_000;
 const MAX_PROMPT_JUSTIFICATION_CHARS = 360;
 const MAX_PREVIOUS_ANSWERS = 20;
 const MAX_PROVENANCE_CHARS = 360;
-const MAX_DECK_MEMORY_CHARS = 8_000;
 const MAX_MEMORY_SECTION_CHARS = 5_000;
 const MAX_MEMORY_HEADING_CHARS = 80;
 const LEARN_GENERATION_MAX_TOKENS = Number.parseInt(
@@ -82,17 +90,6 @@ type LearnMemoryPatch =
 function normalizeText(value: unknown, maxLength: number): string {
   return typeof value === "string"
     ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
-    : "";
-}
-
-function normalizeMarkdownText(value: unknown, maxLength: number): string {
-  return typeof value === "string"
-    ? value
-        .trim()
-        .replace(/\r\n?/g, "\n")
-        .replace(/[ \t]+\n/g, "\n")
-        .replace(/\n{3,}/g, "\n\n")
-        .slice(0, maxLength)
     : "";
 }
 
@@ -227,45 +224,6 @@ function compactRejectedQuestions(
   }));
 }
 
-function initialDeckMemory(deck: { name: string; goal: string }): string {
-  return [
-    "# Deck Memory",
-    "",
-    "## Goal",
-    `${deck.goal || deck.name}`,
-    "",
-    "## Curriculum Map",
-    "- Status: not yet inferred.",
-    "- Scope: infer from the deck goal, then keep this section compact.",
-    "",
-    "## Target Ledger",
-    "- Status: not yet inferred.",
-    "- Use one line per atomic target when feasible, or compact ordered modules for large/open goals.",
-    "- Status labels: todo, planned, strong, partial, weak.",
-    "",
-    "## Proficiency",
-    "- No answered questions yet.",
-    "",
-    "## Weak Points",
-    "- None observed yet.",
-    "",
-    "## Frontier",
-    "- Start with the simplest prerequisite recall targets.",
-    "",
-    "## Frontier Queue",
-    "- Infer the ordered uncovered target queue from the goal before generating.",
-    "",
-    "## Completion",
-    "- Not complete.",
-  ].join("\n");
-}
-
-function normalizeDeckMemory(memory: string, deck: { name: string; goal: string }): string {
-  const source = memory.trim() || initialDeckMemory(deck);
-
-  return source.slice(0, MAX_DECK_MEMORY_CHARS);
-}
-
 function normalizeMemoryPatch(value: unknown): LearnMemoryPatch[] {
   const patch = value && typeof value === "object"
     ? (value as { memoryPatch?: unknown }).memoryPatch
@@ -308,56 +266,6 @@ function normalizeMemoryPatch(value: unknown): LearnMemoryPatch[] {
     .slice(0, 8);
 }
 
-function replaceMemorySection(memory: string, heading: string, body: string): string {
-  const sectionHeading = `## ${heading}`;
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const sectionPattern = new RegExp(
-    `(^##\\s+${escapedHeading}\\s*$)[\\s\\S]*?(?=^##\\s+|(?![\\s\\S]))`,
-    "imu",
-  );
-  const replacement = `${sectionHeading}\n${body.trim()}\n\n`;
-
-  if (sectionPattern.test(memory)) {
-    return memory.replace(sectionPattern, replacement);
-  }
-
-  return `${memory.trim()}\n\n${replacement}`;
-}
-
-function appendMemoryNote(memory: string, heading: string, text: string): string {
-  const currentSection = memory.match(
-    new RegExp(`^##\\s+${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "imu"),
-  );
-
-  if (!currentSection) {
-    return replaceMemorySection(memory, heading, `- ${text.trim()}`);
-  }
-
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const sectionPattern = new RegExp(
-    `(^##\\s+${escapedHeading}\\s*$[\\s\\S]*?)(?=^##\\s+|(?![\\s\\S]))`,
-    "imu",
-  );
-
-  return memory.replace(sectionPattern, (section) => `${section.trim()}\n- ${text.trim()}\n\n`);
-}
-
-function memorySectionBody(memory: string, heading: string): string {
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = memory.match(
-    new RegExp(`^##\\s+${escapedHeading}\\s*$([\\s\\S]*?)(?=^##\\s+|(?![\\s\\S]))`, "imu"),
-  );
-
-  return match?.[1]?.trim() ?? "";
-}
-
-function normalizedMemorySectionLines(section: string): string[] {
-  return section
-    .split("\n")
-    .map((line) => line.trim().replace(/^[-*]\s*/u, "").trim())
-    .filter(Boolean);
-}
-
 function canApplyMemoryOperation(
   memory: string,
   operation: LearnMemoryPatch,
@@ -386,31 +294,6 @@ function canApplyMemoryOperation(
   }
 
   return true;
-}
-
-function dedupeMemorySections(memory: string): string {
-  const parts = memory.split(/(?=^##\s+)/gim);
-  const [preamble = "", ...sections] = parts;
-  const seen = new Set<string>();
-  const keptSections: string[] = [];
-
-  for (const section of sections) {
-    const heading = section.match(/^##\s+(.+?)\s*$/im)?.[1]?.trim().toLowerCase();
-
-    if (!heading) {
-      keptSections.push(section.trim());
-      continue;
-    }
-
-    if (seen.has(heading)) {
-      continue;
-    }
-
-    seen.add(heading);
-    keptSections.push(section.trim());
-  }
-
-  return [preamble.trim(), ...keptSections].filter(Boolean).join("\n\n");
 }
 
 function applyMemoryPatch(
@@ -548,12 +431,13 @@ function buildCompletionAuditSystemPrompt(questionQualityReference: string): str
   ].join("\n\n");
 }
 
-function learnGenerationModels(): string[] {
-  return OPENROUTER_MODEL ? [OPENROUTER_MODEL] : [];
+function learnGenerationModels(model: string): string[] {
+  return [model];
 }
 
 async function generateLearnCompletion(input: {
   apiKey: string;
+  model: string;
   userId: string;
   deckId: string;
   operation?: string;
@@ -564,7 +448,7 @@ async function generateLearnCompletion(input: {
 > {
   const failures: string[] = [];
 
-  for (const model of learnGenerationModels()) {
+  for (const model of learnGenerationModels(input.model)) {
     const { response, body } = await openRouterChatCompletion({
       apiKey: input.apiKey,
       trace: {
@@ -616,6 +500,7 @@ async function generateLearnCompletion(input: {
 
 async function auditLearnCompletion(input: {
   apiKey: string;
+  model: string;
   userId: string;
   deckId: string;
   deck: { name: string; goal: string };
@@ -631,6 +516,7 @@ async function auditLearnCompletion(input: {
 > {
   return generateLearnCompletion({
     apiKey: input.apiKey,
+    model: input.model,
     userId: input.userId,
     deckId: input.deckId,
     operation: "learn_mode_completion_audit",
@@ -707,21 +593,18 @@ export async function POST(request: Request) {
     return parsed.response;
   }
 
-  const apiKey = getOpenRouterApiKey();
+  const openRouterConfig = getOpenRouterChatConfig({
+    requireConfiguredModel: true,
+  });
 
-  if (!apiKey) {
+  if (!openRouterConfig.ok) {
     return NextResponse.json(
-      { ok: false, error: "OPENROUTER_API_KEY is not configured." },
+      { ok: false, error: openRouterConfig.error },
       { status: 500 },
     );
   }
 
-  if (!OPENROUTER_MODEL) {
-    return NextResponse.json(
-      { ok: false, error: "LLM_MODEL is not configured." },
-      { status: 500 },
-    );
-  }
+  const { apiKey, model } = openRouterConfig;
 
   const user = await getCurrentUser();
   const payload =
@@ -840,6 +723,7 @@ export async function POST(request: Request) {
   const currentMemory = normalizeDeckMemory(activeTargetDeck.memory, deck);
   const completion = await generateLearnCompletion({
     apiKey,
+    model,
     userId: user.id,
     deckId: activeTargetDeck.id,
     body: {
@@ -914,6 +798,7 @@ export async function POST(request: Request) {
   if (generatedQuestions.length === 0) {
     const audit = await auditLearnCompletion({
       apiKey,
+      model,
       userId: user.id,
       deckId: activeTargetDeck.id,
       deck,
@@ -1034,6 +919,7 @@ export async function POST(request: Request) {
   if (result.added === 0) {
     const audit = await auditLearnCompletion({
       apiKey,
+      model,
       userId: user.id,
       deckId: activeTargetDeck.id,
       deck,

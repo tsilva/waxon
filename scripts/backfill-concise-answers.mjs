@@ -3,8 +3,11 @@ import { extractJsonObject } from "./lib/json-object.mjs";
 import {
   chunks,
   configureNeonWebSocket,
+  createDatabasePool,
   loadLocalEnvFiles,
-  requireEnv,
+  logSavedProgress,
+  openRouterChatModel,
+  requireOpenRouterApiKey,
 } from "./lib/runtime.mjs";
 
 loadLocalEnvFiles();
@@ -76,7 +79,7 @@ async function generateConciseAnswers(batch, apiKey) {
       "X-Title": "waxon",
     },
     body: JSON.stringify({
-      model: process.env.LLM_MODEL ?? "openai/gpt-5.5",
+      model: openRouterChatModel(),
       response_format: { type: "json_object" },
       temperature: 0,
       max_tokens: Math.min(4096, 140 * batch.length + 400),
@@ -144,9 +147,8 @@ async function saveAnswers(pool, rows) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const apiKey = requireEnv("OPENROUTER_API_KEY", "LLM_API_KEY");
-  const connectionString = requireEnv("DATABASE_URL_UNPOOLED", "DATABASE_URL");
-  const pool = new Pool({ connectionString });
+  const apiKey = requireOpenRouterApiKey();
+  const pool = createDatabasePool(Pool);
 
   try {
     const questions = await loadQuestions(pool, options.force);
@@ -170,7 +172,7 @@ async function main() {
 
       await saveAnswers(pool, rows);
       saved += rows.length;
-      console.log(`Saved ${saved}/${questions.length}`);
+      logSavedProgress(saved, questions.length);
     }
   } finally {
     await pool.end();

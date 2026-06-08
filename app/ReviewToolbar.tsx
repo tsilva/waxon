@@ -10,7 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 
-export type ReviewToolbarTab = "review" | "decks" | "admin";
+type ReviewToolbarTab = "review" | "decks" | "admin";
 
 type ReviewToolbarProps = {
   activeTab: ReviewToolbarTab;
