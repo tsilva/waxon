@@ -15,7 +15,7 @@ import { extractCompleteJsonObjectsFromArrayProperty } from "./streamedJsonArray
 
 const DEFAULT_BULK_QUESTION_COUNT = 50;
 const MAX_BULK_QUESTION_COUNT = 80;
-const MAX_EXISTING_QUESTION_CONTEXT = 240;
+const MAX_EXISTING_QUESTION_CONTEXT = 160;
 const MAX_RECENT_ATTEMPTS = 30;
 const MAX_QUESTION_CHARS = 1_200;
 const MAX_CONCISE_ANSWER_CHARS = 800;
@@ -53,17 +53,42 @@ function normalizeText(value: unknown, maxLength: number): string {
     : "";
 }
 
+function memorySection(memory: string, heading: string): string {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = memory.match(
+    new RegExp(`^##\\s+${escapedHeading}\\s*$([\\s\\S]*?)(?=^##\\s+|(?![\\s\\S]))`, "imu"),
+  );
+
+  return match?.[1]?.trim() ?? "";
+}
+
+function buildGenerationMemoryContext(memory: string): string {
+  const sections = [
+    "Goal",
+    "Target Ledger",
+    "Weak Points",
+    "Frontier",
+    "Frontier Queue",
+    "Completion",
+  ]
+    .map((heading) => {
+      const body = memorySection(memory, heading);
+
+      return body ? `## ${heading}\n${body}` : "";
+    })
+    .filter(Boolean);
+
+  return sections.length > 0 ? sections.join("\n\n") : memory;
+}
+
 function buildGenerationSystemPrompt(questionQualityReference: string): string {
   return [
     "You generate bulk Waxon questions that continue learning when a review rotation has no due questions.",
-    "Use the deck MEMORY.md as the durable curriculum state. Do not update or emit memory diffs.",
-    "Generate questions from the first useful Frontier Queue and Target Ledger todo/weak/planned targets in learner order.",
-    "Earlier questions must support later dependent questions.",
-    "Do not generate review, recap, or practice duplicates. Introduce uncovered targets or repair weak/partial targets.",
-    "Each question must include a conciseAnswer for semantic dedupe and a questionProvenance explaining why this target is next.",
-    "Never reveal the answer in the question text. Do not include numbering or preambles.",
+    "Use the memory excerpts as durable curriculum state. Generate from the first useful Frontier Queue and Target Ledger todo/weak/planned targets in learner order.",
+    "Earlier questions must support later dependent questions. Introduce uncovered targets or repair weak/partial targets; no review, recap, or practice duplicates.",
+    "Never reveal the answer in the question text. Return compact keys: q=question, a=concise expected answer, p=why this target is next.",
     "Return strict JSON only:",
-    '{"questions":[{"question":"...","conciseAnswer":"short expected answer","questionProvenance":"why now"}]}',
+    '{"questions":[{"q":"...","a":"short expected answer","p":"why now"}]}',
     "Shared Waxon question-quality reference:",
     questionQualityReference,
   ].join("\n\n");
@@ -92,13 +117,13 @@ export function normalizeGeneratedQuestions(
     }
 
     const record = item as Record<string, unknown>;
-    const question = normalizeText(record.question, MAX_QUESTION_CHARS);
+    const question = normalizeText(record.question ?? record.q, MAX_QUESTION_CHARS);
     const conciseAnswer = normalizeText(
-      record.conciseAnswer,
+      record.conciseAnswer ?? record.a,
       MAX_CONCISE_ANSWER_CHARS,
     );
     const questionProvenance = normalizeText(
-      record.questionProvenance ?? record.provenance,
+      record.questionProvenance ?? record.provenance ?? record.p,
       MAX_PROVENANCE_CHARS,
     );
     const key = question.toLowerCase();
@@ -207,20 +232,25 @@ export async function generateBulkQuestionsFromMemory(input: {
             cardCount: input.deck.cardCount,
             dueCount: input.deck.dueCount,
           }),
-          "Current MEMORY.md:",
-          input.memory,
+          "Memory excerpts:",
+          buildGenerationMemoryContext(input.memory),
           "Existing questions to avoid:",
           JSON.stringify(
             existingQuestions
               .slice(0, MAX_EXISTING_QUESTION_CONTEXT)
               .map((question) => ({
-                question: question.question,
-                conciseAnswer: question.concise_answer,
-                reviews: question.reviews,
+                q: question.question,
+                a: question.concise_answer,
               })),
           ),
           "Recent answer attempts:",
-          JSON.stringify(recentAttempts),
+          JSON.stringify(
+            recentAttempts.map((attempt) => ({
+              q: attempt.question,
+              answer: attempt.answerSummary || attempt.rawAnswer,
+              score: attempt.score,
+            })),
+          ),
         ].join("\n\n"),
       },
     ],

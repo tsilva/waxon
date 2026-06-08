@@ -45,6 +45,8 @@ const MAX_MODAL_CONCISE_ANSWER_CHARS = 800;
 const MAX_MODAL_COVERAGE_LABEL_CHARS = 240;
 const MAX_CONTEXT_CHARS = 32_000;
 const MAX_SUMMARY_CHARS = 1_600;
+const MAX_DIRECT_GENERATION_CONTEXT_CHARS = 6_000;
+const MAX_GENERATION_CONTEXT_EXCERPT_CHARS = 12_000;
 const DEFAULT_QUESTION_COUNT = 5;
 const MAX_QUESTION_COUNT = 10;
 const GENERATION_NEIGHBOR_COUNT = 32;
@@ -287,15 +289,13 @@ function buildContext(input: {
 function buildQuestionGenerationSystemPrompt(questionQualityReference: string): string {
   return [
     "You generate high-quality spaced-repetition questions for a study deck.",
-    "Every generated question must follow the shared question-quality reference below.",
     "Maximize coverage across the content instead of making variants of the same point.",
     "Avoid generic questions such as 'What is the key idea behind the topic?'",
-    "Each question must include a concise expected answer for dedupe embeddings.",
-    "The conciseAnswer is not a user-facing explanation. It is the shortest answer that preserves the atomic recall target.",
-    "Do not include long explanations, numbering, or preambles.",
+    "Each question needs a short expected answer for dedupe embeddings; do not include explanations, numbering, or preambles.",
     "Do not duplicate existing questions, near-duplicates, or current modal review queue questions.",
-    "Return JSON only with this shape:",
-    '{"questions":[{"question":"...","conciseAnswer":"short expected answer","sourceLabel":"Prompt or filename","coverageLabel":"short covered concept"}]}',
+    "Return compact keys: q=question, a=short expected answer, s=prompt or filename, c=covered concept.",
+    "Return JSON only:",
+    '{"questions":[{"q":"...","a":"short expected answer","s":"Prompt or filename","c":"short covered concept"}]}',
     "Shared question-quality reference:",
     questionQualityReference,
   ].join("\n\n");
@@ -330,8 +330,8 @@ function normalizeGeneratedQuestions(
       continue;
     }
 
-    const question = normalizeText(record.question).replace(/\s+/g, " ");
-    const conciseAnswer = normalizeText(record.conciseAnswer).replace(/\s+/g, " ");
+    const question = normalizeText(record.question ?? record.q).replace(/\s+/g, " ");
+    const conciseAnswer = normalizeText(record.conciseAnswer ?? record.a).replace(/\s+/g, " ");
     const key = question.toLowerCase();
 
     if (!question || !conciseAnswer || seen.has(key)) {
@@ -342,12 +342,43 @@ function normalizeGeneratedQuestions(
     normalized.push({
       question,
       conciseAnswer,
-      sourceLabel: normalizeText(record.sourceLabel) || "OpenRouter",
-      coverageLabel: normalizeText(record.coverageLabel) || question,
+      sourceLabel: normalizeText(record.sourceLabel ?? record.s) || "OpenRouter",
+      coverageLabel: normalizeText(record.coverageLabel ?? record.c) || question,
     });
   }
 
   return normalized;
+}
+
+function buildContextExcerpt(context: string): string {
+  if (context.length <= MAX_GENERATION_CONTEXT_EXCERPT_CHARS) {
+    return context;
+  }
+
+  const headLength = Math.floor(MAX_GENERATION_CONTEXT_EXCERPT_CHARS * 0.65);
+  const tailLength = MAX_GENERATION_CONTEXT_EXCERPT_CHARS - headLength;
+
+  return [
+    context.slice(0, headLength),
+    "[...middle omitted for token budget...]",
+    context.slice(-tailLength),
+  ].join("\n");
+}
+
+function buildGenerationContextPrompt(input: {
+  context: string;
+  contextSummary: string;
+}): string[] {
+  if (input.context.length <= MAX_DIRECT_GENERATION_CONTEXT_CHARS) {
+    return ["Content:", input.context];
+  }
+
+  return [
+    "Coverage summary:",
+    input.contextSummary,
+    "Selected content excerpts:",
+    buildContextExcerpt(input.context),
+  ];
 }
 
 async function summarizeGenerationContext(input: {
@@ -583,12 +614,15 @@ export async function POST(request: Request) {
   }
 
   const context = buildContext({ scope: scope.value, files: files.value });
-  const contextSummary = await summarizeGenerationContext({
-    apiKey,
-    context,
-    userId: user.id,
-    deckId,
-  });
+  const contextSummary =
+    context.length <= MAX_DIRECT_GENERATION_CONTEXT_CHARS
+      ? context.slice(0, MAX_SUMMARY_CHARS)
+      : await summarizeGenerationContext({
+          apiKey,
+          context,
+          userId: user.id,
+          deckId,
+        });
   const generationNeighbors = await loadGenerationNeighbors({
     apiKey,
     summary: contextSummary,
@@ -628,12 +662,12 @@ export async function POST(request: Request) {
                   "Questions already generated in the current modal review queue:",
                   JSON.stringify(
                     modalQuestions.value.map((item) => ({
-                      question: item.question,
-                      conciseAnswer: item.conciseAnswer,
-                      coverageLabel: item.coverageLabel,
+                      q: item.question,
+                      a: item.conciseAnswer,
+                      c: item.coverageLabel,
                     })),
                   ),
-                  "Do not generate repeats or semantic paraphrases of these. Treat their recall targets as already covered even if they have not been added to the deck yet.",
+                  "Treat these targets as covered.",
                 ].join("\n\n")
               : "",
             generationNeighbors.length > 0
@@ -641,18 +675,15 @@ export async function POST(request: Request) {
                   "Nearby already-covered questions from the deck:",
                   JSON.stringify(
                     generationNeighbors.map((neighbor) => ({
-                      question: neighbor.question,
-                      conciseAnswer: neighbor.conciseAnswer,
-                      similarity: neighbor.similarity,
+                      q: neighbor.question,
+                      a: neighbor.conciseAnswer,
+                      sim: neighbor.similarity,
                     })),
                   ),
-                  "Use these as covered territory. Generate questions that fill gaps, deepen boundaries, add prerequisites, or test adjacent failure modes instead of paraphrasing them.",
+                  "Fill gaps, boundaries, prerequisites, or adjacent failure modes instead of paraphrasing these.",
                 ].join("\n\n")
               : "",
-            "Coverage summary used for retrieval:",
-            contextSummary,
-            "Content:",
-            context,
+            ...buildGenerationContextPrompt({ context, contextSummary }),
           ]
             .filter(Boolean)
             .join("\n\n"),

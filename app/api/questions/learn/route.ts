@@ -33,6 +33,7 @@ const MAX_DECK_ID_CHARS = 200;
 const MAX_QUESTION_CHARS = 1_200;
 const MAX_ANSWER_CHARS = 2_000;
 const MAX_JUSTIFICATION_CHARS = 2_000;
+const MAX_PROMPT_JUSTIFICATION_CHARS = 360;
 const MAX_PREVIOUS_ANSWERS = 20;
 const MAX_PROVENANCE_CHARS = 360;
 const MAX_DECK_MEMORY_CHARS = 8_000;
@@ -162,10 +163,10 @@ function normalizeGeneratedQuestions(
     }
 
     const record = item as Record<string, unknown>;
-    const question = normalizeText(record.question, MAX_QUESTION_CHARS);
-    const conciseAnswer = normalizeText(record.conciseAnswer, 800);
+    const question = normalizeText(record.question ?? record.q, MAX_QUESTION_CHARS);
+    const conciseAnswer = normalizeText(record.conciseAnswer ?? record.a, 800);
     const questionProvenance = normalizeText(
-      record.questionProvenance ?? record.provenance,
+      record.questionProvenance ?? record.provenance ?? record.p,
       MAX_PROVENANCE_CHARS,
     );
     const key = question.toLowerCase();
@@ -199,31 +200,31 @@ function normalizeAuditComplete(value: unknown): boolean {
   return (value as { complete?: unknown }).complete === true;
 }
 
-function buildQuestionQualitySummary(questionQualityReference: string): string {
-  const criteria = [
-    "Concise",
-    "Single-target",
-    "Self-describing",
-    "Standalone",
-    "Recall-oriented",
-    "Precise",
-    "Readable",
-    "Non-fragmentary",
-  ].filter((criterion) => questionQualityReference.includes(criterion));
-
-  return [
-    `Question quality rules: ${criteria.join(", ")}.`,
-    "Ask one atomic recall target, include enough context, avoid hints and broad survey prompts.",
-  ].join(" ");
+function buildQuestionQualityPromptBlock(questionQualityReference: string): string {
+  return ["Question quality:", questionQualityReference].join("\n\n");
 }
 
-function buildQuestionQualityPromptBlock(questionQualityReference: string): string {
-  return [
-    buildQuestionQualitySummary(questionQualityReference),
-    "Every generated question must follow the shared Waxon question-quality reference below.",
-    "Shared Waxon question-quality reference:",
-    questionQualityReference,
-  ].join("\n\n");
+function compactPreviousAnswers(
+  answers: PreviousAnswerContext[],
+): Array<{ q: string; a: string; s: number | null; j?: string }> {
+  return answers.map((answer) => ({
+    q: answer.question,
+    a: answer.answer,
+    s: answer.score,
+    ...(answer.justification
+      ? { j: answer.justification.slice(0, MAX_PROMPT_JUSTIFICATION_CHARS) }
+      : {}),
+  }));
+}
+
+function compactRejectedQuestions(
+  questions: LearnQuestionPayload[],
+): Array<{ q: string; a: string; p: string }> {
+  return questions.map((question) => ({
+    q: question.question,
+    a: question.conciseAnswer,
+    p: question.questionProvenance,
+  }));
 }
 
 function initialDeckMemory(deck: { name: string; goal: string }): string {
@@ -508,25 +509,24 @@ function buildLearnSystemPrompt(questionQualityReference: string): string {
     "You are Waxon's generic deck-memory learn planner. The deck memory is the durable curriculum state; update it and generate the next ordered batch from it.",
     "Do not rely on hardcoded curricula. Infer scope, prerequisites, covered targets, weak points, and frontier from the deck goal, memory, and recent performance.",
     "Never narrow an established Curriculum Map or Target Ledger. You may expand or clarify them, but do not replace a complete/all/entire goal with a smaller starter subset.",
-    "The ## Target Ledger is the source of truth. Maintain it as ordered target coverage with statuses: todo, planned, strong, partial, weak. For finite goals, infer the full target set or full module set before declaring completion. For broad goals, keep expandable modules and a concrete next frontier.",
+    "The ## Target Ledger is source of truth. Maintain ordered coverage with statuses: todo, planned, strong, partial, weak. For finite goals, infer auditable full coverage; for broad goals, keep expandable modules and a concrete next frontier.",
     "Curriculum Map must summarize the full Target Ledger. If the ledger contains targets outside the map, expand the map; do not leave them inconsistent.",
     "Preserve target text exactly in memory for symbols, formulas, code identifiers, names, terms, or other atomic targets. Copy exact target strings from generated questions and answered performance; do not transliterate, normalize, substitute, or retype similar-looking characters.",
     `Generate up to ${LEARN_BATCH_SIZE} new questions in learner order. Earlier questions must support later dependent questions.`,
     "The ## Frontier Queue section is canonical for the next batch. Generate questions for the first todo queue items in exact queue order. Never skip a queue item to ask a later target. If the queue is missing, reconstruct it in memoryPatch before using it.",
-    "Targets described in memory as generated, current batch, active batch, planned, pending, or awaiting answers are already planned coverage. Do not generate them again; generate after them.",
+    "Targets described in memory as generated, current batch, active batch, planned, pending, or awaiting answers are already planned coverage. Generate after them.",
     "memoryPatch must replace ## Frontier Queue with the remaining ordered queue after the generated targets, plus enough future targets to keep the next generation unambiguous.",
     "memoryPatch must update ## Target Ledger: mark generated targets planned, answered high-score targets strong, low-score targets weak or partial, and leave future uncovered targets todo.",
     "If pending planned targets remain, still generate later targets after those pending targets unless the full curriculum map is already covered or pending.",
-    "Never fill unused batch slots with review, recap, or practice duplicates. Learn generation should introduce uncovered targets or repair weak targets; otherwise return fewer questions.",
-    "Never mark Completion complete in a response that returns any questions.",
+    "Only introduce uncovered targets or repair weak targets; otherwise return fewer questions. Never mark Completion complete in a response that returns questions.",
     "For empty or vague memory, first infer the simplest beginner sequence. For finite goals, keep the curriculum map explicit enough that completion is auditable.",
     "For alphabet, script, or syllabary goals, treat the default scope as character recognition plus the standard/common transliteration named or implied by the goal. Do not expand into example words, spelling rules, particle readings, long-vowel conventions, historical variants, or comparisons between romanization systems unless the goal explicitly asks for those.",
     "The memoryPatch must be a diff: replace or append only changed sections. Do not return the whole memory. Keep sections compact so future prompts remain bounded.",
-    "Do not mark newly generated questions as mastered; only update memory from existing memory and answered performance. Dedupe happens after your response.",
+    "Do not mark newly generated questions as mastered.",
     buildQuestionQualityPromptBlock(questionQualityReference),
     "Return zero questions only when memory and performance show no useful uncovered or weak target remains.",
-    "Return JSON only:",
-    '{"questions":[{"question":"...","conciseAnswer":"short expected answer","questionProvenance":"why now"}],"memoryPatch":[{"op":"replace_section","heading":"Frontier","body":"- ..."}]}',
+    "Return compact question keys q=question, a=short expected answer, p=why now. Return JSON only:",
+    '{"questions":[{"q":"...","a":"short expected answer","p":"why now"}],"memoryPatch":[{"op":"replace_section","heading":"Frontier","body":"- ..."}]}',
   ].join("\n\n");
 }
 
@@ -539,13 +539,12 @@ function buildCompletionAuditSystemPrompt(questionQualityReference: string): str
     "If the memory is narrower than the goal, return complete false, expand the relevant memory sections with a diff, and generate the next ordered frontier questions.",
     "If useful uncovered targets remain but you are uncertain about the exact full scope, keep Completion not complete and generate the best next boundary-expanding questions rather than stopping.",
     "For alphabet, script, or syllabary goals, do not treat example words, spelling rules, particle readings, long-vowel conventions, historical variants, or comparisons between romanization systems as uncovered scope unless the goal explicitly asks for those.",
-    "If the user lists candidates rejected as duplicate/non-novel, those exact atomic targets are unavailable. Do not return them again. If they correspond to planned or frontier memory targets, update memoryPatch to mark them covered or remove them from Frontier Queue, then choose different uncovered targets or confirm completion.",
+    "Rejected duplicate/non-novel candidates are unavailable. If they correspond to planned or frontier targets, patch memory to mark/remove them, then choose distinct uncovered targets or confirm completion.",
     "Preserve target text exactly in memory for symbols, formulas, code identifiers, names, terms, or other atomic targets. Copy exact target strings from generated questions and answered performance.",
-    "Never generate review, recap, or practice duplicates. Only introduce uncovered targets or repair weak targets.",
     `Generate up to ${LEARN_BATCH_SIZE} questions if completion is not justified.`,
     buildQuestionQualityPromptBlock(questionQualityReference),
-    "Return JSON only:",
-    '{"complete":false,"reason":"brief audit reason","questions":[{"question":"...","conciseAnswer":"short expected answer","questionProvenance":"why now"}],"memoryPatch":[{"op":"replace_section","heading":"Frontier","body":"- ..."}]}',
+    "Return compact question keys q=question, a=short expected answer, p=why now. Return JSON only:",
+    '{"complete":false,"reason":"brief audit reason","questions":[{"q":"...","a":"short expected answer","p":"why now"}],"memoryPatch":[{"op":"replace_section","heading":"Frontier","body":"- ..."}]}',
   ].join("\n\n");
 }
 
@@ -657,18 +656,26 @@ async function auditLearnCompletion(input: {
             "Current MEMORY.md:",
             input.memory,
             "Recent in-session answers from the current Learn context:",
-            JSON.stringify(input.previousAnswers.slice(0, MAX_PREVIOUS_ANSWERS)),
+            JSON.stringify(
+              compactPreviousAnswers(
+                input.previousAnswers.slice(0, MAX_PREVIOUS_ANSWERS),
+              ),
+            ),
             "Recent target-deck answer attempts and scores:",
             JSON.stringify(
-              input.persistedPreviousAnswers.slice(0, MAX_PREVIOUS_ANSWERS),
+              compactPreviousAnswers(
+                input.persistedPreviousAnswers.slice(0, MAX_PREVIOUS_ANSWERS),
+              ),
             ),
             input.rejectedDuplicateCandidates?.length
               ? [
                   "Recently generated candidates rejected as duplicate/non-novel by Waxon's dedupe gate:",
                   JSON.stringify(
-                    input.rejectedDuplicateCandidates.slice(0, LEARN_BATCH_SIZE),
+                    compactRejectedQuestions(
+                      input.rejectedDuplicateCandidates.slice(0, LEARN_BATCH_SIZE),
+                    ),
                   ),
-                  "Do not repeat those rejected candidates. Either choose genuinely distinct uncovered targets or update memory to mark that duplicate frontier as covered.",
+                  "Do not repeat these candidates.",
                 ].join("\n\n")
               : "",
           ].join("\n\n"),
@@ -861,11 +868,13 @@ export async function POST(request: Request) {
               : "",
             "Recent in-session answers from the current Learn context:",
             JSON.stringify(
-              previousAnswers.slice(0, MAX_PREVIOUS_ANSWERS),
+              compactPreviousAnswers(previousAnswers.slice(0, MAX_PREVIOUS_ANSWERS)),
             ),
             "Recent target-deck answer attempts and scores:",
             JSON.stringify(
-              persistedPreviousAnswers.slice(0, MAX_PREVIOUS_ANSWERS),
+              compactPreviousAnswers(
+                persistedPreviousAnswers.slice(0, MAX_PREVIOUS_ANSWERS),
+              ),
             ),
           ]
             .filter(Boolean)
