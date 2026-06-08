@@ -59,6 +59,7 @@ export type OpenRouterEmbeddingResponse = {
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 const STREAM_DONE_SENTINEL = "[DONE]";
+const AFFORDABLE_MAX_TOKENS_PATTERN = /can only afford\s+(\d+)/iu;
 
 export function getOpenRouterApiKey(): string | null {
   return process.env.OPENROUTER_API_KEY ?? process.env.LLM_API_KEY ?? null;
@@ -89,6 +90,43 @@ export function extractChatCompletionText(response: unknown): string {
   }
 
   return "";
+}
+
+export function extractAffordableOpenRouterMaxTokens(
+  responseBody: unknown,
+): number | null {
+  const messages: string[] = [];
+  const collectMessages = (value: unknown) => {
+    if (typeof value === "string") {
+      messages.push(value);
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        collectMessages(item);
+      }
+      return;
+    }
+
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    for (const nestedValue of Object.values(value)) {
+      collectMessages(nestedValue);
+    }
+  };
+
+  collectMessages(responseBody);
+
+  const tokenLimits = messages
+    .map((message) => AFFORDABLE_MAX_TOKENS_PATTERN.exec(message)?.[1])
+    .filter((value): value is string => value !== undefined)
+    .map((value) => Number.parseInt(value, 10))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  return tokenLimits.length > 0 ? Math.min(...tokenLimits) : null;
 }
 
 function withOpenRouterHeaders(apiKey: string): HeadersInit {
