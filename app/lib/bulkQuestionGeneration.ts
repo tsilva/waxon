@@ -1,5 +1,6 @@
 import { extractJsonObject } from "./jsonObject";
 import {
+  extractAffordableOpenRouterMaxTokens,
   extractChatCompletionText,
   openRouterChatCompletion,
 } from "./openRouter";
@@ -19,6 +20,8 @@ const MAX_RECENT_ATTEMPTS = 30;
 const MAX_QUESTION_CHARS = 1_200;
 const MAX_CONCISE_ANSWER_CHARS = 800;
 const MAX_PROVENANCE_CHARS = 360;
+const MAX_BULK_COMPLETION_TOKENS = 10_000;
+const MIN_BULK_RETRY_COMPLETION_TOKENS = 1_000;
 
 export type GeneratedQuestionPayload = {
   question: string;
@@ -133,6 +136,10 @@ export function normalizePartialGeneratedQuestions(
   );
 }
 
+function getBulkCompletionTokenLimit(count: number): number {
+  return Math.min(MAX_BULK_COMPLETION_TOKENS, 190 * count + 1_200);
+}
+
 export async function generateBulkQuestionsFromMemory(input: {
   apiKey: string;
   model: string;
@@ -157,76 +164,106 @@ export async function generateBulkQuestionsFromMemory(input: {
   const questionQualityReference = getQuestionQualityReference();
   let streamedContent = "";
   let partialQuestionCount = 0;
-  const { response, body } = await openRouterChatCompletion({
+  const onTextDelta = (delta: string) => {
+    streamedContent += delta;
+
+    if (!input.onPartialQuestions) {
+      return;
+    }
+
+    const partialQuestions = normalizePartialGeneratedQuestions(
+      streamedContent,
+      input.count,
+    );
+
+    if (partialQuestions.length > partialQuestionCount) {
+      partialQuestionCount = partialQuestions.length;
+      input.onPartialQuestions(partialQuestions);
+    }
+  };
+  const trace = {
+    operation: "bulk_generate_questions_from_memory",
+    userId: input.userId,
+    deckId: input.deck.id,
+  };
+  const requestBody = {
+    model: input.model,
+    temperature: 0.35,
+    max_tokens: getBulkCompletionTokenLimit(input.count),
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system" as const,
+        content: buildGenerationSystemPrompt(questionQualityReference),
+      },
+      {
+        role: "user" as const,
+        content: [
+          `Generate up to ${input.count} new questions.`,
+          "Deck:",
+          JSON.stringify({
+            name: input.deck.name,
+            goal: input.deck.coverage || input.deck.name,
+            cardCount: input.deck.cardCount,
+            dueCount: input.deck.dueCount,
+          }),
+          "Current MEMORY.md:",
+          input.memory,
+          "Existing questions to avoid:",
+          JSON.stringify(
+            existingQuestions
+              .slice(0, MAX_EXISTING_QUESTION_CONTEXT)
+              .map((question) => ({
+                question: question.question,
+                conciseAnswer: question.concise_answer,
+                reviews: question.reviews,
+              })),
+          ),
+          "Recent answer attempts:",
+          JSON.stringify(recentAttempts),
+        ].join("\n\n"),
+      },
+    ],
+  };
+  let completion = await openRouterChatCompletion({
     apiKey: input.apiKey,
-    trace: {
-      operation: "bulk_generate_questions_from_memory",
-      userId: input.userId,
-      deckId: input.deck.id,
-    },
-    body: {
-      model: input.model,
-      temperature: 0.35,
-      max_tokens: Math.min(10_000, 190 * input.count + 1_200),
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: buildGenerationSystemPrompt(questionQualityReference),
-        },
-        {
-          role: "user",
-          content: [
-            `Generate up to ${input.count} new questions.`,
-            "Deck:",
-            JSON.stringify({
-              name: input.deck.name,
-              goal: input.deck.coverage || input.deck.name,
-              cardCount: input.deck.cardCount,
-              dueCount: input.deck.dueCount,
-            }),
-            "Current MEMORY.md:",
-            input.memory,
-            "Existing questions to avoid:",
-            JSON.stringify(
-              existingQuestions
-                .slice(0, MAX_EXISTING_QUESTION_CONTEXT)
-                .map((question) => ({
-                  question: question.question,
-                  conciseAnswer: question.concise_answer,
-                  reviews: question.reviews,
-                })),
-            ),
-            "Recent answer attempts:",
-            JSON.stringify(recentAttempts),
-          ].join("\n\n"),
-        },
-      ],
-    },
-    onTextDelta: (delta) => {
-      streamedContent += delta;
-
-      if (!input.onPartialQuestions) {
-        return;
-      }
-
-      const partialQuestions = normalizePartialGeneratedQuestions(
-        streamedContent,
-        input.count,
-      );
-
-      if (partialQuestions.length > partialQuestionCount) {
-        partialQuestionCount = partialQuestions.length;
-        input.onPartialQuestions(partialQuestions);
-      }
-    },
+    trace,
+    body: requestBody,
+    onTextDelta,
   });
 
-  if (!response.ok) {
-    throw new Error(`OpenRouter bulk generation failed (${response.status}).`);
+  if (!completion.response.ok) {
+    const affordableMaxTokens = extractAffordableOpenRouterMaxTokens(
+      completion.body,
+    );
+
+    if (
+      completion.response.status === 402 &&
+      affordableMaxTokens !== null &&
+      affordableMaxTokens >= MIN_BULK_RETRY_COMPLETION_TOKENS &&
+      affordableMaxTokens < requestBody.max_tokens
+    ) {
+      streamedContent = "";
+      partialQuestionCount = 0;
+      completion = await openRouterChatCompletion({
+        apiKey: input.apiKey,
+        trace,
+        body: {
+          ...requestBody,
+          max_tokens: affordableMaxTokens,
+        },
+        onTextDelta,
+      });
+    }
   }
 
-  const content = extractChatCompletionText(body);
+  if (!completion.response.ok) {
+    throw new Error(
+      `OpenRouter bulk generation failed (${completion.response.status}).`,
+    );
+  }
+
+  const content = extractChatCompletionText(completion.body);
 
   if (!content) {
     throw new Error("OpenRouter returned no generated content.");

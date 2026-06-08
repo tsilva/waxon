@@ -107,7 +107,12 @@ type JsonToken = {
   text: string;
 };
 
-type ResponsePayloadViewMode = "json" | "markdown";
+type PayloadViewMode = "json" | "markdown";
+
+type RequestMarkdownMessage = {
+  role: "system" | "user";
+  content: string;
+};
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MAX_TRACE_INTERACTIONS = 200;
@@ -977,6 +982,58 @@ function extractResponseMarkdown(payload: string): string | null {
   return null;
 }
 
+function requestPayloadCandidates(payload: string): unknown[] {
+  const parsed = parseJsonPayload(payload);
+
+  if (!parsed) {
+    return [];
+  }
+
+  const candidates = [parsed];
+
+  if (isRecord(parsed) && parsed.body) {
+    const body =
+      typeof parsed.body === "string" ? parseJsonPayload(parsed.body) : parsed.body;
+
+    if (body) {
+      candidates.unshift(body);
+    }
+  }
+
+  return candidates;
+}
+
+function extractRequestMarkdownMessages(payload: string): RequestMarkdownMessage[] {
+  for (const candidate of requestPayloadCandidates(payload)) {
+    if (!isRecord(candidate) || !Array.isArray(candidate.messages)) {
+      continue;
+    }
+
+    const messages = candidate.messages.flatMap((message) => {
+      if (!isRecord(message)) {
+        return [];
+      }
+
+      const role = message.role;
+
+      if (role !== "system" && role !== "user") {
+        return [];
+      }
+
+      const messageRole: RequestMarkdownMessage["role"] = role;
+      const content = contentPartsToText(message.content);
+
+      return content ? [{ role: messageRole, content }] : [];
+    });
+
+    if (messages.length > 0) {
+      return messages;
+    }
+  }
+
+  return [];
+}
+
 function findClosingDelimiter(
   text: string,
   delimiter: string,
@@ -1127,6 +1184,26 @@ function TraceMarkdownContent({ text }: { text: string }) {
           </p>
         );
       })}
+    </div>
+  );
+}
+
+function TraceRequestMarkdownContent({
+  messages,
+}: {
+  messages: RequestMarkdownMessage[];
+}) {
+  return (
+    <div className="admin-call-request-markdown">
+      {messages.map((message, index) => (
+        <section
+          className="admin-call-request-message"
+          key={`${message.role}-${index}`}
+        >
+          <h4>{message.role}</h4>
+          <TraceMarkdownContent text={message.content} />
+        </section>
+      ))}
     </div>
   );
 }
@@ -1490,8 +1567,10 @@ export function AdminPageClient({
   const [selectedCallId, setSelectedCallId] = useState<string | null>(
     selectedTraceId,
   );
+  const [requestPayloadViewMode, setRequestPayloadViewMode] =
+    useState<PayloadViewMode>("json");
   const [responsePayloadViewMode, setResponsePayloadViewMode] =
-    useState<ResponsePayloadViewMode>("json");
+    useState<PayloadViewMode>("json");
 
   const refreshTraces = useCallback(async () => {
     setIsRefreshing(true);
@@ -1676,6 +1755,14 @@ export function AdminPageClient({
     );
   }, [selectedCallContext]);
 
+  const selectedRequestMarkdownMessages = useMemo(() => {
+    if (!selectedRequestPayload) {
+      return [];
+    }
+
+    return extractRequestMarkdownMessages(selectedRequestPayload);
+  }, [selectedRequestPayload]);
+
   const selectedResponseMarkdown = useMemo(() => {
     if (!selectedResponsePayload) {
       return null;
@@ -1715,6 +1802,7 @@ export function AdminPageClient({
     }
 
     setSelectedCallId(selectedTraceId);
+    setRequestPayloadViewMode("json");
     setResponsePayloadViewMode("json");
   }, [selectedTraceId]);
 
@@ -2121,9 +2209,52 @@ export function AdminPageClient({
               <section className="admin-call-payload-panel">
                 <div className="admin-call-payload-heading">
                   <h3>Request sent</h3>
-                  <span>{formatNumber(selectedCallContext.call.inputTokens)} tokens</span>
+                  <div className="admin-call-payload-heading-actions">
+                    {selectedRequestMarkdownMessages.length > 0 ? (
+                      <div
+                        className="admin-call-payload-toggle"
+                        role="group"
+                        aria-label="Request payload view"
+                      >
+                        <button
+                          className={
+                            requestPayloadViewMode === "json"
+                              ? "admin-call-payload-toggle-active"
+                              : ""
+                          }
+                          type="button"
+                          aria-pressed={requestPayloadViewMode === "json"}
+                          onClick={() => setRequestPayloadViewMode("json")}
+                        >
+                          JSON
+                        </button>
+                        <button
+                          className={
+                            requestPayloadViewMode === "markdown"
+                              ? "admin-call-payload-toggle-active"
+                              : ""
+                          }
+                          type="button"
+                          aria-pressed={requestPayloadViewMode === "markdown"}
+                          onClick={() => setRequestPayloadViewMode("markdown")}
+                        >
+                          Markdown
+                        </button>
+                      </div>
+                    ) : null}
+                    <span>
+                      {formatNumber(selectedCallContext.call.inputTokens)} tokens
+                    </span>
+                  </div>
                 </div>
-                <JsonPayloadView payload={selectedRequestPayload} />
+                {requestPayloadViewMode === "markdown" &&
+                selectedRequestMarkdownMessages.length > 0 ? (
+                  <TraceRequestMarkdownContent
+                    messages={selectedRequestMarkdownMessages}
+                  />
+                ) : (
+                  <JsonPayloadView payload={selectedRequestPayload} />
+                )}
               </section>
               <section className="admin-call-payload-panel">
                 <div className="admin-call-payload-heading">

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  extractAffordableOpenRouterMaxTokens,
   openRouterChatCompletion,
   openRouterEmbeddings,
 } from "../app/lib/openRouter.ts";
@@ -58,6 +59,38 @@ test("classifyLlmInteractionKind uses explicit non-answer trace kinds", () => {
   assert.equal(classifyLlmInteractionKind("refresh_deck_memory"), "Deck memory");
   assert.equal(classifyLlmInteractionKind("question_embedding"), "Embedding");
   assert.equal(classifyLlmInteractionKind("test_operation"), "Other");
+});
+
+test("extractAffordableOpenRouterMaxTokens reads OpenRouter credit errors", () => {
+  assert.equal(
+    extractAffordableOpenRouterMaxTokens({
+      error: {
+        message:
+          "This request requires more credits, or fewer max_tokens. You requested up to 10000 tokens, but can only afford 7070.",
+        metadata: {
+          previous_errors: [
+            {
+              code: 402,
+              message:
+                "This request requires more credits, or fewer max_tokens. You requested up to 10000 tokens, but can only afford 7070.",
+            },
+          ],
+        },
+      },
+    }),
+    7070,
+  );
+});
+
+test("extractAffordableOpenRouterMaxTokens ignores unrelated errors", () => {
+  assert.equal(
+    extractAffordableOpenRouterMaxTokens({
+      error: {
+        message: "Provider is temporarily unavailable.",
+      },
+    }),
+    null,
+  );
 });
 
 test("openRouterEmbeddings sends user and deck trace identifiers", async () => {
