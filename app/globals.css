@@ -169,6 +169,7 @@ textarea {
 .previous-question-feedback,
 .previous-details-link,
 .stats-history-trace-link,
+.icon-tooltip-bubble,
 .previous-answer,
 .previous-time,
 .question-source,
@@ -1493,11 +1494,70 @@ textarea {
   stroke-width: 1.9;
 }
 
-.question-source span {
+.question-source-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.icon-tooltip {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: max-content;
+  line-height: 0;
+}
+
+.icon-tooltip-bubble {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  z-index: 30;
+  max-width: min(220px, calc(100vw - 32px));
+  padding: 6px 8px;
+  border: 1px solid rgb(227 218 196 / 92%);
+  border-radius: 6px;
+  background: rgb(251 248 240 / 98%);
+  box-shadow: 0 12px 28px rgb(42 24 22 / 14%);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1.2;
+  opacity: 0;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  text-align: center;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 0ms linear 120ms;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.icon-tooltip:hover .icon-tooltip-bubble,
+.icon-tooltip:focus-within .icon-tooltip-bubble {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  transition-delay: 0ms;
+  visibility: visible;
+}
+
+.question-source .icon-tooltip {
+  margin-left: 2px;
+}
+
+.question-source .icon-tooltip-bubble {
+  top: calc(100% + 8px);
+  bottom: auto;
+  transform: translate(-50%, -4px);
+}
+
+.question-source .icon-tooltip:hover .icon-tooltip-bubble,
+.question-source .icon-tooltip:focus-within .icon-tooltip-bubble {
+  transform: translate(-50%, 0);
 }
 
 .question-details-trigger,
@@ -1506,7 +1566,6 @@ textarea {
   place-items: center;
   width: 22px;
   height: 22px;
-  margin-left: 2px;
   padding: 0;
   border: 1px solid rgb(227 218 196 / 64%);
   border-radius: 999px;
@@ -2651,22 +2710,6 @@ textarea {
   font-family:
     "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 0.82em;
-}
-
-.markdown-formula-code {
-  display: inline-block;
-  max-width: 100%;
-  border: 1px solid rgb(124 89 104 / 16%);
-  padding: 0.01em 0.2em 0.05em;
-  background: var(--formula-soft);
-  color: var(--formula);
-  font-family:
-    "Times New Roman", "STIX Two Math", "Cambria Math", Georgia, serif;
-  font-size: 0.86em;
-  font-style: italic;
-  line-height: 0.98;
-  vertical-align: -0.04em;
-  white-space: nowrap;
 }
 
 .math-expression {
