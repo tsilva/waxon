@@ -1819,7 +1819,7 @@ textarea {
 .learn-generation-panel {
   display: grid;
   align-content: center;
-  justify-items: center;
+  justify-items: start;
   gap: 18px;
   width: 100%;
   min-height: 250px;
@@ -1836,10 +1836,10 @@ textarea {
 
 .learn-generation-header {
   display: grid;
-  justify-items: center;
+  justify-items: start;
   gap: 10px;
   width: min(720px, 100%);
-  text-align: center;
+  text-align: left;
 }
 
 .learn-generation-kicker {
@@ -1863,8 +1863,9 @@ textarea {
 }
 
 .learn-generation-status {
+  width: min(620px, 100%);
   max-width: 620px;
-  margin: -2px auto 0;
+  margin: -2px 0 0;
   color: var(--ink-soft);
   font-size: 18px;
   font-weight: 620;

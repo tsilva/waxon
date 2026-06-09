@@ -144,7 +144,10 @@ export async function POST(request: Request) {
         send("progress", {
           ok: true,
           phase: "processing",
-          status: "Checking duplicates and adding questions",
+          status:
+            rotationDeck.cardCount === 0
+              ? "Adding questions"
+              : "Checking duplicates and adding questions",
           progress: calculateQuestionExtractionProgress({
             generated: generation.questions.length,
             total: count,
