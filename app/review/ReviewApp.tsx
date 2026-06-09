@@ -98,6 +98,7 @@ type SubmitAnswerResponse =
 
 type QueueStatusResponse = {
   queueRemaining: number;
+  nextScheduledDue?: number | null;
   pendingEvaluations: number;
   evaluations: EvaluationQueueItem[];
   recentAttempts?: QuestionAttempt[];
@@ -117,17 +118,23 @@ type StatsResponse = {
   now: number;
   dueCount: number;
   cardCount: number;
-  scheduled: Array<{
-    nextDue: number;
+  scheduledBuckets: Array<{
+    dayStart: number;
+    value: number;
   }>;
-  attempts: Array<{
-    resolvedAt: number;
-    score: number;
+  processedBuckets: Array<{
+    dayStart: number;
+    value: number;
+    averageScore: number;
   }>;
 };
 
 type EvaluationStatusResponse = {
   evaluations: EvaluationQueueItem[];
+};
+
+type QuestionAttemptsResponse = {
+  attempts: QuestionAttempt[];
 };
 
 type UserProfileResponse = {
@@ -1029,6 +1036,24 @@ function formatRelativeTime(timestamp: number | null, now: number): string {
   return formatReviewDate(timestamp);
 }
 
+function questionAttemptCacheKey(input: {
+  questionId: string | null;
+  question: string;
+}): string {
+  return input.questionId ? `id:${input.questionId}` : `question:${input.question}`;
+}
+
+function reviewQueueItemPreviousTimestamp(item: ReviewQueueItem): number | null {
+  const latestAttempt = item.attempts.at(-1);
+
+  return (
+    latestAttempt?.resolvedAt ??
+    latestAttempt?.submittedAt ??
+    item.reviewHistory.at(-1)?.ts ??
+    null
+  );
+}
+
 function formatNextDue(stats: QuestionStats): string {
   if (stats.nextDue === null || stats.msUntilDue === null) {
     return "Unknown";
@@ -1305,36 +1330,40 @@ function buildStatsAnalytics(stats: StatsResponse | null): StatsAnalytics {
     }),
   );
   const scoreTotals = processedBuckets.map(() => ({ total: 0, count: 0 }));
+  const scheduledBucketIndex = new Map(
+    scheduledBuckets.map((bucket, index) => [bucket.dayStart, index]),
+  );
+  const processedBucketIndex = new Map(
+    processedBuckets.map((bucket, index) => [bucket.dayStart, index]),
+  );
 
-  for (const item of stats?.scheduled ?? []) {
-    if (!Number.isFinite(item.nextDue)) {
+  for (const item of stats?.scheduledBuckets ?? []) {
+    if (!Number.isFinite(item.dayStart) || !Number.isFinite(item.value)) {
       continue;
     }
 
-    const normalizedDue = Math.max(item.nextDue, todayStart);
-    const index = Math.floor((startOfLocalDay(normalizedDue) - todayStart) / DAY);
+    const index = scheduledBucketIndex.get(startOfLocalDay(item.dayStart));
 
-    if (index >= 0 && index < scheduledBuckets.length) {
-      scheduledBuckets[index].value += 1;
+    if (index !== undefined) {
+      scheduledBuckets[index].value += item.value;
     }
   }
 
-  for (const attempt of stats?.attempts ?? []) {
+  for (const item of stats?.processedBuckets ?? []) {
     if (
-      !Number.isFinite(attempt.resolvedAt) ||
-      !Number.isFinite(attempt.score)
+      !Number.isFinite(item.dayStart) ||
+      !Number.isFinite(item.value) ||
+      !Number.isFinite(item.averageScore)
     ) {
       continue;
     }
 
-    const index = Math.floor(
-      (startOfLocalDay(attempt.resolvedAt) - processedBuckets[0].dayStart) / DAY,
-    );
+    const index = processedBucketIndex.get(startOfLocalDay(item.dayStart));
 
-    if (index >= 0 && index < processedBuckets.length) {
-      processedBuckets[index].value += 1;
-      scoreTotals[index].total += attempt.score;
-      scoreTotals[index].count += 1;
+    if (index !== undefined) {
+      processedBuckets[index].value += item.value;
+      scoreTotals[index].total += item.averageScore * item.value;
+      scoreTotals[index].count += item.value;
     }
   }
 
@@ -1835,6 +1864,11 @@ export default function ReviewApp({
         (cachedSessionRef.current?.hasLoadedQueueStatus ?? false)
       ),
   );
+  const [isQueueStatusStreamActive, setIsQueueStatusStreamActive] =
+    useState(false);
+  const [questionAttemptsByKey, setQuestionAttemptsByKey] = useState<
+    Record<string, QuestionAttempt[]>
+  >({});
   const [queueVirtualRange, setQueueVirtualRange] = useState({
     start: canUseCachedQueueState
       ? cachedSessionRef.current?.queueVirtualRange.start ?? 0
@@ -1999,6 +2033,7 @@ export default function ReviewApp({
   const loadedDeckEmbeddingPlotKeyRef = useRef<string | null>(null);
   const isQueuePageLoadingRef = useRef(false);
   const queueStatusRequestIdRef = useRef(0);
+  const questionAttemptsRequestKeysRef = useRef(new Set<string>());
   const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
@@ -2246,6 +2281,86 @@ export default function ReviewApp({
     },
     [],
   );
+  const selectedQuestionAttemptKey = useMemo(
+    () =>
+      selectedQuestion
+        ? questionAttemptCacheKey({
+            questionId: selectedQuestionId,
+            question: selectedQuestion,
+          })
+        : null,
+    [selectedQuestion, selectedQuestionId],
+  );
+
+  useEffect(() => {
+    if (!selectedQuestion || !selectedQuestionAttemptKey) {
+      return;
+    }
+
+    const attemptKey = selectedQuestionAttemptKey;
+
+    if (
+      Object.prototype.hasOwnProperty.call(
+        questionAttemptsByKey,
+        attemptKey,
+      ) ||
+      questionAttemptsRequestKeysRef.current.has(attemptKey)
+    ) {
+      return;
+    }
+
+    let isActive = true;
+    const params = new URLSearchParams();
+
+    if (selectedQuestionId) {
+      params.set("questionId", selectedQuestionId);
+    } else {
+      params.set("question", selectedQuestion);
+    }
+
+    questionAttemptsRequestKeysRef.current.add(attemptKey);
+
+    async function loadQuestionAttempts() {
+      try {
+        const response = await fetch(`/api/question-attempts?${params.toString()}`, {
+          cache: "no-store",
+        });
+
+        const data = await readJsonResponse<QuestionAttemptsResponse>(
+          response,
+          "Failed to load question attempts.",
+        );
+
+        if (!isActive) {
+          return;
+        }
+
+        setQuestionAttemptsByKey((current) =>
+          Object.prototype.hasOwnProperty.call(current, attemptKey)
+            ? current
+            : {
+                ...current,
+                [attemptKey]: data.attempts,
+              },
+        );
+      } catch {
+        // Attempt details are loaded on demand; the stats shell remains useful.
+      } finally {
+        questionAttemptsRequestKeysRef.current.delete(attemptKey);
+      }
+    }
+
+    void loadQuestionAttempts();
+
+    return () => {
+      isActive = false;
+    };
+  }, [
+    questionAttemptsByKey,
+    selectedQuestion,
+    selectedQuestionAttemptKey,
+    selectedQuestionId,
+  ]);
 
   const resetQuestionGenerator = useCallback(() => {
     setGeneratorScope("");
@@ -3179,6 +3294,7 @@ export default function ReviewApp({
       limit: String(Math.max(0, Math.floor(limit))),
       offset: "0",
       sort: queueSortKey,
+      includeQuestionAttempts: "0",
       includeDeckEmbeddingPlot: "0",
     });
 
@@ -3192,6 +3308,21 @@ export default function ReviewApp({
 
     return `/api/queue-status?${params.toString()}`;
   }, [queueSearchQuery, queueSortKey, selectedDeckDetailId]);
+
+  const previousAnswerStatusUrl = useCallback(() => {
+    const params = new URLSearchParams({
+      limit: "0",
+      offset: "0",
+      mode: "review",
+      includeReviewQueue: "0",
+      includeQuestionAttempts: "0",
+      includeRecentAttempts: "1",
+      includeDeckEmbeddingPlot: "0",
+      includeQueueCounts: "0",
+    });
+
+    return `/api/queue-status?${params.toString()}`;
+  }, []);
 
   const queueStatusStreamUrl = useCallback((limit: number) => {
     const params = new URLSearchParams({
@@ -3303,6 +3434,25 @@ export default function ReviewApp({
     }
   }, [applyQueueStatus, queueStatusUrl]);
 
+  const loadPreviousAnswerStatus = useCallback(async () => {
+    try {
+      const response = await fetch(previousAnswerStatusUrl(), {
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const data = (await response.json()) as QueueStatusResponse;
+
+      setEvaluations(data.evaluations);
+      setRecentAttempts(data.recentAttempts ?? []);
+    } catch {
+      // Previous answers are supplemental; keep the review loop usable.
+    }
+  }, [previousAnswerStatusUrl]);
+
   const loadStats = useCallback(async () => {
     setIsStatsLoading(true);
     setStatsError(null);
@@ -3362,12 +3512,19 @@ export default function ReviewApp({
       return;
     }
 
+    void loadPreviousAnswerStatus();
+
     if (hasLoadedQuestionRef.current) {
       return;
     }
 
     void loadNextQuestion({ surfaceError: false });
-  }, [activeTab, loadNextQuestion, reviewQueueVersion]);
+  }, [
+    activeTab,
+    loadNextQuestion,
+    loadPreviousAnswerStatus,
+    reviewQueueVersion,
+  ]);
 
   useEffect(() => {
     if (activeTab !== "stats") {
@@ -3423,12 +3580,16 @@ export default function ReviewApp({
     }
 
     if (isQueueSearchActive) {
+      setIsQueueStatusStreamActive(false);
       return;
     }
 
+    let isStreamEffectActive = true;
     const events = new EventSource(
       queueStatusStreamUrl(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current)),
     );
+
+    setIsQueueStatusStreamActive(true);
 
     events.addEventListener("status", (event) => {
       try {
@@ -3439,6 +3600,9 @@ export default function ReviewApp({
           preserveLoadedQueue: true,
           preserveRecentAttempts: true,
         });
+        if (isStreamEffectActive) {
+          setIsQueueStatusStreamActive(true);
+        }
       } catch {
         // Ignore malformed stream events; the connection can continue.
       }
@@ -3446,10 +3610,17 @@ export default function ReviewApp({
 
     events.onerror = () => {
       events.close();
+      if (isStreamEffectActive) {
+        setIsQueueStatusStreamActive(false);
+      }
       void loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
     };
 
-    return () => events.close();
+    return () => {
+      isStreamEffectActive = false;
+      events.close();
+      setIsQueueStatusStreamActive(false);
+    };
   }, [
     activeTab,
     applyQueueStatus,
@@ -3499,7 +3670,7 @@ export default function ReviewApp({
   const gradingEvaluationIdsKey = gradingEvaluationIds.join(",");
 
   useEffect(() => {
-    if (!gradingEvaluationIdsKey) {
+    if (!gradingEvaluationIdsKey || isQueueStatusStreamActive) {
       return;
     }
 
@@ -3556,7 +3727,7 @@ export default function ReviewApp({
       isActive = false;
       window.clearInterval(interval);
     };
-  }, [gradingEvaluationIdsKey]);
+  }, [gradingEvaluationIdsKey, isQueueStatusStreamActive]);
 
   useEffect(() => {
     setMessages((current) => {
@@ -4624,6 +4795,28 @@ export default function ReviewApp({
     ...sessionPreviousAnswers.map((previousItem) => previousItem.question),
     ...evaluationPreviousAnswers.map((previousItem) => previousItem.question),
   ]);
+  const reviewHistoryPreviousSources = useMemo(() => {
+    const byQuestionKey = new Map<string, ReviewQueueItem>();
+
+    for (const item of [currentSessionItem, ...sessionQueue, ...reviewQueue]) {
+      if (!item || item.lastScore === null || item.lastAnswer === null) {
+        continue;
+      }
+
+      const key = item.questionId || `question:${item.question}`;
+      const existing = byQuestionKey.get(key);
+
+      if (
+        !existing ||
+        (reviewQueueItemPreviousTimestamp(item) ?? 0) >
+          (reviewQueueItemPreviousTimestamp(existing) ?? 0)
+      ) {
+        byQuestionKey.set(key, item);
+      }
+    }
+
+    return Array.from(byQuestionKey.values());
+  }, [currentSessionItem, reviewQueue, sessionQueue]);
 
   const recentAttemptPreviousAnswers: PreviousAnswerItem[] = recentAttempts
     .filter((attempt) => {
@@ -4669,17 +4862,23 @@ export default function ReviewApp({
     recentAttemptPreviousAnswers.map((previousItem) => previousItem.question),
   );
 
-  const historicalPreviousAnswers: PreviousAnswerItem[] = reviewQueue
+  const historicalPreviousAnswers: PreviousAnswerItem[] = reviewHistoryPreviousSources
     .filter(
       (item) =>
         item.lastScore !== null &&
         item.lastAnswer !== null &&
         isDeckInReviewRotation(item.deckId) &&
-        item.question !== question &&
         !livePreviousQuestions.has(item.question) &&
         !recentAttemptQuestions.has(item.question),
     )
     .sort((a, b) => {
+      const aTimestamp = reviewQueueItemPreviousTimestamp(a) ?? 0;
+      const bTimestamp = reviewQueueItemPreviousTimestamp(b) ?? 0;
+
+      if (aTimestamp !== bTimestamp) {
+        return bTimestamp - aTimestamp;
+      }
+
       const aScore = a.lastScore ?? -1;
       const bScore = b.lastScore ?? -1;
 
@@ -4691,12 +4890,7 @@ export default function ReviewApp({
     })
     .slice(0, EXPANDED_PREVIOUS_ANSWER_LIMIT)
     .map((item) => {
-      const latestAttempt = item.attempts.at(-1);
-      const timestamp =
-        latestAttempt?.resolvedAt ??
-        latestAttempt?.submittedAt ??
-        item.reviewHistory.at(-1)?.ts ??
-        null;
+      const timestamp = reviewQueueItemPreviousTimestamp(item);
 
       return {
         id: `history-${item.question}`,
@@ -4986,6 +5180,21 @@ export default function ReviewApp({
     const recentQuestionAttempts = recentAttempts.filter(
       (attempt) => matchesSelectedQuestion(attempt),
     );
+    const lazyQuestionAttempts =
+      selectedQuestionAttemptKey === null
+        ? []
+        : (questionAttemptsByKey[selectedQuestionAttemptKey] ?? []);
+    const persistedAttemptsById = new Map<number, QuestionAttempt>();
+
+    for (const attempt of [
+      ...(queueItem?.attempts ?? []),
+      ...recentQuestionAttempts,
+      ...lazyQuestionAttempts,
+    ]) {
+      persistedAttemptsById.set(attempt.id, attempt);
+    }
+
+    const persistedAttempts = Array.from(persistedAttemptsById.values());
     const resolvedEvaluations = evaluations.filter(
       (evaluation) =>
         matchesSelectedQuestion(evaluation) &&
@@ -5001,7 +5210,7 @@ export default function ReviewApp({
       historyMap.set(`${entry.ts}-${entry.score}`, entry);
     }
 
-    for (const attempt of recentQuestionAttempts) {
+    for (const attempt of persistedAttempts) {
       historyMap.set(`${attempt.resolvedAt}-${attempt.score}`, {
         ts: attempt.resolvedAt,
         score: attempt.score,
@@ -5050,15 +5259,6 @@ export default function ReviewApp({
       queueItem?.status ??
       (msUntilDue === null ? "unknown" : msUntilDue <= 0 ? "now" : "scheduled");
     const lastScore = scores.at(-1) ?? queueItem?.lastScore ?? null;
-    const persistedAttempts = [
-      ...(queueItem?.attempts ?? []),
-      ...recentQuestionAttempts.filter(
-        (attempt) =>
-          !(queueItem?.attempts ?? []).some(
-            (queueAttempt) => queueAttempt.id === attempt.id,
-          ),
-      ),
-    ];
     const persistedAnswerHistory: AnswerHistoryEntry[] =
       persistedAttempts.map((attempt) => ({
         id: `attempt-${attempt.id}`,
@@ -5177,8 +5377,10 @@ export default function ReviewApp({
     currentTime,
     evaluations,
     messages,
+    questionAttemptsByKey,
     recentAttempts,
     reviewQueue,
+    selectedQuestionAttemptKey,
     selectedQuestionId,
     selectedQuestion,
   ]);

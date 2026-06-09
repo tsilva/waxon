@@ -5,6 +5,7 @@ import {
   createAnswerEvaluationRecord,
   flagQuestionForReview,
   getDueQuestions,
+  getNextScheduledQuestionDue,
   getVisibleAnswerEvaluations,
   getQuestionAttemptsByQuestionIds,
   getQueuedQuestionsPage,
@@ -13,7 +14,7 @@ import {
   getRecentQuestionAttempts,
   listDecks,
   resolveAnswerEvaluationRecord,
-  readQuestionsWithEmbeddings,
+  readQuestionEmbeddingProjections,
   resolveOwnedDeckId,
   updateAnswerEvaluationPhase,
   upsertDueQuestions,
@@ -80,7 +81,8 @@ type Submission = {
   previousReviews: string;
 };
 
-type QueueStatusSubscriber = () => void;
+type QueueStatusBroadcastMode = "full" | "evaluations";
+type QueueStatusSubscriber = (mode: QueueStatusBroadcastMode) => void;
 
 type NextQuestionMode = "review" | "learn";
 
@@ -101,6 +103,7 @@ type QueueStatusInput = {
   includeQuestionAttempts?: boolean;
   includeRecentAttempts?: boolean;
   includeDeckEmbeddingPlot?: boolean;
+  includeQueueCounts?: boolean;
 };
 
 type LatestEvaluation = {
@@ -210,7 +213,7 @@ export function invalidateReviewQueue(userId?: string): void {
     state.initializing = null;
     state.queue = [];
     logQueueFlushStatus(state, "invalidated-review-queue");
-    void broadcastQueueStatus(state);
+    void broadcastQueueStatus(state, "full");
   }
 }
 
@@ -235,13 +238,16 @@ function logQueueFlushStatus(state: QueueState, action: string): void {
   });
 }
 
-async function broadcastQueueStatus(state: QueueState): Promise<void> {
+async function broadcastQueueStatus(
+  state: QueueState,
+  mode: QueueStatusBroadcastMode = "full",
+): Promise<void> {
   if (state.subscribers.size === 0) {
     return;
   }
 
   for (const subscriber of state.subscribers) {
-    subscriber();
+    subscriber(mode);
   }
 }
 
@@ -338,7 +344,7 @@ function updateEvaluationPhase(
 
   item.phase = phase;
   item.lastActivityAt = Date.now();
-  void broadcastQueueStatus(state);
+  void broadcastQueueStatus(state, "evaluations");
 }
 
 function touchEvaluationActivity(
@@ -359,7 +365,7 @@ function touchEvaluationActivity(
   if (item.phase !== phase) {
     item.phase = phase;
     item.lastActivityAt = now;
-    void broadcastQueueStatus(state);
+    void broadcastQueueStatus(state, "evaluations");
     return true;
   }
 
@@ -368,7 +374,7 @@ function touchEvaluationActivity(
   }
 
   item.lastActivityAt = now;
-  void broadcastQueueStatus(state);
+  void broadcastQueueStatus(state, "evaluations");
   return true;
 }
 
@@ -412,87 +418,6 @@ function mergeEvaluationItems(
   });
 }
 
-function dotProduct(a: number[], b: number[]): number {
-  let total = 0;
-
-  for (let index = 0; index < a.length; index += 1) {
-    total += (a[index] ?? 0) * (b[index] ?? 0);
-  }
-
-  return total;
-}
-
-function normalizeVector(vector: number[]): number[] | null {
-  let squaredNorm = 0;
-
-  for (const component of vector) {
-    squaredNorm += component * component;
-  }
-
-  const norm = Math.sqrt(squaredNorm);
-
-  if (norm <= Number.EPSILON) {
-    return null;
-  }
-
-  return vector.map((component) => component / norm);
-}
-
-function initialComponent(dimensions: number, seed: number): number[] {
-  return normalizeVector(
-    Array.from({ length: dimensions }, (_, index) =>
-      Math.sin((index + 1) * seed) + Math.cos((index + 1) * (seed + 0.37)),
-    ),
-  ) ?? Array.from({ length: dimensions }, (_, index) => (index === 0 ? 1 : 0));
-}
-
-function principalComponent(
-  rows: number[][],
-  dimensions: number,
-  seed: number,
-  previousComponent?: number[],
-): number[] | null {
-  let component = initialComponent(dimensions, seed);
-
-  if (previousComponent) {
-    const overlap = dotProduct(component, previousComponent);
-    component = component.map(
-      (value, index) => value - overlap * (previousComponent[index] ?? 0),
-    );
-    component = normalizeVector(component) ?? initialComponent(dimensions, seed + 1);
-  }
-
-  for (let iteration = 0; iteration < 24; iteration += 1) {
-    const next = Array.from({ length: dimensions }, () => 0);
-
-    for (const row of rows) {
-      const score = dotProduct(row, component);
-
-      for (let index = 0; index < dimensions; index += 1) {
-        next[index] += (row[index] ?? 0) * score;
-      }
-    }
-
-    if (previousComponent) {
-      const overlap = dotProduct(next, previousComponent);
-
-      for (let index = 0; index < dimensions; index += 1) {
-        next[index] -= overlap * (previousComponent[index] ?? 0);
-      }
-    }
-
-    const normalized = normalizeVector(next);
-
-    if (!normalized) {
-      return null;
-    }
-
-    component = normalized;
-  }
-
-  return component;
-}
-
 function normalizeProjectionValue(value: number, min: number, max: number): number {
   if (max - min <= Number.EPSILON) {
     return 0.5;
@@ -501,8 +426,13 @@ function normalizeProjectionValue(value: number, min: number, max: number): numb
   return (value - min) / (max - min);
 }
 
-function projectEmbeddings(
-  rows: Array<{ question: string; lastScore: number | null; embedding: number[] }>,
+function normalizeProjectionPoints(
+  rows: Array<{
+    question: string;
+    lastScore: number | null;
+    projectionX: number;
+    projectionY: number;
+  }>,
 ): DeckEmbeddingPlotPoint[] {
   if (rows.length === 0) {
     return [];
@@ -519,40 +449,18 @@ function projectEmbeddings(
     ];
   }
 
-  const dimensions = rows[0]?.embedding.length ?? 0;
-  const means = Array.from({ length: dimensions }, (_, dimension) => {
-    const total = rows.reduce(
-      (sum, row) => sum + (row.embedding[dimension] ?? 0),
-      0,
-    );
-
-    return total / rows.length;
-  });
-  const centered = rows.map((row) =>
-    row.embedding.map((component, dimension) => component - means[dimension]),
-  );
-  const firstComponent = principalComponent(centered, dimensions, 1.41);
-  const secondComponent = firstComponent
-    ? principalComponent(centered, dimensions, 2.73, firstComponent)
-    : null;
-  const projected = centered.map((row, index) => ({
-    question: rows[index]?.question ?? "",
-    lastScore: rows[index]?.lastScore ?? null,
-    rawX: firstComponent ? dotProduct(row, firstComponent) : index,
-    rawY: secondComponent ? dotProduct(row, secondComponent) : 0,
-  }));
-  const xValues = projected.map((point) => point.rawX);
-  const yValues = projected.map((point) => point.rawY);
+  const xValues = rows.map((point) => point.projectionX);
+  const yValues = rows.map((point) => point.projectionY);
   const minX = Math.min(...xValues);
   const maxX = Math.max(...xValues);
   const minY = Math.min(...yValues);
   const maxY = Math.max(...yValues);
 
-  return projected.map((point) => ({
+  return rows.map((point) => ({
     question: point.question,
     lastScore: point.lastScore,
-    x: normalizeProjectionValue(point.rawX, minX, maxX),
-    y: normalizeProjectionValue(point.rawY, minY, maxY),
+    x: normalizeProjectionValue(point.projectionX, minX, maxX),
+    y: normalizeProjectionValue(point.projectionY, minY, maxY),
   }));
 }
 
@@ -564,7 +472,7 @@ async function getDeckEmbeddingPlot(input: {
   totalQuestions?: number;
   userId: string;
 }): Promise<DeckEmbeddingPlot> {
-  const questions = await readQuestionsWithEmbeddings({
+  const questions = await readQuestionEmbeddingProjections({
     deckId: input.deckId,
     userId: input.userId,
     questions: input.questions,
@@ -576,21 +484,25 @@ async function getDeckEmbeddingPlot(input: {
   });
   const totalQuestions = input.totalQuestions ?? questions.length;
   const modelCounts = new Map<string, number>();
-  const preferredEmbeddings = questions.flatMap((question) =>
-    question.embeddings.filter(
-      (candidate) =>
-        candidate.embeddingKind === DEDUPE_EMBEDDING_KIND && candidate.isCurrent,
-    ),
+  const projectedRows = questions.filter(
+    (question) =>
+      question.embeddingModel &&
+      question.embeddingKind === DEDUPE_EMBEDDING_KIND &&
+      question.isCurrent &&
+      question.projectionX !== null &&
+      question.projectionY !== null,
   );
-  const embeddingsForModelSelection =
-    preferredEmbeddings.length > 0
-      ? preferredEmbeddings
-      : questions.flatMap((question) => question.embeddings);
 
-  for (const embedding of embeddingsForModelSelection) {
+  for (const embedding of projectedRows) {
+    const embeddingModel = embedding.embeddingModel;
+
+    if (!embeddingModel) {
+      continue;
+    }
+
     modelCounts.set(
-      embedding.embeddingModel,
-      (modelCounts.get(embedding.embeddingModel) ?? 0) + 1,
+      embeddingModel,
+      (modelCounts.get(embeddingModel) ?? 0) + 1,
     );
   }
 
@@ -607,24 +519,16 @@ async function getDeckEmbeddingPlot(input: {
     };
   }
 
-  const selectedEmbeddings = questions
+  const selectedEmbeddings = projectedRows
     .map((question) => {
-      const embedding =
-        question.embeddings.find(
-          (candidate) =>
-            candidate.embeddingModel === model &&
-            candidate.embeddingKind === DEDUPE_EMBEDDING_KIND &&
-            candidate.isCurrent,
-        ) ??
-        question.embeddings.find(
-          (candidate) => candidate.embeddingModel === model,
-        );
-
-      return embedding
+      return question.embeddingModel === model &&
+        question.projectionX !== null &&
+        question.projectionY !== null
         ? {
             question: question.question,
             lastScore: parseReviews(question.reviews).at(-1)?.score ?? null,
-            embedding: embedding.embedding,
+            projectionX: question.projectionX,
+            projectionY: question.projectionY,
           }
         : null;
     })
@@ -632,34 +536,19 @@ async function getDeckEmbeddingPlot(input: {
       (item): item is {
         question: string;
         lastScore: number | null;
-        embedding: number[];
+        projectionX: number;
+        projectionY: number;
       } =>
         item !== null &&
-        item.embedding.length > 0 &&
-        item.embedding.every(Number.isFinite),
+        Number.isFinite(item.projectionX) &&
+        Number.isFinite(item.projectionY),
     );
-  const dimensionCounts = new Map<number, number>();
-
-  for (const item of selectedEmbeddings) {
-    dimensionCounts.set(
-      item.embedding.length,
-      (dimensionCounts.get(item.embedding.length) ?? 0) + 1,
-    );
-  }
-
-  const dimension = Array.from(dimensionCounts.entries()).sort(
-    ([dimensionA, countA], [dimensionB, countB]) =>
-      countB - countA || dimensionB - dimensionA,
-  )[0]?.[0] ?? 0;
-  const projectableEmbeddings = selectedEmbeddings.filter(
-    (item) => item.embedding.length === dimension,
-  );
 
   return {
     model,
     totalQuestions,
-    embeddedQuestions: projectableEmbeddings.length,
-    points: projectEmbeddings(projectableEmbeddings),
+    embeddedQuestions: selectedEmbeddings.length,
+    points: normalizeProjectionPoints(selectedEmbeddings),
   };
 }
 
@@ -798,6 +687,7 @@ function toReviewQueueItem(
   const msUntilDue = item.nextDue - input.now;
   const reviewHistory = parseReviews(item.reviews);
   const lastReview = reviewHistory.at(-1);
+  const latestAttempt = input.attempts?.at(-1);
 
   return {
     questionId: item.questionId,
@@ -811,12 +701,20 @@ function toReviewQueueItem(
     generatedFromQuestion: item.generatedFromQuestion,
     questionProvenance: item.questionProvenance,
     reviewHistory,
-    lastScore: input.latest?.score ?? lastReview?.score ?? null,
-    lastAnswer: item.lastAnswer,
-    lastAnswerSummary: input.latest?.answerSummary ?? item.lastAnswerSummary,
-    conciseAnswer: input.latest?.correctAnswer ?? item.conciseAnswer,
+    lastScore: input.latest?.score ?? latestAttempt?.score ?? lastReview?.score ?? null,
+    lastAnswer: item.lastAnswer ?? latestAttempt?.rawAnswer ?? null,
+    lastAnswerSummary:
+      input.latest?.answerSummary ??
+      item.lastAnswerSummary ??
+      latestAttempt?.answerSummary ??
+      null,
+    conciseAnswer:
+      input.latest?.correctAnswer ??
+      item.conciseAnswer ??
+      latestAttempt?.correctAnswer ??
+      null,
     referenceAnswer: item.referenceAnswer,
-    lastJustification: input.latest?.justification ?? null,
+    lastJustification: input.latest?.justification ?? latestAttempt?.justification ?? null,
     attempts: input.attempts ?? [],
   };
 }
@@ -1548,8 +1446,13 @@ export async function queueStatusForUser(
   const sortKey = input.sortKey ?? "review-date";
   const includeReviewQueue = input.includeReviewQueue ?? true;
   const includeRecentAttempts = input.includeRecentAttempts ?? true;
-  const reviewQueuePage = includeReviewQueue
-    ? await getReviewQueueItems(userId, state, {
+  const includeQueueCounts = input.includeQueueCounts ?? true;
+  const excludeQuestionIds = Array.from(state.inFlightQuestionKeys).filter(
+    (key) => !key.startsWith("question:"),
+  );
+  const emptyReviewQueuePage = { items: [], total: 0 };
+  const reviewQueuePagePromise = includeReviewQueue
+    ? getReviewQueueItems(userId, state, {
         deckId: input.deckId,
         limit,
         offset,
@@ -1557,41 +1460,74 @@ export async function queueStatusForUser(
         query,
         includeQuestionAttempts: input.includeQuestionAttempts,
       })
-    : { items: [], total: 0 };
-  const recentAttempts = includeRecentAttempts
-    ? await getRecentQuestionAttempts({
+    : Promise.resolve(emptyReviewQueuePage);
+  const recentAttemptsPromise = includeRecentAttempts
+    ? getRecentQuestionAttempts({
         userId,
         deckScope: input.deckId ? undefined : "rotation",
         deckId: input.deckId,
         limit: 24,
       })
-    : [];
-  const deckEmbeddingPlot = input.includeDeckEmbeddingPlot
-    ? await getDeckEmbeddingPlot({
-        userId,
-        deckId: input.deckId,
-        ...(input.deckId
-          ? {}
-          : {
-              questions: reviewQueuePage.items.map((item) => item.question),
-              totalQuestions: reviewQueuePage.total,
-            }),
-      })
-    : emptyDeckEmbeddingPlot();
-  const persistedEvaluations = await getVisibleAnswerEvaluations({
+    : Promise.resolve([]);
+  const persistedEvaluationsPromise = getVisibleAnswerEvaluations({
     userId,
     deckId: input.deckId,
     activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
     resolvedSince: now - RESOLVED_JUDGING_VISIBLE_MS,
     limit: 50,
   });
-  const queueRemaining = await countDueQuestions(now, {
-    userId,
-    deckId: input.deckId,
-  });
+  const queueRemainingPromise = includeQueueCounts
+    ? countDueQuestions(now, {
+        userId,
+        deckId: input.deckId,
+      })
+    : Promise.resolve(null);
+  const nextScheduledDuePromise = includeQueueCounts
+    ? getNextScheduledQuestionDue(now, {
+        userId,
+        deckId: input.deckId,
+        excludeQuestionIds,
+      })
+    : Promise.resolve(null);
+  const deckEmbeddingPlotPromise =
+    input.includeDeckEmbeddingPlot && input.deckId
+      ? getDeckEmbeddingPlot({
+          userId,
+          deckId: input.deckId,
+        })
+      : Promise.resolve(emptyDeckEmbeddingPlot());
+  const [
+    reviewQueuePage,
+    recentAttempts,
+    persistedEvaluations,
+    queueRemaining,
+    nextScheduledDueFromDb,
+    deckEmbeddingPlotForDeck,
+  ] = await Promise.all([
+    reviewQueuePagePromise,
+    recentAttemptsPromise,
+    persistedEvaluationsPromise,
+    queueRemainingPromise,
+    nextScheduledDuePromise,
+    deckEmbeddingPlotPromise,
+  ]);
+  const deckEmbeddingPlot =
+    input.includeDeckEmbeddingPlot && !input.deckId
+      ? await getDeckEmbeddingPlot({
+        userId,
+        questions: reviewQueuePage.items.map((item) => item.question),
+        totalQuestions: reviewQueuePage.total,
+      })
+      : deckEmbeddingPlotForDeck;
+  const nextScheduledDue =
+    queueRemaining === null
+      ? null
+      : (reviewQueuePage.items.find((item) => item.nextDue > now)?.nextDue ??
+        nextScheduledDueFromDb);
 
   return {
-    queueRemaining,
+    queueRemaining: queueRemaining ?? 0,
+    nextScheduledDue,
     pendingEvaluations: state.pendingEvaluations,
     evaluations: mergeEvaluationItems(
       getVisibleEvaluations(state, now),

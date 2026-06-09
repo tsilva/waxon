@@ -127,6 +127,20 @@
       "when": 1781059200000,
       "tag": "0018_question_flags",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1781059300000,
+      "tag": "0019_embedding_plot_projection",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1781059400000,
+      "tag": "0020_queue_filter_indexes",
+      "breakpoints": true
     }
   ]
 }

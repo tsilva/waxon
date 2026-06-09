@@ -7,6 +7,7 @@ import {
   desc,
   eq,
   gte,
+  gt,
   inArray,
   isNull,
   lte,
@@ -36,6 +37,7 @@ import {
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
   DEFAULT_EMBEDDING_MODEL,
+  projectEmbeddingForPlot,
 } from "./embeddingSource";
 import type {
   EvaluationPhase,
@@ -88,12 +90,24 @@ export type QuestionEmbedding = {
   sourceHash: string;
   isCurrent: boolean;
   embedding: number[];
+  projectionX: number | null;
+  projectionY: number | null;
   createdAt: number;
   updatedAt: number;
 };
 
 export type QuestionWithEmbeddings = QuestionRow & {
   embeddings: QuestionEmbedding[];
+};
+
+export type QuestionEmbeddingProjection = {
+  question: string;
+  reviews: string;
+  embeddingModel: string | null;
+  embeddingKind: string | null;
+  isCurrent: boolean | null;
+  projectionX: number | null;
+  projectionY: number | null;
 };
 
 export type PersistedEvaluation = {
@@ -368,6 +382,8 @@ function toQuestionEmbedding(row: {
   sourceHash: string;
   isCurrent: boolean;
   embedding: number[];
+  projectionX: number | null;
+  projectionY: number | null;
   createdAt: number;
   updatedAt: number;
 }): QuestionEmbedding {
@@ -379,6 +395,8 @@ function toQuestionEmbedding(row: {
     sourceHash: row.sourceHash,
     isCurrent: row.isCurrent,
     embedding: row.embedding,
+    projectionX: row.projectionX,
+    projectionY: row.projectionY,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -448,6 +466,8 @@ async function copyDefaultDeckEmbeddingsToUserDeck(
       source_hash,
       is_current,
       embedding,
+      projection_x,
+      projection_y,
       created_at,
       updated_at
     )
@@ -461,6 +481,8 @@ async function copyDefaultDeckEmbeddingsToUserDeck(
       source_embedding.source_hash,
       source_embedding.is_current,
       source_embedding.embedding,
+      source_embedding.projection_x,
+      source_embedding.projection_y,
       source_embedding.created_at,
       ${now}
     FROM question_embeddings source_embedding
@@ -483,6 +505,8 @@ async function copyDefaultDeckEmbeddingsToUserDeck(
       source_hash = excluded.source_hash,
       is_current = excluded.is_current,
       embedding = excluded.embedding,
+      projection_x = excluded.projection_x,
+      projection_y = excluded.projection_y,
       updated_at = excluded.updated_at
   `);
 }
@@ -665,41 +689,47 @@ export async function listDecks(
   const context = await ensureSeedData(input);
   const now = Math.round(Date.now());
   const rows = await db.execute(sql`
-    WITH question_counts AS (
+    WITH user_decks AS (
+      SELECT *
+      FROM ${decks}
+      WHERE ${decks.userId} = ${context.userId}
+        AND ${decks.archivedAt} IS NULL
+    ),
+    question_counts AS (
       SELECT
-        deck_id,
+        ${questions.deckId} AS deck_id,
         count(*)::int AS card_count,
-        count(*) FILTER (WHERE next_due <= ${now})::int AS due_count
+        count(*) FILTER (WHERE ${questions.nextDue} <= ${now})::int AS due_count
       FROM ${questions}
-      WHERE flagged_at IS NULL
-      GROUP BY deck_id
+      INNER JOIN user_decks ON user_decks.id = ${questions.deckId}
+      WHERE ${questions.flaggedAt} IS NULL
+      GROUP BY ${questions.deckId}
     ),
     attempt_counts AS (
       SELECT
-        deck_id,
-        max(resolved_at) AS last_reviewed_at
+        ${questionAttempts.deckId} AS deck_id,
+        max(${questionAttempts.resolvedAt}) AS last_reviewed_at
       FROM ${questionAttempts}
-      GROUP BY deck_id
+      INNER JOIN user_decks ON user_decks.id = ${questionAttempts.deckId}
+      GROUP BY ${questionAttempts.deckId}
     )
     SELECT
-      ${decks.id} AS id,
-      ${decks.name} AS name,
-      ${decks.slug} AS slug,
-      ${decks.coverage} AS coverage,
-      ${decks.memory} AS memory,
-      ${decks.inReviewRotation} AS "inReviewRotation",
-      ${decks.archivedAt} AS "archivedAt",
-      ${decks.createdAt} AS "createdAt",
-      ${decks.updatedAt} AS "updatedAt",
+      user_decks.id AS id,
+      user_decks.name AS name,
+      user_decks.slug AS slug,
+      user_decks.coverage AS coverage,
+      user_decks.memory AS memory,
+      user_decks.in_review_rotation AS "inReviewRotation",
+      user_decks.archived_at AS "archivedAt",
+      user_decks.created_at AS "createdAt",
+      user_decks.updated_at AS "updatedAt",
       coalesce(question_counts.card_count, 0)::int AS "cardCount",
       coalesce(question_counts.due_count, 0)::int AS "dueCount",
       attempt_counts.last_reviewed_at AS "lastReviewedAt"
-    FROM ${decks}
-    LEFT JOIN question_counts ON question_counts.deck_id = ${decks.id}
-    LEFT JOIN attempt_counts ON attempt_counts.deck_id = ${decks.id}
-    WHERE ${decks.userId} = ${context.userId}
-      AND ${decks.archivedAt} IS NULL
-    ORDER BY ${decks.updatedAt} DESC, ${decks.name} ASC
+    FROM user_decks
+    LEFT JOIN question_counts ON question_counts.deck_id = user_decks.id
+    LEFT JOIN attempt_counts ON attempt_counts.deck_id = user_decks.id
+    ORDER BY user_decks.updated_at DESC, user_decks.name ASC
   `);
 
   return rows.rows.map((row) =>
@@ -908,6 +938,8 @@ export async function readQuestionsWithEmbeddings(input: {
       source_hash: questionEmbeddings.sourceHash,
       is_current: questionEmbeddings.isCurrent,
       embedding: questionEmbeddings.embedding,
+      projection_x: questionEmbeddings.projectionX,
+      projection_y: questionEmbeddings.projectionY,
       embedding_created_at: questionEmbeddings.createdAt,
       embedding_updated_at: questionEmbeddings.updatedAt,
     })
@@ -992,6 +1024,8 @@ export async function readQuestionsWithEmbeddings(input: {
         sourceHash: row.source_hash,
         isCurrent: row.is_current,
         embedding: row.embedding,
+        projectionX: row.projection_x,
+        projectionY: row.projection_y,
         createdAt: row.embedding_created_at,
         updatedAt: row.embedding_updated_at,
       });
@@ -999,6 +1033,96 @@ export async function readQuestionsWithEmbeddings(input: {
   }
 
   return Array.from(questionsByText.values());
+}
+
+export async function readQuestionEmbeddingProjections(input: {
+  deckId?: string;
+  embeddingModel?: string;
+  embeddingKind?: string;
+  currentOnly?: boolean;
+  questions?: string[];
+  limit?: number;
+  offset?: number;
+  userId?: string;
+} = {}): Promise<QuestionEmbeddingProjection[]> {
+  const context = await ensureSeedData(input);
+  const targetDeckId = input.deckId?.trim() || context.deckId;
+  const questionFilter =
+    input.questions === undefined
+      ? null
+      : Array.from(new Set(input.questions.map((question) => question.trim())))
+          .filter(Boolean);
+  const model =
+    input.embeddingModel === undefined
+      ? null
+      : normalizeEmbeddingModel(input.embeddingModel);
+  const embeddingKind = input.embeddingKind?.trim() || null;
+  const limit =
+    input.limit === undefined ? null : Math.max(0, Math.floor(input.limit));
+  const offset = Math.max(0, Math.floor(input.offset ?? 0));
+
+  if (model !== null && !model) {
+    throw new Error("Embedding model is required");
+  }
+
+  if (questionFilter?.length === 0) {
+    return [];
+  }
+
+  const rows = await db
+    .select({
+      question: questions.question,
+      reviews: questions.reviews,
+      next_due: questions.nextDue,
+      embedding_model: questionEmbeddings.embeddingModel,
+      embedding_kind: questionEmbeddings.embeddingKind,
+      is_current: questionEmbeddings.isCurrent,
+      projection_x: questionEmbeddings.projectionX,
+      projection_y: questionEmbeddings.projectionY,
+    })
+    .from(questions)
+    .innerJoin(decks, eq(decks.id, questions.deckId))
+    .leftJoin(
+      questionEmbeddings,
+      and(
+        eq(questionEmbeddings.questionId, questions.id),
+        eq(questionEmbeddings.deckId, questions.deckId),
+        model === null
+          ? sql`true`
+          : eq(questionEmbeddings.embeddingModel, model),
+        embeddingKind === null
+          ? sql`true`
+          : eq(questionEmbeddings.embeddingKind, embeddingKind),
+        input.currentOnly ? eq(questionEmbeddings.isCurrent, true) : sql`true`,
+      ),
+    )
+    .where(
+      and(
+        eq(questions.deckId, targetDeckId),
+        isNull(questions.flaggedAt),
+        eq(decks.userId, context.userId),
+        questionFilter === null
+          ? sql`true`
+          : inArray(questions.question, questionFilter),
+      ),
+    )
+    .orderBy(
+      asc(questions.nextDue),
+      asc(questions.question),
+      asc(questionEmbeddings.embeddingModel),
+    )
+    .limit(limit ?? 2_147_483_647)
+    .offset(offset);
+
+  return rows.map((row) => ({
+    question: row.question,
+    reviews: row.reviews,
+    embeddingModel: row.embedding_model,
+    embeddingKind: row.embedding_kind,
+    isCurrent: row.is_current,
+    projectionX: row.projection_x,
+    projectionY: row.projection_y,
+  }));
 }
 
 export async function upsertQuestionEmbeddings(input: {
@@ -1034,6 +1158,8 @@ export async function upsertQuestionEmbeddings(input: {
       sourceHash: string;
       isCurrent: boolean;
       embedding: number[];
+      projectionX: number | null;
+      projectionY: number | null;
       createdAt: number;
       updatedAt: number;
     }
@@ -1052,6 +1178,8 @@ export async function upsertQuestionEmbeddings(input: {
 
     const embeddingKind = item.embeddingKind?.trim() || "question_only";
     const sourceVersion = item.sourceVersion ?? 1;
+    const embedding = normalizeEmbedding(item.embedding);
+    const projection = projectEmbeddingForPlot(embedding);
 
     valuesByKey.set(
       `${item.question}\0${model}\0${embeddingKind}\0${sourceVersion}`,
@@ -1064,7 +1192,9 @@ export async function upsertQuestionEmbeddings(input: {
         sourceVersion,
         sourceHash: item.sourceHash?.trim() ?? "",
         isCurrent: true,
-        embedding: normalizeEmbedding(item.embedding),
+        embedding,
+        projectionX: projection?.x ?? null,
+        projectionY: projection?.y ?? null,
         createdAt: now,
         updatedAt: now,
       },
@@ -1109,6 +1239,8 @@ export async function upsertQuestionEmbeddings(input: {
       ],
       set: {
         embedding: sql`excluded.embedding`,
+        projectionX: sql`excluded.projection_x`,
+        projectionY: sql`excluded.projection_y`,
         sourceHash: sql`excluded.source_hash`,
         isCurrent: true,
         updatedAt: now,
@@ -1122,6 +1254,8 @@ export async function upsertQuestionEmbeddings(input: {
       sourceHash: questionEmbeddings.sourceHash,
       isCurrent: questionEmbeddings.isCurrent,
       embedding: questionEmbeddings.embedding,
+      projectionX: questionEmbeddings.projectionX,
+      projectionY: questionEmbeddings.projectionY,
       createdAt: questionEmbeddings.createdAt,
       updatedAt: questionEmbeddings.updatedAt,
     });
@@ -1208,6 +1342,38 @@ export async function countDueQuestions(
     );
 
   return Number(value) || 0;
+}
+
+export async function getNextScheduledQuestionDue(
+  now = Date.now(),
+  input: DueQuestionsInput = {},
+): Promise<number | null> {
+  const context = await ensureSeedData(input);
+  const excludeQuestionIds = Array.from(
+    new Set(input.excludeQuestionIds ?? []),
+  ).filter(Boolean);
+  const [row] = await db
+    .select({ nextDue: questions.nextDue })
+    .from(questions)
+    .innerJoin(decks, eq(decks.id, questions.deckId))
+    .where(
+      and(
+        eq(decks.userId, context.userId),
+        input.deckId
+          ? eq(questions.deckId, input.deckId)
+          : eq(decks.inReviewRotation, true),
+        isNull(decks.archivedAt),
+        isNull(questions.flaggedAt),
+        gt(questions.nextDue, Math.round(now)),
+        excludeQuestionIds.length > 0
+          ? notInArray(questions.id, excludeQuestionIds)
+          : sql`true`,
+      ),
+    )
+    .orderBy(asc(questions.nextDue), asc(questions.createdAt), asc(questions.question))
+    .limit(1);
+
+  return row?.nextDue ?? null;
 }
 
 export async function getQueuedQuestionsPage(

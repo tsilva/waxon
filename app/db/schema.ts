@@ -4,6 +4,7 @@ import {
   boolean,
   check,
   customType,
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -114,6 +115,11 @@ export const decks = pgTable(
   },
   (table) => [
     uniqueIndex("decks_user_slug_idx").on(table.userId, table.slug),
+    index("decks_user_rotation_archive_idx").on(
+      table.userId,
+      table.inReviewRotation,
+      table.archivedAt,
+    ),
     check("decks_id_nonempty_check", sql`length(trim(${table.id})) > 0`),
     check("decks_name_nonempty_check", sql`length(trim(${table.name})) > 0`),
     check("decks_slug_nonempty_check", sql`length(trim(${table.slug})) > 0`),
@@ -157,6 +163,12 @@ export const questions = pgTable(
       table.questionSlug,
     ),
     index("questions_deck_next_due_idx").on(table.deckId, table.nextDue),
+    index("questions_active_deck_due_idx")
+      .on(table.deckId, table.nextDue, table.createdAt, table.question)
+      .where(sql`${table.flaggedAt} IS NULL`),
+    index("questions_active_deck_created_idx")
+      .on(table.deckId, table.createdAt.desc(), table.question)
+      .where(sql`${table.flaggedAt} IS NULL`),
     foreignKey({
       name: "questions_deck_generated_from_question_fk",
       columns: [table.deckId, table.generatedFromQuestion],
@@ -250,6 +262,8 @@ export const questionEmbeddings = pgTable(
     sourceHash: text("source_hash").notNull().default(""),
     isCurrent: boolean("is_current").notNull().default(true),
     embedding: vector("embedding").notNull(),
+    projectionX: doublePrecision("projection_x"),
+    projectionY: doublePrecision("projection_y"),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
   },
@@ -298,6 +312,17 @@ export const questionEmbeddings = pgTable(
     ),
     check("question_embeddings_source_version_check", sql`${table.sourceVersion} > 0`),
     check("question_embeddings_source_hash_check", sql`length(${table.sourceHash}) <= 128`),
+    check(
+      "question_embeddings_projection_pair_check",
+      sql`(
+        ${table.projectionX} IS NULL AND ${table.projectionY} IS NULL
+      ) OR (
+        ${table.projectionX} IS NOT NULL
+        AND ${table.projectionY} IS NOT NULL
+        AND ${table.projectionX}::text NOT IN ('NaN', 'Infinity', '-Infinity')
+        AND ${table.projectionY}::text NOT IN ('NaN', 'Infinity', '-Infinity')
+      )`,
+    ),
     check("question_embeddings_created_at_check", sql`${table.createdAt} >= 0`),
     check(
       "question_embeddings_updated_at_check",
