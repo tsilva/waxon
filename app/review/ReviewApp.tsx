@@ -49,8 +49,10 @@ import {
   KeyboardEvent,
   type ComponentProps,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -937,6 +939,25 @@ function PreviousAnswerScore({
       <span className={`previous-score score-${scoreTone(score)}`}>
         {displayScore}
       </span>
+    </span>
+  );
+}
+
+function IconTooltip({
+  label,
+  children,
+}: {
+  label: string;
+  children: (tooltipId: string) => ReactNode;
+}) {
+  const tooltipId = useId();
+
+  return (
+    <span className="icon-tooltip">
+      <span className="icon-tooltip-bubble" id={tooltipId} role="tooltip">
+        {label}
+      </span>
+      {children(tooltipId)}
     </span>
   );
 }
@@ -5354,30 +5375,42 @@ export default function ReviewApp({
                     {currentDeckName ? (
                       <>
                         <Layers aria-hidden="true" />
-                        <span>{currentDeckName}</span>
+                        <span className="question-source-label">
+                          {currentDeckName}
+                        </span>
                       </>
                     ) : null}
-                    <button
-                      className="question-details-trigger"
-                      type="button"
-                      aria-label="View current question details"
-                      title="Question details"
-                      onClick={() => selectQuestion(question, currentQuestionId)}
-                    >
-                      <Info aria-hidden="true" />
-                    </button>
-                    <button
-                      className="question-flag-trigger"
-                      type="button"
-                      aria-label="Flag and skip current question"
-                      title="Flag and skip"
-                      onClick={() => {
-                        void flagCurrentQuestion();
-                      }}
-                      disabled={isSubmitting || isFlaggingQuestion}
-                    >
-                      <Flag aria-hidden="true" />
-                    </button>
+                    <IconTooltip label="Question details">
+                      {(tooltipId) => (
+                        <button
+                          className="question-details-trigger"
+                          type="button"
+                          aria-label="View current question details"
+                          aria-describedby={tooltipId}
+                          onClick={() =>
+                            selectQuestion(question, currentQuestionId)
+                          }
+                        >
+                          <Info aria-hidden="true" />
+                        </button>
+                      )}
+                    </IconTooltip>
+                    <IconTooltip label="Flag and skip">
+                      {(tooltipId) => (
+                        <button
+                          className="question-flag-trigger"
+                          type="button"
+                          aria-label="Flag and skip current question"
+                          aria-describedby={tooltipId}
+                          onClick={() => {
+                            void flagCurrentQuestion();
+                          }}
+                          disabled={isSubmitting || isFlaggingQuestion}
+                        >
+                          <Flag aria-hidden="true" />
+                        </button>
+                      )}
+                    </IconTooltip>
                   </div>
                   <MarkdownInline
                     as="h2"
@@ -5539,31 +5572,44 @@ export default function ReviewApp({
                   autoFocus
                   disabled={isSubmitting || isFlaggingQuestion}
                 />
-                <button
-                  className={`composer-mic ${
-                    isSpeechActive ? "composer-mic-active" : ""
-                  }`}
-                  type="button"
-                  aria-label={
-                    isSpeechActive ? "Stop voice answer" : "Start voice answer"
-                  }
-                  aria-pressed={isSpeechActive}
-                  onClick={isSpeechActive ? stopSpeech : startSpeech}
-                  disabled={isSubmitting || isFlaggingQuestion}
-                  title={
+                <IconTooltip
+                  label={
                     isSpeechActive ? "Stop voice answer" : "Start voice answer"
                   }
                 >
-                  {isSpeechActive ? <StopIcon /> : <MicrophoneIcon />}
-                </button>
-                <button
-                  className="composer-submit"
-                  type="submit"
-                  disabled={isSubmitting || isFlaggingQuestion}
-                  aria-label="Submit answer"
-                >
-                  <SubmitIcon />
-                </button>
+                  {(tooltipId) => (
+                    <button
+                      className={`composer-mic ${
+                        isSpeechActive ? "composer-mic-active" : ""
+                      }`}
+                      type="button"
+                      aria-label={
+                        isSpeechActive
+                          ? "Stop voice answer"
+                          : "Start voice answer"
+                      }
+                      aria-describedby={tooltipId}
+                      aria-pressed={isSpeechActive}
+                      onClick={isSpeechActive ? stopSpeech : startSpeech}
+                      disabled={isSubmitting || isFlaggingQuestion}
+                    >
+                      {isSpeechActive ? <StopIcon /> : <MicrophoneIcon />}
+                    </button>
+                  )}
+                </IconTooltip>
+                <IconTooltip label="Submit answer">
+                  {(tooltipId) => (
+                    <button
+                      className="composer-submit"
+                      type="submit"
+                      disabled={isSubmitting || isFlaggingQuestion}
+                      aria-label="Submit answer"
+                      aria-describedby={tooltipId}
+                    >
+                      <SubmitIcon />
+                    </button>
+                  )}
+                </IconTooltip>
               </div>
               {speechMessage ? (
                 <p
