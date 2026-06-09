@@ -2,6 +2,7 @@ import { after } from "next/server";
 import {
   applyEvaluationToPostgres,
   createAnswerEvaluationRecord,
+  flagQuestionForReview,
   getDueQuestions,
   getVisibleAnswerEvaluations,
   getQuestionAttemptsByQuestionIds,
@@ -27,7 +28,7 @@ import {
   type EvaluationResult,
 } from "./evaluateAnswer";
 import { recordPendingLlmTrace } from "./llmTraceStore";
-import { parseReviews } from "./scheduler";
+import { parseReviews, SCHEDULED_SCORE_THRESHOLD } from "./scheduler";
 import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
@@ -255,6 +256,7 @@ function createEvaluationItem(input: {
     correctAnswer: null,
     resolvedAt: null,
     nextDue: null,
+    cost: null,
   };
 }
 
@@ -857,7 +859,7 @@ function restoreFailedQuestion(question: DueQuestion | null): void {
 }
 
 function appendRetryQuestion(question: DueQuestion | null): void {
-  if (!question) {
+  if (!question || question.flaggedAt !== null) {
     return;
   }
 
@@ -1085,7 +1087,8 @@ async function processEvaluation(submission: Submission): Promise<void> {
     }
 
     if (persisted) {
-      const evaluationNextDue = result.score < 10 ? null : persisted.nextDue;
+      const evaluationNextDue =
+        result.score < SCHEDULED_SCORE_THRESHOLD ? null : persisted.nextDue;
 
       await persistEvaluationResolution({
         evaluationId: submission.evaluationId,
@@ -1095,7 +1098,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       });
       savedEvaluationNextDue = evaluationNextDue;
 
-      if (result.score < 10) {
+      if (result.score < SCHEDULED_SCORE_THRESHOLD) {
         appendRetryQuestion(persisted);
       }
     } else {
@@ -1202,6 +1205,38 @@ export async function skipQuestion(input: {
   return peekNextQuestion({ mode: input.mode });
 }
 
+export async function flagQuestion(input: {
+  mode?: NextQuestionMode;
+  questionId: string;
+  question: string;
+}): Promise<{
+  questionId: string | null;
+  question: string | null;
+  deckId: string | null;
+  deckName: string | null;
+  queueRemaining: number;
+}> {
+  const user = await initializeQueue();
+  await refreshIfEmpty(user.id);
+
+  const flagged = await flagQuestionForReview({
+    userId: user.id,
+    questionId: input.questionId,
+    question: input.question,
+  });
+
+  if (flagged) {
+    state.queue = state.queue.filter(
+      (item) => questionKey(item) !== questionKey(flagged),
+    );
+    state.inFlightQuestionKeys.delete(questionKey(flagged));
+    logQueueFlushStatus("flagged-question");
+    void broadcastQueueStatus();
+  }
+
+  return peekNextQuestion({ mode: input.mode });
+}
+
 export async function submitAnswer(input: {
   questionId: string;
   question: string;
@@ -1228,6 +1263,10 @@ export async function submitAnswer(input: {
 
   if (!snapshotDeck?.inReviewRotation) {
     throw new Error("Question is not in review.");
+  }
+
+  if (snapshot.flaggedAt !== null) {
+    throw new Error("Question has been flagged.");
   }
 
   const normalizedInputQuestion = input.question.trim().replace(/\s+/g, " ");

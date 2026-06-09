@@ -144,6 +144,7 @@ export const questions = pgTable(
     lastAnswerSummary: text("last_answer_summary").notNull().default(""),
     conciseAnswer: text("concise_answer").notNull().default(""),
     referenceAnswer: text("reference_answer").notNull().default(""),
+    flaggedAt: bigint("flagged_at", { mode: "number" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
   },

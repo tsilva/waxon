@@ -14,11 +14,12 @@ loadLocalEnvFiles();
 configureNeonWebSocket(neonConfig);
 
 const DEFAULT_BATCH_SIZE = 20;
+const MAX_CONCISE_ANSWER_CHARS = 320;
 const CONCISE_ANSWER_SYSTEM_PROMPT = [
   "Generate concise expected answers for flashcard questions.",
   "Each answer is used for semantic duplicate detection, not as an explanation.",
   "Keep each answer factual, direct, and as short as possible while preserving the recall target.",
-  "Return strict JSON: {\"answers\":[{\"question\":\"...\",\"conciseAnswer\":\"...\"}]}",
+  "Return strict JSON: {\"answers\":[{\"id\":\"...\",\"conciseAnswer\":\"...\"}]}",
 ].join("\n\n");
 
 function parseArgs(argv) {
@@ -58,10 +59,10 @@ function parseArgs(argv) {
 async function loadQuestions(pool, force) {
   const result = await pool.query(
     `
-      SELECT deck_id, question
+      SELECT id::text, question
       FROM questions
-      WHERE $1::boolean OR concise_answer = ''
-      ORDER BY created_at ASC, question ASC
+      WHERE $1::boolean OR nullif(trim(concise_answer), '') IS NULL
+      ORDER BY created_at ASC, id ASC
     `,
     [force],
   );
@@ -90,7 +91,15 @@ async function generateConciseAnswers(batch, apiKey) {
         },
         {
           role: "user",
-          content: JSON.stringify(batch.map((row) => ({ question: row.question }))),
+          content: [
+            "Questions:",
+            JSON.stringify(
+              batch.map((row) => ({
+                id: row.id,
+                question: row.question,
+              })),
+            ),
+          ].join("\n\n"),
         },
       ],
     }),
@@ -111,38 +120,42 @@ async function generateConciseAnswers(batch, apiKey) {
     throw new Error("Model returned no answers array.");
   }
 
-  const answersByQuestion = new Map();
+  const answersById = new Map();
 
   for (const item of parsed.answers) {
-    const question = String(item?.question ?? "").trim();
+    const id = String(item?.id ?? "").trim();
     const conciseAnswer = String(item?.conciseAnswer ?? "")
       .trim()
       .replace(/\s+/g, " ")
-      .slice(0, 320);
+      .slice(0, MAX_CONCISE_ANSWER_CHARS);
 
-    if (question && conciseAnswer) {
-      answersByQuestion.set(question, conciseAnswer);
+    if (id && conciseAnswer) {
+      answersById.set(id, conciseAnswer);
     }
   }
 
-  return answersByQuestion;
+  return answersById;
 }
 
-async function saveAnswers(pool, rows) {
+async function saveAnswers(pool, rows, force) {
   const now = Date.now();
+  let saved = 0;
 
   for (const row of rows) {
-    await pool.query(
+    const result = await pool.query(
       `
         UPDATE questions
         SET concise_answer = $1,
             updated_at = $2
-        WHERE deck_id = $3
-          AND question = $4
+        WHERE id = $3::uuid
+          AND ($4::boolean OR nullif(trim(concise_answer), '') IS NULL)
       `,
-      [row.conciseAnswer, now, row.deck_id, row.question],
+      [row.conciseAnswer, now, row.id, force],
     );
+    saved += result.rowCount ?? 0;
   }
+
+  return saved;
 }
 
 async function main() {
@@ -162,16 +175,15 @@ async function main() {
     let saved = 0;
 
     for (const batch of chunks(questions, options.batchSize)) {
-      const answersByQuestion = await generateConciseAnswers(batch, apiKey);
+      const answersById = await generateConciseAnswers(batch, apiKey);
       const rows = batch
         .map((row) => ({
           ...row,
-          conciseAnswer: answersByQuestion.get(row.question) ?? "",
+          conciseAnswer: answersById.get(row.id) ?? "",
         }))
         .filter((row) => row.conciseAnswer);
 
-      await saveAnswers(pool, rows);
-      saved += rows.length;
+      saved += await saveAnswers(pool, rows, options.force);
       logSavedProgress(saved, questions.length);
     }
   } finally {

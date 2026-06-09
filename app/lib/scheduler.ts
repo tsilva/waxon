@@ -8,6 +8,7 @@ export const HOUR = 60 * MINUTE;
 export const DAY = 24 * HOUR;
 
 const MAX_SUCCESS_INTERVAL = 365 * DAY;
+export const SCHEDULED_SCORE_THRESHOLD = 9;
 
 export function parseReviews(reviews: string): ReviewEntry[] {
   if (!reviews.trim()) {
@@ -46,11 +47,12 @@ export function scheduleNextReview(input: {
   const previousReview = previousReviews.at(-1);
   const previousInterval = previousReview ? now - previousReview.ts : DAY;
 
-  if (newScore < 10) {
+  if (newScore < SCHEDULED_SCORE_THRESHOLD) {
     return now;
   }
 
   const successIntervals: Record<number, number> = {
+    9: Math.max(3 * DAY, previousInterval * 3),
     10: Math.max(7 * DAY, previousInterval * 5),
   };
 

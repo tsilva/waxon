@@ -6,7 +6,7 @@ import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
-import { DAY } from "@/app/lib/scheduler";
+import { DAY, SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import {
   MarkdownContent as SharedMarkdownContent,
@@ -27,6 +27,7 @@ import {
   Check,
   ChevronDown,
   FileText,
+  Flag,
   Info,
   Layers,
   Mic,
@@ -169,6 +170,7 @@ type ChatMessage =
       correctAnswer: string | null;
       nextDue: number | null;
       resolvedAt: number | null;
+      cost: number | null;
     };
 
 type PreviousAnswerItem = {
@@ -182,6 +184,7 @@ type PreviousAnswerItem = {
   justification: string | null;
   correctAnswer: string | null;
   traceId: string | null;
+  cost: number | null;
   timestamp: number | null;
   timeLabel: string;
 };
@@ -861,15 +864,15 @@ function scoreTone(score: number | null) {
     return "neutral";
   }
 
-  if (score <= 3) {
-    return "low";
+  if (score >= SCHEDULED_SCORE_THRESHOLD) {
+    return "high";
   }
 
-  if (score <= 7) {
+  if (score === SCHEDULED_SCORE_THRESHOLD - 1) {
     return "medium";
   }
 
-  return "high";
+  return "low";
 }
 
 function formatEvaluationPhase(phase: EvaluationPhase | null): string {
@@ -944,6 +947,19 @@ function formatScore(score: number | null): string {
 
 function formatAverageScore(score: number | null): string {
   return score === null ? "N/A" : `${score.toFixed(1)}/10`;
+}
+
+function formatEvaluationCost(cost: number | null): string | null {
+  if (cost === null || !Number.isFinite(cost)) {
+    return null;
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(cost);
 }
 
 function formatReviewDate(timestamp: number | null): string {
@@ -1886,7 +1902,9 @@ export default function ReviewApp({
     () => !hasLoadedQuestionRef.current,
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isFlaggingQuestion, setIsFlaggingQuestion] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isEmbeddingMapOpen, setIsEmbeddingMapOpen] = useState(false);
   const [isQuestionGeneratorOpen, setIsQuestionGeneratorOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfileResponse | null>(
     () => cachedSessionRef.current?.currentUser ?? null,
@@ -1935,6 +1953,7 @@ export default function ReviewApp({
   const questionIdRef = useRef(currentQuestionId);
   const currentSessionItemRef = useRef(currentSessionItem);
   const sessionQueueRef = useRef(sessionQueue);
+  const isFlaggingQuestionRef = useRef(isFlaggingQuestion);
   const pendingRetryItemsRef = useRef(new Map<string, ReviewQueueItem>());
   const processedEvaluationIdsRef = useRef(new Set<string>());
   const pendingLearnSourceRef = useRef<{
@@ -2073,6 +2092,10 @@ export default function ReviewApp({
   useEffect(() => {
     isSubmittingRef.current = isSubmitting;
   }, [isSubmitting]);
+
+  useEffect(() => {
+    isFlaggingQuestionRef.current = isFlaggingQuestion;
+  }, [isFlaggingQuestion]);
 
   useEffect(() => {
     isLearnTopUpPendingRef.current = isLearnTopUpPending;
@@ -2757,6 +2780,23 @@ export default function ReviewApp({
 
     return () => window.removeEventListener("keydown", closeGeneratorOnEscape);
   }, [closeQuestionGenerator, isGeneratingQuestions, isQuestionGeneratorOpen]);
+
+  useEffect(() => {
+    if (!isEmbeddingMapOpen) {
+      return;
+    }
+
+    function closeEmbeddingMapOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsEmbeddingMapOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeEmbeddingMapOnEscape);
+
+    return () =>
+      window.removeEventListener("keydown", closeEmbeddingMapOnEscape);
+  }, [isEmbeddingMapOpen]);
 
   const clearPendingSpeechCommand = useCallback(() => {
     if (pendingSpeechCommandTimerRef.current) {
@@ -3479,7 +3519,8 @@ export default function ReviewApp({
           message.nextDue === evaluation.nextDue &&
           message.resolvedAt === evaluation.resolvedAt &&
           message.deckId === evaluation.deckId &&
-          message.traceId === evaluation.traceId
+          message.traceId === evaluation.traceId &&
+          message.cost === evaluation.cost
         ) {
           return message;
         }
@@ -3499,6 +3540,7 @@ export default function ReviewApp({
           resolvedAt: evaluation.resolvedAt,
           deckId: evaluation.deckId,
           traceId: evaluation.traceId,
+          cost: evaluation.cost,
         };
       });
 
@@ -3524,7 +3566,10 @@ export default function ReviewApp({
       processedEvaluationIdsRef.current.add(evaluation.id);
       pendingRetryItemsRef.current.delete(evaluation.id);
 
-      if (evaluation.score === null || evaluation.score >= 10) {
+      if (
+        evaluation.score === null ||
+        evaluation.score >= SCHEDULED_SCORE_THRESHOLD
+      ) {
         continue;
       }
 
@@ -3598,7 +3643,7 @@ export default function ReviewApp({
     clearPendingSpeechCommand();
     const activeQuestion = questionRef.current;
 
-    if (!activeQuestion || isSubmittingRef.current) {
+    if (!activeQuestion || isSubmittingRef.current || isFlaggingQuestionRef.current) {
       return false;
     }
 
@@ -3645,6 +3690,7 @@ export default function ReviewApp({
         correctAnswer: null,
         nextDue: null,
         resolvedAt: null,
+        cost: null,
       },
     ]);
 
@@ -3787,7 +3833,7 @@ export default function ReviewApp({
     const activeQuestion = questionRef.current;
     const activeQuestionId = questionIdRef.current;
 
-    if (!activeQuestion || isSubmittingRef.current) {
+    if (!activeQuestion || isSubmittingRef.current || isFlaggingQuestionRef.current) {
       return false;
     }
 
@@ -3836,6 +3882,88 @@ export default function ReviewApp({
           : "Failed to skip the question.",
       );
       return false;
+    }
+  }, [
+    advanceReviewSessionQueue,
+    applyNextQuestion,
+    clearPendingSpeechCommand,
+    learnPanelMode,
+  ]);
+
+  const flagCurrentQuestion = useCallback(async () => {
+    clearPendingSpeechCommand();
+    const activeQuestion = questionRef.current;
+    const activeQuestionId = questionIdRef.current;
+
+    if (
+      !activeQuestion ||
+      !activeQuestionId ||
+      isSubmittingRef.current ||
+      isFlaggingQuestionRef.current
+    ) {
+      return false;
+    }
+
+    setIsFlaggingQuestion(true);
+    setAnswer("");
+    answerRef.current = "";
+    setSpeechPreview("");
+    setError(null);
+    prefetchedNextQuestionRef.current = null;
+    nextQuestionPrefetchRef.current?.abortController.abort();
+    nextQuestionPrefetchRef.current = null;
+
+    const flagRequest = fetch("/api/flag-question", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        mode: learnPanelMode,
+        questionId: activeQuestionId,
+        question: activeQuestion,
+      }),
+    }).then((response) =>
+      readJsonResponse<NextQuestionResponse>(
+        response,
+        "Failed to flag the question.",
+      ),
+    );
+
+    try {
+      if (learnPanelMode === "review") {
+        const nextQueue = sessionQueueRef.current.filter(
+          (item) =>
+            item.questionId !== activeQuestionId &&
+            item.question !== activeQuestion,
+        );
+
+        sessionQueueRef.current = nextQueue;
+        setSessionQueue(nextQueue);
+
+        if (nextQueue.length > 0) {
+          await advanceReviewSessionQueue({ appendToMessages: true });
+          await flagRequest;
+          return true;
+        }
+
+        const data = await flagRequest;
+        applyNextQuestion(data);
+        return true;
+      }
+
+      const data = await flagRequest;
+      applyNextQuestion(data);
+      return true;
+    } catch (flagError) {
+      setError(
+        flagError instanceof Error
+          ? flagError.message
+          : "Failed to flag the question.",
+      );
+      return false;
+    } finally {
+      setIsFlaggingQuestion(false);
     }
   }, [
     advanceReviewSessionQueue,
@@ -4361,6 +4489,9 @@ export default function ReviewApp({
     .slice()
     .reverse()
     .map((message) => {
+      const evaluation = evaluations.find(
+        (candidate) => candidate.id === message.evaluationId,
+      );
       const timestamp = message.resolvedAt ?? message.submittedAt;
 
       return {
@@ -4374,6 +4505,7 @@ export default function ReviewApp({
         justification: message.justification,
         correctAnswer: message.correctAnswer,
         traceId: message.traceId,
+        cost: evaluation?.cost ?? message.cost ?? null,
         timestamp,
         timeLabel:
           message.status === "grading"
@@ -4414,6 +4546,7 @@ export default function ReviewApp({
         justification: evaluation.justification,
         correctAnswer: evaluation.correctAnswer,
         traceId: evaluation.traceId,
+        cost: evaluation.cost,
         timestamp,
         timeLabel:
           evaluation.status === "grading"
@@ -4460,6 +4593,7 @@ export default function ReviewApp({
       justification: attempt.justification,
       correctAnswer: attempt.correctAnswer,
       traceId: null,
+      cost: null,
       timestamp: attempt.resolvedAt || attempt.submittedAt,
       timeLabel: formatRelativeTime(
         attempt.resolvedAt || attempt.submittedAt,
@@ -4512,6 +4646,7 @@ export default function ReviewApp({
           "Covers the core idea; a few details could be sharper.",
         correctAnswer: item.conciseAnswer,
         traceId: null,
+        cost: null,
         timestamp,
         timeLabel: formatRelativeTime(timestamp, currentTime),
       };
@@ -4984,6 +5119,7 @@ export default function ReviewApp({
   usePageScrollLock(
     isCreatingDeck ||
       Boolean(editingDeck) ||
+      isEmbeddingMapOpen ||
       isQuestionGeneratorOpen ||
       isSettingsOpen ||
       Boolean(selectedQuestionStats),
@@ -5214,6 +5350,18 @@ export default function ReviewApp({
                     >
                       <Info aria-hidden="true" />
                     </button>
+                    <button
+                      className="question-flag-trigger"
+                      type="button"
+                      aria-label="Flag and skip current question"
+                      title="Flag and skip"
+                      onClick={() => {
+                        void flagCurrentQuestion();
+                      }}
+                      disabled={isSubmitting || isFlaggingQuestion}
+                    >
+                      <Flag aria-hidden="true" />
+                    </button>
                   </div>
                   <MarkdownInline
                     as="h2"
@@ -5365,11 +5513,11 @@ export default function ReviewApp({
                     resizeComposerTextarea(event.currentTarget);
                   }}
                   onKeyDown={handleAnswerKeyDown}
-                  placeholder="Your answer"
+                  placeholder="Type your answer here..."
                   aria-label="Your answer"
                   rows={4}
                   autoFocus
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isFlaggingQuestion}
                 />
                 <button
                   className={`composer-mic ${
@@ -5381,7 +5529,7 @@ export default function ReviewApp({
                   }
                   aria-pressed={isSpeechActive}
                   onClick={isSpeechActive ? stopSpeech : startSpeech}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isFlaggingQuestion}
                   title={
                     isSpeechActive ? "Stop voice answer" : "Start voice answer"
                   }
@@ -5391,7 +5539,7 @@ export default function ReviewApp({
                 <button
                   className="composer-submit"
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isFlaggingQuestion}
                   aria-label="Submit answer"
                 >
                   <SubmitIcon />
@@ -5424,6 +5572,7 @@ export default function ReviewApp({
               {visiblePreviousAnswers.map((item, index) => {
                 const isPending = item.status === "grading";
                 const isDetailsExpanded = expandedPreviousAnswerIds.has(item.id);
+                const evaluationCostLabel = formatEvaluationCost(item.cost);
                 const detailId = `previous-answer-details-${index}-${item.id.replace(
                   /[^A-Za-z0-9_-]/g,
                   "-",
@@ -5505,20 +5654,30 @@ export default function ReviewApp({
                       </div>
 
                       <span className="previous-row-meta">
-                        <time
-                          className="previous-time"
-                          dateTime={
-                            item.timestamp
-                              ? new Date(item.timestamp).toISOString()
-                              : undefined
-                          }
-                        >
-                          {item.timeLabel}
-                        </time>
-                        <ChevronDown
-                          className="previous-collapse-icon"
-                          aria-hidden="true"
-                        />
+                        <span className="previous-time-control">
+                          <time
+                            className="previous-time"
+                            dateTime={
+                              item.timestamp
+                                ? new Date(item.timestamp).toISOString()
+                                : undefined
+                            }
+                          >
+                            {item.timeLabel}
+                          </time>
+                          <ChevronDown
+                            className="previous-collapse-icon"
+                            aria-hidden="true"
+                          />
+                        </span>
+                        {evaluationCostLabel ? (
+                          <span
+                            className="previous-cost-label"
+                            aria-label={`Evaluation cost ${evaluationCostLabel}`}
+                          >
+                            eval {evaluationCostLabel}
+                          </span>
+                        ) : null}
                       </span>
                     </button>
 
@@ -5671,12 +5830,15 @@ export default function ReviewApp({
                 <div>
                   <h2>{selectedDeckDetail?.name ?? "Deck"}</h2>
                 </div>
+                <button
+                  className="queue-map-trigger"
+                  type="button"
+                  onClick={() => setIsEmbeddingMapOpen(true)}
+                >
+                  <Layers aria-hidden="true" />
+                  <span>Map</span>
+                </button>
               </div>
-
-              <DeckEmbeddingPlot
-                plot={deckEmbeddingPlot}
-                reviewQueue={reviewQueue}
-              />
 
               <div className="queue-toolbar">
                 <button
@@ -6344,6 +6506,50 @@ export default function ReviewApp({
                 </div>
               </section>
               )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isEmbeddingMapOpen && selectedDeckDetailId ? (
+        <div
+          className="embedding-map-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsEmbeddingMapOpen(false);
+            }
+          }}
+        >
+          <section
+            className="embedding-map-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="embedding-map-modal-title"
+          >
+            <div className="embedding-map-modal-header">
+              <div>
+                <p className="embedding-map-modal-kicker">Deck map</p>
+                <h2
+                  className="embedding-map-modal-title"
+                  id="embedding-map-modal-title"
+                >
+                  {selectedDeckDetail?.name ?? "Deck"}
+                </h2>
+              </div>
+              <button
+                className="stats-modal-close"
+                type="button"
+                aria-label="Close embedding map"
+                onClick={() => setIsEmbeddingMapOpen(false)}
+              />
+            </div>
+
+            <div className="embedding-map-modal-body">
+              <DeckEmbeddingPlot
+                plot={deckEmbeddingPlot}
+                reviewQueue={reviewQueue}
+              />
             </div>
           </section>
         </div>
