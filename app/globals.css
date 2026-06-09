@@ -2376,11 +2376,6 @@ textarea {
   color: var(--ink);
 }
 
-.previous-row-main-button:hover .previous-summary,
-.previous-row-main-button:focus-visible .previous-summary {
-  color: var(--ink);
-}
-
 .previous-row-main-button:hover .previous-question-feedback,
 .previous-row-main-button:focus-visible .previous-question-feedback {
   color: var(--ink-soft);
@@ -2612,34 +2607,6 @@ textarea {
 .previous-answer-empty {
   color: var(--muted);
   font-weight: 650;
-}
-
-.previous-summary {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 14px;
-  font-weight: 650;
-  line-height: 1.42;
-  overflow-wrap: anywhere;
-}
-
-.previous-summary-pending {
-  display: grid;
-  gap: 4px;
-}
-
-.previous-summary-pending p {
-  margin: 0;
-}
-
-.previous-summary-pending span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 760;
-}
-
-.previous-row-pending .previous-summary {
-  font-size: 14px;
 }
 
 .previous-time {
@@ -6545,12 +6512,7 @@ textarea {
     font-size: 15px;
   }
 
-  .previous-answer,
-  .previous-summary {
-    font-size: 13px;
-  }
-
-  .previous-row-pending .previous-summary {
+  .previous-answer {
     font-size: 13px;
   }
 

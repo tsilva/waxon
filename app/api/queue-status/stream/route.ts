@@ -1,8 +1,9 @@
 import {
-  queueStatus,
+  queueStatusForUser,
   RESOLVED_JUDGING_VISIBLE_MS,
   subscribeQueueStatus,
 } from "@/app/lib/reviewQueue";
+import { getCurrentUser } from "@/app/lib/auth";
 import type { QueueStatusSnapshot } from "@/app/lib/reviewTypes";
 
 export const runtime = "nodejs";
@@ -50,6 +51,7 @@ function nextRefreshDelay(status: QueueStatusSnapshot): number | null {
 }
 
 export async function GET(request: Request) {
+  const user = await getCurrentUser();
   const url = new URL(request.url);
   const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
   const offset = Number.parseInt(url.searchParams.get("offset") ?? "", 10);
@@ -66,14 +68,14 @@ export async function GET(request: Request) {
     includeReviewQueue:
       mode === "review"
         ? false
-        : isEnabled(url.searchParams.get("includeReviewQueue"), true),
+        : isEnabled(url.searchParams.get("includeReviewQueue"), false),
     includeQuestionAttempts: isEnabled(
       url.searchParams.get("includeQuestionAttempts"),
-      true,
+      false,
     ),
     includeRecentAttempts: isEnabled(
       url.searchParams.get("includeRecentAttempts"),
-      true,
+      false,
     ),
     includeDeckEmbeddingPlot: isEnabled(
       url.searchParams.get("includeDeckEmbeddingPlot"),
@@ -127,7 +129,7 @@ export async function GET(request: Request) {
           return;
         }
 
-        const status = await queueStatus(statusInput);
+        const status = await queueStatusForUser(user.id, statusInput);
         emitStatus(status);
       };
 
@@ -156,7 +158,7 @@ export async function GET(request: Request) {
 
       cancelStream = close;
 
-      unsubscribe = subscribeQueueStatus(() => {
+      unsubscribe = subscribeQueueStatus(user.id, () => {
         void sendStatus();
       });
       heartbeat = setInterval(() => {

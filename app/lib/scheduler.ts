@@ -58,19 +58,3 @@ export function scheduleNextReview(input: {
 
   return now + Math.min(successIntervals[newScore] ?? DAY, MAX_SUCCESS_INTERVAL);
 }
-
-export function reinsertionDelay(score: number): number | null {
-  if (score <= 3) {
-    return 1;
-  }
-
-  if (score <= 5) {
-    return 3;
-  }
-
-  if (score === 6) {
-    return 8;
-  }
-
-  return null;
-}

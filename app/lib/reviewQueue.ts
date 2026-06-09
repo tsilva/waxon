@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import {
   applyEvaluationToPostgres,
+  countDueQuestions,
   createAnswerEvaluationRecord,
   flagQuestionForReview,
   getDueQuestions,
@@ -61,8 +62,11 @@ export const RESOLVED_JUDGING_VISIBLE_MS = 5 * 60_000;
 const EVALUATION_PROCESSING_TIMEOUT_MS = EVALUATION_TIMEOUT_MS;
 const ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS = 5 * 60_000;
 const QUEUE_SEARCH_TOP_K = 200;
+const REVIEW_SESSION_QUEUE_LIMIT = 200;
+const DECK_EMBEDDING_PLOT_LIMIT = 500;
 
 type Submission = {
+  state: QueueState;
   evaluationId: string;
   traceId: string;
   questionId: string | null;
@@ -76,7 +80,7 @@ type Submission = {
   previousReviews: string;
 };
 
-type QueueStatusSubscriber = (status: QueueStatusSnapshot) => void;
+type QueueStatusSubscriber = () => void;
 
 type NextQuestionMode = "review" | "learn";
 
@@ -121,12 +125,12 @@ type QueueState = {
 
 const globalForQueue = globalThis as typeof globalThis & {
   waxonQueue?: QueueState;
+  waxonQueueStates?: Map<string, QueueState>;
 };
 
-const state: QueueState =
-  globalForQueue.waxonQueue ??
-  {
-    userId: null,
+function createQueueState(userId: string | null): QueueState {
+  return {
+    userId,
     initialized: false,
     initializing: null,
     queue: [],
@@ -136,16 +140,49 @@ const state: QueueState =
     latestByQuestionKey: {},
     subscribers: new Set<QueueStatusSubscriber>(),
   };
+}
 
-globalForQueue.waxonQueue = state;
-const legacyState = state as QueueState & {
-  inFlightQuestions?: Set<string>;
-  latestByQuestion?: Record<string, LatestEvaluation>;
+const queueStates =
+  globalForQueue.waxonQueueStates ?? new Map<string, QueueState>();
+
+globalForQueue.waxonQueueStates = queueStates;
+
+if (globalForQueue.waxonQueue?.userId) {
+  queueStates.set(globalForQueue.waxonQueue.userId, globalForQueue.waxonQueue);
+  globalForQueue.waxonQueue = undefined;
+}
+
+function normalizeQueueState(state: QueueState): QueueState {
+  const legacyState = state as QueueState & {
+    inFlightQuestions?: Set<string>;
+    latestByQuestion?: Record<string, LatestEvaluation>;
+  };
+
+  state.inFlightQuestionKeys ??=
+    legacyState.inFlightQuestions ?? new Set<string>();
+  state.latestByQuestionKey ??= legacyState.latestByQuestion ?? {};
+  state.subscribers ??= new Set<QueueStatusSubscriber>();
+
+  return state;
+}
+
+function getQueueStateForUser(userId: string): QueueState {
+  const existing = queueStates.get(userId);
+
+  if (existing) {
+    return normalizeQueueState(existing);
+  }
+
+  const state = createQueueState(userId);
+
+  queueStates.set(userId, state);
+  return state;
+}
+
+type QueueContext = {
+  user: AuthenticatedUser;
+  state: QueueState;
 };
-state.userId ??= null;
-state.inFlightQuestionKeys ??= legacyState.inFlightQuestions ?? new Set<string>();
-state.latestByQuestionKey ??= legacyState.latestByQuestion ?? {};
-state.subscribers ??= new Set<QueueStatusSubscriber>();
 
 function questionKey(input: {
   questionId?: string | null;
@@ -163,38 +200,33 @@ function matchesNextQuestionMode(
   return mode === "learn" ? !hasReviewHistory : true;
 }
 
-function resetQueueStateForUser(userId: string): void {
-  state.userId = userId;
-  state.initialized = false;
-  state.initializing = null;
-  state.queue = [];
-  state.pendingEvaluations = 0;
-  state.inFlightQuestionKeys = new Set();
-  state.evaluations = [];
-  state.latestByQuestionKey = {};
-}
+export function invalidateReviewQueue(userId?: string): void {
+  const states = userId
+    ? [getQueueStateForUser(userId)]
+    : Array.from(queueStates.values());
 
-export function invalidateReviewQueue(): void {
-  state.initialized = false;
-  state.initializing = null;
-  state.queue = [];
-  logQueueFlushStatus("invalidated-review-queue");
-  void broadcastQueueStatus();
-}
-
-async function ensureQueueUser(): Promise<AuthenticatedUser> {
-  const user = await getCurrentUser();
-
-  if (state.userId !== user.id) {
-    resetQueueStateForUser(user.id);
+  for (const state of states) {
+    state.initialized = false;
+    state.initializing = null;
+    state.queue = [];
+    logQueueFlushStatus(state, "invalidated-review-queue");
+    void broadcastQueueStatus(state);
   }
-
-  return user;
 }
 
-function logQueueFlushStatus(action: string): void {
+async function ensureQueueContext(): Promise<QueueContext> {
+  const user = await getCurrentUser();
+  const state = getQueueStateForUser(user.id);
+
+  state.userId = user.id;
+
+  return { user, state };
+}
+
+function logQueueFlushStatus(state: QueueState, action: string): void {
   console.info("[waxon] queue flush status", {
     action,
+    userId: state.userId,
     queueRemaining: state.queue.length,
     pendingEvaluations: state.pendingEvaluations,
     inFlightQuestions: state.inFlightQuestionKeys.size,
@@ -203,27 +235,22 @@ function logQueueFlushStatus(action: string): void {
   });
 }
 
-async function broadcastQueueStatus(): Promise<void> {
+async function broadcastQueueStatus(state: QueueState): Promise<void> {
   if (state.subscribers.size === 0) {
     return;
   }
 
-  let status: QueueStatusSnapshot;
-
-  try {
-    status = await queueStatus();
-  } catch {
-    return;
-  }
-
   for (const subscriber of state.subscribers) {
-    subscriber(status);
+    subscriber();
   }
 }
 
 export function subscribeQueueStatus(
+  userId: string,
   subscriber: QueueStatusSubscriber,
 ): () => void {
+  const state = getQueueStateForUser(userId);
+
   state.subscribers.add(subscriber);
 
   return () => {
@@ -263,6 +290,7 @@ function createEvaluationItem(input: {
 }
 
 function resolveEvaluationItem(
+  state: QueueState,
   evaluationId: string,
   result: EvaluationResult,
   nextDue: number | null,
@@ -296,6 +324,7 @@ function resolveEvaluationItem(
 }
 
 function updateEvaluationPhase(
+  state: QueueState,
   evaluationId: string,
   phase: EvaluationPhase,
 ): void {
@@ -309,10 +338,11 @@ function updateEvaluationPhase(
 
   item.phase = phase;
   item.lastActivityAt = Date.now();
-  void broadcastQueueStatus();
+  void broadcastQueueStatus(state);
 }
 
 function touchEvaluationActivity(
+  state: QueueState,
   evaluationId: string,
   phase: EvaluationPhase,
 ): boolean {
@@ -329,7 +359,7 @@ function touchEvaluationActivity(
   if (item.phase !== phase) {
     item.phase = phase;
     item.lastActivityAt = now;
-    void broadcastQueueStatus();
+    void broadcastQueueStatus(state);
     return true;
   }
 
@@ -338,11 +368,14 @@ function touchEvaluationActivity(
   }
 
   item.lastActivityAt = now;
-  void broadcastQueueStatus();
+  void broadcastQueueStatus(state);
   return true;
 }
 
-function getVisibleEvaluations(now = Date.now()): EvaluationQueueItem[] {
+function getVisibleEvaluations(
+  state: QueueState,
+  now = Date.now(),
+): EvaluationQueueItem[] {
   state.evaluations = state.evaluations.filter(
     (evaluation) =>
       evaluation.status === "grading" ||
@@ -525,6 +558,8 @@ function projectEmbeddings(
 
 async function getDeckEmbeddingPlot(input: {
   deckId?: string;
+  limit?: number;
+  offset?: number;
   questions?: string[];
   totalQuestions?: number;
   userId: string;
@@ -533,6 +568,11 @@ async function getDeckEmbeddingPlot(input: {
     deckId: input.deckId,
     userId: input.userId,
     questions: input.questions,
+    embeddingModel: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+    embeddingKind: DEDUPE_EMBEDDING_KIND,
+    currentOnly: true,
+    limit: input.questions ? undefined : input.limit,
+    offset: input.questions ? undefined : input.offset,
   });
   const totalQuestions = input.totalQuestions ?? questions.length;
   const modelCounts = new Map<string, number>();
@@ -625,6 +665,7 @@ async function getDeckEmbeddingPlot(input: {
 
 async function getReviewQueueItems(
   userId: string,
+  state: QueueState,
   input: {
     deckId?: string;
     limit: number;
@@ -786,10 +827,13 @@ export async function loadReviewSessionQueue(input: {
   items: ReviewQueueItem[];
 }> {
   const user = await getCurrentUser();
+  const state = getQueueStateForUser(user.id);
   const now = Date.now();
-  const dueQuestions = (await getDueQuestions(now, { userId: user.id })).filter(
-    (item) => !input.deckId || item.deckId === input.deckId,
-  );
+  const dueQuestions = await getDueQuestions(now, {
+    userId: user.id,
+    deckId: input.deckId || undefined,
+    limit: REVIEW_SESSION_QUEUE_LIMIT,
+  });
 
   return {
     items: dueQuestions.map((item) =>
@@ -801,39 +845,48 @@ export async function loadReviewSessionQueue(input: {
   };
 }
 
-async function initializeQueue(): Promise<AuthenticatedUser> {
-  const user = await ensureQueueUser();
+async function initializeQueue(): Promise<QueueContext> {
+  const { user, state } = await ensureQueueContext();
 
   if (state.initialized) {
-    return user;
+    return { user, state };
   }
 
   if (!state.initializing) {
-    state.initializing = getDueQuestions(Date.now(), { userId: user.id }).then((dueQuestions) => {
+    state.initializing = getDueQuestions(Date.now(), {
+      userId: user.id,
+      limit: REVIEW_SESSION_QUEUE_LIMIT,
+    }).then((dueQuestions) => {
       state.queue = dueQuestions;
       state.initialized = true;
       state.initializing = null;
-      logQueueFlushStatus("initialized");
+      logQueueFlushStatus(state, "initialized");
     });
   }
 
   await state.initializing;
-  return user;
+  return { user, state };
 }
 
-async function refreshIfEmpty(userId: string): Promise<void> {
+async function refreshIfEmpty(state: QueueState, userId: string): Promise<void> {
   if (state.queue.length > 0) {
     return;
   }
 
-  const dueQuestions = await getDueQuestions(Date.now(), { userId });
+  const dueQuestions = await getDueQuestions(Date.now(), {
+    userId,
+    excludeQuestionIds: Array.from(state.inFlightQuestionKeys).filter(
+      (key) => !key.startsWith("question:"),
+    ),
+    limit: REVIEW_SESSION_QUEUE_LIMIT,
+  });
   state.queue = dueQuestions.filter(
     (question) => !state.inFlightQuestionKeys.has(questionKey(question)),
   );
-  logQueueFlushStatus("refreshed-empty-queue");
+  logQueueFlushStatus(state, "refreshed-empty-queue");
 }
 
-function removeFromQueue(input: {
+function removeFromQueue(state: QueueState, input: {
   questionId?: string | null;
   question: string;
 }): DueQuestion | null {
@@ -848,7 +901,10 @@ function removeFromQueue(input: {
   return removed ?? null;
 }
 
-function restoreFailedQuestion(question: DueQuestion | null): void {
+function restoreFailedQuestion(
+  state: QueueState,
+  question: DueQuestion | null,
+): void {
   if (!question) {
     return;
   }
@@ -857,10 +913,13 @@ function restoreFailedQuestion(question: DueQuestion | null): void {
     question,
     ...state.queue.filter((item) => questionKey(item) !== questionKey(question)),
   ];
-  logQueueFlushStatus("restored-failed-evaluation-question");
+  logQueueFlushStatus(state, "restored-failed-evaluation-question");
 }
 
-function appendRetryQuestion(question: DueQuestion | null): void {
+function appendRetryQuestion(
+  state: QueueState,
+  question: DueQuestion | null,
+): void {
   if (!question || question.flaggedAt !== null) {
     return;
   }
@@ -869,7 +928,7 @@ function appendRetryQuestion(question: DueQuestion | null): void {
     ...state.queue.filter((item) => questionKey(item) !== questionKey(question)),
     question,
   ];
-  logQueueFlushStatus("appended-retry-question");
+  logQueueFlushStatus(state, "appended-retry-question");
 }
 
 function persistEvaluationFailure(
@@ -916,6 +975,7 @@ async function persistEvaluationResolution(input: {
 }
 
 async function processEvaluation(submission: Submission): Promise<void> {
+  const state = submission.state;
   const startedAt = Date.now();
   let currentPhase: EvaluationPhase = "queued";
   let phaseStartedAt = startedAt;
@@ -962,7 +1022,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
     currentPhase = phase;
     phaseStartedAt = Date.now();
     resetWatchdog();
-    updateEvaluationPhase(submission.evaluationId, phase);
+    updateEvaluationPhase(state, submission.evaluationId, phase);
     void updateAnswerEvaluationPhase({
       id: submission.evaluationId,
       phase,
@@ -970,7 +1030,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
   };
   const markActivity = () => {
     resetWatchdog();
-    touchEvaluationActivity(submission.evaluationId, currentPhase);
+    touchEvaluationActivity(state, submission.evaluationId, currentPhase);
   };
   const finishEvaluation = (
     result: EvaluationResult,
@@ -998,7 +1058,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       (phaseTimingsMs[currentPhase] ?? 0) + Date.now() - phaseStartedAt;
 
     if (options.restoreQuestion) {
-      restoreFailedQuestion(submission.queuedQuestion);
+      restoreFailedQuestion(state, submission.queuedQuestion);
     }
 
     if (result.status === "failed") {
@@ -1034,11 +1094,11 @@ async function processEvaluation(submission: Submission): Promise<void> {
       });
     }
 
-    resolveEvaluationItem(submission.evaluationId, result, nextDue);
+    resolveEvaluationItem(state, submission.evaluationId, result, nextDue);
     state.pendingEvaluations = Math.max(0, state.pendingEvaluations - 1);
     state.inFlightQuestionKeys.delete(questionKey(submission));
-    logQueueFlushStatus(options.logAction);
-    void broadcastQueueStatus();
+    logQueueFlushStatus(state, options.logAction);
+    void broadcastQueueStatus(state);
     return true;
   };
   resetWatchdog();
@@ -1101,7 +1161,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       savedEvaluationNextDue = evaluationNextDue;
 
       if (result.score < SCHEDULED_SCORE_THRESHOLD) {
-        appendRetryQuestion(persisted);
+        appendRetryQuestion(state, persisted);
       }
     } else {
       await persistEvaluationResolution({
@@ -1154,8 +1214,8 @@ export async function peekNextQuestion(input: NextQuestionInput = {}): Promise<{
   deckName: string | null;
   queueRemaining: number;
 }> {
-  const user = await initializeQueue();
-  await refreshIfEmpty(user.id);
+  const { user, state } = await initializeQueue();
+  await refreshIfEmpty(state, user.id);
   const mode = input.mode ?? "review";
   const deckId = input.deckId?.trim() || null;
   const excludedQuestionKey = input.excludeQuestionId?.trim() || null;
@@ -1178,7 +1238,10 @@ export async function peekNextQuestion(input: NextQuestionInput = {}): Promise<{
     question: nextQuestion?.question ?? null,
     deckId: nextQuestion?.deckId ?? null,
     deckName: nextQuestion?.deckName ?? null,
-    queueRemaining: availableQueue.length,
+    queueRemaining: await countDueQuestions(Date.now(), {
+      userId: user.id,
+      deckId: deckId || undefined,
+    }),
   };
 }
 
@@ -1193,15 +1256,15 @@ export async function skipQuestion(input: {
   deckName: string | null;
   queueRemaining: number;
 }> {
-  const user = await initializeQueue();
-  await refreshIfEmpty(user.id);
+  const { user, state } = await initializeQueue();
+  await refreshIfEmpty(state, user.id);
 
-  const skipped = removeFromQueue(input);
+  const skipped = removeFromQueue(state, input);
 
   if (skipped) {
     state.queue.push(skipped);
-    logQueueFlushStatus("skipped-question");
-    void broadcastQueueStatus();
+    logQueueFlushStatus(state, "skipped-question");
+    void broadcastQueueStatus(state);
   }
 
   return peekNextQuestion({ mode: input.mode });
@@ -1218,8 +1281,8 @@ export async function flagQuestion(input: {
   deckName: string | null;
   queueRemaining: number;
 }> {
-  const user = await initializeQueue();
-  await refreshIfEmpty(user.id);
+  const { user, state } = await initializeQueue();
+  await refreshIfEmpty(state, user.id);
 
   const flagged = await flagQuestionForReview({
     userId: user.id,
@@ -1232,8 +1295,8 @@ export async function flagQuestion(input: {
       (item) => questionKey(item) !== questionKey(flagged),
     );
     state.inFlightQuestionKeys.delete(questionKey(flagged));
-    logQueueFlushStatus("flagged-question");
-    void broadcastQueueStatus();
+    logQueueFlushStatus(state, "flagged-question");
+    void broadcastQueueStatus(state);
   }
 
   return peekNextQuestion({ mode: input.mode });
@@ -1245,6 +1308,7 @@ export async function submitAnswer(input: {
   answer: string;
 }): Promise<{ evaluationId: string; traceId: string }> {
   const user = await getCurrentUser();
+  const state = getQueueStateForUser(user.id);
   const requestedQuestionId = input.questionId.trim();
 
   if (!requestedQuestionId) {
@@ -1313,13 +1377,14 @@ export async function submitAnswer(input: {
     submittedAt,
   });
   state.evaluations = [...state.evaluations, evaluation].slice(-50);
-  const queuedQuestion = removeFromQueue(snapshot);
+  const queuedQuestion = removeFromQueue(state, snapshot);
   state.inFlightQuestionKeys.add(questionKey(snapshot));
   state.pendingEvaluations += 1;
-  logQueueFlushStatus("submitted-answer");
-  void broadcastQueueStatus();
+  logQueueFlushStatus(state, "submitted-answer");
+  void broadcastQueueStatus(state);
 
   const submission = {
+    state,
     evaluationId: evaluation.id,
     traceId,
     questionId,
@@ -1433,7 +1498,7 @@ export async function addQuestionsToDeck(input: {
     userId: user.id,
   });
 
-  void broadcastQueueStatus();
+  void broadcastQueueStatus(getQueueStateForUser(user.id));
 
   return {
     added: addedQuestions.length,
@@ -1457,15 +1522,24 @@ export async function deckEmbeddingPlotStatus(input: {
   sortKey?: QueuedQuestionsSortKey;
 } = {}): Promise<DeckEmbeddingPlot> {
   const user = await getCurrentUser();
+  const limit = Math.min(
+    DECK_EMBEDDING_PLOT_LIMIT,
+    Math.max(0, Math.floor(input.limit ?? DECK_EMBEDDING_PLOT_LIMIT)),
+  );
 
   return getDeckEmbeddingPlot({
     userId: user.id,
     deckId: input.deckId,
+    limit,
+    offset: input.offset,
   });
 }
 
-export async function queueStatus(input: QueueStatusInput = {}): Promise<QueueStatusSnapshot> {
-  const user = await getCurrentUser();
+export async function queueStatusForUser(
+  userId: string,
+  input: QueueStatusInput = {},
+): Promise<QueueStatusSnapshot> {
+  const state = getQueueStateForUser(userId);
   const now = Date.now();
   const query = normalizeEmbeddingText(input.query ?? "");
   const limitCap = query ? QUEUE_SEARCH_TOP_K : 2_000;
@@ -1475,7 +1549,7 @@ export async function queueStatus(input: QueueStatusInput = {}): Promise<QueueSt
   const includeReviewQueue = input.includeReviewQueue ?? true;
   const includeRecentAttempts = input.includeRecentAttempts ?? true;
   const reviewQueuePage = includeReviewQueue
-    ? await getReviewQueueItems(user.id, {
+    ? await getReviewQueueItems(userId, state, {
         deckId: input.deckId,
         limit,
         offset,
@@ -1486,7 +1560,7 @@ export async function queueStatus(input: QueueStatusInput = {}): Promise<QueueSt
     : { items: [], total: 0 };
   const recentAttempts = includeRecentAttempts
     ? await getRecentQuestionAttempts({
-        userId: user.id,
+        userId,
         deckScope: input.deckId ? undefined : "rotation",
         deckId: input.deckId,
         limit: 24,
@@ -1494,7 +1568,7 @@ export async function queueStatus(input: QueueStatusInput = {}): Promise<QueueSt
     : [];
   const deckEmbeddingPlot = input.includeDeckEmbeddingPlot
     ? await getDeckEmbeddingPlot({
-        userId: user.id,
+        userId,
         deckId: input.deckId,
         ...(input.deckId
           ? {}
@@ -1505,18 +1579,24 @@ export async function queueStatus(input: QueueStatusInput = {}): Promise<QueueSt
       })
     : emptyDeckEmbeddingPlot();
   const persistedEvaluations = await getVisibleAnswerEvaluations({
-    userId: user.id,
+    userId,
     deckId: input.deckId,
     activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
     resolvedSince: now - RESOLVED_JUDGING_VISIBLE_MS,
     limit: 50,
   });
-  const dueQuestions = await getDueQuestions(now, { userId: user.id });
+  const queueRemaining = await countDueQuestions(now, {
+    userId,
+    deckId: input.deckId,
+  });
 
   return {
-    queueRemaining: dueQuestions.length,
+    queueRemaining,
     pendingEvaluations: state.pendingEvaluations,
-    evaluations: mergeEvaluationItems(getVisibleEvaluations(now), persistedEvaluations),
+    evaluations: mergeEvaluationItems(
+      getVisibleEvaluations(state, now),
+      persistedEvaluations,
+    ),
     recentAttempts,
     reviewQueue: reviewQueuePage.items,
     reviewQueueTotal: reviewQueuePage.total,
@@ -1526,4 +1606,12 @@ export async function queueStatus(input: QueueStatusInput = {}): Promise<QueueSt
       offset + reviewQueuePage.items.length < reviewQueuePage.total,
     deckEmbeddingPlot,
   };
+}
+
+export async function queueStatus(
+  input: QueueStatusInput = {},
+): Promise<QueueStatusSnapshot> {
+  const user = await getCurrentUser();
+
+  return queueStatusForUser(user.id, input);
 }
