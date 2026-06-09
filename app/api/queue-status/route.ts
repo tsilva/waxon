@@ -34,7 +34,7 @@ export async function GET(request: Request) {
           : isEnabled(url.searchParams.get("includeReviewQueue"), true),
       includeQuestionAttempts: isEnabled(
         url.searchParams.get("includeQuestionAttempts"),
-        true,
+        false,
       ),
       includeRecentAttempts: isEnabled(
         url.searchParams.get("includeRecentAttempts"),
@@ -43,6 +43,10 @@ export async function GET(request: Request) {
       includeDeckEmbeddingPlot: isEnabled(
         url.searchParams.get("includeDeckEmbeddingPlot"),
         false,
+      ),
+      includeQueueCounts: isEnabled(
+        url.searchParams.get("includeQueueCounts"),
+        true,
       ),
     }),
   );

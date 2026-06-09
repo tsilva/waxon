@@ -80,6 +80,7 @@ export type DeckEmbeddingPlot = {
 
 export type QueueStatusSnapshot = {
   queueRemaining: number;
+  nextScheduledDue: number | null;
   pendingEvaluations: number;
   evaluations: EvaluationQueueItem[];
   recentAttempts: QuestionAttempt[];

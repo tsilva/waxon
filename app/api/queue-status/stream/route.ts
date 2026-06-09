@@ -12,6 +12,12 @@ export const dynamic = "force-dynamic";
 const encoder = new TextEncoder();
 const GRADING_REFRESH_MS = 750;
 
+type RefreshMode = "full" | "lightweight";
+type ScheduledRefresh = {
+  delay: number;
+  mode: RefreshMode;
+};
+
 function isEnabled(value: string | null, fallback: boolean): boolean {
   if (value === null) {
     return fallback;
@@ -24,30 +30,68 @@ function encodeStatusEvent(status: QueueStatusSnapshot): Uint8Array {
   return encoder.encode(`event: status\ndata: ${JSON.stringify(status)}\n\n`);
 }
 
-function nextRefreshDelay(status: QueueStatusSnapshot): number | null {
+function nextRefresh(status: QueueStatusSnapshot): ScheduledRefresh | null {
   const now = Date.now();
   const hasGradingEvaluation = status.evaluations.some(
     (evaluation) => evaluation.status === "grading",
   );
-  const delays = [
-    ...(hasGradingEvaluation ? [GRADING_REFRESH_MS] : []),
-    ...status.reviewQueue
-      .map((item) => item.msUntilDue)
-      .filter((delay) => delay > 0),
-    ...status.evaluations
-      .map((evaluation) =>
-        evaluation.resolvedAt === null
-          ? null
-          : evaluation.resolvedAt + RESOLVED_JUDGING_VISIBLE_MS - now,
-      )
-      .filter((delay): delay is number => delay !== null && delay > 0),
-  ];
+  const refreshes: ScheduledRefresh[] = [];
 
-  if (delays.length === 0) {
+  if (hasGradingEvaluation) {
+    refreshes.push({ delay: GRADING_REFRESH_MS, mode: "lightweight" });
+  }
+
+  if (status.nextScheduledDue !== null && status.nextScheduledDue > now) {
+    refreshes.push({
+      delay: status.nextScheduledDue - now,
+      mode: "full",
+    });
+  }
+
+  for (const item of status.reviewQueue) {
+    if (item.msUntilDue > 0) {
+      refreshes.push({ delay: item.msUntilDue, mode: "full" });
+    }
+  }
+
+  for (const evaluation of status.evaluations) {
+    if (evaluation.resolvedAt === null) {
+      continue;
+    }
+
+    const delay = evaluation.resolvedAt + RESOLVED_JUDGING_VISIBLE_MS - now;
+
+    if (delay > 0) {
+      refreshes.push({ delay, mode: "lightweight" });
+    }
+  }
+
+  if (refreshes.length === 0) {
     return null;
   }
 
-  return Math.min(Math.min(...delays) + 50, 2_147_483_647);
+  const [next] = refreshes.sort(
+    (left, right) => {
+      if (left.delay !== right.delay) {
+        return left.delay - right.delay;
+      }
+
+      if (left.mode === right.mode) {
+        return 0;
+      }
+
+      return left.mode === "full" ? -1 : 1;
+    },
+  );
+
+  if (!next) {
+    return null;
+  }
+
+  return {
+    delay: Math.min(next.delay + 50, 2_147_483_647),
+    mode: next.mode,
+  };
 }
 
 export async function GET(request: Request) {
@@ -81,6 +125,10 @@ export async function GET(request: Request) {
       url.searchParams.get("includeDeckEmbeddingPlot"),
       false,
     ),
+    includeQueueCounts: isEnabled(
+      url.searchParams.get("includeQueueCounts"),
+      true,
+    ),
   };
   let cancelStream = () => {};
 
@@ -90,6 +138,9 @@ export async function GET(request: Request) {
       let refreshTimeout: ReturnType<typeof setTimeout> | null = null;
       let heartbeat: ReturnType<typeof setInterval> | null = null;
       let unsubscribe = () => {};
+      let lastStatus: QueueStatusSnapshot | null = null;
+      let isSendingStatus = false;
+      let pendingRefreshMode: RefreshMode | null = null;
 
       const clearRefreshTimeout = () => {
         if (refreshTimeout !== null) {
@@ -124,27 +175,91 @@ export async function GET(request: Request) {
         }
       };
 
-      const sendStatus = async () => {
+      const preserveQueuePayload = (
+        status: QueueStatusSnapshot,
+      ): QueueStatusSnapshot => {
+        if (!lastStatus) {
+          return status;
+        }
+
+        return {
+          ...status,
+          queueRemaining: lastStatus.queueRemaining,
+          nextScheduledDue: lastStatus.nextScheduledDue,
+          recentAttempts: lastStatus.recentAttempts,
+          reviewQueue: lastStatus.reviewQueue,
+          reviewQueueTotal: lastStatus.reviewQueueTotal,
+          reviewQueueOffset: lastStatus.reviewQueueOffset,
+          reviewQueueLimit: lastStatus.reviewQueueLimit,
+          reviewQueueHasMore: lastStatus.reviewQueueHasMore,
+          deckEmbeddingPlot: lastStatus.deckEmbeddingPlot,
+        };
+      };
+
+      const queueStatusInputForMode = (mode: RefreshMode) => {
+        if (mode === "full" || !lastStatus) {
+          return statusInput;
+        }
+
+        return {
+          ...statusInput,
+          includeReviewQueue: false,
+          includeQuestionAttempts: false,
+          includeRecentAttempts: false,
+          includeDeckEmbeddingPlot: false,
+          includeQueueCounts: false,
+        };
+      };
+
+      const sendStatus = async (mode: RefreshMode) => {
         if (isClosed) {
           return;
         }
 
-        const status = await queueStatusForUser(user.id, statusInput);
-        emitStatus(status);
+        if (isSendingStatus) {
+          pendingRefreshMode =
+            pendingRefreshMode === "full" || mode === "full" ? "full" : mode;
+          return;
+        }
+
+        isSendingStatus = true;
+
+        try {
+          const response = await queueStatusForUser(
+            user.id,
+            queueStatusInputForMode(mode),
+          );
+          const status =
+            mode === "lightweight" && lastStatus
+              ? preserveQueuePayload(response)
+              : response;
+
+          lastStatus = status;
+          emitStatus(status);
+        } finally {
+          isSendingStatus = false;
+
+          if (pendingRefreshMode !== null) {
+            const pendingMode = pendingRefreshMode;
+
+            pendingRefreshMode = null;
+            void sendStatus(pendingMode);
+          }
+        }
       };
 
       const scheduleNextRefresh = (status: QueueStatusSnapshot) => {
         clearRefreshTimeout();
 
-        const delay = nextRefreshDelay(status);
+        const refresh = nextRefresh(status);
 
-        if (delay === null) {
+        if (refresh === null) {
           return;
         }
 
         refreshTimeout = setTimeout(() => {
-          void sendStatus();
-        }, delay);
+          void sendStatus(refresh.mode);
+        }, refresh.delay);
       };
 
       const emitStatus = (status: QueueStatusSnapshot) => {
@@ -158,8 +273,8 @@ export async function GET(request: Request) {
 
       cancelStream = close;
 
-      unsubscribe = subscribeQueueStatus(user.id, () => {
-        void sendStatus();
+      unsubscribe = subscribeQueueStatus(user.id, (mode) => {
+        void sendStatus(mode === "evaluations" ? "lightweight" : "full");
       });
       heartbeat = setInterval(() => {
         enqueue(encoder.encode(": keepalive\n\n"));
@@ -170,7 +285,7 @@ export async function GET(request: Request) {
       });
 
       try {
-        await sendStatus();
+        await sendStatus("full");
       } catch {
         close();
         controller.error(new Error("Failed to stream queue status."));
