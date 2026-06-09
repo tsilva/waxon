@@ -1845,7 +1845,7 @@ export default function ReviewApp({
     () => cachedSessionRef.current?.deckSearchQuery ?? "",
   );
   const [deckSortKey, setDeckSortKey] = useState<DeckSortKey>(
-    () => cachedSessionRef.current?.deckSortKey ?? "updated",
+    () => cachedSessionRef.current?.deckSortKey ?? "name",
   );
   const [selectedDeckDetailId, setSelectedDeckDetailId] = useState<
     string | null
