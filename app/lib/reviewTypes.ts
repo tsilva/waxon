@@ -40,6 +40,7 @@ export type EvaluationQueueItem = {
   correctAnswer: string | null;
   resolvedAt: number | null;
   nextDue: number | null;
+  cost: number | null;
 };
 
 export type ReviewQueueItem = {

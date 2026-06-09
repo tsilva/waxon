@@ -18,6 +18,7 @@ import { db, pool } from "@/app/db/client";
 import {
   answerEvaluations,
   decks,
+  llmTraceInteractions,
   questionAttempts,
   questionEmbeddings,
   questions,
@@ -57,6 +58,7 @@ export type QuestionRow = {
   last_answer_summary: string;
   concise_answer: string;
   reference_answer: string;
+  flagged_at: number | null;
   created_at: number;
 };
 
@@ -74,6 +76,7 @@ export type DueQuestion = {
   lastAnswerSummary: string | null;
   conciseAnswer: string | null;
   referenceAnswer: string | null;
+  flaggedAt: number | null;
   createdAt: number;
 };
 
@@ -107,6 +110,7 @@ export type PersistedEvaluation = {
   lastAnswerSummary: string | null;
   conciseAnswer: string | null;
   referenceAnswer: string | null;
+  flaggedAt: number | null;
   createdAt: number;
 } | null;
 
@@ -269,6 +273,7 @@ function toDueQuestion(row: QuestionRow): DueQuestion {
     lastAnswerSummary: row.last_answer_summary || null,
     conciseAnswer: row.concise_answer || null,
     referenceAnswer: row.reference_answer || null,
+    flaggedAt: row.flagged_at,
     createdAt: row.created_at,
   };
 }
@@ -560,6 +565,7 @@ async function selectQuestionRows(
       last_answer_summary: questions.lastAnswerSummary,
       concise_answer: questions.conciseAnswer,
       reference_answer: questions.referenceAnswer,
+      flagged_at: questions.flaggedAt,
       created_at: questions.createdAt,
     })
     .from(questions)
@@ -668,7 +674,10 @@ export async function listDecks(
       lastReviewedAt: sql<number | null>`max(${questionAttempts.resolvedAt})`,
     })
     .from(decks)
-    .leftJoin(questions, eq(questions.deckId, decks.id))
+    .leftJoin(
+      questions,
+      and(eq(questions.deckId, decks.id), isNull(questions.flaggedAt)),
+    )
     .leftJoin(questionAttempts, eq(questionAttempts.deckId, decks.id))
     .where(and(eq(decks.userId, context.userId), isNull(decks.archivedAt)))
     .groupBy(
@@ -858,6 +867,7 @@ export async function readQuestionsWithEmbeddings(input: {
       last_answer_summary: questions.lastAnswerSummary,
       concise_answer: questions.conciseAnswer,
       reference_answer: questions.referenceAnswer,
+      flagged_at: questions.flaggedAt,
       created_at: questions.createdAt,
       embedding_model: questionEmbeddings.embeddingModel,
       embedding_kind: questionEmbeddings.embeddingKind,
@@ -883,6 +893,7 @@ export async function readQuestionsWithEmbeddings(input: {
     .where(
       and(
         eq(questions.deckId, targetDeckId),
+        isNull(questions.flaggedAt),
         eq(decks.userId, context.userId),
         questionFilter === null
           ? sql`true`
@@ -915,6 +926,7 @@ export async function readQuestionsWithEmbeddings(input: {
         last_answer_summary: row.last_answer_summary,
         concise_answer: row.concise_answer,
         reference_answer: row.reference_answer,
+        flagged_at: row.flagged_at,
         created_at: row.created_at,
         embeddings: [],
       };
@@ -1083,7 +1095,7 @@ export async function getDueQuestions(
   input: UserContextInput = {},
 ): Promise<DueQuestion[]> {
   const rows = await selectQuestionRows(
-    lte(questions.nextDue, Math.round(now)),
+    and(lte(questions.nextDue, Math.round(now)), isNull(questions.flaggedAt)),
     { ...input, deckScope: "rotation" },
   );
 
@@ -1114,6 +1126,7 @@ export async function getQueuedQuestionsPage(
     eq(decks.userId, context.userId),
     eq(decks.inReviewRotation, true),
     input.deckId ? eq(questions.deckId, input.deckId) : sql`true`,
+    isNull(questions.flaggedAt),
     isNull(decks.archivedAt),
     excludeQuestionIds.length > 0
       ? notInArray(questions.id, excludeQuestionIds)
@@ -1144,6 +1157,7 @@ export async function getQueuedQuestionsPage(
       last_answer_summary: questions.lastAnswerSummary,
       concise_answer: questions.conciseAnswer,
       reference_answer: questions.referenceAnswer,
+      flagged_at: questions.flaggedAt,
       created_at: questions.createdAt,
     })
     .from(questions)
@@ -1173,11 +1187,13 @@ function rawQuestionRowToDueQuestion(row: {
   last_answer_summary: string;
   concise_answer: string;
   reference_answer: string;
+  flagged_at: number | string | null;
   created_at: number | string;
 }): DueQuestion {
   return toDueQuestion({
     ...row,
     next_due: Number(row.next_due),
+    flagged_at: row.flagged_at === null ? null : Number(row.flagged_at),
     created_at: Number(row.created_at),
   });
 }
@@ -1227,6 +1243,7 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
       `d.user_id = $${input.userIndex}`,
       `d.in_review_rotation = true`,
       `d.archived_at IS NULL`,
+      `q.flagged_at IS NULL`,
       `qe.embedding_model = $${input.modelIndex}`,
       `qe.embedding_kind = $${input.kindIndex}`,
       `qe.source_version = $${input.versionIndex}`,
@@ -1304,6 +1321,7 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
         q.last_answer_summary,
         q.concise_answer,
         q.reference_answer,
+        q.flagged_at,
         q.created_at,
         qe.embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
           <=> $2::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS}) AS distance
@@ -1355,6 +1373,49 @@ export async function getQuestionSnapshotById(
   });
 
   return row ? toDueQuestion(row) : null;
+}
+
+export async function flagQuestionForReview(input: {
+  questionId: string;
+  question: string;
+  userId?: string;
+  now?: number;
+}): Promise<DueQuestion | null> {
+  const questionId = input.questionId.trim();
+  const normalizedInputQuestion = input.question.trim().replace(/\s+/g, " ");
+
+  if (!questionId || !normalizedInputQuestion) {
+    throw new Error("Question is required.");
+  }
+
+  const snapshot = await getQuestionSnapshotById(questionId, {
+    userId: input.userId,
+  });
+
+  if (!snapshot) {
+    throw new Error("Question not found.");
+  }
+
+  const normalizedSnapshotQuestion = snapshot.question.trim().replace(/\s+/g, " ");
+
+  if (normalizedInputQuestion !== normalizedSnapshotQuestion) {
+    throw new Error("Question mismatch.");
+  }
+
+  const now = Math.round(input.now ?? Date.now());
+
+  await db
+    .update(questions)
+    .set({
+      flaggedAt: snapshot.flaggedAt ?? now,
+      updatedAt: now,
+    })
+    .where(and(eq(questions.deckId, snapshot.deckId), eq(questions.id, questionId)));
+
+  return {
+    ...snapshot,
+    flaggedAt: snapshot.flaggedAt ?? now,
+  };
 }
 
 export async function getQuestionAttempts(
@@ -1570,6 +1631,7 @@ function toEvaluationQueueItem(row: {
   correctAnswer: string | null;
   nextDue: number | null;
   resolvedAt: number | null;
+  traceCalls: string | null;
 }): EvaluationQueueItem {
   const status = row.status === "resolved" ? "resolved" : "grading";
 
@@ -1590,7 +1652,50 @@ function toEvaluationQueueItem(row: {
     correctAnswer: row.correctAnswer || null,
     resolvedAt: row.resolvedAt,
     nextDue: row.nextDue,
+    cost: totalTraceCost(row.traceCalls),
   };
+}
+
+function totalTraceCost(callsJson: string | null): number | null {
+  if (!callsJson) {
+    return null;
+  }
+
+  let calls: unknown;
+
+  try {
+    calls = JSON.parse(callsJson);
+  } catch {
+    return null;
+  }
+
+  if (!Array.isArray(calls)) {
+    return null;
+  }
+
+  let total = 0;
+  let hasCost = false;
+
+  for (const call of calls) {
+    if (!call || typeof call !== "object") {
+      continue;
+    }
+
+    const cost = (call as { cost?: unknown }).cost;
+    const numericCost =
+      typeof cost === "number"
+        ? cost
+        : typeof cost === "string"
+          ? Number.parseFloat(cost)
+          : Number.NaN;
+
+    if (Number.isFinite(numericCost)) {
+      total += numericCost;
+      hasCost = true;
+    }
+  }
+
+  return hasCost ? total : null;
 }
 
 export async function createAnswerEvaluationRecord(input: {
@@ -1698,9 +1803,14 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
       correctAnswer: questions.conciseAnswer,
       nextDue: answerEvaluations.nextDue,
       resolvedAt: answerEvaluations.resolvedAt,
+      traceCalls: llmTraceInteractions.calls,
     })
     .from(answerEvaluations)
     .innerJoin(decks, eq(decks.id, answerEvaluations.deckId))
+    .leftJoin(
+      llmTraceInteractions,
+      eq(llmTraceInteractions.id, answerEvaluations.traceId),
+    )
     .innerJoin(
       questions,
       and(
@@ -1763,8 +1873,13 @@ export async function getAnswerEvaluationsByIds(input: UserContextInput & {
       correctAnswer: questions.conciseAnswer,
       nextDue: answerEvaluations.nextDue,
       resolvedAt: answerEvaluations.resolvedAt,
+      traceCalls: llmTraceInteractions.calls,
     })
     .from(answerEvaluations)
+    .leftJoin(
+      llmTraceInteractions,
+      eq(llmTraceInteractions.id, answerEvaluations.traceId),
+    )
     .innerJoin(
       questions,
       and(
@@ -1946,6 +2061,7 @@ export async function applyEvaluationToPostgres(input: {
         last_answer_summary: questions.lastAnswerSummary,
         concise_answer: questions.conciseAnswer,
         reference_answer: questions.referenceAnswer,
+        flagged_at: questions.flaggedAt,
         created_at: questions.createdAt,
       })
       .from(questions)
@@ -2054,6 +2170,7 @@ export async function applyEvaluationToPostgres(input: {
       lastAnswerSummary: input.answerSummary || null,
       referenceAnswer: row.reference_answer || null,
       conciseAnswer: conciseAnswer || null,
+      flaggedAt: row.flagged_at,
       createdAt: row.created_at,
     };
   });

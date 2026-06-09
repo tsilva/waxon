@@ -151,6 +151,7 @@ textarea {
 .reader-tab,
 .queue-summary,
 .queue-generate-trigger,
+.queue-map-trigger,
 .user-menu-item,
 .resting-kicker,
 .resting-metrics dd,
@@ -183,6 +184,7 @@ textarea {
 .settings-action-secondary,
 .settings-status,
 .generator-modal-kicker,
+.embedding-map-modal-kicker,
 .generator-field label,
 .generator-slider-field span,
 .generator-slider-field output,
@@ -1495,7 +1497,8 @@ textarea {
   white-space: nowrap;
 }
 
-.question-details-trigger {
+.question-details-trigger,
+.question-flag-trigger {
   display: inline-grid;
   place-items: center;
   width: 22px;
@@ -1517,7 +1520,8 @@ textarea {
     opacity 140ms ease;
 }
 
-.question-details-trigger svg {
+.question-details-trigger svg,
+.question-flag-trigger svg {
   display: block;
   width: 13px;
   height: 13px;
@@ -1526,13 +1530,24 @@ textarea {
 }
 
 .question-details-trigger:hover,
-.question-details-trigger:focus-visible {
+.question-details-trigger:focus-visible,
+.question-flag-trigger:hover:not(:disabled),
+.question-flag-trigger:focus-visible {
   border-color: rgb(166 124 82 / 36%);
   background: rgb(245 238 224 / 78%);
   color: var(--accent);
   opacity: 1;
   outline: 2px solid rgb(166 124 82 / 12%);
   outline-offset: 2px;
+}
+
+.question-flag-trigger {
+  color: rgb(140 84 98 / 62%);
+}
+
+.question-flag-trigger:disabled {
+  cursor: default;
+  opacity: 0.44;
 }
 
 .learn-waiting-mask {
@@ -2567,9 +2582,27 @@ textarea {
 
 .previous-row-meta {
   display: flex;
+  align-items: flex-end;
+  align-self: stretch;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 58px;
+}
+
+.previous-time-control {
+  display: flex;
   align-items: center;
   gap: 8px;
   min-height: 24px;
+}
+
+.previous-cost-label {
+  margin-top: auto;
+  color: rgb(168 148 132 / 78%);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .previous-collapse-icon {
@@ -2680,6 +2713,17 @@ textarea {
   scrollbar-color: rgb(166 124 82 / 50%) transparent;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
+}
+
+.queue-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.queue-detail-header h2 {
+  margin: 0;
 }
 
 .stats-stage {
@@ -2865,6 +2909,19 @@ textarea {
   background:
     linear-gradient(180deg, rgb(255 255 255 / 54%), transparent),
     rgb(251 248 240 / 74%);
+}
+
+.embedding-map-modal-body {
+  min-height: 0;
+  margin-top: 18px;
+}
+
+.embedding-map-modal .embedding-plot-panel {
+  height: 100%;
+}
+
+.embedding-map-modal .embedding-plot-canvas {
+  min-height: min(520px, calc(100vh - 260px));
 }
 
 .embedding-plot-header {
@@ -3070,6 +3127,39 @@ textarea {
   font-size: 13px;
   font-weight: 760;
   line-height: 1;
+}
+
+.queue-map-trigger {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  border: 1px solid rgb(227 218 196 / 78%);
+  border-radius: 8px;
+  padding: 0 13px;
+  background: rgb(251 248 240 / 82%);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.queue-map-trigger svg {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+  stroke-width: 2.3;
+}
+
+.queue-map-trigger:hover,
+.queue-map-trigger:focus-visible {
+  border-color: rgb(166 124 82 / 42%);
+  background: #ffffff;
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 2px;
 }
 
 .queue-generate-trigger svg {
@@ -3596,6 +3686,7 @@ textarea {
 }
 
 .generator-modal-backdrop,
+.embedding-map-modal-backdrop,
 .settings-modal-backdrop,
 .stats-modal-backdrop,
 .admin-call-modal-backdrop,
@@ -3613,6 +3704,7 @@ textarea {
 }
 
 .generator-modal,
+.embedding-map-modal,
 .settings-modal,
 .stats-modal,
 .admin-call-modal,
@@ -3647,6 +3739,12 @@ textarea {
   grid-template-rows: auto minmax(0, 1fr);
   position: relative;
   width: min(1040px, 100%);
+}
+
+.embedding-map-modal {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1240px, 100%);
 }
 
 .generator-progress-mask {
@@ -3700,6 +3798,7 @@ textarea {
 }
 
 .generator-modal-header,
+.embedding-map-modal-header,
 .settings-modal-header,
 .stats-modal-header,
 .admin-call-modal-header,
@@ -3713,6 +3812,7 @@ textarea {
 }
 
 .generator-modal-kicker,
+.embedding-map-modal-kicker,
 .settings-modal-kicker,
 .stats-modal-kicker,
 .admin-call-modal-kicker {
@@ -3726,6 +3826,7 @@ textarea {
 }
 
 .generator-modal-title,
+.embedding-map-modal-title,
 .settings-modal-title,
 .stats-modal-title,
 .admin-call-modal-title {
@@ -6391,13 +6492,25 @@ textarea {
   }
 
   .previous-row-meta {
-    justify-content: flex-start;
+    flex-direction: row;
+    justify-content: flex-end;
+    min-height: 24px;
+    width: 100%;
+  }
+
+  .previous-cost-label {
+    margin-top: 0;
+    font-size: 10px;
   }
 
   .queue-stage {
     width: 100%;
     gap: 14px;
     padding: 26px 22px 20px;
+  }
+
+  .queue-detail-header {
+    align-items: flex-start;
   }
 
   .stats-stage {
@@ -6449,6 +6562,14 @@ textarea {
 
   .embedding-plot-panel {
     padding: 13px;
+  }
+
+  .embedding-map-modal-body {
+    margin-top: 14px;
+  }
+
+  .embedding-map-modal .embedding-plot-canvas {
+    min-height: 300px;
   }
 
   .embedding-plot-canvas {
@@ -6565,6 +6686,7 @@ textarea {
   }
 
   .generator-modal-backdrop,
+  .embedding-map-modal-backdrop,
   .settings-modal-backdrop,
   .stats-modal-backdrop,
   .admin-call-modal-backdrop,
@@ -6574,6 +6696,7 @@ textarea {
   }
 
   .generator-modal,
+  .embedding-map-modal,
   .settings-modal,
   .stats-modal,
   .admin-call-modal,
