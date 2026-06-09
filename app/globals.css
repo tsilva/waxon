@@ -196,8 +196,6 @@ textarea {
 .generator-file-chip,
 .generator-slider-scale,
 .generator-scope-footer,
-.generator-review-header p,
-.generator-review-header span,
 .generator-review-footer,
 .stats-modal-kicker,
 .stats-modal-question-id,
@@ -1090,6 +1088,10 @@ textarea {
   overflow: visible;
 }
 
+.page-queue-active {
+  overflow: hidden;
+}
+
 .review-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -1105,6 +1107,10 @@ textarea {
 
 .page-previous-expanded .review-shell {
   min-height: 0;
+}
+
+.page-queue-active .review-shell {
+  height: max(760px, calc(100svh - (clamp(16px, 1.6vw, 24px) * 2)));
 }
 
 .reader-header {
@@ -2790,6 +2796,23 @@ textarea {
   margin: 0;
 }
 
+.queue-detail-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 14px;
+  min-width: 0;
+}
+
+.queue-detail-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
 .stats-stage {
   display: grid;
   align-content: start;
@@ -3174,6 +3197,13 @@ textarea {
   justify-content: space-between;
   gap: 14px;
   min-height: 42px;
+}
+
+.queue-action-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
 }
 
 .queue-generate-trigger {
@@ -4078,8 +4108,7 @@ textarea {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.generator-scope-panel,
-.generator-review-panel {
+.generator-scope-panel {
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -4388,37 +4417,11 @@ textarea {
 }
 
 .generator-review-panel {
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
-}
-
-.generator-review-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 14px;
-  border-bottom: 1px solid rgb(227 218 196 / 72%);
-  padding: 14px 16px;
-}
-
-.generator-review-header h3,
-.generator-review-header p {
-  margin: 0;
-}
-
-.generator-review-header h3 {
-  color: var(--ink);
-  font-size: 18px;
-  font-weight: 760;
-  line-height: 1.2;
-}
-
-.generator-review-header p,
-.generator-review-header span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 720;
-  line-height: 1.25;
 }
 
 .generator-question-list {
@@ -4428,7 +4431,7 @@ textarea {
   gap: 8px;
   min-height: 0;
   margin: 0;
-  padding: 12px;
+  padding: 0;
   overflow-y: auto;
   scrollbar-color: rgb(166 124 82 / 50%) transparent;
   scrollbar-width: thin;
@@ -4520,11 +4523,9 @@ textarea {
 .generator-review-footer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
-  border-top: 1px solid rgb(227 218 196 / 72%);
-  padding: 12px;
-  background: rgb(251 248 240 / 94%);
+  padding-top: 14px;
 }
 
 .generator-review-actions {
@@ -6272,6 +6273,11 @@ textarea {
     box-shadow: none;
   }
 
+  .page-queue-active .review-shell {
+    height: 100svh;
+    min-height: 100svh;
+  }
+
   .reader-header {
     height: 58px;
     padding: 0 18px;
@@ -6660,8 +6666,18 @@ textarea {
     flex-direction: column;
   }
 
+  .queue-action-group {
+    width: 100%;
+  }
+
   .queue-generate-trigger {
     width: 100%;
+  }
+
+  .queue-action-group .queue-generate-trigger,
+  .queue-action-group .queue-map-trigger {
+    flex: 1 1 0;
+    width: auto;
   }
 
   .queue-search-label {
