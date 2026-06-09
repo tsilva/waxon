@@ -525,8 +525,8 @@ function projectEmbeddings(
 
 async function getDeckEmbeddingPlot(input: {
   deckId?: string;
-  questions: string[];
-  totalQuestions: number;
+  questions?: string[];
+  totalQuestions?: number;
   userId: string;
 }): Promise<DeckEmbeddingPlot> {
   const questions = await readQuestionsWithEmbeddings({
@@ -534,7 +534,7 @@ async function getDeckEmbeddingPlot(input: {
     userId: input.userId,
     questions: input.questions,
   });
-  const totalQuestions = input.totalQuestions;
+  const totalQuestions = input.totalQuestions ?? questions.length;
   const modelCounts = new Map<string, number>();
   const preferredEmbeddings = questions.flatMap((question) =>
     question.embeddings.filter(
@@ -1457,25 +1457,10 @@ export async function deckEmbeddingPlotStatus(input: {
   sortKey?: QueuedQuestionsSortKey;
 } = {}): Promise<DeckEmbeddingPlot> {
   const user = await getCurrentUser();
-  const limit = Math.min(2_000, Math.max(0, Math.floor(input.limit ?? 48)));
-  const offset = Math.max(0, Math.floor(input.offset ?? 0));
-  const sortKey = input.sortKey ?? "review-date";
-  const reviewQueuePage = await getQueuedQuestionsPage({
-    userId: user.id,
-    deckId: input.deckId,
-    excludeQuestionIds: Array.from(state.inFlightQuestionKeys).filter(
-      (key) => !key.startsWith("question:"),
-    ),
-    limit,
-    offset,
-    sortKey,
-  });
 
   return getDeckEmbeddingPlot({
     userId: user.id,
     deckId: input.deckId,
-    questions: reviewQueuePage.items.map((item) => item.question),
-    totalQuestions: reviewQueuePage.total,
   });
 }
 
@@ -1511,8 +1496,12 @@ export async function queueStatus(input: QueueStatusInput = {}): Promise<QueueSt
     ? await getDeckEmbeddingPlot({
         userId: user.id,
         deckId: input.deckId,
-        questions: reviewQueuePage.items.map((item) => item.question),
-        totalQuestions: reviewQueuePage.total,
+        ...(input.deckId
+          ? {}
+          : {
+              questions: reviewQueuePage.items.map((item) => item.question),
+              totalQuestions: reviewQueuePage.total,
+            }),
       })
     : emptyDeckEmbeddingPlot();
   const persistedEvaluations = await getVisibleAnswerEvaluations({

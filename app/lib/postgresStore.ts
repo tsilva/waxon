@@ -1124,7 +1124,7 @@ export async function getQueuedQuestionsPage(
   ).filter(Boolean);
   const whereClause = and(
     eq(decks.userId, context.userId),
-    eq(decks.inReviewRotation, true),
+    input.deckId ? sql`true` : eq(decks.inReviewRotation, true),
     input.deckId ? eq(questions.deckId, input.deckId) : sql`true`,
     isNull(questions.flaggedAt),
     isNull(decks.archivedAt),
@@ -1241,7 +1241,6 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
     const params: unknown[] = [];
     const clauses = [
       `d.user_id = $${input.userIndex}`,
-      `d.in_review_rotation = true`,
       `d.archived_at IS NULL`,
       `q.flagged_at IS NULL`,
       `qe.embedding_model = $${input.modelIndex}`,
@@ -1250,6 +1249,10 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
       `qe.is_current = true`,
     ];
     let paramIndex = input.startIndex;
+
+    if (!targetDeckId) {
+      clauses.push(`d.in_review_rotation = true`);
+    }
 
     if (targetDeckId) {
       clauses.push(`q.deck_id = $${paramIndex}`);
