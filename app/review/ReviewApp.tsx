@@ -4793,10 +4793,9 @@ export default function ReviewApp({
   ]);
   const updateQueueVirtualRange = useCallback(() => {
     const totalRows = sortedReviewQueue.length;
-    const scroller = queueStageRef.current;
     const list = queueListRef.current;
 
-    if (!scroller || !list || totalRows === 0) {
+    if (!list || totalRows === 0) {
       setQueueVirtualRange({
         start: 0,
         end: Math.min(totalRows, QUEUE_PAGE_SIZE),
@@ -4804,9 +4803,11 @@ export default function ReviewApp({
       return;
     }
 
-    const listTop = list.offsetTop;
-    const visibleTop = Math.max(0, scroller.scrollTop - listTop);
-    const visibleBottom = visibleTop + scroller.clientHeight;
+    const listTop = list.getBoundingClientRect().top + window.scrollY;
+    const viewportTop = window.scrollY;
+    const viewportBottom = viewportTop + window.innerHeight;
+    const visibleTop = Math.max(0, viewportTop - listTop);
+    const visibleBottom = Math.max(visibleTop, viewportBottom - listTop);
     const nextStart = Math.max(
       0,
       Math.floor(visibleTop / QUEUE_ROW_ESTIMATED_HEIGHT) - QUEUE_ROW_OVERSCAN,
@@ -5225,19 +5226,13 @@ export default function ReviewApp({
       return;
     }
 
-    const stage = queueStageRef.current;
-
     updateQueueVirtualRange();
 
-    if (!stage) {
-      return;
-    }
-
-    stage.addEventListener("scroll", updateQueueVirtualRange, { passive: true });
+    window.addEventListener("scroll", updateQueueVirtualRange, { passive: true });
     window.addEventListener("resize", updateQueueVirtualRange);
 
     return () => {
-      stage.removeEventListener("scroll", updateQueueVirtualRange);
+      window.removeEventListener("scroll", updateQueueVirtualRange);
       window.removeEventListener("resize", updateQueueVirtualRange);
     };
   }, [
@@ -5263,7 +5258,7 @@ export default function ReviewApp({
     }
 
     const distanceToBottom =
-      stage.scrollHeight - stage.scrollTop - stage.clientHeight;
+      stage.getBoundingClientRect().bottom - window.innerHeight;
 
     if (distanceToBottom < QUEUE_ROW_ESTIMATED_HEIGHT * 4) {
       loadMoreQueueRows();

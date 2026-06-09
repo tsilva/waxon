@@ -15,7 +15,6 @@ if (typeof WebSocket !== "undefined") {
 }
 
 const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
-const DEFAULT_DECK_ID = "deep-learning";
 const DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-2";
 const DEFAULT_BATCH_SIZE = 32;
 
@@ -25,7 +24,7 @@ function parseArgs(argv) {
     approvalTable: false,
     batchSize: DEFAULT_BATCH_SIZE,
     changesPath: null,
-    deckId: DEFAULT_DECK_ID,
+    deckId: "",
     embeddingModel: DEFAULT_EMBEDDING_MODEL,
     json: false,
     limit: 0,
@@ -100,7 +99,7 @@ function parseArgs(argv) {
   options.embeddingModel = options.embeddingModel.trim();
 
   if (!options.deckId) {
-    throw new Error("--deck-id must not be empty");
+    throw new Error("--deck-id is required");
   }
 
   if (!options.embeddingModel) {

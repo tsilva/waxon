@@ -58,7 +58,6 @@ type CandidateForJudgment = CandidateWithEmbedding & {
   neighbors: Neighbor[];
 };
 
-const DEFAULT_DECK_ID = "deep-learning";
 const NEIGHBOR_COUNT = 10;
 const MIN_EXTERNAL_SIMILARITY = 0.78;
 const MIN_BATCH_SIMILARITY = 0.86;
@@ -241,7 +240,12 @@ async function loadExternalNeighbors(
     return new Map();
   }
 
-  const deckId = trace.deckId?.trim() || DEFAULT_DECK_ID;
+  const deckId = trace.deckId?.trim();
+
+  if (!deckId) {
+    throw new Error("deckId is required for semantic dedupe.");
+  }
+
   const valuesSql = candidates
     .map((_, index) => `($${index * 2 + 1}, $${index * 2 + 2}::vector)`)
     .join(", ");
@@ -514,8 +518,17 @@ export async function gateNovelQuestions(
   input: Array<string | QuestionInput>,
   trace: Partial<OpenRouterTraceContext> = {},
 ): Promise<NovelQuestionGateResult> {
-  const deckId = trace.deckId?.trim() || DEFAULT_DECK_ID;
-  const normalized = await ensureConciseAnswers(normalizeQuestionInput(input), trace);
+  const deckId = trace.deckId?.trim();
+
+  if (!deckId) {
+    throw new Error("deckId is required for semantic dedupe.");
+  }
+
+  const traceWithDeck = { ...trace, deckId };
+  const normalized = await ensureConciseAnswers(
+    normalizeQuestionInput(input),
+    traceWithDeck,
+  );
   const candidatesWithAnswers = normalized.filter(
     (candidate) => candidate.conciseAnswer.trim().length > 0,
   );
@@ -553,7 +566,10 @@ export async function gateNovelQuestions(
   let embeddedCandidates: CandidateWithEmbedding[];
 
   try {
-    embeddedCandidates = await buildCandidateEmbeddings(candidatesToCheck, trace);
+    embeddedCandidates = await buildCandidateEmbeddings(
+      candidatesToCheck,
+      traceWithDeck,
+    );
   } catch (error) {
     console.info("[waxon] semantic dedupe embedding unavailable; using exact dedupe only", {
       error: error instanceof Error ? error.message : "unknown error",
@@ -569,7 +585,10 @@ export async function gateNovelQuestions(
     };
   }
 
-  const externalNeighbors = await loadExternalNeighbors(embeddedCandidates, trace);
+  const externalNeighbors = await loadExternalNeighbors(
+    embeddedCandidates,
+    traceWithDeck,
+  );
   const candidatesForJudgment = addBatchNeighbors(
     embeddedCandidates.map((candidate) => ({
       ...candidate,
@@ -579,7 +598,7 @@ export async function gateNovelQuestions(
   let decisions: Map<string, { duplicateOf: string | null; rationale: string }>;
 
   try {
-    decisions = await judgeDuplicateBatch(candidatesForJudgment, trace);
+    decisions = await judgeDuplicateBatch(candidatesForJudgment, traceWithDeck);
   } catch (error) {
     console.info("[waxon] semantic dedupe judge unavailable; accepting embedded candidates", {
       error: error instanceof Error ? error.message : "unknown error",

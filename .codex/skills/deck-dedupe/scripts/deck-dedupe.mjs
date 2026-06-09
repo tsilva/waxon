@@ -13,7 +13,6 @@ if (typeof WebSocket !== "undefined") {
   neonConfig.webSocketConstructor = WebSocket;
 }
 
-const DEFAULT_DECK_ID = "deep-learning";
 const DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-2";
 const DEFAULT_EMBEDDING_KIND = "dedupe_v1";
 const DEFAULT_SOURCE_VERSION = 1;
@@ -24,7 +23,7 @@ const AGENT_JUDGE_LABEL = "codex-agent-native";
 function parseArgs(argv) {
   const options = {
     apply: false,
-    deckId: DEFAULT_DECK_ID,
+    deckId: "",
     decisionsPath: null,
     embeddingKind: DEFAULT_EMBEDDING_KIND,
     embeddingModel: DEFAULT_EMBEDDING_MODEL,
@@ -98,7 +97,7 @@ function parseArgs(argv) {
   options.decisionsPath = options.decisionsPath?.trim() || null;
 
   if (!options.deckId) {
-    throw new Error("--deck-id must not be empty");
+    throw new Error("--deck-id is required");
   }
 
   if (!options.embeddingModel) {
