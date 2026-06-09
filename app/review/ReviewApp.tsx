@@ -967,7 +967,7 @@ function formatReviewDate(timestamp: number | null): string {
     return "Never";
   }
 
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -1253,7 +1253,7 @@ function startOfLocalDay(timestamp: number): number {
 }
 
 function formatStatsDate(timestamp: number): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
   }).format(new Date(timestamp));
@@ -1953,6 +1953,7 @@ export default function ReviewApp({
   const questionIdRef = useRef(currentQuestionId);
   const currentSessionItemRef = useRef(currentSessionItem);
   const sessionQueueRef = useRef(sessionQueue);
+  const reviewSessionReloadGenerationRef = useRef(0);
   const isFlaggingQuestionRef = useRef(isFlaggingQuestion);
   const pendingRetryItemsRef = useRef(new Map<string, ReviewQueueItem>());
   const processedEvaluationIdsRef = useRef(new Set<string>());
@@ -2346,6 +2347,32 @@ export default function ReviewApp({
     }
   }, []);
 
+  const resetReviewSessionForServerReload = useCallback(() => {
+    reviewSessionReloadGenerationRef.current += 1;
+    prefetchedNextQuestionRef.current = null;
+    nextQuestionPrefetchRef.current?.abortController.abort();
+    nextQuestionPrefetchRef.current = null;
+    hasLoadedQuestionRef.current = false;
+    currentSessionItemRef.current = null;
+    sessionQueueRef.current = [];
+    questionRef.current = null;
+    questionIdRef.current = null;
+    answerRef.current = "";
+    pendingLearnSourceRef.current = null;
+    learnTopUpSatisfiedKeyRef.current = null;
+    setCurrentSessionItem(null);
+    setSessionQueue([]);
+    setQuestion(null);
+    setCurrentQuestionId(null);
+    setCurrentDeckId(null);
+    setCurrentDeckName(null);
+    setAnswer("");
+    setSpeechPreview("");
+    setQueueRemaining(0);
+    setError(null);
+    setReviewQueueVersion((currentVersion) => currentVersion + 1);
+  }, []);
+
   const openDeckEditor = useCallback((deck: DeckManagementItem) => {
     setSelectedDeckId(deck.id);
     setDeckDraftName(deck.name);
@@ -2420,6 +2447,7 @@ export default function ReviewApp({
         ]);
         setSelectedDeckId(savedDeck.id);
         rememberLearnTargetDeck(savedDeck.id);
+        resetReviewSessionForServerReload();
       } else {
         setDecks((currentDecks) =>
           currentDecks.map((deck) =>
@@ -2455,6 +2483,7 @@ export default function ReviewApp({
     isDeckSaving,
     navigateToTab,
     rememberLearnTargetDeck,
+    resetReviewSessionForServerReload,
     selectedDeckDetailId,
   ]);
 
@@ -2482,17 +2511,7 @@ export default function ReviewApp({
           currentDeck.id === deck.id ? (data.deck as DeckManagementItem) : currentDeck,
         ),
       );
-      prefetchedNextQuestionRef.current = null;
-      nextQuestionPrefetchRef.current?.abortController.abort();
-      nextQuestionPrefetchRef.current = null;
-      hasLoadedQuestionRef.current = false;
-      setQuestion(null);
-      questionRef.current = null;
-      setCurrentQuestionId(null);
-      questionIdRef.current = null;
-      setCurrentDeckId(null);
-      setQueueRemaining(0);
-      setReviewQueueVersion((currentVersion) => currentVersion + 1);
+      resetReviewSessionForServerReload();
     } catch (toggleError) {
       setDeckPageMessage(
         toggleError instanceof Error
@@ -2500,7 +2519,7 @@ export default function ReviewApp({
           : "Could not update rotation.",
       );
     }
-  }, []);
+  }, [resetReviewSessionForServerReload]);
 
   const resetDeckQueueState = useCallback(() => {
     queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
@@ -2564,6 +2583,7 @@ export default function ReviewApp({
 
     const deckId = editingDeck.id;
     const deckName = editingDeck.name;
+    const wasRotationDeck = editingDeck.inReviewRotation;
     const nextDecks = decks.filter((deck) => deck.id !== deckId);
     const wasOpenDeck = selectedDeckDetailId === deckId;
     const wasCurrentQuestionDeck = currentDeckId === deckId;
@@ -2598,21 +2618,12 @@ export default function ReviewApp({
         ),
       );
 
-      if (wasCurrentQuestionDeck) {
-        prefetchedNextQuestionRef.current = null;
-        nextQuestionPrefetchRef.current?.abortController.abort();
-        nextQuestionPrefetchRef.current = null;
-        hasLoadedQuestionRef.current = false;
-        setQuestion(null);
-        questionRef.current = null;
-        setCurrentQuestionId(null);
-        questionIdRef.current = null;
-        setCurrentDeckId(null);
-        setCurrentDeckName(null);
-        setAnswer("");
-        setSpeechPreview("");
-        setMessages([]);
-        setQueueRemaining(0);
+      if (wasRotationDeck || wasCurrentQuestionDeck) {
+        resetReviewSessionForServerReload();
+
+        if (wasCurrentQuestionDeck) {
+          setMessages([]);
+        }
       }
 
       if (wasOpenDeck) {
@@ -2626,7 +2637,6 @@ export default function ReviewApp({
       setSelectedQuestion(null);
       setIsCreatingDeck(false);
       setEditingDeckId(null);
-      setReviewQueueVersion((currentVersion) => currentVersion + 1);
       setDeckPageMessage(`Deleted ${deckName}.`);
     } catch (deleteError) {
       setDeckEditorMessage(
@@ -2645,6 +2655,7 @@ export default function ReviewApp({
     isDeckDeleting,
     navigateToTab,
     rememberLearnTargetDeck,
+    resetReviewSessionForServerReload,
     resetDeckQueueState,
     selectedDeckDetailId,
   ]);
@@ -2877,6 +2888,7 @@ export default function ReviewApp({
     appendToMessages?: boolean;
   }) => {
     const surfaceError = options?.surfaceError ?? true;
+    const reloadGeneration = reviewSessionReloadGenerationRef.current;
     setIsLoadingQuestion(true);
     setError(null);
 
@@ -2885,6 +2897,10 @@ export default function ReviewApp({
 
       if (queue.length === 0) {
         queue = await fetchReviewSessionQueue();
+      }
+
+      if (reviewSessionReloadGenerationRef.current !== reloadGeneration) {
+        return null;
       }
 
       const [nextItem, ...remainingItems] = queue;
