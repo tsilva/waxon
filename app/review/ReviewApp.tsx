@@ -3224,7 +3224,10 @@ export default function ReviewApp({
 
   const applyQueueStatus = useCallback((
     data: QueueStatusResponse,
-    options: { preserveLoadedQueue?: boolean } = {},
+    options: {
+      preserveLoadedQueue?: boolean;
+      preserveRecentAttempts?: boolean;
+    } = {},
   ) => {
     const nextReviewQueueTotal = data.reviewQueueTotal ?? data.reviewQueue.length;
     const nextReviewQueueLimit = Math.max(
@@ -3233,11 +3236,14 @@ export default function ReviewApp({
     );
     const shouldPreserveLoadedQueue =
       options.preserveLoadedQueue &&
-      nextReviewQueueLimit < queueLoadedLimitRef.current;
+      (nextReviewQueueLimit < queueLoadedLimitRef.current ||
+        (data.reviewQueue.length === 0 && nextReviewQueueTotal === 0));
 
     setQueueRemaining(data.queueRemaining);
     setEvaluations(data.evaluations);
-    setRecentAttempts(data.recentAttempts ?? []);
+    if (!options.preserveRecentAttempts) {
+      setRecentAttempts(data.recentAttempts ?? []);
+    }
     setReviewQueue((currentQueue) => {
       if (!shouldPreserveLoadedQueue) {
         return data.reviewQueue;
@@ -3247,7 +3253,9 @@ export default function ReviewApp({
         ? currentQueue.slice(0, nextReviewQueueTotal)
         : currentQueue;
     });
-    setReviewQueueTotal(nextReviewQueueTotal);
+    if (!shouldPreserveLoadedQueue) {
+      setReviewQueueTotal(nextReviewQueueTotal);
+    }
     if (!shouldPreserveLoadedQueue) {
       queueLoadedLimitRef.current = nextReviewQueueLimit;
     }
@@ -3427,7 +3435,10 @@ export default function ReviewApp({
         const data = JSON.parse(
           (event as MessageEvent<string>).data,
         ) as QueueStatusResponse;
-        applyQueueStatus(data, { preserveLoadedQueue: true });
+        applyQueueStatus(data, {
+          preserveLoadedQueue: true,
+          preserveRecentAttempts: true,
+        });
       } catch {
         // Ignore malformed stream events; the connection can continue.
       }
