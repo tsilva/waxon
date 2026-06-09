@@ -3222,16 +3222,35 @@ export default function ReviewApp({
     return `/api/deck-embedding-plot?${params.toString()}`;
   }, [queueSortKey, selectedDeckDetailId]);
 
-  const applyQueueStatus = useCallback((data: QueueStatusResponse) => {
-    setQueueRemaining(data.queueRemaining);
-    setEvaluations(data.evaluations);
-    setRecentAttempts(data.recentAttempts ?? []);
-    setReviewQueue(data.reviewQueue);
-    setReviewQueueTotal(data.reviewQueueTotal ?? data.reviewQueue.length);
-    queueLoadedLimitRef.current = Math.max(
+  const applyQueueStatus = useCallback((
+    data: QueueStatusResponse,
+    options: { preserveLoadedQueue?: boolean } = {},
+  ) => {
+    const nextReviewQueueTotal = data.reviewQueueTotal ?? data.reviewQueue.length;
+    const nextReviewQueueLimit = Math.max(
       QUEUE_PAGE_SIZE,
       data.reviewQueueLimit ?? data.reviewQueue.length,
     );
+    const shouldPreserveLoadedQueue =
+      options.preserveLoadedQueue &&
+      nextReviewQueueLimit < queueLoadedLimitRef.current;
+
+    setQueueRemaining(data.queueRemaining);
+    setEvaluations(data.evaluations);
+    setRecentAttempts(data.recentAttempts ?? []);
+    setReviewQueue((currentQueue) => {
+      if (!shouldPreserveLoadedQueue) {
+        return data.reviewQueue;
+      }
+
+      return currentQueue.length > nextReviewQueueTotal
+        ? currentQueue.slice(0, nextReviewQueueTotal)
+        : currentQueue;
+    });
+    setReviewQueueTotal(nextReviewQueueTotal);
+    if (!shouldPreserveLoadedQueue) {
+      queueLoadedLimitRef.current = nextReviewQueueLimit;
+    }
     hasLoadedQueueStatusRef.current = true;
     loadedQueueSortKeyRef.current = queueSortKey;
     loadedQueueSearchQueryRef.current = queueSearchQuery;
@@ -3408,7 +3427,7 @@ export default function ReviewApp({
         const data = JSON.parse(
           (event as MessageEvent<string>).data,
         ) as QueueStatusResponse;
-        applyQueueStatus(data);
+        applyQueueStatus(data, { preserveLoadedQueue: true });
       } catch {
         // Ignore malformed stream events; the connection can continue.
       }
@@ -4377,9 +4396,7 @@ export default function ReviewApp({
 
       setGeneratedQuestions((current) => [...candidates, ...current]);
       setGeneratorMessage(
-        candidates.length > 0
-          ? `${candidates.length} generated.`
-          : "OpenRouter returned no new questions.",
+        candidates.length > 0 ? null : "OpenRouter returned no new questions.",
       );
     } catch (generateError) {
       setGeneratorMessage(
@@ -4818,14 +4835,15 @@ export default function ReviewApp({
   const queueBottomSpacerHeight =
     Math.max(0, sortedReviewQueue.length - queueVirtualRange.end) *
     QUEUE_ROW_ESTIMATED_HEIGHT;
-  const previousAnswerPlaceholderCount = isPreviousExpanded
-    ? 0
-    : !isLoadingQuestion
-      ? 0
-    : Math.max(
+  const shouldFillPreviousAnswerPlaceholders =
+    !isPreviousExpanded &&
+    (isLoadingQuestion || visiblePreviousAnswers.length === 0);
+  const previousAnswerPlaceholderCount = shouldFillPreviousAnswerPlaceholders
+    ? Math.max(
         0,
         COLLAPSED_PREVIOUS_ANSWER_LIMIT - visiblePreviousAnswers.length,
-      );
+      )
+    : 0;
   const topUpLearnQueue = useCallback(async () => {
     const now = Date.now();
     const count = 50;
@@ -5254,6 +5272,7 @@ export default function ReviewApp({
     activeTab,
     hasMoreReviewQueue,
     loadMoreQueueRows,
+    queueVirtualRange.start,
     queueVirtualRange.end,
     selectedDeckDetailId,
   ]);
@@ -5264,7 +5283,7 @@ export default function ReviewApp({
         activeTab === "review" && isPreviousExpanded
           ? "page-previous-expanded"
           : ""
-      }`}
+      } ${activeTab === "queue" ? "page-queue-active" : ""}`}
     >
       <section className="review-shell" aria-label="Flashcard learning">
         <ReviewToolbar
@@ -5760,7 +5779,9 @@ export default function ReviewApp({
                 );
               })}
 
-              {!hasPreviousAnswers && isReviewResting ? (
+              {!hasPreviousAnswers &&
+              isReviewResting &&
+              previousAnswerPlaceholderCount === 0 ? (
                 <li className="previous-row previous-row-empty">
                   <p>No previous answers yet.</p>
                 </li>
@@ -5893,28 +5914,34 @@ export default function ReviewApp({
           {selectedDeckDetailId ? (
             <>
               <div className="queue-detail-header">
-                <div>
+                <div className="queue-detail-heading">
                   <h2>{selectedDeckDetail?.name ?? "Deck"}</h2>
+                  <p>
+                    {selectedDeckDetail?.cardCount ?? 0}{" "}
+                    {(selectedDeckDetail?.cardCount ?? 0) === 1 ? "card" : "cards"}
+                  </p>
                 </div>
-                <button
-                  className="queue-map-trigger"
-                  type="button"
-                  onClick={() => setIsEmbeddingMapOpen(true)}
-                >
-                  <Layers aria-hidden="true" />
-                  <span>Map</span>
-                </button>
               </div>
 
               <div className="queue-toolbar">
-                <button
-                  className="queue-generate-trigger"
-                  type="button"
-                  onClick={openQuestionGenerator}
-                >
-                  <Sparkles aria-hidden="true" />
-                  <span>Generate</span>
-                </button>
+                <div className="queue-action-group">
+                  <button
+                    className="queue-generate-trigger"
+                    type="button"
+                    onClick={openQuestionGenerator}
+                  >
+                    <Sparkles aria-hidden="true" />
+                    <span>Generate</span>
+                  </button>
+                  <button
+                    className="queue-map-trigger"
+                    type="button"
+                    onClick={() => setIsEmbeddingMapOpen(true)}
+                  >
+                    <Layers aria-hidden="true" />
+                    <span>Map</span>
+                  </button>
+                </div>
                 <label className="queue-search-label">
                   <span className="sr-only">Search cards by meaning</span>
                   <span className="queue-search-shell">
@@ -6498,79 +6525,66 @@ export default function ReviewApp({
                 </section>
               ) : (
                 <section className="generator-review-panel" aria-label="Generated questions">
-                <div className="generator-review-header">
-                  <div>
-                    <h3>Generated</h3>
-                    <p>
-                      {generatedQuestionCounts.new} available ·{" "}
-                      {generatedQuestionCounts.selected} selected
-                    </p>
-                  </div>
-                  {generatedQuestionCounts.adding > 0 ? (
-                    <span>{generatedQuestionCounts.adding} adding</span>
-                  ) : null}
-                </div>
-
-                <ol className="generator-question-list">
-                  {generatedQuestions.map((item) => (
-                    <li
-                      className={`generator-question-row generator-question-${item.status}`}
-                      key={item.id}
-                    >
-                      <button
-                        className="generator-question-status"
-                        type="button"
-                        aria-label={
-                          item.status === "new"
-                            ? `Select question for adding: ${item.question}`
-                            : item.status === "selected"
-                              ? `Remove question from add selection: ${item.question}`
-                              : "Adding question"
-                        }
-                        disabled={item.status === "adding"}
-                        onClick={() => toggleGeneratedQuestionSelection(item.id)}
+                  <ol className="generator-question-list">
+                    {generatedQuestions.map((item) => (
+                      <li
+                        className={`generator-question-row generator-question-${item.status}`}
+                        key={item.id}
                       >
-                        {item.status === "selected" ? (
-                          <Check aria-hidden="true" />
-                        ) : (
-                          <Plus aria-hidden="true" />
-                        )}
-                      </button>
-                      <div className="generator-question-copy">
-                        <MarkdownInline
-                          as="p"
-                          className="generator-question-text"
-                          text={item.question}
-                        />
-                      </div>
-                    </li>
-                  ))}
-                </ol>
+                        <button
+                          className="generator-question-status"
+                          type="button"
+                          aria-label={
+                            item.status === "new"
+                              ? `Select question for adding: ${item.question}`
+                              : item.status === "selected"
+                                ? `Remove question from add selection: ${item.question}`
+                                : "Adding question"
+                          }
+                          disabled={item.status === "adding"}
+                          onClick={() => toggleGeneratedQuestionSelection(item.id)}
+                        >
+                          {item.status === "selected" ? (
+                            <Check aria-hidden="true" />
+                          ) : (
+                            <Plus aria-hidden="true" />
+                          )}
+                        </button>
+                        <div className="generator-question-copy">
+                          <MarkdownInline
+                            as="p"
+                            className="generator-question-text"
+                            text={item.question}
+                          />
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
 
-                <div className="generator-review-footer">
-                  <p aria-live="polite">
-                    {generatorMessage ??
-                      (generatedQuestionCounts.selected > 0
-                        ? `${generatedQuestionCounts.selected} selected for add.`
-                        : generatedQuestionCounts.new > 0
-                          ? "Click + on any question to select it."
-                          : "Add selected questions to the deck.")}
-                  </p>
-                  <div className="generator-review-actions">
-                    <button
-                      className="generator-primary-action"
-                      type="button"
-                      onClick={() => void addSelectedGeneratedQuestionsToDeck()}
-                      disabled={
-                        generatedQuestionCounts.selected === 0 ||
-                        generatedQuestionCounts.adding > 0
-                      }
-                    >
-                      {generatedQuestionCounts.adding > 0 ? "Adding..." : "Add to Deck"}
-                    </button>
+                  <div className="generator-review-footer">
+                    <p aria-live="polite">
+                      {generatorMessage ? `${generatorMessage} · ` : ""}
+                      {generatedQuestionCounts.selected} selected ·{" "}
+                      {generatedQuestionCounts.new} available
+                      {generatedQuestionCounts.adding > 0
+                        ? ` · ${generatedQuestionCounts.adding} adding`
+                        : ""}
+                    </p>
+                    <div className="generator-review-actions">
+                      <button
+                        className="generator-primary-action"
+                        type="button"
+                        onClick={() => void addSelectedGeneratedQuestionsToDeck()}
+                        disabled={
+                          generatedQuestionCounts.selected === 0 ||
+                          generatedQuestionCounts.adding > 0
+                        }
+                      >
+                        {generatedQuestionCounts.adding > 0 ? "Adding..." : "Add to Deck"}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </section>
+                </section>
               )}
             </div>
           </section>
