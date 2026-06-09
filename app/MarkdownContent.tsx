@@ -122,6 +122,12 @@ function readMathAtom(source: string, startIndex: number): MathParseResult {
   };
 }
 
+function isFormulaInlineCode(value: string): boolean {
+  return /[=+\-*/^≈≤≥<>]|\\[A-Za-z]+|\b(?:cos|exp|ln|log|logit|sigmoid|sin|softmax|sum|tan|tanh)\b/iu.test(
+    value,
+  );
+}
+
 function renderMathNodes(expression: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let index = 0;
@@ -227,9 +233,18 @@ function renderInlineMarkdown(
       const closeIndex = findClosingDelimiter(text, "`", index + 1);
 
       if (closeIndex > index) {
+        const codeText = text.slice(index + 1, closeIndex);
+
         nodes.push(
-          <code className="markdown-inline-code" key={`code-${index}`}>
-            {text.slice(index + 1, closeIndex)}
+          <code
+            className={
+              isFormulaInlineCode(codeText)
+                ? "markdown-inline-code markdown-formula-code"
+                : "markdown-inline-code"
+            }
+            key={`code-${index}`}
+          >
+            {codeText}
           </code>,
         );
         index = closeIndex + 1;

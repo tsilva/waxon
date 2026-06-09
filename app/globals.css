@@ -16,6 +16,9 @@
   --danger: #8c5462;
   --success: #6b8e75;
   --success-soft: #d7e6d6;
+  --formula: #7c5968;
+  --formula-command: #8b6238;
+  --formula-soft: #f3e8e5;
   --shadow: 0 30px 90px rgb(42 24 22 / 10%);
   --font-ui:
     "Red Hat Mono", "SFMono-Regular", ui-monospace, SFMono-Regular,
@@ -2650,17 +2653,31 @@ textarea {
   font-size: 0.82em;
 }
 
-.math-expression {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.13em;
+.markdown-formula-code {
+  display: inline-block;
   max-width: 100%;
-  color: inherit;
+  border: 1px solid rgb(124 89 104 / 16%);
+  padding: 0.01em 0.2em 0.05em;
+  background: var(--formula-soft);
+  color: var(--formula);
+  font-family:
+    "Times New Roman", "STIX Two Math", "Cambria Math", Georgia, serif;
+  font-size: 0.86em;
+  font-style: italic;
+  line-height: 0.98;
+  vertical-align: -0.04em;
+  white-space: nowrap;
+}
+
+.math-expression {
+  display: inline;
+  max-width: 100%;
+  color: var(--formula);
   font-family:
     "Times New Roman", "STIX Two Math", "Cambria Math", Georgia, serif;
   font-style: italic;
   line-height: 1;
-  vertical-align: middle;
+  vertical-align: -0.04em;
   white-space: nowrap;
 }
 
@@ -2668,9 +2685,12 @@ textarea {
   display: flex;
   justify-content: center;
   padding: 0.2em 0;
+  line-height: 1.12;
+  vertical-align: baseline;
 }
 
 .math-command {
+  color: var(--formula-command);
   font-style: normal;
 }
 
