@@ -5438,7 +5438,11 @@ export default function ReviewApp({
 
                   <div className="learn-generation-stream">
                     <span className="pending-spinner" aria-hidden="true" />
-                    <p>{activeLearnGenerationStreamText}</p>
+                    <MarkdownInline
+                      as="p"
+                      className="learn-generation-stream-text"
+                      text={activeLearnGenerationStreamText}
+                    />
                   </div>
                 </div>
               ) : (

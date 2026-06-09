@@ -45,6 +45,7 @@ import {
   getOpenRouterApiKey,
   openRouterEmbeddings,
 } from "./openRouter";
+import { questionSlug } from "./questionSlug";
 import type {
   DeckEmbeddingPlot,
   DeckEmbeddingPlotPoint,
@@ -54,6 +55,7 @@ import type {
   QueueStatusSnapshot,
   ReviewQueueItem,
 } from "./reviewTypes";
+import type { NovelQuestionGateResult } from "./semanticDedupe";
 
 export const RESOLVED_JUDGING_VISIBLE_MS = 5 * 60_000;
 const EVALUATION_PROCESSING_TIMEOUT_MS = EVALUATION_TIMEOUT_MS;
@@ -1339,6 +1341,39 @@ export async function submitAnswer(input: {
   };
 }
 
+function acceptQuestionsWithoutNoveltyGate(
+  input: Array<string | QuestionInput>,
+): NovelQuestionGateResult {
+  const seen = new Set<string>();
+  const accepted: NovelQuestionGateResult["accepted"] = [];
+
+  for (const item of input) {
+    const question = typeof item === "string" ? item : item.question;
+    const normalizedQuestion = question.trim().replace(/\s+/g, " ");
+    const slug = questionSlug(normalizedQuestion);
+
+    if (!normalizedQuestion || seen.has(slug)) {
+      continue;
+    }
+
+    seen.add(slug);
+    accepted.push({
+      question: normalizedQuestion,
+      conciseAnswer:
+        typeof item === "string"
+          ? ""
+          : (item.conciseAnswer ?? "").trim().replace(/\s+/g, " "),
+      embedding: [],
+      sourceHash: "",
+    });
+  }
+
+  return {
+    accepted,
+    rejected: [],
+  };
+}
+
 export async function addQuestionsToDeck(input: {
   questions: Array<string | QuestionInput>;
   deckId?: string;
@@ -1350,11 +1385,17 @@ export async function addQuestionsToDeck(input: {
     deckId: input.deckId,
   });
 
-  const gateResult = await gateNovelQuestions(input.questions, {
-    operation: "add_questions_gate",
-    userId: user.id,
-    deckId,
-  });
+  const targetDeck = (await listDecks({ userId: user.id })).find(
+    (deck) => deck.id === deckId,
+  );
+  const gateResult =
+    targetDeck?.cardCount === 0
+      ? acceptQuestionsWithoutNoveltyGate(input.questions)
+      : await gateNovelQuestions(input.questions, {
+          operation: "add_questions_gate",
+          userId: user.id,
+          deckId,
+        });
   const provenanceByQuestion = new Map(
     input.questions
       .filter((question): question is QuestionInput => typeof question !== "string")
