@@ -290,7 +290,7 @@ function deckSlug(input: string): string {
 }
 
 function deckIdForSlug(userId: string, slug: string): string {
-  return userId === "tsilva" ? slug : `${userId}:${slug}`;
+  return `${userId}:${slug}`;
 }
 
 function normalizedDeckName(input: string): string {

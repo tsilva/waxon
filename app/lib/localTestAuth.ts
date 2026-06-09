@@ -1,9 +1,9 @@
 const LOCAL_TEST_AUTH_DISABLED_VALUES = new Set(["1", "true", "yes"]);
 
 export const localTestUser = {
-  id: "tsilva",
-  displayName: "Tiago Silva",
-  email: "eng.tiago.silva@gmail.com",
+  id: "local-test",
+  displayName: "Local Test User",
+  email: "local-test@waxon.local",
   avatarUrl: null,
 } as const;
 

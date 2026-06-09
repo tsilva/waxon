@@ -50,8 +50,8 @@ In local development, login and signup buttons automatically enter the app as a
 test user:
 
 ```text
-id: tsilva
-email: eng.tiago.silva@gmail.com
+id: local-test
+email: local-test@waxon.local
 ```
 
 This keeps `/review`, `/decks`, `/admin`, and app API routes testable without a
@@ -70,15 +70,6 @@ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your-clerk-publishable-key
 CLERK_SECRET_KEY=your-clerk-secret-key
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-```
-
-To attach the first Clerk test account to the existing local `tsilva` data, set
-this before the first sign-in. The email guard prevents another test account
-from claiming that legacy user:
-
-```bash
-WAXON_CLAIM_LEGACY_USER_ID=tsilva
-WAXON_CLAIM_LEGACY_EMAIL=eng.tiago.silva@gmail.com
 ```
 
 ## Commands

@@ -1089,7 +1089,7 @@ textarea {
 }
 
 .page-queue-active {
-  overflow: hidden;
+  overflow: visible;
 }
 
 .review-shell {
@@ -1110,7 +1110,7 @@ textarea {
 }
 
 .page-queue-active .review-shell {
-  height: max(760px, calc(100svh - (clamp(16px, 1.6vw, 24px) * 2)));
+  height: auto;
 }
 
 .reader-header {
@@ -2779,10 +2779,7 @@ textarea {
   min-height: 0;
   margin: 0 auto;
   padding: clamp(28px, 4vh, 48px) 0 32px;
-  overflow-y: auto;
-  scrollbar-color: rgb(166 124 82 / 50%) transparent;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
+  overflow: visible;
 }
 
 .queue-detail-header {
@@ -6274,8 +6271,8 @@ textarea {
   }
 
   .page-queue-active .review-shell {
-    height: 100svh;
-    min-height: 100svh;
+    height: auto;
+    min-height: 100vh;
   }
 
   .reader-header {

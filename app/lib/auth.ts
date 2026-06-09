@@ -37,40 +37,8 @@ function appUserIdForClerkUser(clerkUserId: string): string {
   return `clerk:${clerkUserId}`;
 }
 
-async function findLegacyClaimUserId(email: string): Promise<string | null> {
-  const legacyUserId = process.env.WAXON_CLAIM_LEGACY_USER_ID?.trim();
-
-  if (!legacyUserId) {
-    return null;
-  }
-
-  const legacyEmail = process.env.WAXON_CLAIM_LEGACY_EMAIL?.trim().toLowerCase();
-
-  if (legacyEmail && email.trim().toLowerCase() !== legacyEmail) {
-    return null;
-  }
-
-  const [legacyUser] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.id, legacyUserId))
-    .limit(1);
-
-  if (!legacyUser) {
-    return null;
-  }
-
-  const [existingClaim] = await db
-    .select({ id: authAccounts.id })
-    .from(authAccounts)
-    .where(eq(authAccounts.userId, legacyUserId))
-    .limit(1);
-
-  return existingClaim ? null : legacyUser.id;
-}
-
 export function getDeckIdForUser(userId: string): string {
-  return userId === "tsilva" ? "deep-learning" : `${userId}:deep-learning`;
+  return `${userId}:deep-learning`;
 }
 
 function setTraceIdentity(input: {
@@ -163,10 +131,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
     )
     .limit(1);
 
-  const userId =
-    existingAccount?.userId ??
-    (await findLegacyClaimUserId(email)) ??
-    appUserIdForClerkUser(clerkUserId);
+  const userId = existingAccount?.userId ?? appUserIdForClerkUser(clerkUserId);
   const deckId = getDeckIdForUser(userId);
 
   setTraceIdentity({ userId, deckId, email, displayName });
