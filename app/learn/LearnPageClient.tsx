@@ -7,10 +7,10 @@ import {
   ChevronRight,
   Loader2,
   PlusCircle,
-  SendHorizontal,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
+import { AnswerComposer } from "@/app/AnswerComposer";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { isAdminEmail } from "@/app/lib/adminAccess";
@@ -505,6 +505,20 @@ export default function LearnPageClient() {
     }
   }
 
+  function handleChatComposerKeyDown(
+    event: React.KeyboardEvent<HTMLTextAreaElement>,
+  ) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey
+    ) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
+    }
+  }
+
   const showCourseList =
     !selectedCourse && courses.length > 0 && !isStartingNewCourse;
 
@@ -612,12 +626,20 @@ export default function LearnPageClient() {
                 >
                   <div className="learn-course-picker-heading">
                     <p className="learn-kicker">Courses</p>
-                    <button type="button" onClick={startNewCourse}>
-                      <PlusCircle aria-hidden="true" />
-                      <span>New</span>
-                    </button>
                   </div>
                   <div className="learn-course-list">
+                    <button
+                      className="learn-course-item learn-course-new"
+                      aria-label="New course"
+                      disabled={Boolean(loadingCourseId)}
+                      type="button"
+                      onClick={startNewCourse}
+                    >
+                      <span aria-hidden="true">
+                        <PlusCircle aria-hidden="true" />
+                      </span>
+                      <strong>New</strong>
+                    </button>
                     {courses.map((course) => (
                       <button
                         className="learn-course-item"
@@ -679,7 +701,7 @@ export default function LearnPageClient() {
                         )}
                       </div>
                     ))}
-                    <div ref={chatEndRef} />
+                    <div className="learn-chat-end" ref={chatEndRef} />
                   </div>
                   {conversationCostLabel ? (
                     <div
@@ -689,32 +711,30 @@ export default function LearnPageClient() {
                       {conversationCostLabel}
                     </div>
                   ) : null}
-                  <form className="learn-chat-composer" onSubmit={submitChatPrompt}>
-                    <input
-                      id="learn-topic-input"
-                      type="text"
-                      value={topic}
-                      onChange={(event) => setTopic(event.target.value)}
-                      placeholder={
-                        selectedCourse
-                          ? "Answer here"
-                          : "Learn convolutional neural networks for vision"
-                      }
-                      disabled={isStreaming}
-                    />
-                    <button
-                      type="submit"
-                      disabled={!topic.trim() || isStreaming}
-                      aria-label={isStreaming ? streamingStatus : "Send"}
-                      title={isStreaming ? streamingStatus : "Send"}
-                    >
-                      {isStreaming ? (
+                  <AnswerComposer
+                    id="learn-topic-input"
+                    className="learn-chat-composer"
+                    value={topic}
+                    onValueChange={setTopic}
+                    onSubmit={submitChatPrompt}
+                    onKeyDown={handleChatComposerKeyDown}
+                    placeholder={
+                      selectedCourse
+                        ? "Answer here"
+                        : "Learn convolutional neural networks for vision"
+                    }
+                    ariaLabel={selectedCourse ? "Answer here" : "Learning goal"}
+                    rows={1}
+                    disabled={isStreaming}
+                    submitDisabled={!topic.trim() || isStreaming}
+                    submitAriaLabel={isStreaming ? streamingStatus : "Send"}
+                    submitTitle={isStreaming ? streamingStatus : "Send"}
+                    submitIcon={
+                      isStreaming ? (
                         <Loader2 className="learn-spin-icon" aria-hidden="true" />
-                      ) : (
-                        <SendHorizontal aria-hidden="true" />
-                      )}
-                    </button>
-                  </form>
+                      ) : undefined
+                    }
+                  />
                 </section>
               ) : null}
             </div>
