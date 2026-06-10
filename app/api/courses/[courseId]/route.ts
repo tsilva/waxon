@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCourse } from "@/app/lib/courseStore";
+import { deleteCourse, getCourse } from "@/app/lib/courseStore";
+import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,4 +41,25 @@ export async function GET(_request: Request, context: RouteContext) {
     ok: true,
     course,
   });
+}
+
+export async function DELETE(_request: Request, context: RouteContext) {
+  const { courseId } = await context.params;
+
+  try {
+    await deleteCourse(courseId);
+    invalidateReviewQueue();
+
+    return NextResponse.json({
+      ok: true,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Could not delete course.";
+
+    return NextResponse.json(
+      { ok: false, error: message },
+      { status: message === "Course not found." ? 404 : 400 },
+    );
+  }
 }

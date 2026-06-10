@@ -19,6 +19,7 @@ import {
 import {
   applyEvaluationToPostgres,
   createDeck,
+  deleteDeck,
   listDecks,
   upsertDueQuestions,
   type DueQuestion,
@@ -339,6 +340,19 @@ export async function getCourse(courseId: string): Promise<CourseDetail | null> 
     pages: pageRows.map(toCoursePage),
     chatMessages: chatRows.map(toCourseChatMessage),
   };
+}
+
+export async function deleteCourse(courseId: string): Promise<void> {
+  const course = await getCourse(courseId);
+
+  if (!course) {
+    throw new Error("Course not found.");
+  }
+
+  await deleteDeck({
+    deckId: course.deckId,
+    userId: course.userId,
+  });
 }
 
 export async function createCourse(input: {
