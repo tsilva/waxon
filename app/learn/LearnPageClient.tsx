@@ -436,10 +436,11 @@ export default function LearnPageClient() {
                     >
                       {message.content ? (
                         <MarkdownContent
-                          className="learn-chat-message-content"
+                          className={`learn-chat-message-content learn-chat-message-content-${message.role}`}
                           text={message.content}
                           enableCodeBlocks
-                          enableHeadings={false}
+                          enableHeadings={message.role === "assistant"}
+                          enableMath={message.role === "assistant"}
                         />
                       ) : (
                         <span className="pending-spinner" aria-hidden="true" />
