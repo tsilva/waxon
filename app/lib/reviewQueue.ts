@@ -84,10 +84,7 @@ type Submission = {
 type QueueStatusBroadcastMode = "full" | "evaluations";
 type QueueStatusSubscriber = (mode: QueueStatusBroadcastMode) => void;
 
-type NextQuestionMode = "review" | "learn";
-
 type NextQuestionInput = {
-  mode?: NextQuestionMode;
   deckId?: string | null;
   excludeQuestionId?: string | null;
   excludeQuestion?: string | null;
@@ -192,15 +189,6 @@ function questionKey(input: {
   question: string;
 }): string {
   return input.questionId ?? `question:${input.question}`;
-}
-
-function matchesNextQuestionMode(
-  question: DueQuestion,
-  mode: NextQuestionMode,
-): boolean {
-  const hasReviewHistory = parseReviews(question.reviews).length > 0;
-
-  return mode === "learn" ? !hasReviewHistory : true;
 }
 
 export function invalidateReviewQueue(userId?: string): void {
@@ -1114,13 +1102,11 @@ export async function peekNextQuestion(input: NextQuestionInput = {}): Promise<{
 }> {
   const { user, state } = await initializeQueue();
   await refreshIfEmpty(state, user.id);
-  const mode = input.mode ?? "review";
   const deckId = input.deckId?.trim() || null;
   const excludedQuestionKey = input.excludeQuestionId?.trim() || null;
   const excludedQuestion = input.excludeQuestion?.trim() || null;
   const matchingQueue = state.queue.filter(
     (item) =>
-      matchesNextQuestionMode(item, mode) &&
       (!deckId || item.deckId === deckId) &&
       !state.inFlightQuestionKeys.has(questionKey(item)),
   );
@@ -1143,33 +1129,7 @@ export async function peekNextQuestion(input: NextQuestionInput = {}): Promise<{
   };
 }
 
-export async function skipQuestion(input: {
-  mode?: NextQuestionMode;
-  questionId?: string | null;
-  question: string;
-}): Promise<{
-  questionId: string | null;
-  question: string | null;
-  deckId: string | null;
-  deckName: string | null;
-  queueRemaining: number;
-}> {
-  const { user, state } = await initializeQueue();
-  await refreshIfEmpty(state, user.id);
-
-  const skipped = removeFromQueue(state, input);
-
-  if (skipped) {
-    state.queue.push(skipped);
-    logQueueFlushStatus(state, "skipped-question");
-    void broadcastQueueStatus(state);
-  }
-
-  return peekNextQuestion({ mode: input.mode });
-}
-
 export async function flagQuestion(input: {
-  mode?: NextQuestionMode;
   questionId: string;
   question: string;
 }): Promise<{
@@ -1197,7 +1157,7 @@ export async function flagQuestion(input: {
     void broadcastQueueStatus(state);
   }
 
-  return peekNextQuestion({ mode: input.mode });
+  return peekNextQuestion();
 }
 
 export async function submitAnswer(input: {

@@ -66,25 +66,6 @@ type NextQuestionResponse = {
   queueRemaining: number;
 };
 
-type LearnPanelMode = "review" | "learn";
-
-type PrefetchedNextQuestion = {
-  mode: LearnPanelMode;
-  deckId: string | null;
-  excludeQuestionId: string | null;
-  excludeQuestion: string;
-  data: NextQuestionResponse;
-};
-
-type NextQuestionPrefetch = {
-  mode: LearnPanelMode;
-  deckId: string | null;
-  excludeQuestionId: string | null;
-  excludeQuestion: string;
-  abortController: AbortController;
-  promise: Promise<PrefetchedNextQuestion | null>;
-};
-
 type SubmitAnswerResponse =
   | {
       ok: true;
@@ -207,7 +188,6 @@ type ReviewAppProps = {
 };
 
 type ReviewSessionSnapshot = {
-  learnPanelMode: LearnPanelMode;
   currentQuestionId: string | null;
   question: string | null;
   currentSessionItem: ReviewQueueItem | null;
@@ -643,57 +623,10 @@ type TopUpStreamPayload =
     };
 
 type PendingSpeechCommand = {
-  command: "skip" | "submit";
+  command: "submit";
   heldText: string;
   submitAnswer: string;
 };
-
-function nextQuestionUrl(input: {
-  mode?: LearnPanelMode;
-  deckId?: string | null;
-  excludeQuestionId?: string | null;
-  excludeQuestion?: string | null;
-} = {}) {
-  const params = new URLSearchParams();
-
-  if (input.mode) {
-    params.set("mode", input.mode);
-  }
-
-  if (input.deckId) {
-    params.set("deckId", input.deckId);
-  }
-
-  if (input.excludeQuestionId) {
-    params.set("excludeQuestionId", input.excludeQuestionId);
-  }
-
-  if (input.excludeQuestion) {
-    params.set("excludeQuestion", input.excludeQuestion);
-  }
-
-  return params.size > 0
-    ? `/api/next-question?${params.toString()}`
-    : "/api/next-question";
-}
-
-async function fetchNextQuestionData(input: {
-  mode?: LearnPanelMode;
-  deckId?: string | null;
-  excludeQuestionId?: string | null;
-  excludeQuestion?: string | null;
-  signal?: AbortSignal;
-} = {}): Promise<NextQuestionResponse> {
-  const response = await fetch(nextQuestionUrl(input), {
-    cache: "no-store",
-    signal: input.signal,
-  });
-
-  return await readJsonResponse<NextQuestionResponse>(
-    response,
-    "Failed to load the next question.",
-  );
-}
 
 async function fetchReviewSessionQueue(input: {
   deckId?: string | null;
@@ -815,7 +748,7 @@ function createEmptyDeckEmbeddingPlot(): DeckEmbeddingPlotResponse {
   };
 }
 const MAX_AVATAR_UPLOAD_BYTES = 512 * 1024;
-const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit|skip)[.!?]*$/i;
+const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit)[.!?]*$/i;
 const DEFAULT_GENERATED_QUESTION_COUNT = 5;
 const MAX_GENERATED_QUESTION_COUNT = 10;
 
@@ -1092,7 +1025,7 @@ function extractTerminalSpeechCommand(
 
   const command = commandMatch[1]?.toLowerCase();
 
-  if (command !== "submit" && command !== "skip") {
+  if (command !== "submit") {
     return null;
   }
 
@@ -1810,7 +1743,6 @@ export default function ReviewApp({
   const [sessionQueue, setSessionQueue] = useState<ReviewQueueItem[]>(
     () => cachedSessionRef.current?.sessionQueue ?? [],
   );
-  const [learnPanelMode] = useState<LearnPanelMode>("review");
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(
     () => cachedSessionRef.current?.currentQuestionId ?? null,
   );
@@ -2012,17 +1944,11 @@ export default function ReviewApp({
   const isFlaggingQuestionRef = useRef(isFlaggingQuestion);
   const pendingRetryItemsRef = useRef(new Map<string, ReviewQueueItem>());
   const processedEvaluationIdsRef = useRef(new Set<string>());
-  const pendingLearnSourceRef = useRef<{
-    deckId: string | null;
-    question: string | null;
-  } | null>(null);
-  const learnTopUpSatisfiedKeyRef = useRef<string | null>(null);
   const learnTargetDeckIdRef = useRef<string | null>(
     cachedSessionRef.current?.selectedDeckDetailId ??
       cachedSessionRef.current?.selectedDeckId ??
       null,
   );
-  const topUpLearnQueueRef = useRef<(() => Promise<void>) | null>(null);
   const queueStageRef = useRef<HTMLElement | null>(null);
   const queueListRef = useRef<HTMLOListElement | null>(null);
   const queueLoadedLimitRef = useRef(
@@ -2037,7 +1963,6 @@ export default function ReviewApp({
   const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
-  const submitSequenceRef = useRef(0);
   const shouldRefocusAnswerAfterSubmitRef = useRef(false);
   const keepListeningRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -2045,8 +1970,6 @@ export default function ReviewApp({
   const pendingSpeechCommandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const prefetchedNextQuestionRef = useRef<PrefetchedNextQuestion | null>(null);
-  const nextQuestionPrefetchRef = useRef<NextQuestionPrefetch | null>(null);
   const isLearnTopUpPendingRef = useRef(false);
   const learnTopUpCooldownUntilRef = useRef(0);
 
@@ -2186,7 +2109,6 @@ export default function ReviewApp({
 
   useEffect(() => {
     reviewSessionSnapshot = {
-      learnPanelMode,
       currentQuestionId,
       question,
       currentSessionItem,
@@ -2249,7 +2171,6 @@ export default function ReviewApp({
     evaluations,
     expandedPreviousAnswerIds,
     isCreatingDeck,
-    learnPanelMode,
     generatedQuestions,
     generatorFiles,
     generatorMessage,
@@ -2485,17 +2406,12 @@ export default function ReviewApp({
 
   const resetReviewSessionForServerReload = useCallback(() => {
     reviewSessionReloadGenerationRef.current += 1;
-    prefetchedNextQuestionRef.current = null;
-    nextQuestionPrefetchRef.current?.abortController.abort();
-    nextQuestionPrefetchRef.current = null;
     hasLoadedQuestionRef.current = false;
     currentSessionItemRef.current = null;
     sessionQueueRef.current = [];
     questionRef.current = null;
     questionIdRef.current = null;
     answerRef.current = "";
-    pendingLearnSourceRef.current = null;
-    learnTopUpSatisfiedKeyRef.current = null;
     setCurrentSessionItem(null);
     setSessionQueue([]);
     setQuestion(null);
@@ -3062,218 +2978,16 @@ export default function ReviewApp({
     }
   }, [applyReviewQueueItem]);
 
-  const getNextQuestionDeckId = useCallback(
-    (mode: LearnPanelMode) =>
-      mode === "learn"
-        ? selectedDeckDetailId ||
-          learnTargetDeckIdRef.current ||
-          (questionRef.current ? currentDeckId : selectedDeckId) ||
-          currentDeckId ||
-          selectedDeckId ||
-          null
-        : null,
-    [currentDeckId, selectedDeckDetailId, selectedDeckId],
-  );
-
-  const prefetchNextQuestion = useCallback((
-    mode: LearnPanelMode,
-    excludeQuestionId: string | null,
-    excludeQuestion: string | null,
-  ) => {
-    const deckId = getNextQuestionDeckId(mode);
-    const normalizedQuestionId = excludeQuestionId?.trim() || null;
-    const normalizedQuestion = excludeQuestion?.trim();
-
-    if (!normalizedQuestion) {
-      return;
-    }
-
-    if (
-      prefetchedNextQuestionRef.current?.mode === mode &&
-      prefetchedNextQuestionRef.current?.deckId === deckId &&
-      prefetchedNextQuestionRef.current?.excludeQuestionId ===
-        normalizedQuestionId &&
-      prefetchedNextQuestionRef.current?.excludeQuestion === normalizedQuestion
-    ) {
-      return;
-    }
-
-    if (
-      nextQuestionPrefetchRef.current?.mode === mode &&
-      nextQuestionPrefetchRef.current?.deckId === deckId &&
-      nextQuestionPrefetchRef.current?.excludeQuestionId ===
-        normalizedQuestionId &&
-      nextQuestionPrefetchRef.current?.excludeQuestion === normalizedQuestion
-    ) {
-      return;
-    }
-
-    prefetchedNextQuestionRef.current = null;
-    nextQuestionPrefetchRef.current?.abortController.abort();
-
-    const abortController = new AbortController();
-    const promise = fetchNextQuestionData({
-      mode,
-      deckId,
-      excludeQuestionId: normalizedQuestionId,
-      excludeQuestion: normalizedQuestion,
-      signal: abortController.signal,
-    })
-      .then((data): PrefetchedNextQuestion => ({
-        mode,
-        deckId,
-        excludeQuestionId: normalizedQuestionId,
-        excludeQuestion: normalizedQuestion,
-        data,
-      }))
-      .catch((prefetchError): null => {
-        if (
-          prefetchError instanceof DOMException &&
-          prefetchError.name === "AbortError"
-        ) {
-          return null;
-        }
-
-        return null;
-      });
-
-    const request: NextQuestionPrefetch = {
-      mode,
-      deckId,
-      excludeQuestionId: normalizedQuestionId,
-      excludeQuestion: normalizedQuestion,
-      abortController,
-      promise,
-    };
-
-    nextQuestionPrefetchRef.current = request;
-
-    void promise.then((prefetched) => {
-      if (nextQuestionPrefetchRef.current !== request) {
-        return;
-      }
-
-      nextQuestionPrefetchRef.current = null;
-
-      if (
-        prefetched &&
-        questionIdRef.current === prefetched.excludeQuestionId &&
-        questionRef.current === prefetched.excludeQuestion
-      ) {
-        prefetchedNextQuestionRef.current = prefetched;
-      }
-    });
-  }, [getNextQuestionDeckId]);
-
-  const takePrefetchedNextQuestion = useCallback(
-    async (
-      mode: LearnPanelMode,
-      excludeQuestionId: string | null,
-      excludeQuestion: string,
-    ) => {
-      const deckId = getNextQuestionDeckId(mode);
-      const normalizedQuestionId = excludeQuestionId?.trim() || null;
-      const normalizedQuestion = excludeQuestion.trim();
-      const cachedQuestion = prefetchedNextQuestionRef.current;
-
-      if (
-        cachedQuestion?.mode === mode &&
-        cachedQuestion?.deckId === deckId &&
-        cachedQuestion?.excludeQuestionId === normalizedQuestionId &&
-        cachedQuestion?.excludeQuestion === normalizedQuestion
-      ) {
-        prefetchedNextQuestionRef.current = null;
-        return cachedQuestion.data;
-      }
-
-      const pendingPrefetch = nextQuestionPrefetchRef.current;
-
-      if (
-        pendingPrefetch?.mode !== mode ||
-        pendingPrefetch.deckId !== deckId ||
-        pendingPrefetch?.excludeQuestionId !== normalizedQuestionId ||
-        pendingPrefetch?.excludeQuestion !== normalizedQuestion
-      ) {
-        return null;
-      }
-
-      const prefetched = await pendingPrefetch.promise;
-
-      if (nextQuestionPrefetchRef.current === pendingPrefetch) {
-        nextQuestionPrefetchRef.current = null;
-      }
-
-      if (
-        prefetched?.mode !== mode ||
-        prefetched.deckId !== deckId ||
-        prefetched.excludeQuestionId !== normalizedQuestionId ||
-        prefetched.excludeQuestion !== normalizedQuestion
-      ) {
-        return null;
-      }
-
-      prefetchedNextQuestionRef.current = null;
-      return prefetched.data;
-    },
-    [getNextQuestionDeckId],
-  );
-
   const loadNextQuestion = useCallback(async (options?: {
-    mode?: LearnPanelMode;
-    excludeQuestionId?: string | null;
-    excludeQuestion?: string | null;
     surfaceError?: boolean;
   }) => {
     const surfaceError = options?.surfaceError ?? true;
-    const mode = options?.mode ?? learnPanelMode;
 
-    if (mode === "review") {
-      return advanceReviewSessionQueue({
-        surfaceError,
-        appendToMessages: true,
-      });
-    }
-
-    setIsLoadingQuestion(true);
-    if (mode === "learn") {
-      setLearnGenerationStatus("Checking for an available question");
-    }
-    setQuestion(null);
-    questionRef.current = null;
-    setCurrentQuestionId(null);
-    questionIdRef.current = null;
-    setCurrentDeckId(null);
-    setCurrentDeckName(null);
-    setError(null);
-
-    try {
-      const data = await fetchNextQuestionData({
-        mode,
-        deckId: getNextQuestionDeckId(mode),
-        excludeQuestionId: options?.excludeQuestionId,
-        excludeQuestion: options?.excludeQuestion,
-      });
-      applyNextQuestion(data);
-      hasLoadedQuestionRef.current = true;
-      return data;
-    } catch (loadError) {
-      if (surfaceError) {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "Failed to load the next question.",
-        );
-      }
-      return null;
-    } finally {
-      setIsLoadingQuestion(false);
-    }
-  }, [
-    advanceReviewSessionQueue,
-    applyNextQuestion,
-    getNextQuestionDeckId,
-    learnPanelMode,
-  ]);
+    return advanceReviewSessionQueue({
+      surfaceError,
+      appendToMessages: true,
+    });
+  }, [advanceReviewSessionQueue]);
 
   const normalizedQueueSearchInput = useMemo(
     () => queueSearchInput.trim().replace(/\s+/g, " "),
@@ -3533,27 +3247,6 @@ export default function ReviewApp({
 
     void loadStats();
   }, [activeTab, loadStats, reviewQueueVersion]);
-
-  useEffect(() => {
-    if (!question) {
-      prefetchedNextQuestionRef.current = null;
-      nextQuestionPrefetchRef.current?.abortController.abort();
-      nextQuestionPrefetchRef.current = null;
-      return;
-    }
-
-    if (learnPanelMode === "review") {
-      return;
-    }
-
-    prefetchNextQuestion(learnPanelMode, currentQuestionId, question);
-  }, [currentQuestionId, learnPanelMode, prefetchNextQuestion, question]);
-
-  useEffect(() => {
-    return () => {
-      nextQuestionPrefetchRef.current?.abortController.abort();
-    };
-  }, []);
 
   useEffect(() => {
     if (activeTab !== "queue" || !selectedDeckDetailId) {
@@ -3898,8 +3591,6 @@ export default function ReviewApp({
     const optimisticMessageId = `answer-${optimisticEvaluationId}`;
 
     isSubmittingRef.current = true;
-    submitSequenceRef.current += 1;
-    const submitSequence = submitSequenceRef.current;
     shouldRefocusAnswerAfterSubmitRef.current = true;
     setIsSubmitting(true);
     setAnswer("");
@@ -3931,26 +3622,6 @@ export default function ReviewApp({
         cost: null,
       },
     ]);
-
-    let nextQuestionData: NextQuestionResponse | null = null;
-    let hasShownNextQuestion = false;
-    const optimisticNextQuestionPromise =
-      learnPanelMode === "learn"
-        ? takePrefetchedNextQuestion(
-            learnPanelMode,
-            submittedQuestionId,
-            submittedQuestion,
-          ).then((prefetchedQuestion) => {
-            if (!prefetchedQuestion || submitSequenceRef.current !== submitSequence) {
-              return null;
-            }
-
-            nextQuestionData = prefetchedQuestion;
-            hasShownNextQuestion = true;
-            applyNextQuestion(prefetchedQuestion, { appendToMessages: false });
-            return prefetchedQuestion;
-          })
-        : Promise.resolve(null);
 
     try {
       const response = await fetch("/api/submit-answer", {
@@ -3995,38 +3666,10 @@ export default function ReviewApp({
         ),
       );
 
-      if (learnPanelMode === "review") {
-        await advanceReviewSessionQueue({ appendToMessages: true });
-      } else {
-        if (!hasShownNextQuestion) {
-          nextQuestionData = await optimisticNextQuestionPromise;
-        }
-
-        if (hasShownNextQuestion && nextQuestionData?.question) {
-          appendQuestion(nextQuestionData.question);
-        }
-
-        if (!nextQuestionData) {
-          nextQuestionData = await loadNextQuestion({
-            mode: learnPanelMode,
-            excludeQuestionId: submittedQuestionId,
-            excludeQuestion: submittedQuestion,
-          }) as NextQuestionResponse | null;
-        }
-      }
-
-      if (learnPanelMode === "learn" && !nextQuestionData?.question) {
-        pendingLearnSourceRef.current = {
-          deckId: currentDeckId,
-          question: submittedQuestion,
-        };
-        learnTopUpCooldownUntilRef.current = 0;
-        await topUpLearnQueueRef.current?.();
-      }
+      await advanceReviewSessionQueue({ appendToMessages: true });
 
       return true;
     } catch (submitError) {
-      submitSequenceRef.current += 1;
       setMessages((current) =>
         current.filter(
           (message) =>
@@ -4056,76 +3699,9 @@ export default function ReviewApp({
     }
   }, [
     advanceReviewSessionQueue,
-    applyNextQuestion,
     clearPendingSpeechCommand,
     currentDeckId,
     currentDeckName,
-    learnPanelMode,
-    loadNextQuestion,
-    appendQuestion,
-    takePrefetchedNextQuestion,
-  ]);
-
-  const skipCurrentQuestion = useCallback(async () => {
-    clearPendingSpeechCommand();
-    const activeQuestion = questionRef.current;
-    const activeQuestionId = questionIdRef.current;
-
-    if (!activeQuestion || isSubmittingRef.current || isFlaggingQuestionRef.current) {
-      return false;
-    }
-
-    setAnswer("");
-    answerRef.current = "";
-    setSpeechPreview("");
-    setError(null);
-
-    if (learnPanelMode === "review") {
-      const skippedItem = currentSessionItemRef.current;
-
-      if (skippedItem) {
-        const nextQueue = [...sessionQueueRef.current, skippedItem];
-        sessionQueueRef.current = nextQueue;
-        setSessionQueue(nextQueue);
-      }
-
-      await advanceReviewSessionQueue({ appendToMessages: true });
-      return true;
-    }
-
-    try {
-      const response = await fetch("/api/skip-question", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          mode: learnPanelMode,
-          questionId: activeQuestionId,
-          question: activeQuestion,
-        }),
-      });
-
-      const data = await readJsonResponse<NextQuestionResponse>(
-        response,
-        "Failed to skip the question.",
-      );
-      applyNextQuestion(data);
-
-      return true;
-    } catch (skipError) {
-      setError(
-        skipError instanceof Error
-          ? skipError.message
-          : "Failed to skip the question.",
-      );
-      return false;
-    }
-  }, [
-    advanceReviewSessionQueue,
-    applyNextQuestion,
-    clearPendingSpeechCommand,
-    learnPanelMode,
   ]);
 
   const flagCurrentQuestion = useCallback(async () => {
@@ -4147,9 +3723,6 @@ export default function ReviewApp({
     answerRef.current = "";
     setSpeechPreview("");
     setError(null);
-    prefetchedNextQuestionRef.current = null;
-    nextQuestionPrefetchRef.current?.abortController.abort();
-    nextQuestionPrefetchRef.current = null;
 
     const flagRequest = fetch("/api/flag-question", {
       method: "POST",
@@ -4157,7 +3730,6 @@ export default function ReviewApp({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        mode: learnPanelMode,
         questionId: activeQuestionId,
         question: activeQuestion,
       }),
@@ -4169,29 +3741,22 @@ export default function ReviewApp({
     );
 
     try {
-      if (learnPanelMode === "review") {
-        const nextQueue = sessionQueueRef.current.filter(
-          (item) =>
-            item.questionId !== activeQuestionId &&
-            item.question !== activeQuestion,
-        );
+      const data = await flagRequest;
+      const nextQueue = sessionQueueRef.current.filter(
+        (item) =>
+          item.questionId !== activeQuestionId &&
+          item.question !== activeQuestion,
+      );
 
-        sessionQueueRef.current = nextQueue;
-        setSessionQueue(nextQueue);
+      sessionQueueRef.current = nextQueue;
+      setSessionQueue(nextQueue);
 
-        if (nextQueue.length > 0) {
-          await advanceReviewSessionQueue({ appendToMessages: true });
-          await flagRequest;
-          return true;
-        }
-
-        const data = await flagRequest;
+      if (nextQueue.length > 0) {
+        await advanceReviewSessionQueue({ appendToMessages: true });
+      } else {
         applyNextQuestion(data);
-        return true;
       }
 
-      const data = await flagRequest;
-      applyNextQuestion(data);
       return true;
     } catch (flagError) {
       setError(
@@ -4207,7 +3772,6 @@ export default function ReviewApp({
     advanceReviewSessionQueue,
     applyNextQuestion,
     clearPendingSpeechCommand,
-    learnPanelMode,
   ]);
 
   const handleSpeechText = useCallback(
@@ -4233,14 +3797,9 @@ export default function ReviewApp({
         return;
       }
 
-      if (speechCommand.command === "submit") {
-        setAnswer("");
-        answerRef.current = "";
-        setSpeechPreview("");
-      } else {
-        setAnswer(speechCommand.submitAnswer);
-        answerRef.current = speechCommand.submitAnswer;
-      }
+      setAnswer("");
+      answerRef.current = "";
+      setSpeechPreview("");
 
       pendingSpeechCommandRef.current = speechCommand;
       pendingSpeechCommandTimerRef.current = setTimeout(() => {
@@ -4252,18 +3811,12 @@ export default function ReviewApp({
 
         clearPendingSpeechCommand();
 
-        if (commandToRun.command === "submit") {
-          void submit(commandToRun.submitAnswer);
-          return;
-        }
-
-        void skipCurrentQuestion();
+        void submit(commandToRun.submitAnswer);
       }, SPEECH_COMMAND_SETTLE_MS);
     },
     [
       appendAnswerText,
       clearPendingSpeechCommand,
-      skipCurrentQuestion,
       submit,
     ],
   );
@@ -5053,6 +4606,12 @@ export default function ReviewApp({
   const topUpLearnQueue = useCallback(async () => {
     const now = Date.now();
     const count = 50;
+    const topUpDeckId =
+      selectedDeckDetailId ||
+      learnTargetDeckIdRef.current ||
+      currentDeckId ||
+      selectedDeckId ||
+      null;
 
     if (isLearnTopUpPendingRef.current) {
       return;
@@ -5086,6 +4645,7 @@ export default function ReviewApp({
         },
         body: JSON.stringify({
           count,
+          ...(topUpDeckId ? { deckId: topUpDeckId } : {}),
         }),
       });
       const data = await parseTopUpResponse(response, count, (progress) => {
@@ -5094,13 +4654,11 @@ export default function ReviewApp({
       });
 
       if (data.added > 0) {
-        learnTopUpSatisfiedKeyRef.current = null;
         setLearnTopUpMessage(
           data.added === 1
             ? `1 question added to ${data.deckName}`
             : `${data.added} questions added to ${data.deckName}`,
         );
-        pendingLearnSourceRef.current = null;
         setLearnGenerationStatus("Refreshing the queue");
         setLearnGenerationProgress((currentProgress) => ({
           phase: "complete",
@@ -5128,7 +4686,7 @@ export default function ReviewApp({
           total: currentProgress?.total ?? count,
           latestQuestion: currentProgress?.latestQuestion ?? null,
         }));
-        await loadNextQuestion({ mode: "review", surfaceError: false });
+        await loadNextQuestion({ surfaceError: false });
       } else {
         learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
         setLearnGenerationStatus(null);
@@ -5136,7 +4694,7 @@ export default function ReviewApp({
         setLearnTopUpMessage(
           data.rejected > 0
             ? "Generated questions were duplicates"
-            : "No learn questions generated",
+            : "No new questions generated",
         );
       }
     } catch (topUpError) {
@@ -5154,14 +4712,13 @@ export default function ReviewApp({
       setLearnGenerationProgress(null);
     }
   }, [
+    currentDeckId,
     loadDecks,
     loadNextQuestion,
     loadStatus,
+    selectedDeckDetailId,
+    selectedDeckId,
   ]);
-
-  useEffect(() => {
-    topUpLearnQueueRef.current = topUpLearnQueue;
-  }, [topUpLearnQueue]);
 
   const selectedQuestionStats = useMemo<QuestionStats | null>(() => {
     if (!selectedQuestion) {
@@ -5409,14 +4966,6 @@ export default function ReviewApp({
   const hasGeneratorContext =
     generatorScope.trim().length > 0 || generatorFiles.length > 0;
   const isGeneratorReviewStep = generatedQuestions.length > 0;
-  const shouldShowLearnWaitingMask = learnPanelMode === "learn" && !question;
-  const isLearnWaitingBusy = isLoadingQuestion || isLearnTopUpPending;
-  const learnWaitingStatus = isLoadingQuestion
-    ? "Checking for an available question"
-    : learnGenerationStatus ?? learnTopUpMessage ?? "Preparing new questions";
-  const learnWaitingTitle = isLearnWaitingBusy
-    ? "Generating questions"
-    : "No question ready";
 
   useEffect(() => {
     if (!selectedQuestionStats) {
@@ -5547,54 +5096,7 @@ export default function ReviewApp({
                 !isLoadingQuestion && question ? "question-copy-enter" : ""
               }`}
             >
-              {shouldShowLearnWaitingMask ? (
-                <div
-                  className="learn-waiting-mask"
-                  aria-busy={isLearnWaitingBusy}
-                >
-                  <div className="learn-waiting-content">
-                    <span className="learn-waiting-icon" aria-hidden="true">
-                      <Sparkles />
-                    </span>
-                    <p className="learn-waiting-kicker">Learn mode</p>
-                    <h2 className="learn-waiting-title">{learnWaitingTitle}</h2>
-                    <p
-                      className="learn-waiting-status"
-                      role="status"
-                      aria-live="polite"
-                    >
-                      {learnWaitingStatus}
-                    </p>
-                    {isLearnWaitingBusy ? (
-                      <div className="learn-waiting-progress" aria-hidden="true">
-                        <span />
-                        <span />
-                        <span />
-                      </div>
-                    ) : (
-                      <div className="learn-waiting-actions">
-                        <button
-                          className="resting-primary"
-                          type="button"
-                          onClick={() => {
-                            learnTopUpCooldownUntilRef.current = 0;
-                            void topUpLearnQueue();
-                          }}
-                        >
-                          Retry
-                        </button>
-                        <button
-                          className="resting-secondary"
-                          type="button"
-                          onClick={openQueue}
-                        >
-                          View queue
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : isLoadingQuestion ? (
+              {isLoadingQuestion ? (
                 <h2 className="question-title">Loading next question...</h2>
               ) : question ? (
                 <>
@@ -5622,12 +5124,12 @@ export default function ReviewApp({
                         </button>
                       )}
                     </IconTooltip>
-                    <IconTooltip label="Flag and skip">
+                    <IconTooltip label="Flag question">
                       {(tooltipId) => (
                         <button
                           className="question-flag-trigger"
                           type="button"
-                          aria-label="Flag and skip current question"
+                          aria-label="Flag current question"
                           aria-describedby={tooltipId}
                           onClick={() => {
                             void flagCurrentQuestion();
