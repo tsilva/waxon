@@ -11,6 +11,7 @@ import {
   nextCoursePosition,
   validateCourseToc,
   type CourseChoice,
+  type CourseMultipleChoiceWidget,
   type CoursePageContent,
   type CourseToc,
 } from "./courseContent";
@@ -37,6 +38,7 @@ export type CoursePageRecord = {
   correctChoiceId: string;
   correctAnswer: string;
   explanation: string;
+  widget: CourseMultipleChoiceWidget;
   createdAt: number;
   updatedAt: number;
 };
@@ -120,6 +122,15 @@ function toCoursePage(row: {
     correctChoiceId: row.correctChoiceId,
     correctAnswer: row.correctAnswer,
     explanation: row.explanation,
+    widget: {
+      type: "multiple_choice",
+      id: `page-${row.id}-check`,
+      question: row.question,
+      choices: toChoices(row.choices),
+      correctChoiceId: row.correctChoiceId,
+      correctAnswer: row.correctAnswer,
+      explanation: row.explanation,
+    },
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

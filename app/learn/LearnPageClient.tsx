@@ -6,7 +6,7 @@ import {
   Check,
   ChevronRight,
   Loader2,
-  Sparkles,
+  SendHorizontal,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
@@ -41,6 +41,12 @@ type CoursePage = {
   summary: string;
   question: string;
   choices: CourseChoice[];
+  widget?: {
+    type: "multiple_choice";
+    id: string;
+    question: string;
+    choices: CourseChoice[];
+  };
 };
 
 type Course = {
@@ -70,6 +76,33 @@ type ApiResult<T> =
       ok: false;
       error: string;
     };
+
+type LearnChatMessage = {
+  id: string;
+  role: "assistant" | "user";
+  content: string;
+};
+
+type CourseIntakeDecision =
+  | {
+      action: "clarify";
+      message: string;
+    }
+  | {
+      action: "create_course";
+      topic: string;
+      message: string;
+    };
+
+const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
+  id: "learn-chat-intro",
+  role: "assistant",
+  content: "What do you want to learn?",
+};
+
+function chatMessageId() {
+  return `learn-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 async function readApiJson<T>(response: Response): Promise<T> {
   const data = (await response.json().catch(() => null)) as T | null;
@@ -122,6 +155,17 @@ function currentCoursePage(course: Course | null): CoursePage | null {
   );
 }
 
+function multipleChoiceWidget(page: CoursePage) {
+  return (
+    page.widget ?? {
+      type: "multiple_choice",
+      id: `${page.id}-multiple-choice`,
+      question: page.question,
+      choices: page.choices,
+    }
+  );
+}
+
 export default function LearnPageClient() {
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
@@ -131,12 +175,16 @@ export default function LearnPageClient() {
     [],
   );
   const [topic, setTopic] = useState("");
+  const [chatMessages, setChatMessages] = useState<LearnChatMessage[]>([
+    INITIAL_CHAT_MESSAGE,
+  ]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [dueCount, setDueCount] = useState(0);
   const [isBooting, setIsBooting] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [isIntaking, setIsIntaking] = useState(false);
   const [isGeneratingPage, setIsGeneratingPage] = useState(false);
   const [isAnswering, setIsAnswering] = useState(false);
   const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
@@ -144,6 +192,8 @@ export default function LearnPageClient() {
   const [error, setError] = useState<string | null>(null);
   const canViewAdmin = isAdminEmail(currentUser?.email);
   const currentPage = currentCoursePage(selectedCourse);
+  const currentPageWidget = currentPage ? multipleChoiceWidget(currentPage) : null;
+  const isChatBusy = isIntaking || isCreating;
   const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
   const menuDisplayName =
     clerkUser?.fullName ||
@@ -287,10 +337,7 @@ export default function LearnPageClient() {
     void loadCurrentPage(selectedCourse.id);
   }, [isGeneratingPage, loadCurrentPage, selectedCourse]);
 
-  async function createCourse(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const normalizedTopic = topic.trim();
-
+  async function createCourseFromTopic(normalizedTopic: string) {
     if (!normalizedTopic || isCreating) {
       return;
     }
@@ -314,6 +361,14 @@ export default function LearnPageClient() {
 
       setTopic("");
       syncCourse(data.course);
+      setChatMessages((messages) => [
+        ...messages,
+        {
+          id: chatMessageId(),
+          role: "assistant",
+          content: `Course ready: ${data.course.title}`,
+        },
+      ]);
       await loadCurrentPage(data.course.id);
     } catch (createError) {
       setError(
@@ -323,6 +378,70 @@ export default function LearnPageClient() {
       );
     } finally {
       setIsCreating(false);
+    }
+  }
+
+  async function submitChatPrompt(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const content = topic.trim();
+
+    if (!content || isChatBusy) {
+      return;
+    }
+
+    const userMessage: LearnChatMessage = {
+      id: chatMessageId(),
+      role: "user",
+      content,
+    };
+    const nextMessages = [...chatMessages, userMessage];
+
+    setTopic("");
+    setChatMessages(nextMessages);
+    setIsIntaking(true);
+    setError(null);
+    setFeedback(null);
+
+    try {
+      const data = await readApiJson<
+        ApiResult<{ decision: CourseIntakeDecision }>
+      >(
+        await fetch("/api/courses/intake", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: nextMessages.map((message) => ({
+              role: message.role,
+              content: message.content,
+            })),
+          }),
+        }),
+      );
+
+      if (!data.ok) {
+        throw new Error(data.error);
+      }
+
+      setChatMessages((messages) => [
+        ...messages,
+        {
+          id: chatMessageId(),
+          role: "assistant",
+          content: data.decision.message,
+        },
+      ]);
+
+      if (data.decision.action === "create_course") {
+        await createCourseFromTopic(data.decision.topic);
+      }
+    } catch (chatError) {
+      setError(
+        chatError instanceof Error
+          ? chatError.message
+          : "Could not continue Learn chat.",
+      );
+    } finally {
+      setIsIntaking(false);
     }
   }
 
@@ -419,31 +538,7 @@ export default function LearnPageClient() {
           aria-labelledby="learn-tab"
         >
           <aside className="learn-sidebar" aria-label="Courses">
-            <form className="learn-topic-form" onSubmit={createCourse}>
-              <label htmlFor="learn-topic-input">Learn</label>
-              <div className="learn-topic-control">
-                <input
-                  id="learn-topic-input"
-                  type="text"
-                  value={topic}
-                  onChange={(event) => setTopic(event.target.value)}
-                  placeholder="Bayesian inference"
-                  disabled={isCreating}
-                />
-                <button
-                  type="submit"
-                  disabled={!topic.trim() || isCreating}
-                  aria-label="Create course"
-                  title="Create course"
-                >
-                  {isCreating ? (
-                    <Loader2 className="learn-spin-icon" aria-hidden="true" />
-                  ) : (
-                    <Sparkles aria-hidden="true" />
-                  )}
-                </button>
-              </div>
-            </form>
+            <p className="learn-sidebar-label">Courses</p>
 
             <div className="learn-course-list" aria-label="Recent courses">
               {courses.map((course) => (
@@ -483,6 +578,52 @@ export default function LearnPageClient() {
                 <span className="pending-spinner" aria-hidden="true" />
                 <span>Loading Learn</span>
               </div>
+            ) : null}
+
+            {!isBooting ? (
+              <section className="learn-chat-panel" aria-label="Learn chat">
+                <div className="learn-chat-thread">
+                  {chatMessages.map((message) => (
+                    <div
+                      className={`learn-chat-message learn-chat-message-${message.role}`}
+                      key={message.id}
+                    >
+                      <p>{message.content}</p>
+                    </div>
+                  ))}
+                  {isChatBusy ? (
+                    <div
+                      className="learn-chat-message learn-chat-message-assistant"
+                      role="status"
+                    >
+                      <span className="pending-spinner" aria-hidden="true" />
+                      <p>{isCreating ? "Generating course" : "Thinking"}</p>
+                    </div>
+                  ) : null}
+                </div>
+                <form className="learn-chat-composer" onSubmit={submitChatPrompt}>
+                  <input
+                    id="learn-topic-input"
+                    type="text"
+                    value={topic}
+                    onChange={(event) => setTopic(event.target.value)}
+                    placeholder="Learn convolutional neural networks for vision"
+                    disabled={isChatBusy}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!topic.trim() || isChatBusy}
+                    aria-label="Send"
+                    title="Send"
+                  >
+                    {isChatBusy ? (
+                      <Loader2 className="learn-spin-icon" aria-hidden="true" />
+                    ) : (
+                      <SendHorizontal aria-hidden="true" />
+                    )}
+                  </button>
+                </form>
+              </section>
             ) : null}
 
             {!isBooting && selectedCourse ? (
@@ -573,10 +714,17 @@ export default function LearnPageClient() {
                           enableCodeBlocks
                           enableHeadings
                         />
-                        <section className="learn-quiz" aria-label="Page question">
-                          <p className="learn-quiz-question">{currentPage.question}</p>
+                        {currentPageWidget ? (
+                        <section
+                          className="learn-quiz"
+                          aria-label="Page question"
+                          data-widget={currentPageWidget.type}
+                        >
+                          <p className="learn-quiz-question">
+                            {currentPageWidget.question}
+                          </p>
                           <div className="learn-choice-grid">
-                            {currentPage.choices.map((choice) => (
+                            {currentPageWidget.choices.map((choice) => (
                               <button
                                 className={`learn-choice ${
                                   selectedChoiceId === choice.id
@@ -599,6 +747,7 @@ export default function LearnPageClient() {
                             </p>
                           ) : null}
                         </section>
+                        ) : null}
                       </>
                     ) : (
                       <div className="learn-loading" role="status">

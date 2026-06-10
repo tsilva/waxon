@@ -141,6 +141,13 @@
       "when": 1781059400000,
       "tag": "0020_queue_filter_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1781136000000,
+      "tag": "0021_courses",
+      "breakpoints": true
     }
   ]
 }

@@ -12,7 +12,14 @@ import { AccountWidgetsUserProfilePage } from "@/app/AccountProfileWidgets";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 
 const authRoutes = ["/sign-in", "/sign-up"];
-const reviewShellRoutes = ["/review", "/queue", "/decks", "/stats", "/admin"];
+const reviewShellRoutes = [
+  "/learn",
+  "/review",
+  "/queue",
+  "/decks",
+  "/stats",
+  "/admin",
+];
 
 export function AuthBar() {
   const pathname = usePathname();

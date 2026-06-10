@@ -21,6 +21,16 @@ export type CourseChoice = {
   text: string;
 };
 
+export type CourseMultipleChoiceWidget = {
+  type: "multiple_choice";
+  id: string;
+  question: string;
+  choices: CourseChoice[];
+  correctChoiceId: string;
+  correctAnswer: string;
+  explanation: string;
+};
+
 export type CoursePageContent = {
   title: string;
   body: string;
@@ -30,6 +40,7 @@ export type CoursePageContent = {
   correctChoiceId: string;
   correctAnswer: string;
   explanation: string;
+  widget: CourseMultipleChoiceWidget;
 };
 
 const MAX_COURSE_TITLE_CHARS = 90;
@@ -71,6 +82,10 @@ function readArray(value: unknown, field: string): unknown[] {
   }
 
   return value;
+}
+
+function readOptionalArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 export function parseCourseTocJson(source: string): CourseToc {
@@ -155,12 +170,68 @@ function hasEmbeddedChoices(question: string, choices: CourseChoice[]): boolean 
   return embeddedChoiceCount >= 2;
 }
 
+function parseToolCallArguments(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") {
+    return readObject(extractJsonObject(value));
+  }
+
+  return readObject(value);
+}
+
+function normalizeToolCall(value: unknown): {
+  name: string;
+  arguments: Record<string, unknown>;
+} | null {
+  const record = readObject(value);
+  const functionRecord =
+    record.function && typeof record.function === "object"
+      ? (record.function as Record<string, unknown>)
+      : null;
+  const name = normalizeText(record.name ?? functionRecord?.name);
+  const rawArguments = record.arguments ?? functionRecord?.arguments;
+
+  if (!name && normalizeText(record.type) === "multiple_choice") {
+    return {
+      name: "render_multiple_choice",
+      arguments: record,
+    };
+  }
+
+  if (!name || rawArguments === undefined) {
+    return null;
+  }
+
+  return {
+    name,
+    arguments: parseToolCallArguments(rawArguments),
+  };
+}
+
+function readMultipleChoiceWidget(record: Record<string, unknown>) {
+  const toolCallSources = [
+    ...readOptionalArray(record.toolCalls),
+    ...readOptionalArray(record.tool_calls),
+    ...readOptionalArray(record.widgets),
+  ];
+
+  for (const rawToolCall of toolCallSources) {
+    const toolCall = normalizeToolCall(rawToolCall);
+
+    if (toolCall?.name === "render_multiple_choice") {
+      return toolCall.arguments;
+    }
+  }
+
+  return record;
+}
+
 export function parseCoursePageJson(source: string): CoursePageContent {
   return validateCoursePageContent(extractJsonObject(source));
 }
 
 export function validateCoursePageContent(value: unknown): CoursePageContent {
   const record = readObject(value);
+  const widgetRecord = readMultipleChoiceWidget(record);
   const title = truncateText(normalizeText(record.title), MAX_PAGE_TITLE_CHARS);
   const body = truncateText(normalizeMarkdown(record.body), MAX_PAGE_BODY_CHARS);
   const summary = truncateText(
@@ -168,17 +239,19 @@ export function validateCoursePageContent(value: unknown): CoursePageContent {
     MAX_PAGE_SUMMARY_CHARS,
   );
   const question = truncateText(
-    normalizeText(record.question),
+    normalizeText(widgetRecord.question),
     MAX_PAGE_QUESTION_CHARS,
   );
-  const rawChoices = readArray(record.choices, "choices");
-  const correctChoiceId = normalizeText(record.correctChoiceId).toUpperCase();
+  const rawChoices = readArray(widgetRecord.choices, "choices");
+  const correctChoiceId = normalizeText(
+    widgetRecord.correctChoiceId,
+  ).toUpperCase();
   const correctAnswer = truncateText(
-    normalizeText(record.correctAnswer),
+    normalizeText(widgetRecord.correctAnswer),
     MAX_CHOICE_TEXT_CHARS,
   );
   const explanation = truncateText(
-    normalizeText(record.explanation),
+    normalizeText(widgetRecord.explanation),
     MAX_EXPLANATION_CHARS,
   );
 
@@ -222,6 +295,16 @@ export function validateCoursePageContent(value: unknown): CoursePageContent {
     throw new Error("Question must not include multiple-choice options.");
   }
 
+  const widget: CourseMultipleChoiceWidget = {
+    type: "multiple_choice",
+    id: normalizeText(widgetRecord.id) || "page-check",
+    question,
+    choices,
+    correctChoiceId,
+    correctAnswer,
+    explanation,
+  };
+
   return {
     title,
     body,
@@ -231,6 +314,7 @@ export function validateCoursePageContent(value: unknown): CoursePageContent {
     correctChoiceId,
     correctAnswer,
     explanation,
+    widget,
   };
 }
 
