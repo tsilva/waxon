@@ -6019,8 +6019,8 @@ textarea {
 
 .learn-stage {
   display: grid;
-  grid-template-columns: minmax(220px, 282px) minmax(0, 1fr);
-  gap: 24px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
   width: 100%;
   padding: 26px clamp(28px, 4vw, 46px) 34px;
 }
@@ -6166,7 +6166,9 @@ textarea {
 .learn-chat-panel {
   display: grid;
   gap: 12px;
-  margin-bottom: 24px;
+  width: min(900px, 100%);
+  margin: 0 auto 34px;
+  padding-top: 12px;
 }
 
 .learn-chat-thread {
@@ -6206,7 +6208,7 @@ textarea {
   grid-template-columns: minmax(0, 1fr) 42px;
   gap: 10px;
   align-items: center;
-  width: min(760px, 100%);
+  width: 100%;
   padding: 8px;
   border-radius: 999px;
   background: rgb(255 252 245 / 82%);
@@ -6255,6 +6257,7 @@ textarea {
 .learn-chat-resting {
   display: grid;
   align-content: center;
+  justify-content: center;
   min-height: 240px;
   color: var(--muted);
   font: 720 13px/1.45 var(--font-ui);
@@ -7422,25 +7425,6 @@ textarea {
     min-width: 0;
     max-width: 100%;
     padding: 20px 18px 24px;
-  }
-
-  .learn-sidebar {
-    gap: 14px;
-    width: calc(100vw - 36px);
-    max-width: calc(100vw - 36px);
-  }
-
-  .learn-course-list {
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(186px, 70%);
-    overflow-x: auto;
-    padding-bottom: 4px;
-    scroll-snap-type: x proximity;
-  }
-
-  .learn-course-item {
-    min-height: 86px;
-    scroll-snap-align: start;
   }
 
   .learn-course-heading {
