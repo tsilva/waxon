@@ -5,12 +5,16 @@ import {
 } from "@/app/lib/referenceAnswer";
 import {
   getQuestionSnapshotById,
-  getQuestionSnapshot,
   saveReferenceAnswer,
 } from "@/app/lib/postgresStore";
+import { getCurrentUser } from "@/app/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+function normalizedQuestion(input: string): string {
+  return input.trim().replace(/\s+/g, " ");
+}
 
 export async function POST(request: Request) {
   const body: unknown = await request.json().catch(() => null);
@@ -31,9 +35,28 @@ export async function POST(request: Request) {
     typeof payload.questionId === "string" && payload.questionId.trim()
       ? payload.questionId.trim()
       : null;
+  const user = await getCurrentUser();
   const snapshot = questionId
-    ? await getQuestionSnapshotById(questionId)
-    : await getQuestionSnapshot(question);
+    ? await getQuestionSnapshotById(questionId, { userId: user.id })
+    : null;
+
+  if (questionId && !snapshot) {
+    return NextResponse.json(
+      { error: "Question not found." },
+      { status: 404 },
+    );
+  }
+
+  if (
+    snapshot &&
+    normalizedQuestion(snapshot.question) !== normalizedQuestion(question)
+  ) {
+    return NextResponse.json(
+      { error: "Question mismatch." },
+      { status: 400 },
+    );
+  }
+
   const cachedAnswer = snapshot?.referenceAnswer?.trim() ?? "";
 
   if (cachedAnswer && hasReferenceAnswerExplanation(cachedAnswer)) {
@@ -42,16 +65,17 @@ export async function POST(request: Request) {
 
   const answer = await generateReferenceAnswer({
     question,
-    userId: snapshot?.userId ?? null,
+    userId: user.id,
     deckId: snapshot?.deckId ?? null,
   });
 
-  if (!answer.startsWith("Reference answer is unavailable")) {
+  if (snapshot && !answer.startsWith("Reference answer is unavailable")) {
     await saveReferenceAnswer({
-      questionId: snapshot?.questionId ?? questionId ?? undefined,
+      questionId: snapshot.questionId,
       question,
       answer,
       now: Date.now(),
+      userId: user.id,
     });
   }
 

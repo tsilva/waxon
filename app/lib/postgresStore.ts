@@ -2121,7 +2121,7 @@ export async function getAnswerEvaluationsByIds(input: UserContextInput & {
 }
 
 export async function saveReferenceAnswer(input: {
-  questionId?: string;
+  questionId: string;
   question: string;
   answer: string;
   now: number;
@@ -2144,9 +2144,8 @@ export async function saveReferenceAnswer(input: {
             .from(decks)
             .where(eq(decks.userId, context.userId)),
         ),
-        input.questionId
-          ? eq(questions.id, input.questionId)
-          : eq(questions.question, input.question),
+        eq(questions.id, input.questionId),
+        eq(questions.question, input.question),
       ),
     );
 }

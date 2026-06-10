@@ -103,7 +103,9 @@ export async function POST(request: Request) {
     const status =
       message === "Question not found." ||
       message === "Question mismatch." ||
-      message === "Question is not in review."
+      message === "Question is not in review." ||
+      message === "Question has been flagged." ||
+      message === "questionId is required."
         ? 400
         : 500;
 

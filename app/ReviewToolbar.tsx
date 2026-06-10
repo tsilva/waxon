@@ -11,7 +11,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 
-type ReviewToolbarTab = "review" | "decks" | "stats" | "admin";
+type ReviewToolbarTab = "learn" | "review" | "decks" | "stats" | "admin";
 
 type ReviewToolbarProps = {
   activeTab: ReviewToolbarTab;
@@ -21,6 +21,7 @@ type ReviewToolbarProps = {
   menuDisplayName: string;
   menuEmail: string;
   onReviewClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
+  onLearnClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onDecksClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onStatsClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onAdminClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
@@ -40,6 +41,7 @@ export function ReviewToolbar({
   menuDisplayName,
   menuEmail,
   onReviewClick,
+  onLearnClick,
   onDecksClick,
   onStatsClick,
   onAdminClick,
@@ -105,6 +107,17 @@ export function ReviewToolbar({
           <span>waxon</span>
         </Link>
         <div className="reader-tabs" role="tablist" aria-label="Waxon views">
+          <Link
+            className={tabClass(activeTab === "learn")}
+            href="/learn"
+            role="tab"
+            id="learn-tab"
+            aria-selected={activeTab === "learn"}
+            aria-controls="learn-panel"
+            onClick={onLearnClick}
+          >
+            Learn
+          </Link>
           <Link
             className={tabClass(activeTab === "review")}
             href="/review"
