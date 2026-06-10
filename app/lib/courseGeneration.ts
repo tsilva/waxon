@@ -10,11 +10,16 @@ import {
   type CoursePageContent,
   type CourseToc,
 } from "./courseContent";
+import { parseScore } from "./evaluateAnswerParsing";
 import type { CourseDetail } from "./courseStore";
 
 const COURSE_JSON_RESPONSE_FORMAT = { type: "json_object" };
 const MAX_INTAKE_MESSAGE_CHARS = 500;
 const MAX_INTAKE_TOPIC_CHARS = 800;
+
+type CourseCostObserver = {
+  onCost?: (cost: number) => void;
+};
 
 export type CourseIntakeMessage = {
   role: "user" | "assistant";
@@ -47,10 +52,48 @@ export type CourseProgressDecision =
       reason: string;
     };
 
+export type CourseQuestionAttemptToolResult =
+  | {
+      toolCall: "record_course_question_attempt";
+      question: string;
+      answer: string;
+      answerSummary: string;
+      conciseAnswer: string;
+      correctAnswer: string;
+      justification: string;
+      score: number;
+    }
+  | {
+      toolCall: "skip_course_question_attempt";
+      reason: string;
+    };
+
 function normalizeIntakeText(value: unknown, maxLength: number): string {
   return typeof value === "string"
     ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
     : "";
+}
+
+function normalizeMultilineText(value: unknown, maxLength: number): string {
+  return typeof value === "string"
+    ? value.trim().replace(/\n{3,}/g, "\n\n").slice(0, maxLength)
+    : "";
+}
+
+function reportResponseCost(
+  input: CourseCostObserver,
+  usage: { cost?: unknown } | undefined,
+) {
+  const cost =
+    typeof usage?.cost === "number"
+      ? usage.cost
+      : typeof usage?.cost === "string"
+        ? Number.parseFloat(usage.cost)
+        : null;
+
+  if (cost !== null && Number.isFinite(cost) && cost > 0) {
+    input.onCost?.(cost);
+  }
 }
 
 function parseCourseIntakeDecision(source: string): CourseIntakeDecision {
@@ -116,6 +159,64 @@ function parseCourseProgressDecision(source: string): CourseProgressDecision {
   };
 }
 
+function parseCourseQuestionAttemptToolResult(
+  source: string,
+  fallbackAnswer: string,
+): CourseQuestionAttemptToolResult {
+  const value = extractJsonObject(source);
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      toolCall: "skip_course_question_attempt",
+      reason: "Question attempt tool returned no JSON object.",
+    };
+  }
+
+  const record = value as Record<string, unknown>;
+  const toolCall = normalizeIntakeText(record.toolCall, 80);
+
+  if (toolCall !== "record_course_question_attempt") {
+    return {
+      toolCall: "skip_course_question_attempt",
+      reason:
+        normalizeIntakeText(record.reason, 500) ||
+        "No learner-facing question was answered.",
+    };
+  }
+
+  const question = normalizeMultilineText(record.question, 1_200);
+  const answer =
+    normalizeMultilineText(record.answer, 4_000) ||
+    normalizeMultilineText(fallbackAnswer, 4_000);
+  const score = parseScore(record.score);
+
+  if (!question || !answer || score === null) {
+    return {
+      toolCall: "skip_course_question_attempt",
+      reason: "Question attempt tool returned an incomplete record.",
+    };
+  }
+
+  return {
+    toolCall,
+    question,
+    answer,
+    answerSummary:
+      normalizeIntakeText(record.answerSummary ?? record.answer_summary, 240) ||
+      answer.slice(0, 240),
+    conciseAnswer:
+      normalizeIntakeText(record.conciseAnswer ?? record.correctAnswer, 400) ||
+      "See course explanation.",
+    correctAnswer:
+      normalizeIntakeText(record.correctAnswer ?? record.conciseAnswer, 400) ||
+      "See course explanation.",
+    justification:
+      normalizeIntakeText(record.justification, 240) ||
+      "Recorded from course chat.",
+    score,
+  };
+}
+
 function currentCourseMilestone(course: CourseDetail) {
   const chapter = course.toc.chapters[course.currentChapterIndex];
   const page = chapter?.pages[course.currentPageIndex];
@@ -176,7 +277,7 @@ export async function generateCourseIntakeDecision(input: {
   model?: string;
   userId: string;
   messages: CourseIntakeMessage[];
-}): Promise<CourseIntakeDecision> {
+} & CourseCostObserver): Promise<CourseIntakeDecision> {
   const compactMessages = input.messages.slice(-8).map((message) => ({
     role: message.role,
     content: message.content.slice(0, MAX_INTAKE_TOPIC_CHARS),
@@ -216,6 +317,8 @@ export async function generateCourseIntakeDecision(input: {
     throw new Error("Course intake failed.");
   }
 
+  reportResponseCost(input, body.usage);
+
   return parseCourseIntakeDecision(extractChatCompletionText(body));
 }
 
@@ -225,7 +328,7 @@ export async function evaluateCourseChatProgress(input: {
   userId: string;
   course: CourseDetail;
   messages: CourseChatMessage[];
-}): Promise<CourseProgressDecision> {
+} & CourseCostObserver): Promise<CourseProgressDecision> {
   const { chapter, page } = currentCourseMilestone(input.course);
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
@@ -270,7 +373,100 @@ export async function evaluateCourseChatProgress(input: {
     throw new Error("Course progress evaluation failed.");
   }
 
+  reportResponseCost(input, body.usage);
+
   return parseCourseProgressDecision(extractChatCompletionText(body));
+}
+
+export async function generateCourseQuestionAttemptToolResult(input: {
+  apiKey: string;
+  model?: string;
+  userId: string;
+  course: CourseDetail;
+  messages: CourseChatMessage[];
+} & CourseCostObserver): Promise<CourseQuestionAttemptToolResult> {
+  const latestUserMessage = [...input.messages]
+    .reverse()
+    .find((message) => message.role === "user");
+  const previousAssistantMessage = [...input.messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+
+  if (!latestUserMessage || !previousAssistantMessage) {
+    return {
+      toolCall: "skip_course_question_attempt",
+      reason: "No prior tutor question and learner answer pair exists.",
+    };
+  }
+
+  if (
+    normalizeIntakeText(previousAssistantMessage.content, 80).toLowerCase() ===
+    "what do you want to learn?"
+  ) {
+    return {
+      toolCall: "skip_course_question_attempt",
+      reason: "The initial course intake prompt is not a review question.",
+    };
+  }
+
+  const { chapter, page } = currentCourseMilestone(input.course);
+  const { body, response } = await openRouterChatCompletion({
+    apiKey: input.apiKey,
+    stream: false,
+    trace: {
+      operation: "course_question_attempt_tool",
+      userId: input.userId,
+      deckId: input.course.deckId,
+      question: `${chapter.title}: ${page.title}`,
+    },
+    body: {
+      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
+      response_format: COURSE_JSON_RESPONSE_FORMAT,
+      temperature: 0,
+      max_tokens: 700,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are filling Waxon's server-side course question attempt tool.",
+            "Look at the tutor's previous assistant message and the learner's latest user message.",
+            "If the previous assistant message ended with a real learner-facing question and the latest user message answers it, return a record_course_question_attempt tool call.",
+            "Extract the exact learner-facing question, preserving multiple-choice options if present.",
+            "Grade the answer from 0 to 10 using normal Waxon review standards.",
+            "If there is no answerable tutor question, or the user is asking a new unrelated course-management question, skip.",
+            "Return strict JSON only.",
+            "Record shape: {\"toolCall\":\"record_course_question_attempt\",\"question\":\"...\",\"answer\":\"...\",\"answerSummary\":\"...\",\"conciseAnswer\":\"...\",\"correctAnswer\":\"...\",\"justification\":\"...\",\"score\":number}.",
+            "Skip shape: {\"toolCall\":\"skip_course_question_attempt\",\"reason\":\"...\"}.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            `Course title: ${input.course.title}`,
+            `Current chapter: ${chapter.title}`,
+            `Current milestone: ${page.title}`,
+            `Milestone objective: ${page.objective}`,
+            `Previous assistant message:\n${previousAssistantMessage.content.slice(0, 4_000)}`,
+            `Latest learner answer:\n${latestUserMessage.content.slice(0, 4_000)}`,
+          ].join("\n\n"),
+        },
+      ],
+    },
+  });
+
+  if (!response.ok) {
+    return {
+      toolCall: "skip_course_question_attempt",
+      reason: "Question attempt tool failed.",
+    };
+  }
+
+  reportResponseCost(input, body.usage);
+
+  return parseCourseQuestionAttemptToolResult(
+    extractChatCompletionText(body),
+    latestUserMessage.content,
+  );
 }
 
 export async function streamCourseChatTurn(input: {
@@ -281,7 +477,7 @@ export async function streamCourseChatTurn(input: {
   messages: CourseChatMessage[];
   progressDecision?: CourseProgressDecision | null;
   onTextDelta: (delta: string) => void;
-}): Promise<string> {
+} & CourseCostObserver): Promise<string> {
   if (input.course.status === "completed") {
     const message =
       "That completes the course. The generated questions are now available for Review.";
@@ -354,6 +550,8 @@ export async function streamCourseChatTurn(input: {
     throw new Error("Course chat generation failed.");
   }
 
+  reportResponseCost(input, body.usage);
+
   const generatedText = extractChatCompletionText(body);
   const hasLearnerQuestion =
     generatedText.includes("?") || /\bA\)\s+\S[\s\S]*\bB\)/u.test(generatedText);
@@ -379,7 +577,7 @@ export async function generateCourseToc(input: {
   model?: string;
   topic: string;
   userId: string;
-}): Promise<CourseToc> {
+} & CourseCostObserver): Promise<CourseToc> {
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: false,
@@ -417,6 +615,8 @@ export async function generateCourseToc(input: {
   if (!response.ok) {
     throw new Error("Course TOC generation failed.");
   }
+
+  reportResponseCost(input, body.usage);
 
   return parseCourseTocJson(extractChatCompletionText(body));
 }

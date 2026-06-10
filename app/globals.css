@@ -6124,6 +6124,60 @@ textarea {
   gap: 8px;
 }
 
+.learn-course-picker {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  min-width: 0;
+  max-height: 100%;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.learn-course-picker-heading,
+.learn-course-context {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.learn-course-context {
+  align-items: center;
+}
+
+.learn-course-picker-heading button,
+.learn-course-context button {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 6px;
+  min-height: 30px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: rgb(255 252 245 / 76%);
+  color: var(--accent);
+  font: 780 12px/1.2 var(--font-ui);
+  cursor: pointer;
+}
+
+.learn-course-picker-heading button:hover,
+.learn-course-picker-heading button:focus-visible,
+.learn-course-context button:hover,
+.learn-course-context button:focus-visible {
+  border-color: rgb(139 92 48 / 38%);
+  background: rgb(252 247 236 / 92%);
+  outline: 0;
+}
+
+.learn-course-picker-heading svg,
+.learn-course-context svg {
+  width: 14px;
+  height: 14px;
+}
+
 .learn-course-item {
   display: grid;
   gap: 5px;
@@ -6146,11 +6200,25 @@ textarea {
   outline: 0;
 }
 
+.learn-course-item:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
 .learn-course-item span,
 .learn-course-item small {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--muted);
   font-size: 11px;
   font-weight: 760;
+}
+
+.learn-course-item span svg {
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
 }
 
 .learn-course-item strong {
@@ -6184,6 +6252,11 @@ textarea {
   justify-content: center;
 }
 
+.learn-chat-layout-picker {
+  grid-template-columns: minmax(190px, 280px) minmax(0, 780px);
+  justify-content: center;
+}
+
 .learn-chat-toc {
   position: sticky;
   top: 22px;
@@ -6198,8 +6271,8 @@ textarea {
 
 .learn-chat-panel {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 8px;
   width: 100%;
   min-width: 0;
   min-height: 0;
@@ -6260,7 +6333,7 @@ textarea {
 .learn-chat-message-content-assistant {
   color: var(--ink);
   font-family: var(--font-question);
-  font-size: clamp(18px, 1.45vw, 21px);
+  font-size: clamp(17px, 1.32vw, 19px);
   font-weight: 430;
   line-height: 1.58;
 }
@@ -6293,6 +6366,28 @@ textarea {
   font-size: 13px;
   font-weight: 730;
   line-height: 1.45;
+}
+
+.learn-chat-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+}
+
+.learn-chat-pending-status {
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 780;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.learn-conversation-cost {
+  justify-self: end;
+  min-height: 14px;
+  color: rgb(117 103 84 / 66%);
+  font: 760 11px/1.2 var(--font-ui);
 }
 
 .learn-chat-composer {
@@ -7541,6 +7636,13 @@ textarea {
 
   .learn-chat-layout-empty {
     grid-template-rows: minmax(0, 1fr);
+  }
+
+  .learn-course-picker {
+    width: 100%;
+    max-width: 100%;
+    max-height: 28svh;
+    overflow: auto;
   }
 
   .learn-chat-toc {

@@ -1,7 +1,14 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
-import { Check, ChevronRight, Loader2, SendHorizontal } from "lucide-react";
+import {
+  BookOpen,
+  Check,
+  ChevronRight,
+  Loader2,
+  PlusCircle,
+  SendHorizontal,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { MarkdownContent } from "@/app/MarkdownContent";
@@ -33,6 +40,17 @@ type Course = {
   currentPageIndex: number;
   totalPages: number;
   generatedPages: number;
+  chatMessageCount: number;
+  conversationCost: number;
+  createdAt: number;
+  updatedAt: number;
+  chatMessages?: StoredCourseChatMessage[];
+};
+
+type StoredCourseChatMessage = {
+  id: string;
+  role: "assistant" | "user";
+  content: string;
 };
 
 type UserProfile = {
@@ -45,6 +63,7 @@ type LearnChatMessage = {
   id: string;
   role: "assistant" | "user";
   content: string;
+  status?: string;
 };
 
 const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
@@ -55,6 +74,47 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
 
 function chatMessageId() {
   return `learn-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function pendingStatus(message: LearnChatMessage): string {
+  return message.status?.trim() || "Thinking...";
+}
+
+function storedMessageToLearnMessage(
+  message: StoredCourseChatMessage,
+): LearnChatMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+  };
+}
+
+function courseProgressLabel(course: Course): string {
+  if (course.status === "completed") {
+    return "Completed";
+  }
+
+  const totalPages = Math.max(course.totalPages, 1);
+  const currentPage = Math.min(
+    pageOrdinal(course, course.currentChapterIndex, course.currentPageIndex),
+    totalPages,
+  );
+
+  return `${currentPage} of ${totalPages}`;
+}
+
+function formatConversationCost(cost: number): string | null {
+  if (!Number.isFinite(cost) || cost <= 0) {
+    return null;
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: cost < 0.01 ? 4 : 2,
+    maximumFractionDigits: cost < 0.01 ? 4 : 2,
+  }).format(cost);
 }
 
 async function readApiJson<T>(response: Response): Promise<T> {
@@ -141,10 +201,13 @@ export default function LearnPageClient() {
   const [chatMessages, setChatMessages] = useState<LearnChatMessage[]>([
     INITIAL_CHAT_MESSAGE,
   ]);
+  const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [draftConversationCost, setDraftConversationCost] = useState(0);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [dueCount, setDueCount] = useState(0);
   const [isBooting, setIsBooting] = useState(true);
+  const [loadingCourseId, setLoadingCourseId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -157,22 +220,34 @@ export default function LearnPageClient() {
     "Waxon user";
   const menuEmail =
     clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
+  const streamingStatus =
+    chatMessages.find(
+      (message) => message.role === "assistant" && !message.content,
+    )?.status ?? "Thinking...";
+  const conversationCostLabel = formatConversationCost(
+    selectedCourse?.conversationCost ?? draftConversationCost,
+  );
 
   useEffect(() => {
     let isCancelled = false;
 
     async function boot() {
       try {
-        const [userResponse, queueResponse] = await Promise.all([
-          fetch("/api/user", { cache: "no-store" }),
-          fetch("/api/queue-status?mode=review&includeReviewQueue=0", {
-            cache: "no-store",
-          }),
-        ]);
+        const [userResponse, queueResponse, coursesResponse] =
+          await Promise.all([
+            fetch("/api/user", { cache: "no-store" }),
+            fetch("/api/queue-status?mode=review&includeReviewQueue=0", {
+              cache: "no-store",
+            }),
+            fetch("/api/courses", { cache: "no-store" }),
+          ]);
         const userData = await readApiJson<UserProfile>(userResponse);
         const queueData = (await readApiJson<{ queueRemaining?: number }>(
           queueResponse,
         )) as { queueRemaining?: number };
+        const coursesData = await readApiJson<{ courses?: Course[] }>(
+          coursesResponse,
+        );
 
         if (isCancelled) {
           return;
@@ -180,6 +255,7 @@ export default function LearnPageClient() {
 
         setCurrentUser(userData);
         setDueCount(queueData.queueRemaining ?? 0);
+        setCourses(coursesData.courses ?? []);
       } catch (bootError) {
         if (!isCancelled) {
           setError(
@@ -216,6 +292,69 @@ export default function LearnPageClient() {
     );
   }
 
+  function updateAssistantStatus(messageId: string, status: string) {
+    setChatMessages((messages) =>
+      messages.map((message) =>
+        message.id === messageId ? { ...message, status } : message,
+      ),
+    );
+  }
+
+  function syncCourse(course: Course) {
+    setCourses((items) => {
+      const existing = items.filter((item) => item.id !== course.id);
+
+      return [course, ...existing].sort(
+        (left, right) => right.updatedAt - left.updatedAt,
+      );
+    });
+  }
+
+  async function selectCourse(courseId: string) {
+    if (isStreaming || loadingCourseId) {
+      return;
+    }
+
+    setError(null);
+    setLoadingCourseId(courseId);
+
+    try {
+      const response = await fetch(`/api/courses/${courseId}`, {
+        cache: "no-store",
+      });
+      const data = await readApiJson<{ course: Course }>(response);
+
+      setSelectedCourse(data.course);
+      syncCourse(data.course);
+      setChatMessages(
+        data.course.chatMessages?.length
+          ? data.course.chatMessages.map(storedMessageToLearnMessage)
+          : [INITIAL_CHAT_MESSAGE],
+      );
+      setTopic("");
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Could not load course.",
+      );
+    } finally {
+      setLoadingCourseId(null);
+    }
+  }
+
+  function startNewCourse() {
+    if (isStreaming || loadingCourseId) {
+      return;
+    }
+
+    setSelectedCourse(null);
+    setChatMessages([INITIAL_CHAT_MESSAGE]);
+    setTopic("");
+    setDraftConversationCost(0);
+    setError(null);
+  }
+
   async function submitChatPrompt(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = topic.trim();
@@ -234,6 +373,7 @@ export default function LearnPageClient() {
       id: assistantMessageId,
       role: "assistant",
       content: "",
+      status: "Thinking...",
     };
     const nextMessages = [...chatMessages, userMessage];
 
@@ -285,11 +425,18 @@ export default function LearnPageClient() {
           buffer = buffer.slice(boundary + 2);
           const parsed = parseSseEvent(rawEvent);
 
-          if (parsed?.event === "course") {
+          if (parsed?.event === "status") {
+            const data = parsed.data as { status?: unknown };
+
+            if (typeof data.status === "string" && data.status.trim()) {
+              updateAssistantStatus(assistantMessageId, data.status);
+            }
+          } else if (parsed?.event === "course") {
             const data = parsed.data as { course?: Course };
 
             if (data.course) {
               setSelectedCourse(data.course);
+              syncCourse(data.course);
             }
           } else if (parsed?.event === "delta") {
             const data = parsed.data as { delta?: unknown };
@@ -306,6 +453,27 @@ export default function LearnPageClient() {
                 : "Could not continue Learn chat.",
             );
           } else if (parsed?.event === "done") {
+            const data = parsed.data as {
+              course?: Course;
+              chatMessages?: StoredCourseChatMessage[];
+              turnCost?: unknown;
+            };
+
+            if (data.course) {
+              setSelectedCourse(data.course);
+              syncCourse(data.course);
+            } else if (typeof data.turnCost === "number" && data.turnCost > 0) {
+              const turnCost = data.turnCost;
+
+              setDraftConversationCost((cost) => cost + turnCost);
+            }
+
+            if (data.chatMessages?.length) {
+              setChatMessages(
+                data.chatMessages.map(storedMessageToLearnMessage),
+              );
+            }
+
             receivedDone = true;
             void reader.cancel().catch(() => undefined);
             break;
@@ -382,12 +550,22 @@ export default function LearnPageClient() {
           {!isBooting ? (
             <div
               className={`learn-chat-layout ${
-                selectedCourse ? "" : "learn-chat-layout-empty"
+                selectedCourse
+                  ? ""
+                  : courses.length
+                    ? "learn-chat-layout-picker"
+                    : "learn-chat-layout-empty"
               }`}
             >
               {selectedCourse ? (
                 <aside className="learn-chat-toc" aria-label="Course outline">
-                  <p className="learn-kicker">{selectedCourse.title}</p>
+                  <div className="learn-course-context">
+                    <p className="learn-kicker">{selectedCourse.title}</p>
+                    <button type="button" onClick={startNewCourse}>
+                      <PlusCircle aria-hidden="true" />
+                      <span>New</span>
+                    </button>
+                  </div>
                   <nav className="learn-toc" aria-label="Course table of contents">
                     {selectedCourse.toc.chapters.map((chapter, chapterIndex) => (
                       <section className="learn-toc-chapter" key={chapter.title}>
@@ -425,9 +603,46 @@ export default function LearnPageClient() {
                     ))}
                   </nav>
                 </aside>
+              ) : courses.length ? (
+                <aside className="learn-course-picker" aria-label="Courses">
+                  <div className="learn-course-picker-heading">
+                    <p className="learn-kicker">Courses</p>
+                    <button type="button" onClick={startNewCourse}>
+                      <PlusCircle aria-hidden="true" />
+                      <span>New</span>
+                    </button>
+                  </div>
+                  <div className="learn-course-list">
+                    {courses.map((course) => (
+                      <button
+                        className="learn-course-item"
+                        disabled={Boolean(loadingCourseId)}
+                        key={course.id}
+                        type="button"
+                        onClick={() => {
+                          void selectCourse(course.id);
+                        }}
+                      >
+                        <span>
+                          <BookOpen aria-hidden="true" />
+                          {courseProgressLabel(course)}
+                        </span>
+                        <strong>{course.title}</strong>
+                        <small>
+                          {loadingCourseId === course.id
+                            ? "Loading"
+                            : `${course.generatedPages}/${course.totalPages} generated`}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                </aside>
               ) : null}
 
-              <section className="learn-chat-panel" aria-label="Learn chat">
+              <section
+                className="learn-chat-panel"
+                aria-label={selectedCourse ? "Learn chat" : "Learn something new"}
+              >
                 <div className="learn-chat-thread">
                   {chatMessages.map((message) => (
                     <div
@@ -443,12 +658,29 @@ export default function LearnPageClient() {
                           enableMath={message.role === "assistant"}
                         />
                       ) : (
-                        <span className="pending-spinner" aria-hidden="true" />
+                        <span
+                          className="learn-chat-pending"
+                          role="status"
+                          aria-live="polite"
+                        >
+                          <span className="pending-spinner" aria-hidden="true" />
+                          <span className="learn-chat-pending-status">
+                            {pendingStatus(message)}
+                          </span>
+                        </span>
                       )}
                     </div>
                   ))}
                   <div ref={chatEndRef} />
                 </div>
+                {conversationCostLabel ? (
+                  <div
+                    className="learn-conversation-cost"
+                    aria-label={`Conversation cost ${conversationCostLabel}`}
+                  >
+                    {conversationCostLabel}
+                  </div>
+                ) : null}
                 <form className="learn-chat-composer" onSubmit={submitChatPrompt}>
                   <input
                     id="learn-topic-input"
@@ -465,8 +697,8 @@ export default function LearnPageClient() {
                   <button
                     type="submit"
                     disabled={!topic.trim() || isStreaming}
-                    aria-label="Send"
-                    title="Send"
+                    aria-label={isStreaming ? streamingStatus : "Send"}
+                    title={isStreaming ? streamingStatus : "Send"}
                   >
                     {isStreaming ? (
                       <Loader2 className="learn-spin-icon" aria-hidden="true" />
