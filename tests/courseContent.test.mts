@@ -82,6 +82,69 @@ test("parseCoursePageJson accepts valid markdown page and MCQ", () => {
   assert.equal(page.choices.length, 4);
   assert.equal(page.correctChoiceId, "C");
   assert.equal(page.correctAnswer, "Updated belief after evidence");
+  assert.equal(page.widget.type, "multiple_choice");
+  assert.equal(page.widget.question, "What does a Bayesian posterior represent?");
+});
+
+test("parseCoursePageJson accepts a multiple-choice UI tool call", () => {
+  const { question, choices, correctChoiceId, correctAnswer, explanation } =
+    validPage();
+  const page = parseCoursePageJson(
+    JSON.stringify({
+      title: "Posterior intuition",
+      body: "A posterior updates prior belief with likelihood evidence.",
+      summary: "Posterior belief combines prior and likelihood.",
+      toolCalls: [
+        {
+          name: "render_multiple_choice",
+          arguments: {
+            type: "multiple_choice",
+            id: "page-check",
+            question,
+            choices,
+            correctChoiceId,
+            correctAnswer,
+            explanation,
+          },
+        },
+      ],
+    }),
+  );
+
+  assert.equal(page.question, question);
+  assert.equal(page.widget.id, "page-check");
+  assert.equal(page.choices.length, 4);
+});
+
+test("parseCoursePageJson accepts OpenAI-style tool_calls arguments", () => {
+  const { question, choices, correctChoiceId, correctAnswer, explanation } =
+    validPage();
+  const page = parseCoursePageJson(
+    JSON.stringify({
+      title: "Posterior intuition",
+      body: "A posterior updates prior belief with likelihood evidence.",
+      summary: "Posterior belief combines prior and likelihood.",
+      tool_calls: [
+        {
+          function: {
+            name: "render_multiple_choice",
+            arguments: JSON.stringify({
+              type: "multiple_choice",
+              id: "native-page-check",
+              question,
+              choices,
+              correctChoiceId,
+              correctAnswer,
+              explanation,
+            }),
+          },
+        },
+      ],
+    }),
+  );
+
+  assert.equal(page.question, question);
+  assert.equal(page.widget.id, "native-page-check");
 });
 
 test("validateCoursePageContent rejects malformed MCQs", () => {
