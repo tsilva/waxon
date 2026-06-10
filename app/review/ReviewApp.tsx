@@ -3,6 +3,7 @@
 import { useClerk, useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
+import { AnswerComposer } from "@/app/AnswerComposer";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
@@ -23,7 +24,6 @@ import type {
   ReviewQueueItem,
 } from "@/app/lib/reviewTypes";
 import {
-  ArrowUp,
   Check,
   ChevronDown,
   FileText,
@@ -273,15 +273,6 @@ function storeLearnTargetDeckId(deckId: string | null) {
   } else {
     window.sessionStorage.removeItem(LEARN_TARGET_DECK_STORAGE_KEY);
   }
-}
-
-function resizeComposerTextarea(textarea: HTMLTextAreaElement | null): void {
-  if (!textarea) {
-    return;
-  }
-
-  textarea.style.height = "auto";
-  textarea.style.height = `${textarea.scrollHeight}px`;
 }
 
 async function readJsonResponse<T>(
@@ -1682,10 +1673,6 @@ function DeckEmbeddingPlot({
       )}
     </section>
   );
-}
-
-function SubmitIcon() {
-  return <ArrowUp aria-hidden="true" />;
 }
 
 export default function ReviewApp({
@@ -3939,10 +3926,6 @@ export default function ReviewApp({
     speechStatus === "starting" ||
     speechStatus === "listening";
 
-  useEffect(() => {
-    resizeComposerTextarea(answerInputRef.current);
-  }, [displayedAnswer, question]);
-
   function handleAnswerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (
       event.key === "Enter" &&
@@ -5280,27 +5263,27 @@ export default function ReviewApp({
               </div>
             </div>
           ) : question ? (
-            <form className="composer" onSubmit={handleSubmit}>
-              <div className="composer-row">
-                <textarea
-                  id="answer-input"
-                  ref={answerInputRef}
-                  className="composer-input"
-                  value={displayedAnswer}
-                  onChange={(event) => {
-                    clearPendingSpeechCommand();
-                    setSpeechPreview("");
-                    setAnswer(event.target.value);
-                    answerRef.current = event.target.value;
-                    resizeComposerTextarea(event.currentTarget);
-                  }}
-                  onKeyDown={handleAnswerKeyDown}
-                  placeholder="Type your answer here..."
-                  aria-label="Your answer"
-                  rows={4}
-                  autoFocus
-                  disabled={isSubmitting || isFlaggingQuestion}
-                />
+            <AnswerComposer
+              id="answer-input"
+              textareaRef={answerInputRef}
+              value={displayedAnswer}
+              onValueChange={(nextAnswer) => {
+                clearPendingSpeechCommand();
+                setSpeechPreview("");
+                setAnswer(nextAnswer);
+                answerRef.current = nextAnswer;
+              }}
+              onSubmit={handleSubmit}
+              onKeyDown={handleAnswerKeyDown}
+              placeholder="Type your answer here..."
+              ariaLabel="Your answer"
+              rows={4}
+              autoFocus
+              disabled={isSubmitting || isFlaggingQuestion}
+              submitDisabled={isSubmitting || isFlaggingQuestion}
+              submitAriaLabel="Submit answer"
+              submitTooltipLabel="Submit answer"
+              secondaryAction={
                 <IconTooltip
                   label={
                     isSpeechActive ? "Stop voice answer" : "Start voice answer"
@@ -5326,29 +5309,18 @@ export default function ReviewApp({
                     </button>
                   )}
                 </IconTooltip>
-                <IconTooltip label="Submit answer">
-                  {(tooltipId) => (
-                    <button
-                      className="composer-submit"
-                      type="submit"
-                      disabled={isSubmitting || isFlaggingQuestion}
-                      aria-label="Submit answer"
-                      aria-describedby={tooltipId}
-                    >
-                      <SubmitIcon />
-                    </button>
-                  )}
-                </IconTooltip>
-              </div>
-              {speechMessage ? (
-                <p
-                  className={`speech-status speech-status-${speechStatus}`}
-                  aria-live="polite"
-                >
-                  {speechMessage}
-                </p>
-              ) : null}
-            </form>
+              }
+              after={
+                speechMessage ? (
+                  <p
+                    className={`speech-status speech-status-${speechStatus}`}
+                    aria-live="polite"
+                  >
+                    {speechMessage}
+                  </p>
+                ) : null
+              }
+            />
           ) : null}
 
           {error && question ? <p className="error-message">{error}</p> : null}
