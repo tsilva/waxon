@@ -178,7 +178,6 @@ export default function LearnPageClient() {
   const [chatMessages, setChatMessages] = useState<LearnChatMessage[]>([
     INITIAL_CHAT_MESSAGE,
   ]);
-  const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [dueCount, setDueCount] = useState(0);
@@ -205,34 +204,7 @@ export default function LearnPageClient() {
 
   const syncCourse = useCallback((course: Course) => {
     setSelectedCourse(course);
-    setCourses((items) => {
-      const existingIndex = items.findIndex((item) => item.id === course.id);
-
-      if (existingIndex === -1) {
-        return [course, ...items];
-      }
-
-      return items.map((item) => (item.id === course.id ? course : item));
-    });
   }, []);
-
-  const loadCourse = useCallback(
-    async (courseId: string) => {
-      const data = await readApiJson<ApiResult<{ course: Course }>>(
-        await fetch(`/api/courses/${encodeURIComponent(courseId)}`, {
-          cache: "no-store",
-        }),
-      );
-
-      if (!data.ok) {
-        throw new Error(data.error);
-      }
-
-      syncCourse(data.course);
-      return data.course;
-    },
-    [syncCourse],
-  );
 
   const loadCurrentPage = useCallback(
     async (courseId: string) => {
@@ -275,32 +247,23 @@ export default function LearnPageClient() {
 
     async function boot() {
       try {
-        const [userResponse, queueResponse, coursesResponse] = await Promise.all([
+        const [userResponse, queueResponse] = await Promise.all([
           fetch("/api/user", { cache: "no-store" }),
           fetch("/api/queue-status?mode=review&includeReviewQueue=0", {
             cache: "no-store",
           }),
-          fetch("/api/courses", { cache: "no-store" }),
         ]);
         const userData = await readApiJson<UserProfile>(userResponse);
         const queueData = (await readApiJson<{ queueRemaining?: number }>(
           queueResponse,
         )) as { queueRemaining?: number };
-        const coursesData = await readApiJson<ApiResult<{ courses: Course[] }>>(
-          coursesResponse,
-        );
 
         if (isCancelled) {
           return;
         }
 
-        if (!coursesData.ok) {
-          throw new Error(coursesData.error);
-        }
-
         setCurrentUser(userData);
         setDueCount(queueData.queueRemaining ?? 0);
-        setCourses(coursesData.courses);
       } catch (bootError) {
         if (!isCancelled) {
           setError(
@@ -489,20 +452,6 @@ export default function LearnPageClient() {
     }
   }
 
-  function selectCourse(course: Course) {
-    setSelectedCourse(course);
-    setFeedback(null);
-    setSelectedChoiceId(null);
-
-    if (!course.pages) {
-      void loadCourse(course.id).catch((loadError) => {
-        setError(
-          loadError instanceof Error ? loadError.message : "Could not load course.",
-        );
-      });
-    }
-  }
-
   return (
     <main className="page page-learn-active">
       <section className="review-shell learn-shell" aria-label="Course learning">
@@ -537,35 +486,6 @@ export default function LearnPageClient() {
           role="tabpanel"
           aria-labelledby="learn-tab"
         >
-          <aside className="learn-sidebar" aria-label="Courses">
-            <p className="learn-sidebar-label">Courses</p>
-
-            <div className="learn-course-list" aria-label="Recent courses">
-              {courses.map((course) => (
-                <button
-                  className={`learn-course-item ${
-                    selectedCourse?.id === course.id
-                      ? "learn-course-item-active"
-                      : ""
-                  }`}
-                  type="button"
-                  key={course.id}
-                  onClick={() => selectCourse(course)}
-                >
-                  <span>{course.status === "completed" ? "Completed" : "Active"}</span>
-                  <strong>{course.title}</strong>
-                  <small>
-                    {course.generatedPages}/{course.totalPages} pages
-                  </small>
-                </button>
-              ))}
-
-              {!isBooting && courses.length === 0 ? (
-                <p className="learn-empty">No courses yet.</p>
-              ) : null}
-            </div>
-          </aside>
-
           <section className="learn-reader">
             {error ? (
               <p className="error-message learn-error" role="alert">
@@ -764,11 +684,7 @@ export default function LearnPageClient() {
 
             {!isBooting && !selectedCourse ? (
               <div className="learn-chat-resting" aria-live="polite">
-                {courses.length > 0 ? (
-                  <p>Pick a course to resume, or start a new one here.</p>
-                ) : (
-                  <p>Start a course from the chat.</p>
-                )}
+                <p>Start a course from the chat.</p>
               </div>
             ) : null}
           </section>
