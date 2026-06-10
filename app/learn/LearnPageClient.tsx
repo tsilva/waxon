@@ -7,6 +7,8 @@ import {
   ChevronRight,
   Loader2,
   PlusCircle,
+  Settings,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
@@ -15,6 +17,7 @@ import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 
 type CourseToc = {
   title: string;
@@ -72,6 +75,18 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
   content: "What do you want to learn?",
 };
 
+const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+const COURSE_UPDATED_TITLE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
+
 function chatMessageId() {
   return `learn-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -115,6 +130,22 @@ function formatConversationCost(cost: number): string | null {
     minimumFractionDigits: cost < 0.01 ? 4 : 2,
     maximumFractionDigits: cost < 0.01 ? 4 : 2,
   }).format(cost);
+}
+
+function formatCourseUpdatedAt(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return "unknown";
+  }
+
+  return COURSE_UPDATED_FORMATTER.format(new Date(timestamp));
+}
+
+function formatCourseUpdatedTitle(timestamp: number): string {
+  if (!Number.isFinite(timestamp) || timestamp <= 0) {
+    return "Unknown";
+  }
+
+  return COURSE_UPDATED_TITLE_FORMATTER.format(new Date(timestamp));
 }
 
 async function readApiJson<T>(response: Response): Promise<T> {
@@ -211,7 +242,11 @@ export default function LearnPageClient() {
   const [loadingCourseId, setLoadingCourseId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const [courseSettingsId, setCourseSettingsId] = useState<string | null>(null);
+  const [isDeletingCourse, setIsDeletingCourse] = useState(false);
+  const [courseSettingsMessage, setCourseSettingsMessage] =
+    useState<string | null>(null);
+  const chatThreadRef = useRef<HTMLDivElement | null>(null);
   const canViewAdmin = isAdminEmail(currentUser?.email);
   const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
   const menuDisplayName =
@@ -228,6 +263,12 @@ export default function LearnPageClient() {
   const conversationCostLabel = formatConversationCost(
     selectedCourse?.conversationCost ?? draftConversationCost,
   );
+  const courseSettingsCourse = useMemo(
+    () => courses.find((course) => course.id === courseSettingsId) ?? null,
+    [courseSettingsId, courses],
+  );
+
+  usePageScrollLock(Boolean(courseSettingsCourse));
 
   useEffect(() => {
     let isCancelled = false;
@@ -280,8 +321,36 @@ export default function LearnPageClient() {
   }, []);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+    const thread = chatThreadRef.current;
+
+    if (!thread) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      thread.scrollTo({
+        top: thread.scrollHeight,
+        behavior: "smooth",
+      });
+    });
   }, [chatMessages, isStreaming]);
+
+  useEffect(() => {
+    if (!courseSettingsCourse) {
+      return;
+    }
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape" && !isDeletingCourse) {
+        setCourseSettingsId(null);
+        setCourseSettingsMessage(null);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [courseSettingsCourse, isDeletingCourse]);
 
   function appendAssistantDelta(messageId: string, delta: string) {
     setChatMessages((messages) =>
@@ -356,6 +425,73 @@ export default function LearnPageClient() {
     setTopic("");
     setDraftConversationCost(0);
     setError(null);
+  }
+
+  function openCourseSettings(course: Course) {
+    if (isStreaming || loadingCourseId) {
+      return;
+    }
+
+    setCourseSettingsId(course.id);
+    setCourseSettingsMessage(null);
+  }
+
+  function closeCourseSettings() {
+    if (isDeletingCourse) {
+      return;
+    }
+
+    setCourseSettingsId(null);
+    setCourseSettingsMessage(null);
+  }
+
+  async function deleteSelectedCourse() {
+    const course = courseSettingsCourse;
+
+    if (!course || isDeletingCourse) {
+      return;
+    }
+
+    setIsDeletingCourse(true);
+    setCourseSettingsMessage(null);
+
+    try {
+      const response = await fetch(`/api/courses/${course.id}`, {
+        method: "DELETE",
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          data && typeof data === "object" && "error" in data
+            ? String((data as { error?: unknown }).error)
+            : "Could not delete course.",
+        );
+      }
+
+      setCourses((items) => items.filter((item) => item.id !== course.id));
+
+      if (selectedCourse?.id === course.id) {
+        setSelectedCourse(null);
+        setChatMessages([INITIAL_CHAT_MESSAGE]);
+        setDraftConversationCost(0);
+        setTopic("");
+      }
+
+      if (loadingCourseId === course.id) {
+        setLoadingCourseId(null);
+      }
+
+      setCourseSettingsId(null);
+    } catch (deleteError) {
+      setCourseSettingsMessage(
+        deleteError instanceof Error
+          ? deleteError.message
+          : "Could not delete course.",
+      );
+    } finally {
+      setIsDeletingCourse(false);
+    }
   }
 
   async function submitChatPrompt(event: React.FormEvent<HTMLFormElement>) {
@@ -521,6 +657,15 @@ export default function LearnPageClient() {
 
   const showCourseList =
     !selectedCourse && courses.length > 0 && !isStartingNewCourse;
+  const sortedCourses = useMemo(
+    () =>
+      [...courses].sort(
+        (left, right) =>
+          right.updatedAt - left.updatedAt ||
+          left.title.localeCompare(right.title),
+      ),
+    [courses],
+  );
 
   return (
     <main className="page page-learn-active">
@@ -640,27 +785,48 @@ export default function LearnPageClient() {
                       </span>
                       <strong>New</strong>
                     </button>
-                    {courses.map((course) => (
-                      <button
-                        className="learn-course-item"
-                        disabled={Boolean(loadingCourseId)}
+                    {sortedCourses.map((course) => (
+                      <article
+                        className="learn-course-item learn-course-card"
                         key={course.id}
-                        type="button"
-                        onClick={() => {
-                          void selectCourse(course.id);
-                        }}
                       >
-                        <span>
-                          <BookOpen aria-hidden="true" />
-                          {courseProgressLabel(course)}
-                        </span>
-                        <strong>{course.title}</strong>
-                        <small>
-                          {loadingCourseId === course.id
-                            ? "Loading"
-                            : `${course.generatedPages}/${course.totalPages} generated`}
-                        </small>
-                      </button>
+                        <button
+                          className="learn-course-open"
+                          disabled={Boolean(loadingCourseId)}
+                          type="button"
+                          onClick={() => {
+                            void selectCourse(course.id);
+                          }}
+                        >
+                          <span>
+                            <BookOpen aria-hidden="true" />
+                            {courseProgressLabel(course)}
+                          </span>
+                          <strong>{course.title}</strong>
+                          <small className="learn-course-meta">
+                            {loadingCourseId === course.id
+                              ? "Loading"
+                              : `${course.generatedPages}/${course.totalPages} generated`}
+                            {" / "}
+                            <time
+                              className="learn-course-updated"
+                              dateTime={new Date(course.updatedAt).toISOString()}
+                              title={formatCourseUpdatedTitle(course.updatedAt)}
+                            >
+                              Updated {formatCourseUpdatedAt(course.updatedAt)}
+                            </time>
+                          </small>
+                        </button>
+                        <button
+                          className="learn-course-settings-trigger"
+                          disabled={Boolean(loadingCourseId)}
+                          type="button"
+                          aria-label={`Open ${course.title} settings`}
+                          onClick={() => openCourseSettings(course)}
+                        >
+                          <Settings aria-hidden="true" />
+                        </button>
+                      </article>
                     ))}
                   </div>
                 </section>
@@ -673,7 +839,7 @@ export default function LearnPageClient() {
                     selectedCourse ? "Learn chat" : "Learn something new"
                   }
                 >
-                  <div className="learn-chat-thread">
+                  <div className="learn-chat-thread" ref={chatThreadRef}>
                     {chatMessages.map((message) => (
                       <div
                         className={`learn-chat-message learn-chat-message-${message.role}`}
@@ -701,7 +867,7 @@ export default function LearnPageClient() {
                         )}
                       </div>
                     ))}
-                    <div className="learn-chat-end" ref={chatEndRef} />
+                    <div className="learn-chat-end" />
                   </div>
                   {conversationCostLabel ? (
                     <div
@@ -741,6 +907,86 @@ export default function LearnPageClient() {
           ) : null}
         </section>
       </section>
+
+      {courseSettingsCourse ? (
+        <div
+          className="settings-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeCourseSettings();
+            }
+          }}
+        >
+          <section
+            className="settings-modal course-settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-busy={isDeletingCourse}
+            aria-labelledby="course-settings-title"
+          >
+            <div className="settings-modal-header">
+              <div>
+                <p className="settings-modal-kicker">Course settings</p>
+                <h2 className="settings-modal-title" id="course-settings-title">
+                  {courseSettingsCourse.title}
+                </h2>
+              </div>
+              <button
+                className="stats-modal-close"
+                type="button"
+                aria-label="Close course settings"
+                disabled={isDeletingCourse}
+                onClick={closeCourseSettings}
+              />
+            </div>
+
+            <dl className="course-settings-summary" aria-label="Course summary">
+              <div>
+                <dt>{courseSettingsCourse.generatedPages}</dt>
+                <dd>generated pages</dd>
+              </div>
+              <div>
+                <dt>{courseSettingsCourse.chatMessageCount}</dt>
+                <dd>chat messages</dd>
+              </div>
+              <div>
+                <dt>{formatCourseUpdatedAt(courseSettingsCourse.updatedAt)}</dt>
+                <dd>last updated</dd>
+              </div>
+            </dl>
+
+            <div className="course-settings-danger">
+              <div>
+                <h3>Delete course</h3>
+                <p>
+                  This removes the course, its chat, generated pages, page
+                  attempts, and generated review questions.
+                </p>
+              </div>
+              <button
+                className="course-delete-action"
+                type="button"
+                disabled={isDeletingCourse}
+                onClick={() => {
+                  void deleteSelectedCourse();
+                }}
+              >
+                <Trash2 aria-hidden="true" />
+                <span>
+                  {isDeletingCourse ? "Deleting..." : "Delete course and data"}
+                </span>
+              </button>
+            </div>
+
+            {courseSettingsMessage ? (
+              <p className="deck-editor-status" role="alert">
+                {courseSettingsMessage}
+              </p>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
