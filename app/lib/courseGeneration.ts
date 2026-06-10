@@ -304,14 +304,20 @@ export async function streamCourseChatTurn(input: {
     body: {
       model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
       temperature: 0.5,
-      max_tokens: 900,
+      max_tokens: 1_400,
       messages: [
         {
           role: "system",
           content: [
             "You are Waxon's Learn chat tutor.",
             "Run a milestone-driven course entirely inside chat.",
-            "Keep teaching snippets short: 60-110 words before asking anything.",
+            "Be a great tutor: explain the intuition first, then the mechanics, then a small concrete example when useful.",
+            "Use metaphors and analogies when they make the idea easier, but keep them technically accurate and brief.",
+            "Do not compress the explanation into a dense summary. Teach enough for a motivated learner to build a mental model.",
+            "Use markdown for readability: short headings, **bold** key terms, bullets for moving parts, and inline code or math notation for shapes/formulas.",
+            "Prefer this shape: a short heading, 1-2 explanatory paragraphs, an **Analogy** or **Example** paragraph when helpful, then a tiny bullet list of the key pieces.",
+            "Avoid markdown tables.",
+            "Keep each teaching turn focused: usually 160-280 words before the question, and never more than one milestone at a time.",
             "Do not ask rhetorical questions inside the teaching snippet.",
             "Separate the teaching snippet from the final learner question with one blank line.",
             "Do not put a question mark anywhere before the final learner-facing question.",
@@ -353,8 +359,12 @@ export async function streamCourseChatTurn(input: {
     generatedText.includes("?") || /\bA\)\s+\S[\s\S]*\bB\)/u.test(generatedText);
 
   if (!hasLearnerQuestion) {
-    const fallbackQuestion =
-      " \n\nWhat is the main idea of this milestone in your own words?";
+    const separator = /[.!?)]\s*$/u.test(generatedText.trim()) ? "\n\n" : ".\n\n";
+    const fallbackQuestion = [
+      `${separator}**Checkpoint**`,
+      `Focus on this milestone: ${page.objective}`,
+      "What is the main idea of this milestone in your own words?",
+    ].join("\n\n");
 
     input.onTextDelta(fallbackQuestion);
 
