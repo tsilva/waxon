@@ -491,3 +491,43 @@ export async function answerCoursePage(input: {
     course: updated,
   };
 }
+
+export async function advanceCourseProgress(
+  courseId: string,
+): Promise<CourseDetail | null> {
+  const course = await getCourse(courseId);
+
+  if (!course) {
+    return null;
+  }
+
+  if (course.status === "completed") {
+    return course;
+  }
+
+  const nextPosition = nextCoursePosition({
+    toc: course.toc,
+    chapterIndex: course.currentChapterIndex,
+    pageIndex: course.currentPageIndex,
+  });
+  const now = Date.now();
+
+  await db
+    .update(courses)
+    .set({
+      status: nextPosition ? "active" : "completed",
+      currentChapterIndex:
+        nextPosition?.chapterIndex ?? course.currentChapterIndex,
+      currentPageIndex: nextPosition?.pageIndex ?? course.currentPageIndex,
+      updatedAt: now,
+    })
+    .where(eq(courses.id, course.id));
+
+  const updated = await getCourse(course.id);
+
+  if (!updated) {
+    throw new Error("Could not reload course.");
+  }
+
+  return updated;
+}

@@ -1,24 +1,13 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
-import {
-  BookOpen,
-  Check,
-  ChevronRight,
-  Loader2,
-  SendHorizontal,
-} from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Check, ChevronRight, Loader2, SendHorizontal } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
-
-type CourseChoice = {
-  id: string;
-  text: string;
-};
 
 type CourseToc = {
   title: string;
@@ -30,23 +19,6 @@ type CourseToc = {
       objective: string;
     }>;
   }>;
-};
-
-type CoursePage = {
-  id: string;
-  chapterIndex: number;
-  pageIndex: number;
-  title: string;
-  body: string;
-  summary: string;
-  question: string;
-  choices: CourseChoice[];
-  widget?: {
-    type: "multiple_choice";
-    id: string;
-    question: string;
-    choices: CourseChoice[];
-  };
 };
 
 type Course = {
@@ -61,7 +33,6 @@ type Course = {
   currentPageIndex: number;
   totalPages: number;
   generatedPages: number;
-  pages?: CoursePage[];
 };
 
 type UserProfile = {
@@ -70,29 +41,11 @@ type UserProfile = {
   avatarUrl: string | null;
 };
 
-type ApiResult<T> =
-  | ({ ok: true } & T)
-  | {
-      ok: false;
-      error: string;
-    };
-
 type LearnChatMessage = {
   id: string;
   role: "assistant" | "user";
   content: string;
 };
-
-type CourseIntakeDecision =
-  | {
-      action: "clarify";
-      message: string;
-    }
-  | {
-      action: "create_course";
-      topic: string;
-      message: string;
-    };
 
 const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
   id: "learn-chat-intro",
@@ -141,29 +94,39 @@ function pageOrdinal(course: Course, chapterIndex: number, pageIndex: number) {
   return ordinal;
 }
 
-function currentCoursePage(course: Course | null): CoursePage | null {
-  if (!course?.pages) {
-    return null;
+function isMilestoneComplete(
+  course: Course,
+  chapterIndex: number,
+  pageIndex: number,
+) {
+  if (course.status === "completed") {
+    return true;
   }
 
   return (
-    course.pages.find(
-      (page) =>
-        page.chapterIndex === course.currentChapterIndex &&
-        page.pageIndex === course.currentPageIndex,
-    ) ?? null
+    pageOrdinal(course, chapterIndex, pageIndex) <
+    pageOrdinal(course, course.currentChapterIndex, course.currentPageIndex)
   );
 }
 
-function multipleChoiceWidget(page: CoursePage) {
-  return (
-    page.widget ?? {
-      type: "multiple_choice",
-      id: `${page.id}-multiple-choice`,
-      question: page.question,
-      choices: page.choices,
-    }
-  );
+function parseSseEvent(rawEvent: string): { event: string; data: unknown } | null {
+  const lines = rawEvent.split("\n");
+  const event =
+    lines.find((line) => line.startsWith("event:"))?.slice(6).trim() ?? "";
+  const data = lines
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+    .join("\n");
+
+  if (!event || !data) {
+    return null;
+  }
+
+  try {
+    return { event, data: JSON.parse(data) as unknown };
+  } catch {
+    return null;
+  }
 }
 
 export default function LearnPageClient() {
@@ -182,17 +145,10 @@ export default function LearnPageClient() {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [dueCount, setDueCount] = useState(0);
   const [isBooting, setIsBooting] = useState(true);
-  const [isCreating, setIsCreating] = useState(false);
-  const [isIntaking, setIsIntaking] = useState(false);
-  const [isGeneratingPage, setIsGeneratingPage] = useState(false);
-  const [isAnswering, setIsAnswering] = useState(false);
-  const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
   const canViewAdmin = isAdminEmail(currentUser?.email);
-  const currentPage = currentCoursePage(selectedCourse);
-  const currentPageWidget = currentPage ? multipleChoiceWidget(currentPage) : null;
-  const isChatBusy = isIntaking || isCreating;
   const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
   const menuDisplayName =
     clerkUser?.fullName ||
@@ -201,46 +157,6 @@ export default function LearnPageClient() {
     "Waxon user";
   const menuEmail =
     clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
-
-  const syncCourse = useCallback((course: Course) => {
-    setSelectedCourse(course);
-  }, []);
-
-  const loadCurrentPage = useCallback(
-    async (courseId: string) => {
-      setIsGeneratingPage(true);
-      setError(null);
-
-      try {
-        const data = await readApiJson<
-          ApiResult<{ course: Course; page: CoursePage | null }>
-        >(
-          await fetch(`/api/courses/${encodeURIComponent(courseId)}/next-page`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
-          }),
-        );
-
-        if (!data.ok) {
-          throw new Error(data.error);
-        }
-
-        syncCourse(data.course);
-        setFeedback(null);
-        setSelectedChoiceId(null);
-      } catch (nextError) {
-        setError(
-          nextError instanceof Error
-            ? nextError.message
-            : "Could not generate page.",
-        );
-      } finally {
-        setIsGeneratingPage(false);
-      }
-    },
-    [syncCourse],
-  );
 
   useEffect(() => {
     let isCancelled = false;
@@ -287,67 +203,24 @@ export default function LearnPageClient() {
   }, []);
 
   useEffect(() => {
-    if (
-      !selectedCourse ||
-      selectedCourse.status === "completed" ||
-      currentCoursePage(selectedCourse) ||
-      isGeneratingPage
-    ) {
-      return;
-    }
+    chatEndRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+  }, [chatMessages, isStreaming]);
 
-    void loadCurrentPage(selectedCourse.id);
-  }, [isGeneratingPage, loadCurrentPage, selectedCourse]);
-
-  async function createCourseFromTopic(normalizedTopic: string) {
-    if (!normalizedTopic || isCreating) {
-      return;
-    }
-
-    setIsCreating(true);
-    setError(null);
-    setFeedback(null);
-
-    try {
-      const data = await readApiJson<ApiResult<{ course: Course }>>(
-        await fetch("/api/courses", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topic: normalizedTopic }),
-        }),
-      );
-
-      if (!data.ok) {
-        throw new Error(data.error);
-      }
-
-      setTopic("");
-      syncCourse(data.course);
-      setChatMessages((messages) => [
-        ...messages,
-        {
-          id: chatMessageId(),
-          role: "assistant",
-          content: `Course ready: ${data.course.title}`,
-        },
-      ]);
-      await loadCurrentPage(data.course.id);
-    } catch (createError) {
-      setError(
-        createError instanceof Error
-          ? createError.message
-          : "Could not create course.",
-      );
-    } finally {
-      setIsCreating(false);
-    }
+  function appendAssistantDelta(messageId: string, delta: string) {
+    setChatMessages((messages) =>
+      messages.map((message) =>
+        message.id === messageId
+          ? { ...message, content: `${message.content}${delta}` }
+          : message,
+      ),
+    );
   }
 
   async function submitChatPrompt(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = topic.trim();
 
-    if (!content || isChatBusy) {
+    if (!content || isStreaming) {
       return;
     }
 
@@ -356,46 +229,94 @@ export default function LearnPageClient() {
       role: "user",
       content,
     };
+    const assistantMessageId = chatMessageId();
+    const assistantMessage: LearnChatMessage = {
+      id: assistantMessageId,
+      role: "assistant",
+      content: "",
+    };
     const nextMessages = [...chatMessages, userMessage];
 
     setTopic("");
-    setChatMessages(nextMessages);
-    setSelectedCourse(null);
-    setIsIntaking(true);
     setError(null);
-    setFeedback(null);
+    setIsStreaming(true);
+    setChatMessages([...nextMessages, assistantMessage]);
 
     try {
-      const data = await readApiJson<
-        ApiResult<{ decision: CourseIntakeDecision }>
-      >(
-        await fetch("/api/courses/intake", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messages: nextMessages.map((message) => ({
-              role: message.role,
-              content: message.content,
-            })),
-          }),
+      const response = await fetch("/api/courses/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          courseId: selectedCourse?.id,
+          messages: nextMessages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
         }),
-      );
+      });
 
-      if (!data.ok) {
-        throw new Error(data.error);
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => null);
+        throw new Error(
+          data && typeof data === "object" && "error" in data
+            ? String((data as { error?: unknown }).error)
+            : "Could not continue Learn chat.",
+        );
       }
 
-      setChatMessages((messages) => [
-        ...messages,
-        {
-          id: chatMessageId(),
-          role: "assistant",
-          content: data.decision.message,
-        },
-      ]);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let receivedDone = false;
 
-      if (data.decision.action === "create_course") {
-        await createCourseFromTopic(data.decision.topic);
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+
+        let boundary = buffer.indexOf("\n\n");
+
+        while (boundary !== -1) {
+          const rawEvent = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const parsed = parseSseEvent(rawEvent);
+
+          if (parsed?.event === "course") {
+            const data = parsed.data as { course?: Course };
+
+            if (data.course) {
+              setSelectedCourse(data.course);
+            }
+          } else if (parsed?.event === "delta") {
+            const data = parsed.data as { delta?: unknown };
+
+            if (typeof data.delta === "string") {
+              appendAssistantDelta(assistantMessageId, data.delta);
+            }
+          } else if (parsed?.event === "error") {
+            const data = parsed.data as { error?: unknown };
+
+            throw new Error(
+              typeof data.error === "string"
+                ? data.error
+                : "Could not continue Learn chat.",
+            );
+          } else if (parsed?.event === "done") {
+            receivedDone = true;
+            void reader.cancel().catch(() => undefined);
+            break;
+          }
+
+          boundary = buffer.indexOf("\n\n");
+        }
+
+        if (receivedDone) {
+          break;
+        }
       }
     } catch (chatError) {
       setError(
@@ -403,52 +324,11 @@ export default function LearnPageClient() {
           ? chatError.message
           : "Could not continue Learn chat.",
       );
-    } finally {
-      setIsIntaking(false);
-    }
-  }
-
-  async function submitChoice(choiceId: string) {
-    if (!selectedCourse || !currentPage || isAnswering) {
-      return;
-    }
-
-    setSelectedChoiceId(choiceId);
-    setIsAnswering(true);
-    setError(null);
-
-    try {
-      const data = await readApiJson<
-        ApiResult<{ correct: boolean; feedback: string; course: Course }>
-      >(
-        await fetch(`/api/courses/${encodeURIComponent(selectedCourse.id)}/answer`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            pageId: currentPage.id,
-            selectedChoiceId: choiceId,
-          }),
-        }),
-      );
-
-      if (!data.ok) {
-        throw new Error(data.error);
-      }
-
-      setFeedback(data.feedback);
-      syncCourse(data.course);
-
-      if (data.correct && data.course.status !== "completed") {
-        await loadCurrentPage(data.course.id);
-      }
-    } catch (answerError) {
-      setError(
-        answerError instanceof Error
-          ? answerError.message
-          : "Could not submit answer.",
+      setChatMessages((messages) =>
+        messages.filter((message) => message.id !== assistantMessageId),
       );
     } finally {
-      setIsAnswering(false);
+      setIsStreaming(false);
     }
   }
 
@@ -486,95 +366,28 @@ export default function LearnPageClient() {
           role="tabpanel"
           aria-labelledby="learn-tab"
         >
-          <section className="learn-reader">
-            {error ? (
-              <p className="error-message learn-error" role="alert">
-                {error}
-              </p>
-            ) : null}
+          {error ? (
+            <p className="error-message learn-error" role="alert">
+              {error}
+            </p>
+          ) : null}
 
-            {isBooting ? (
-              <div className="learn-loading" role="status">
-                <span className="pending-spinner" aria-hidden="true" />
-                <span>Loading Learn</span>
-              </div>
-            ) : null}
+          {isBooting ? (
+            <div className="learn-loading" role="status">
+              <span className="pending-spinner" aria-hidden="true" />
+              <span>Loading Learn</span>
+            </div>
+          ) : null}
 
-            {!isBooting ? (
-              <section className="learn-chat-panel" aria-label="Learn chat">
-                <div className="learn-chat-thread">
-                  {chatMessages.map((message) => (
-                    <div
-                      className={`learn-chat-message learn-chat-message-${message.role}`}
-                      key={message.id}
-                    >
-                      <p>{message.content}</p>
-                    </div>
-                  ))}
-                  {isChatBusy ? (
-                    <div
-                      className="learn-chat-message learn-chat-message-assistant"
-                      role="status"
-                    >
-                      <span className="pending-spinner" aria-hidden="true" />
-                      <p>{isCreating ? "Generating course" : "Thinking"}</p>
-                    </div>
-                  ) : null}
-                </div>
-                <form className="learn-chat-composer" onSubmit={submitChatPrompt}>
-                  <input
-                    id="learn-topic-input"
-                    type="text"
-                    value={topic}
-                    onChange={(event) => setTopic(event.target.value)}
-                    placeholder="Learn convolutional neural networks for vision"
-                    disabled={isChatBusy}
-                  />
-                  <button
-                    type="submit"
-                    disabled={!topic.trim() || isChatBusy}
-                    aria-label="Send"
-                    title="Send"
-                  >
-                    {isChatBusy ? (
-                      <Loader2 className="learn-spin-icon" aria-hidden="true" />
-                    ) : (
-                      <SendHorizontal aria-hidden="true" />
-                    )}
-                  </button>
-                </form>
-              </section>
-            ) : null}
-
-            {!isBooting && selectedCourse ? (
-              <>
-                <div className="learn-course-heading">
-                  <div>
-                    <p className="learn-kicker">{selectedCourse.deckName}</p>
-                    <h1>{selectedCourse.title}</h1>
-                    {selectedCourse.description ? (
-                      <p>{selectedCourse.description}</p>
-                    ) : null}
-                  </div>
-                  <div className="learn-progress-pill" aria-label="Course progress">
-                    <BookOpen aria-hidden="true" />
-                    <span>
-                      {selectedCourse.status === "completed"
-                        ? selectedCourse.totalPages
-                        : Math.max(
-                            1,
-                            pageOrdinal(
-                              selectedCourse,
-                              selectedCourse.currentChapterIndex,
-                              selectedCourse.currentPageIndex,
-                            ),
-                          )}
-                      /{selectedCourse.totalPages}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="learn-layout">
+          {!isBooting ? (
+            <div
+              className={`learn-chat-layout ${
+                selectedCourse ? "" : "learn-chat-layout-empty"
+              }`}
+            >
+              {selectedCourse ? (
+                <aside className="learn-chat-toc" aria-label="Course outline">
+                  <p className="learn-kicker">{selectedCourse.title}</p>
                   <nav className="learn-toc" aria-label="Course table of contents">
                     {selectedCourse.toc.chapters.map((chapter, chapterIndex) => (
                       <section className="learn-toc-chapter" key={chapter.title}>
@@ -585,10 +398,10 @@ export default function LearnPageClient() {
                               selectedCourse.currentChapterIndex === chapterIndex &&
                               selectedCourse.currentPageIndex === pageIndex &&
                               selectedCourse.status !== "completed";
-                            const isGenerated = selectedCourse.pages?.some(
-                              (coursePage) =>
-                                coursePage.chapterIndex === chapterIndex &&
-                                coursePage.pageIndex === pageIndex,
+                            const isDone = isMilestoneComplete(
+                              selectedCourse,
+                              chapterIndex,
+                              pageIndex,
                             );
 
                             return (
@@ -597,7 +410,7 @@ export default function LearnPageClient() {
                                 key={`${chapterIndex}-${pageIndex}-${page.title}`}
                               >
                                 <span>
-                                  {isGenerated ? (
+                                  {isDone ? (
                                     <Check aria-hidden="true" />
                                   ) : (
                                     <ChevronRight aria-hidden="true" />
@@ -611,83 +424,59 @@ export default function LearnPageClient() {
                       </section>
                     ))}
                   </nav>
+                </aside>
+              ) : null}
 
-                  <article className="learn-page-card">
-                    {selectedCourse.status === "completed" ? (
-                      <div className="learn-complete">
-                        <p className="learn-kicker">Complete</p>
-                        <h2>{selectedCourse.title}</h2>
-                        <p>Course cards are now in review rotation.</p>
-                      </div>
-                    ) : currentPage ? (
-                      <>
-                        <div className="learn-page-heading">
-                          <p className="learn-kicker">
-                            Chapter {currentPage.chapterIndex + 1} / Page{" "}
-                            {currentPage.pageIndex + 1}
-                          </p>
-                          <h2>{currentPage.title}</h2>
-                        </div>
+              <section className="learn-chat-panel" aria-label="Learn chat">
+                <div className="learn-chat-thread">
+                  {chatMessages.map((message) => (
+                    <div
+                      className={`learn-chat-message learn-chat-message-${message.role}`}
+                      key={message.id}
+                    >
+                      {message.content ? (
                         <MarkdownContent
-                          className="learn-page-body"
-                          text={currentPage.body}
+                          className="learn-chat-message-content"
+                          text={message.content}
                           enableCodeBlocks
-                          enableHeadings
+                          enableHeadings={false}
                         />
-                        {currentPageWidget ? (
-                        <section
-                          className="learn-quiz"
-                          aria-label="Page question"
-                          data-widget={currentPageWidget.type}
-                        >
-                          <p className="learn-quiz-question">
-                            {currentPageWidget.question}
-                          </p>
-                          <div className="learn-choice-grid">
-                            {currentPageWidget.choices.map((choice) => (
-                              <button
-                                className={`learn-choice ${
-                                  selectedChoiceId === choice.id
-                                    ? "learn-choice-selected"
-                                    : ""
-                                }`}
-                                type="button"
-                                key={choice.id}
-                                disabled={isAnswering}
-                                onClick={() => submitChoice(choice.id)}
-                              >
-                                <span>{choice.id}</span>
-                                <p>{choice.text}</p>
-                              </button>
-                            ))}
-                          </div>
-                          {feedback ? (
-                            <p className="learn-feedback" role="status">
-                              {feedback}
-                            </p>
-                          ) : null}
-                        </section>
-                        ) : null}
-                      </>
-                    ) : (
-                      <div className="learn-loading" role="status">
+                      ) : (
                         <span className="pending-spinner" aria-hidden="true" />
-                        <span>
-                          {isGeneratingPage ? "Generating page" : "Preparing page"}
-                        </span>
-                      </div>
-                    )}
-                  </article>
+                      )}
+                    </div>
+                  ))}
+                  <div ref={chatEndRef} />
                 </div>
-              </>
-            ) : null}
-
-            {!isBooting && !selectedCourse ? (
-              <div className="learn-chat-resting" aria-live="polite">
-                <p>Start a course from the chat.</p>
-              </div>
-            ) : null}
-          </section>
+                <form className="learn-chat-composer" onSubmit={submitChatPrompt}>
+                  <input
+                    id="learn-topic-input"
+                    type="text"
+                    value={topic}
+                    onChange={(event) => setTopic(event.target.value)}
+                    placeholder={
+                      selectedCourse
+                        ? "Answer here"
+                        : "Learn convolutional neural networks for vision"
+                    }
+                    disabled={isStreaming}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!topic.trim() || isStreaming}
+                    aria-label="Send"
+                    title="Send"
+                  >
+                    {isStreaming ? (
+                      <Loader2 className="learn-spin-icon" aria-hidden="true" />
+                    ) : (
+                      <SendHorizontal aria-hidden="true" />
+                    )}
+                  </button>
+                </form>
+              </section>
+            </div>
+          ) : null}
         </section>
       </section>
     </main>
