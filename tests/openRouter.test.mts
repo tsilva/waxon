@@ -300,6 +300,7 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
   const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];
   let activityCount = 0;
+  const deltas: string[] = [];
   const encoder = new TextEncoder();
 
   globalThis.fetch = async (_url, init) => {
@@ -312,7 +313,7 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
             encoder.encode(
               `data: ${JSON.stringify({
                 choices: [{ delta: { content: "{\"score\"" } }],
-              })}\n\n`,
+              })}\r\n\r\n`,
             ),
           );
           controller.enqueue(
@@ -324,10 +325,10 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
                   completion_tokens: 4,
                   total_tokens: 12,
                 },
-              })}\n\n`,
+              })}\r\n\r\n`,
             ),
           );
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.enqueue(encoder.encode("data: [DONE]\r\n\r\n"));
           controller.close();
         },
       }),
@@ -343,6 +344,9 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
   try {
     const { body } = await openRouterChatCompletion({
       apiKey: "test-key",
+      onTextDelta: (delta) => {
+        deltas.push(delta);
+      },
       onActivity: () => {
         activityCount += 1;
       },
@@ -358,6 +362,7 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
     assert.equal(requestBodies[0]?.stream, true);
     assert.deepEqual(requestBodies[0]?.stream_options, { include_usage: true });
     assert.equal(body.choices?.[0]?.message?.content, "{\"score\":10}");
+    assert.deepEqual(deltas, ["{\"score\"", ":10}"]);
     assert.equal(body.usage?.completion_tokens, 4);
     assert.ok(activityCount >= 2);
   } finally {

@@ -234,6 +234,26 @@ function extractStreamingDeltaText(chunk: unknown): string {
   return "";
 }
 
+function findStreamingEventBoundary(buffer: string):
+  | {
+      index: number;
+      length: number;
+    }
+  | null {
+  const lfBoundary = buffer.indexOf("\n\n");
+  const crlfBoundary = buffer.indexOf("\r\n\r\n");
+
+  if (lfBoundary === -1 && crlfBoundary === -1) {
+    return null;
+  }
+
+  if (lfBoundary !== -1 && (crlfBoundary === -1 || lfBoundary < crlfBoundary)) {
+    return { index: lfBoundary, length: 2 };
+  }
+
+  return { index: crlfBoundary, length: 4 };
+}
+
 async function parseOpenRouterStream(
   response: Response,
   onActivity?: () => void,
@@ -299,13 +319,13 @@ async function parseOpenRouterStream(
     rawText += text;
     buffer += text;
 
-    let eventBoundary = buffer.indexOf("\n\n");
+    let eventBoundary = findStreamingEventBoundary(buffer);
 
-    while (eventBoundary !== -1) {
-      const eventText = buffer.slice(0, eventBoundary);
-      buffer = buffer.slice(eventBoundary + 2);
+    while (eventBoundary) {
+      const eventText = buffer.slice(0, eventBoundary.index);
+      buffer = buffer.slice(eventBoundary.index + eventBoundary.length);
       parseEvent(eventText);
-      eventBoundary = buffer.indexOf("\n\n");
+      eventBoundary = findStreamingEventBoundary(buffer);
     }
   }
 
