@@ -6252,6 +6252,18 @@ textarea {
   height: 18px;
 }
 
+.learn-chat-resting {
+  display: grid;
+  align-content: center;
+  min-height: 240px;
+  color: var(--muted);
+  font: 720 13px/1.45 var(--font-ui);
+}
+
+.learn-chat-resting p {
+  margin: 0;
+}
+
 .learn-error {
   margin: 0 0 14px;
 }

@@ -301,7 +301,6 @@ export default function LearnPageClient() {
         setCurrentUser(userData);
         setDueCount(queueData.queueRemaining ?? 0);
         setCourses(coursesData.courses);
-        setSelectedCourse(coursesData.courses[0] ?? null);
       } catch (bootError) {
         if (!isCancelled) {
           setError(
@@ -398,6 +397,7 @@ export default function LearnPageClient() {
 
     setTopic("");
     setChatMessages(nextMessages);
+    setSelectedCourse(null);
     setIsIntaking(true);
     setError(null);
     setFeedback(null);
@@ -760,6 +760,16 @@ export default function LearnPageClient() {
                   </article>
                 </div>
               </>
+            ) : null}
+
+            {!isBooting && !selectedCourse ? (
+              <div className="learn-chat-resting" aria-live="polite">
+                {courses.length > 0 ? (
+                  <p>Pick a course to resume, or start a new one here.</p>
+                ) : (
+                  <p>Start a course from the chat.</p>
+                )}
+              </div>
             ) : null}
           </section>
         </section>
