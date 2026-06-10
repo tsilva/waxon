@@ -6,7 +6,7 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/next-server.mjs dev",
     "build": "next build",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
@@ -16,7 +16,7 @@
     "deck:simplify-questions": "node .codex/skills/deck-cleanup-questions/scripts/deck-cleanup-questions.mjs",
     "answers:backfill-concise": "node scripts/backfill-concise-answers.mjs",
     "embeddings:backfill": "node scripts/backfill-question-embeddings.mjs",
-    "start": "next start",
+    "start": "node scripts/next-server.mjs start",
     "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
