@@ -203,6 +203,7 @@ export default function LearnPageClient() {
   ]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [isStartingNewCourse, setIsStartingNewCourse] = useState(false);
   const [draftConversationCost, setDraftConversationCost] = useState(0);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [dueCount, setDueCount] = useState(0);
@@ -325,6 +326,7 @@ export default function LearnPageClient() {
       const data = await readApiJson<{ course: Course }>(response);
 
       setSelectedCourse(data.course);
+      setIsStartingNewCourse(false);
       syncCourse(data.course);
       setChatMessages(
         data.course.chatMessages?.length
@@ -349,6 +351,7 @@ export default function LearnPageClient() {
     }
 
     setSelectedCourse(null);
+    setIsStartingNewCourse(true);
     setChatMessages([INITIAL_CHAT_MESSAGE]);
     setTopic("");
     setDraftConversationCost(0);
@@ -436,6 +439,7 @@ export default function LearnPageClient() {
 
             if (data.course) {
               setSelectedCourse(data.course);
+              setIsStartingNewCourse(false);
               syncCourse(data.course);
             }
           } else if (parsed?.event === "delta") {
@@ -461,6 +465,7 @@ export default function LearnPageClient() {
 
             if (data.course) {
               setSelectedCourse(data.course);
+              setIsStartingNewCourse(false);
               syncCourse(data.course);
             } else if (typeof data.turnCost === "number" && data.turnCost > 0) {
               const turnCost = data.turnCost;
@@ -499,6 +504,9 @@ export default function LearnPageClient() {
       setIsStreaming(false);
     }
   }
+
+  const showCourseList =
+    !selectedCourse && courses.length > 0 && !isStartingNewCourse;
 
   return (
     <main className="page page-learn-active">
@@ -552,20 +560,14 @@ export default function LearnPageClient() {
               className={`learn-chat-layout ${
                 selectedCourse
                   ? ""
-                  : courses.length
-                    ? "learn-chat-layout-picker"
+                  : showCourseList
+                    ? "learn-chat-layout-course-list"
                     : "learn-chat-layout-empty"
               }`}
             >
               {selectedCourse ? (
                 <aside className="learn-chat-toc" aria-label="Course outline">
-                  <div className="learn-course-context">
-                    <p className="learn-kicker">{selectedCourse.title}</p>
-                    <button type="button" onClick={startNewCourse}>
-                      <PlusCircle aria-hidden="true" />
-                      <span>New</span>
-                    </button>
-                  </div>
+                  <p className="learn-kicker">{selectedCourse.title}</p>
                   <nav className="learn-toc" aria-label="Course table of contents">
                     {selectedCourse.toc.chapters.map((chapter, chapterIndex) => (
                       <section className="learn-toc-chapter" key={chapter.title}>
@@ -603,8 +605,11 @@ export default function LearnPageClient() {
                     ))}
                   </nav>
                 </aside>
-              ) : courses.length ? (
-                <aside className="learn-course-picker" aria-label="Courses">
+              ) : showCourseList ? (
+                <section
+                  className="learn-course-picker learn-course-picker-full"
+                  aria-label="Courses"
+                >
                   <div className="learn-course-picker-heading">
                     <p className="learn-kicker">Courses</p>
                     <button type="button" onClick={startNewCourse}>
@@ -636,78 +641,82 @@ export default function LearnPageClient() {
                       </button>
                     ))}
                   </div>
-                </aside>
+                </section>
               ) : null}
 
-              <section
-                className="learn-chat-panel"
-                aria-label={selectedCourse ? "Learn chat" : "Learn something new"}
-              >
-                <div className="learn-chat-thread">
-                  {chatMessages.map((message) => (
-                    <div
-                      className={`learn-chat-message learn-chat-message-${message.role}`}
-                      key={message.id}
-                    >
-                      {message.content ? (
-                        <MarkdownContent
-                          className={`learn-chat-message-content learn-chat-message-content-${message.role}`}
-                          text={message.content}
-                          enableCodeBlocks
-                          enableHeadings={message.role === "assistant"}
-                          enableMath={message.role === "assistant"}
-                        />
-                      ) : (
-                        <span
-                          className="learn-chat-pending"
-                          role="status"
-                          aria-live="polite"
-                        >
-                          <span className="pending-spinner" aria-hidden="true" />
-                          <span className="learn-chat-pending-status">
-                            {pendingStatus(message)}
+              {!showCourseList ? (
+                <section
+                  className="learn-chat-panel"
+                  aria-label={
+                    selectedCourse ? "Learn chat" : "Learn something new"
+                  }
+                >
+                  <div className="learn-chat-thread">
+                    {chatMessages.map((message) => (
+                      <div
+                        className={`learn-chat-message learn-chat-message-${message.role}`}
+                        key={message.id}
+                      >
+                        {message.content ? (
+                          <MarkdownContent
+                            className={`learn-chat-message-content learn-chat-message-content-${message.role}`}
+                            text={message.content}
+                            enableCodeBlocks
+                            enableHeadings={message.role === "assistant"}
+                            enableMath={message.role === "assistant"}
+                          />
+                        ) : (
+                          <span
+                            className="learn-chat-pending"
+                            role="status"
+                            aria-live="polite"
+                          >
+                            <span className="pending-spinner" aria-hidden="true" />
+                            <span className="learn-chat-pending-status">
+                              {pendingStatus(message)}
+                            </span>
                           </span>
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                  <div ref={chatEndRef} />
-                </div>
-                {conversationCostLabel ? (
-                  <div
-                    className="learn-conversation-cost"
-                    aria-label={`Conversation cost ${conversationCostLabel}`}
-                  >
-                    {conversationCostLabel}
+                        )}
+                      </div>
+                    ))}
+                    <div ref={chatEndRef} />
                   </div>
-                ) : null}
-                <form className="learn-chat-composer" onSubmit={submitChatPrompt}>
-                  <input
-                    id="learn-topic-input"
-                    type="text"
-                    value={topic}
-                    onChange={(event) => setTopic(event.target.value)}
-                    placeholder={
-                      selectedCourse
-                        ? "Answer here"
-                        : "Learn convolutional neural networks for vision"
-                    }
-                    disabled={isStreaming}
-                  />
-                  <button
-                    type="submit"
-                    disabled={!topic.trim() || isStreaming}
-                    aria-label={isStreaming ? streamingStatus : "Send"}
-                    title={isStreaming ? streamingStatus : "Send"}
-                  >
-                    {isStreaming ? (
-                      <Loader2 className="learn-spin-icon" aria-hidden="true" />
-                    ) : (
-                      <SendHorizontal aria-hidden="true" />
-                    )}
-                  </button>
-                </form>
-              </section>
+                  {conversationCostLabel ? (
+                    <div
+                      className="learn-conversation-cost"
+                      aria-label={`Conversation cost ${conversationCostLabel}`}
+                    >
+                      {conversationCostLabel}
+                    </div>
+                  ) : null}
+                  <form className="learn-chat-composer" onSubmit={submitChatPrompt}>
+                    <input
+                      id="learn-topic-input"
+                      type="text"
+                      value={topic}
+                      onChange={(event) => setTopic(event.target.value)}
+                      placeholder={
+                        selectedCourse
+                          ? "Answer here"
+                          : "Learn convolutional neural networks for vision"
+                      }
+                      disabled={isStreaming}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!topic.trim() || isStreaming}
+                      aria-label={isStreaming ? streamingStatus : "Send"}
+                      title={isStreaming ? streamingStatus : "Send"}
+                    >
+                      {isStreaming ? (
+                        <Loader2 className="learn-spin-icon" aria-hidden="true" />
+                      ) : (
+                        <SendHorizontal aria-hidden="true" />
+                      )}
+                    </button>
+                  </form>
+                </section>
+              ) : null}
             </div>
           ) : null}
         </section>

@@ -6134,8 +6134,16 @@ textarea {
   padding-right: 4px;
 }
 
-.learn-course-picker-heading,
-.learn-course-context {
+.learn-course-picker-full {
+  width: 100%;
+}
+
+.learn-course-picker-full .learn-course-list {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.learn-course-picker-heading {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -6143,12 +6151,7 @@ textarea {
   min-width: 0;
 }
 
-.learn-course-context {
-  align-items: center;
-}
-
-.learn-course-picker-heading button,
-.learn-course-context button {
+.learn-course-picker-heading button {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
@@ -6164,16 +6167,13 @@ textarea {
 }
 
 .learn-course-picker-heading button:hover,
-.learn-course-picker-heading button:focus-visible,
-.learn-course-context button:hover,
-.learn-course-context button:focus-visible {
+.learn-course-picker-heading button:focus-visible {
   border-color: rgb(139 92 48 / 38%);
   background: rgb(252 247 236 / 92%);
   outline: 0;
 }
 
-.learn-course-picker-heading svg,
-.learn-course-context svg {
+.learn-course-picker-heading svg {
   width: 14px;
   height: 14px;
 }
@@ -6254,6 +6254,11 @@ textarea {
 
 .learn-chat-layout-picker {
   grid-template-columns: minmax(190px, 280px) minmax(0, 780px);
+  justify-content: center;
+}
+
+.learn-chat-layout-course-list {
+  grid-template-columns: minmax(0, 1fr);
   justify-content: center;
 }
 
@@ -7641,8 +7646,12 @@ textarea {
   .learn-course-picker {
     width: 100%;
     max-width: 100%;
-    max-height: 28svh;
+    max-height: 100%;
     overflow: auto;
+  }
+
+  .learn-course-picker-full .learn-course-list {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .learn-chat-toc {
