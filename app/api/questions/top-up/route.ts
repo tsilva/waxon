@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   consumeUserRateLimit,
+  normalizeBoundedText,
   readJsonBodyWithLimit,
 } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
@@ -12,6 +13,7 @@ import { refreshDeckMemory } from "@/app/lib/deckMemory";
 import {
   ensureQuestionsDatabase,
   listDecks,
+  resolveOwnedDeckId,
 } from "@/app/lib/postgresStore";
 import { getOpenRouterChatConfig } from "@/app/lib/openRouter";
 import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
@@ -21,6 +23,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_TOP_UP_BODY_BYTES = 16 * 1024;
+const MAX_DECK_ID_CHARS = 200;
 
 function encodeStreamEvent(event: string, data: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(
@@ -54,6 +57,15 @@ export async function POST(request: Request) {
       ? (parsed.value as Record<string, unknown>)
       : {};
   const count = normalizeBulkQuestionCount(payload.count);
+  const requestedDeckId = normalizeBoundedText(payload.deckId, {
+    field: "deckId",
+    maxLength: MAX_DECK_ID_CHARS,
+  });
+
+  if (!requestedDeckId.ok) {
+    return requestedDeckId.response;
+  }
+
   const rateLimitResponse = consumeUserRateLimit({
     userId: user.id,
     route: "questions-top-up",
@@ -69,13 +81,44 @@ export async function POST(request: Request) {
 
   await ensureQuestionsDatabase();
 
-  const rotationDeck = (await listDecks({ userId: user.id })).find(
-    (deck) => deck.inReviewRotation,
-  );
+  let targetDeckId = "";
+
+  if (requestedDeckId.value) {
+    try {
+      targetDeckId = await resolveOwnedDeckId({
+        userId: user.id,
+        deckId: requestedDeckId.value,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Deck not found.";
+
+      return NextResponse.json(
+        { ok: false, error: message },
+        { status: message === "Deck not found." ? 404 : 500 },
+      );
+    }
+  }
+
+  const decks = await listDecks({ userId: user.id });
+  const rotationDeck = targetDeckId
+    ? decks.find((deck) => deck.id === targetDeckId)
+    : decks.find((deck) => deck.inReviewRotation);
 
   if (!rotationDeck) {
     return NextResponse.json(
-      { ok: false, error: "No deck is in review rotation." },
+      {
+        ok: false,
+        error: targetDeckId
+          ? "Deck not found."
+          : "No deck is in review rotation.",
+      },
+      { status: 400 },
+    );
+  }
+
+  if (!rotationDeck.inReviewRotation) {
+    return NextResponse.json(
+      { ok: false, error: "Deck is not in review rotation." },
       { status: 400 },
     );
   }

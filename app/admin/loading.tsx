@@ -21,7 +21,7 @@ export default function AdminLoading() {
               <span>waxon</span>
             </div>
             <div className="reader-tabs" aria-hidden="true">
-              <span className="reader-tab">Learn</span>
+              <span className="reader-tab">Review</span>
               <span className="reader-tab">Decks</span>
               <span className="reader-tab reader-tab-active">Admin</span>
             </div>

@@ -20,7 +20,6 @@ export async function POST(request: Request) {
   }
 
   const payload = parsed.value as Partial<{
-    mode: unknown;
     questionId: unknown;
     question: unknown;
   }>;
@@ -44,11 +43,8 @@ export async function POST(request: Request) {
     return question.response;
   }
 
-  const mode = payload?.mode === "learn" ? "learn" : "review";
-
   return NextResponse.json(
     await flagQuestion({
-      mode,
       questionId: questionId.value,
       question: question.value,
     }),
