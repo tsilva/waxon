@@ -1,6 +1,7 @@
-import { and, asc, count, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import {
+  courseChatMessages,
   coursePageAttempts,
   coursePages,
   courses,
@@ -16,6 +17,7 @@ import {
   type CourseToc,
 } from "./courseContent";
 import {
+  applyEvaluationToPostgres,
   createDeck,
   listDecks,
   upsertDueQuestions,
@@ -43,6 +45,16 @@ export type CoursePageRecord = {
   updatedAt: number;
 };
 
+export type CourseChatMessageRecord = {
+  id: string;
+  courseId: string;
+  role: "assistant" | "user";
+  content: string;
+  sequence: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type CourseRecord = {
   id: string;
   userId: string;
@@ -57,12 +69,15 @@ export type CourseRecord = {
   currentPageIndex: number;
   totalPages: number;
   generatedPages: number;
+  chatMessageCount: number;
+  conversationCost: number;
   createdAt: number;
   updatedAt: number;
 };
 
 export type CourseDetail = CourseRecord & {
   pages: CoursePageRecord[];
+  chatMessages: CourseChatMessageRecord[];
 };
 
 export type CourseAnswerResult = {
@@ -71,8 +86,29 @@ export type CourseAnswerResult = {
   course: CourseDetail;
 };
 
+export type CourseChatQuestionAttemptInput = {
+  course: CourseDetail;
+  question: string;
+  answer: string;
+  answerSummary: string;
+  conciseAnswer: string;
+  correctAnswer: string | null;
+  justification: string;
+  score: number;
+  submittedAt: number;
+};
+
+export type CourseChatQuestionAttemptResult = {
+  questionId: string;
+  attemptSaved: boolean;
+};
+
 function toCourseStatus(value: string): CourseStatus {
   return value === "completed" ? "completed" : "active";
+}
+
+function toCourseChatRole(value: string): CourseChatMessageRecord["role"] {
+  return value === "assistant" ? "assistant" : "user";
 }
 
 function toChoices(value: unknown): CourseChoice[] {
@@ -89,6 +125,26 @@ function toChoices(value: unknown): CourseChoice[] {
       };
     })
     .filter((choice) => choice.id && choice.text);
+}
+
+function toCourseChatMessage(row: {
+  id: string;
+  courseId: string;
+  role: string;
+  content: string;
+  sequence: number;
+  createdAt: number;
+  updatedAt: number;
+}): CourseChatMessageRecord {
+  return {
+    id: row.id,
+    courseId: row.courseId,
+    role: toCourseChatRole(row.role),
+    content: row.content,
+    sequence: row.sequence,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
 }
 
 function toCoursePage(row: {
@@ -181,6 +237,14 @@ async function loadCourseRows(userId: string, courseId?: string) {
     .from(coursePages)
     .groupBy(coursePages.courseId)
     .as("page_counts");
+  const chatCounts = db
+    .select({
+      courseId: courseChatMessages.courseId,
+      chatMessageCount: count(courseChatMessages.id).as("chat_message_count"),
+    })
+    .from(courseChatMessages)
+    .groupBy(courseChatMessages.courseId)
+    .as("chat_counts");
 
   return db
     .select({
@@ -194,12 +258,15 @@ async function loadCourseRows(userId: string, courseId?: string) {
       status: courses.status,
       currentChapterIndex: courses.currentChapterIndex,
       currentPageIndex: courses.currentPageIndex,
+      conversationCost: courses.conversationCost,
       createdAt: courses.createdAt,
       updatedAt: courses.updatedAt,
       generatedPages: pageCounts.generatedPages,
+      chatMessageCount: chatCounts.chatMessageCount,
     })
     .from(courses)
     .leftJoin(pageCounts, eq(pageCounts.courseId, courses.id))
+    .leftJoin(chatCounts, eq(chatCounts.courseId, courses.id))
     .where(
       courseId
         ? and(eq(courses.userId, userId), eq(courses.id, courseId))
@@ -231,6 +298,8 @@ async function hydrateCourse(input: {
     currentPageIndex: input.row.currentPageIndex,
     totalPages: coursePageCount(toc),
     generatedPages: Number(input.row.generatedPages ?? 0),
+    chatMessageCount: Number(input.row.chatMessageCount ?? 0),
+    conversationCost: Math.max(0, Number(input.row.conversationCost ?? 0)),
     createdAt: input.row.createdAt,
     updatedAt: input.row.updatedAt,
   };
@@ -252,15 +321,23 @@ export async function getCourse(courseId: string): Promise<CourseDetail | null> 
   }
 
   const course = await hydrateCourse({ row, userId: user.id });
-  const pageRows = await db
-    .select()
-    .from(coursePages)
-    .where(eq(coursePages.courseId, course.id))
-    .orderBy(asc(coursePages.chapterIndex), asc(coursePages.pageIndex));
+  const [pageRows, chatRows] = await Promise.all([
+    db
+      .select()
+      .from(coursePages)
+      .where(eq(coursePages.courseId, course.id))
+      .orderBy(asc(coursePages.chapterIndex), asc(coursePages.pageIndex)),
+    db
+      .select()
+      .from(courseChatMessages)
+      .where(eq(courseChatMessages.courseId, course.id))
+      .orderBy(asc(courseChatMessages.sequence)),
+  ]);
 
   return {
     ...course,
     pages: pageRows.map(toCoursePage),
+    chatMessages: chatRows.map(toCourseChatMessage),
   };
 }
 
@@ -305,6 +382,85 @@ export async function createCourse(input: {
   return detail;
 }
 
+export async function replaceCourseChatMessages(input: {
+  courseId: string;
+  messages: Array<{
+    role: "assistant" | "user";
+    content: string;
+  }>;
+}): Promise<CourseChatMessageRecord[]> {
+  const course = await getCourse(input.courseId);
+
+  if (!course) {
+    throw new Error("Course could not be loaded.");
+  }
+
+  const now = Date.now();
+  const messages = input.messages
+    .map((message) => ({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: message.content.trim(),
+    }))
+    .filter((message) => message.content);
+
+  return db.transaction(async (tx) => {
+    await tx
+      .delete(courseChatMessages)
+      .where(eq(courseChatMessages.courseId, course.id));
+
+    if (messages.length === 0) {
+      await tx
+        .update(courses)
+        .set({ updatedAt: now })
+        .where(eq(courses.id, course.id));
+
+      return [];
+    }
+
+    const rows = await tx
+      .insert(courseChatMessages)
+      .values(
+        messages.map((message, index) => ({
+          courseId: course.id,
+          role: message.role,
+          content: message.content,
+          sequence: index,
+          createdAt: now + index,
+          updatedAt: now + index,
+        })),
+      )
+      .returning();
+
+    await tx
+      .update(courses)
+      .set({ updatedAt: now })
+      .where(eq(courses.id, course.id));
+
+    return rows.map(toCourseChatMessage);
+  });
+}
+
+export async function addCourseConversationCost(input: {
+  courseId: string;
+  cost: number;
+}): Promise<void> {
+  if (!Number.isFinite(input.cost) || input.cost <= 0) {
+    return;
+  }
+
+  const user = await getCurrentUser();
+
+  const now = Date.now();
+
+  await db
+    .update(courses)
+    .set({
+      conversationCost: sql`${courses.conversationCost} + ${input.cost}`,
+      updatedAt: now,
+    })
+    .where(and(eq(courses.userId, user.id), eq(courses.id, input.courseId)));
+}
+
 export async function getCoursePageByPosition(input: {
   courseId: string;
   chapterIndex: number;
@@ -340,6 +496,77 @@ function courseQuestionProvenance(input: {
   ]
     .filter(Boolean)
     .join(" | ");
+}
+
+function courseChatQuestionProvenance(course: CourseDetail): string {
+  const chapter = course.toc.chapters[course.currentChapterIndex];
+  const page = chapter?.pages[course.currentPageIndex];
+
+  return [
+    `Course chat: ${course.title}`,
+    chapter ? `Chapter ${course.currentChapterIndex + 1}: ${chapter.title}` : "",
+    page ? `Milestone ${course.currentPageIndex + 1}: ${page.title}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+export async function recordCourseChatQuestionAttempt(
+  input: CourseChatQuestionAttemptInput,
+): Promise<CourseChatQuestionAttemptResult | null> {
+  const question = input.question.trim().replace(/\s+/g, " ");
+  const answer = input.answer.trim();
+  const score = Math.max(0, Math.min(10, Math.round(input.score)));
+
+  if (!question || !answer || !Number.isFinite(score)) {
+    return null;
+  }
+
+  const now = Date.now();
+  const [dueQuestion] = await upsertDueQuestions({
+    userId: input.course.userId,
+    deckId: input.course.deckId,
+    sourceQuestion: null,
+    now,
+    questions: [
+      {
+        question,
+        conciseAnswer:
+          input.conciseAnswer.trim().replace(/\s+/g, " ") ||
+          input.correctAnswer?.trim().replace(/\s+/g, " ") ||
+          "",
+        questionProvenance: courseChatQuestionProvenance(input.course),
+      },
+    ],
+  });
+
+  if (!dueQuestion) {
+    return null;
+  }
+
+  const persisted = await applyEvaluationToPostgres({
+    questionId: dueQuestion.questionId,
+    question: dueQuestion.question,
+    answer,
+    answerSummary:
+      input.answerSummary.trim().replace(/\s+/g, " ") || answer.slice(0, 240),
+    correctAnswer:
+      input.correctAnswer?.trim().replace(/\s+/g, " ") ||
+      input.conciseAnswer.trim().replace(/\s+/g, " ") ||
+      null,
+    justification:
+      input.justification.trim().replace(/\s+/g, " ") ||
+      "Recorded from course chat.",
+    score,
+    submittedAt: input.submittedAt,
+    now,
+    userId: input.course.userId,
+  });
+
+  return {
+    questionId: dueQuestion.questionId,
+    attemptSaved: Boolean(persisted),
+  };
 }
 
 export async function saveCoursePage(input: {

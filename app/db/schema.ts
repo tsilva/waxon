@@ -349,6 +349,7 @@ export const courses = pgTable(
     status: text("status").notNull().default("active"),
     currentChapterIndex: integer("current_chapter_index").notNull().default(0),
     currentPageIndex: integer("current_page_index").notNull().default(0),
+    conversationCost: doublePrecision("conversation_cost").notNull().default(0),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
   },
@@ -367,9 +368,49 @@ export const courses = pgTable(
     ),
     check("courses_current_chapter_index_check", sql`${table.currentChapterIndex} >= 0`),
     check("courses_current_page_index_check", sql`${table.currentPageIndex} >= 0`),
+    check("courses_conversation_cost_check", sql`${table.conversationCost} >= 0`),
     check("courses_created_at_check", sql`${table.createdAt} >= 0`),
     check(
       "courses_updated_at_check",
+      sql`${table.updatedAt} >= ${table.createdAt}`,
+    ),
+  ],
+);
+
+export const courseChatMessages = pgTable(
+  "course_chat_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    courseId: uuid("course_id")
+      .notNull()
+      .references(() => courses.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    sequence: integer("sequence").notNull(),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => [
+    uniqueIndex("course_chat_messages_course_sequence_idx").on(
+      table.courseId,
+      table.sequence,
+    ),
+    index("course_chat_messages_course_created_idx").on(
+      table.courseId,
+      table.createdAt,
+    ),
+    check(
+      "course_chat_messages_role_check",
+      sql`${table.role} IN ('assistant', 'user')`,
+    ),
+    check(
+      "course_chat_messages_content_nonempty_check",
+      sql`length(trim(${table.content})) > 0`,
+    ),
+    check("course_chat_messages_sequence_check", sql`${table.sequence} >= 0`),
+    check("course_chat_messages_created_at_check", sql`${table.createdAt} >= 0`),
+    check(
+      "course_chat_messages_updated_at_check",
       sql`${table.updatedAt} >= ${table.createdAt}`,
     ),
   ],
