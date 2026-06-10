@@ -10,6 +10,7 @@ import {
   type CoursePageContent,
   type CourseToc,
 } from "./courseContent";
+import type { CourseDetail } from "./courseStore";
 
 const COURSE_JSON_RESPONSE_FORMAT = { type: "json_object" };
 const MAX_INTAKE_MESSAGE_CHARS = 500;
@@ -29,6 +30,21 @@ export type CourseIntakeDecision =
       action: "create_course";
       topic: string;
       message: string;
+    };
+
+export type CourseChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
+export type CourseProgressDecision =
+  | {
+      toolCall: "mark_milestone_done";
+      reason: string;
+    }
+  | {
+      toolCall: "continue_current_milestone";
+      reason: string;
     };
 
 function normalizeIntakeText(value: unknown, maxLength: number): string {
@@ -74,6 +90,85 @@ function parseCourseIntakeDecision(source: string): CourseIntakeDecision {
   }
 
   throw new Error("Course intake action must be clarify or create_course.");
+}
+
+function parseCourseProgressDecision(source: string): CourseProgressDecision {
+  const value = extractJsonObject(source);
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Course progress response must be a JSON object.");
+  }
+
+  const record = value as Record<string, unknown>;
+  const toolCall = normalizeIntakeText(record.toolCall, 80);
+  const reason = normalizeIntakeText(record.reason, 500);
+
+  if (toolCall === "mark_milestone_done") {
+    return {
+      toolCall,
+      reason: reason || "The learner demonstrated enough understanding.",
+    };
+  }
+
+  return {
+    toolCall: "continue_current_milestone",
+    reason: reason || "The learner needs another short check.",
+  };
+}
+
+function currentCourseMilestone(course: CourseDetail) {
+  const chapter = course.toc.chapters[course.currentChapterIndex];
+  const page = chapter?.pages[course.currentPageIndex];
+
+  if (!chapter || !page) {
+    throw new Error("Course current position does not exist.");
+  }
+
+  return { chapter, page };
+}
+
+function compactCourseMessages(messages: CourseChatMessage[]) {
+  return messages.slice(-10).map((message) => ({
+    role: message.role,
+    content: message.content.slice(0, 1_200),
+  }));
+}
+
+export function buildFallbackCourseToc(topic: string): CourseToc {
+  const title = normalizeIntakeText(topic, 80) || "Focused Mini-Course";
+
+  return {
+    title,
+    description: `A focused chat course about ${title}.`,
+    chapters: [
+      {
+        title: "Core Model",
+        pages: [
+          {
+            title: "Main Idea",
+            objective: `State the central idea behind ${title}.`,
+          },
+          {
+            title: "Working Parts",
+            objective: `Explain the most important moving parts in ${title}.`,
+          },
+        ],
+      },
+      {
+        title: "Practice",
+        pages: [
+          {
+            title: "Apply It",
+            objective: `Use ${title} in a small concrete example.`,
+          },
+          {
+            title: "Check Understanding",
+            objective: `Recognize a common mistake or limitation in ${title}.`,
+          },
+        ],
+      },
+    ],
+  };
 }
 
 export async function generateCourseIntakeDecision(input: {
@@ -122,6 +217,151 @@ export async function generateCourseIntakeDecision(input: {
   }
 
   return parseCourseIntakeDecision(extractChatCompletionText(body));
+}
+
+export async function evaluateCourseChatProgress(input: {
+  apiKey: string;
+  model?: string;
+  userId: string;
+  course: CourseDetail;
+  messages: CourseChatMessage[];
+}): Promise<CourseProgressDecision> {
+  const { chapter, page } = currentCourseMilestone(input.course);
+  const { body, response } = await openRouterChatCompletion({
+    apiKey: input.apiKey,
+    stream: false,
+    trace: {
+      operation: "course_chat_progress",
+      userId: input.userId,
+      deckId: input.course.id,
+      question: `${chapter.title}: ${page.title}`,
+    },
+    body: {
+      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
+      response_format: COURSE_JSON_RESPONSE_FORMAT,
+      temperature: 0.15,
+      max_tokens: 320,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are controlling Waxon's milestone progress tool.",
+            "Decide whether the learner's latest answer shows enough understanding to finish the current TOC milestone.",
+            "Use mark_milestone_done only when the learner correctly explains or selects the core idea.",
+            "Use continue_current_milestone when the answer is missing, vague, wrong, or only partially correct.",
+            "Return strict JSON only with shape {\"toolCall\":\"mark_milestone_done\"|\"continue_current_milestone\",\"reason\":\"...\"}.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            `Course title: ${input.course.title}`,
+            `Current chapter: ${chapter.title}`,
+            `Current milestone: ${page.title}`,
+            `Milestone objective: ${page.objective}`,
+            `Conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
+          ].join("\n"),
+        },
+      ],
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Course progress evaluation failed.");
+  }
+
+  return parseCourseProgressDecision(extractChatCompletionText(body));
+}
+
+export async function streamCourseChatTurn(input: {
+  apiKey: string;
+  model?: string;
+  userId: string;
+  course: CourseDetail;
+  messages: CourseChatMessage[];
+  progressDecision?: CourseProgressDecision | null;
+  onTextDelta: (delta: string) => void;
+}): Promise<string> {
+  if (input.course.status === "completed") {
+    const message =
+      "That completes the course. The generated questions are now available for Review.";
+
+    input.onTextDelta(message);
+    return message;
+  }
+
+  const { chapter, page } = currentCourseMilestone(input.course);
+  const { body, response } = await openRouterChatCompletion({
+    apiKey: input.apiKey,
+    stream: true,
+    onTextDelta: input.onTextDelta,
+    trace: {
+      operation: "course_chat_turn",
+      userId: input.userId,
+      deckId: input.course.id,
+      question: `${chapter.title}: ${page.title}`,
+    },
+    body: {
+      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
+      temperature: 0.5,
+      max_tokens: 900,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are Waxon's Learn chat tutor.",
+            "Run a milestone-driven course entirely inside chat.",
+            "Keep teaching snippets short: 60-110 words before asking anything.",
+            "Do not ask rhetorical questions inside the teaching snippet.",
+            "Separate the teaching snippet from the final learner question with one blank line.",
+            "Do not put a question mark anywhere before the final learner-facing question.",
+            "End every turn with exactly one learner-facing question, and make it the final sentence or final multiple-choice block.",
+            "Questions can be short free-response or multiple choice.",
+            "If multiple choice, write choices directly in chat as A), B), C), D). Do not use widgets, JSON, markdown tables, or hidden metadata.",
+            "If the previous answer completed a milestone, briefly acknowledge it and move to the next milestone.",
+            "If the previous answer did not complete the milestone, give concise corrective feedback and ask a smaller follow-up question.",
+            "Do not mention tool calls or internal progress decisions.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            `Course title: ${input.course.title}`,
+            `Course description: ${input.course.description}`,
+            `Full TOC JSON: ${JSON.stringify(input.course.toc)}`,
+            `Current chapter index: ${input.course.currentChapterIndex}`,
+            `Current chapter: ${chapter.title}`,
+            `Current milestone index: ${input.course.currentPageIndex}`,
+            `Current milestone: ${page.title}`,
+            `Milestone objective: ${page.objective}`,
+            input.progressDecision
+              ? `Progress tool result: ${input.progressDecision.toolCall} - ${input.progressDecision.reason}`
+              : "Progress tool result: starting or continuing current milestone.",
+            `Recent conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
+          ].join("\n"),
+        },
+      ],
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Course chat generation failed.");
+  }
+
+  const generatedText = extractChatCompletionText(body);
+  const hasLearnerQuestion =
+    generatedText.includes("?") || /\bA\)\s+\S[\s\S]*\bB\)/u.test(generatedText);
+
+  if (!hasLearnerQuestion) {
+    const fallbackQuestion =
+      " \n\nWhat is the main idea of this milestone in your own words?";
+
+    input.onTextDelta(fallbackQuestion);
+
+    return `${generatedText}${fallbackQuestion}`;
+  }
+
+  return generatedText;
 }
 
 export async function generateCourseToc(input: {
