@@ -6550,67 +6550,76 @@ textarea {
   margin-top: 12px;
 }
 
-.learn-chat-message + .learn-chat-evaluation-list,
-.learn-chat-evaluation-list + .learn-chat-message,
-.learn-chat-evaluation-list + .learn-chat-evaluation-list {
+.learn-chat-message + .learn-chat-evaluation-card,
+.learn-chat-evaluation-card + .learn-chat-message,
+.learn-chat-evaluation-card + .learn-chat-evaluation-card {
   margin-top: 12px;
 }
 
-.learn-chat-evaluation-list {
-  align-self: flex-start;
-  width: min(780px, 100%);
-  padding-right: 0;
-}
-
-.learn-chat-evaluation-list .previous-row {
+.learn-chat-evaluation-card {
+  display: grid;
   grid-template-columns: minmax(0, 1fr) 46px;
+  align-self: flex-start;
   gap: 18px;
-  width: 100%;
+  width: min(780px, 100%);
   align-items: start;
   border-color: rgb(227 218 196 / 88%);
+  border: 1px solid rgb(227 218 196 / 88%);
+  border-radius: 8px;
   background: rgb(255 252 245 / 98%);
   padding: 18px 20px;
 }
 
-.learn-chat-evaluation-list .previous-row-main-button {
-  grid-column: 1;
-  grid-row: 1;
-  grid-template-columns: minmax(0, 1fr);
+.learn-chat-evaluation-copy {
+  display: grid;
   gap: 10px;
-  padding-right: 0;
+  min-width: 0;
 }
 
-.learn-chat-evaluation-list .previous-score-slot {
-  grid-column: 2;
-  grid-row: 1;
-  justify-self: start;
-  align-self: start;
-  width: 46px;
-  height: 46px;
-  margin-top: 0;
+.learn-chat-evaluation-label {
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
-.learn-chat-evaluation-list .previous-score {
-  width: 46px;
-  height: 46px;
-  font-size: 18px;
+.learn-chat-evaluation-title {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
-.learn-chat-evaluation-list .previous-row-meta {
-  display: none;
-}
-
-.learn-chat-evaluation-list .previous-question-feedback {
+.learn-chat-evaluation-feedback {
   max-width: none;
+  color: var(--ink-soft);
   font-family: var(--font-question);
   font-size: 15px;
   font-weight: 430;
   line-height: 1.52;
 }
 
-.learn-chat-evaluation-list .previous-question-feedback .markdown-paragraph,
-.learn-chat-evaluation-list .previous-question-feedback .markdown-list {
+.learn-chat-evaluation-feedback .markdown-paragraph,
+.learn-chat-evaluation-feedback .markdown-list {
   overflow-wrap: anywhere;
+}
+
+.learn-chat-evaluation-score {
+  display: grid;
+  place-items: start;
+  width: 46px;
+  height: 46px;
+}
+
+.learn-chat-evaluation-score .previous-score {
+  width: 46px;
+  height: 46px;
+  font-size: 18px;
 }
 
 .learn-chat-end {
@@ -7559,34 +7568,25 @@ textarea {
     width: 100%;
   }
 
-  .learn-chat-evaluation-list .previous-row {
+  .learn-chat-evaluation-card {
     grid-template-columns: minmax(0, 1fr) 42px;
     gap: 12px;
     padding: 16px;
   }
 
-  .learn-chat-evaluation-list .previous-row-main-button {
-    padding-right: 0;
-  }
-
-  .learn-chat-evaluation-list .previous-score-slot {
-    grid-column: 2;
-    grid-row: 1;
-    justify-self: start;
-    align-self: start;
+  .learn-chat-evaluation-score {
     width: 42px;
     height: 42px;
-    margin-top: 0;
   }
 
-  .learn-chat-evaluation-list .previous-score {
+  .learn-chat-evaluation-score .previous-score {
     width: 42px;
     height: 42px;
     font-size: 17px;
   }
 
-  .learn-chat-evaluation-list .previous-row-meta {
-    display: none;
+  .learn-chat-evaluation-title {
+    font-size: 15px;
   }
 
   .previous-cost-label {

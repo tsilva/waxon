@@ -17,8 +17,8 @@ import {
   AnswerComposer,
   ComposerMicButton,
 } from "@/app/AnswerComposer";
-import { MarkdownContent } from "@/app/MarkdownContent";
-import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
+import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
+import { PreviousAnswerScore } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
@@ -158,6 +158,37 @@ function parseQuestionEvaluationSnippet(
     question,
     score: normalizedScore,
   };
+}
+
+function LearnQuestionEvaluationCard({
+  snippet,
+}: {
+  snippet: LearnQuestionEvaluationSnippet;
+}) {
+  return (
+    <article
+      className="learn-chat-evaluation-card"
+      aria-label={`Question evaluation: ${snippet.question}`}
+    >
+      <div className="learn-chat-evaluation-copy">
+        <span className="learn-chat-evaluation-label">Evaluation</span>
+        <MarkdownInline
+          as="p"
+          className="learn-chat-evaluation-title"
+          enableMath
+          text={snippet.question}
+        />
+        <MarkdownContent
+          className="learn-chat-evaluation-feedback"
+          enableMath
+          text={snippet.content}
+        />
+      </div>
+      <div className="learn-chat-evaluation-score">
+        <PreviousAnswerScore score={snippet.score} />
+      </div>
+    </article>
+  );
 }
 
 function storedMessageToLearnMessage(
@@ -1077,21 +1108,10 @@ export default function LearnPageClient({
                         evaluationSnippet?.content ?? message.content;
                       if (evaluationSnippet) {
                         return (
-                          <ol
-                            className="previous-list learn-chat-evaluation-list"
+                          <LearnQuestionEvaluationCard
                             key={message.id}
-                            aria-label="Question evaluation"
-                          >
-                            <PreviousAnswerRow
-                              id={message.id}
-                              question={evaluationSnippet.question}
-                              questionLabel="Evaluation"
-                              status="resolved"
-                              score={evaluationSnippet.score}
-                              feedback={evaluationSnippet.content}
-                              timeLabel="Just now"
-                            />
-                          </ol>
+                            snippet={evaluationSnippet}
+                          />
                         );
                       }
 
