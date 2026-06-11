@@ -1,0 +1,222 @@
+"use client";
+
+import { ChevronDown } from "lucide-react";
+import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
+import { SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
+
+export type PreviousAnswerRowStatus = "grading" | "resolved";
+
+export type PreviousAnswerRowProps = {
+  id: string;
+  question: string;
+  status: PreviousAnswerRowStatus;
+  score: number | null;
+  feedback: string | null;
+  correctAnswer?: string | null;
+  cost?: number | null;
+  timestamp?: number | null;
+  timeLabel?: string;
+  isExpanded?: boolean;
+  detailId?: string;
+  questionLabel?: string;
+  detailsLabel?: string;
+  className?: string;
+  onToggle?: () => void;
+  onDetailsClick?: () => void;
+};
+
+function scoreTone(score: number | null) {
+  if (score === null) {
+    return "neutral";
+  }
+
+  if (score >= SCHEDULED_SCORE_THRESHOLD) {
+    return "high";
+  }
+
+  if (score === SCHEDULED_SCORE_THRESHOLD - 1) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function formatEvaluationCost(cost: number | null | undefined): string | null {
+  if (cost === null || cost === undefined || !Number.isFinite(cost)) {
+    return null;
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(cost);
+}
+
+export function PreviousAnswerScore({
+  score,
+  className,
+  label,
+}: {
+  score: number | null;
+  className?: string;
+  label?: string;
+}) {
+  const displayScore = score === null ? "-" : score;
+  const accessibleLabel =
+    label ?? (score === null ? "No score" : `Score ${score} out of 10`);
+
+  return (
+    <span
+      className={`previous-score-shell${className ? ` ${className}` : ""}`}
+      aria-label={accessibleLabel}
+    >
+      <span className={`previous-score score-${scoreTone(score)}`}>
+        {displayScore}
+      </span>
+    </span>
+  );
+}
+
+export function PreviousAnswerRow({
+  id,
+  question,
+  status,
+  score,
+  feedback,
+  correctAnswer,
+  cost = null,
+  timestamp = null,
+  timeLabel = "Just now",
+  isExpanded = false,
+  detailId,
+  questionLabel = "Question",
+  detailsLabel = "More details",
+  className,
+  onToggle,
+  onDetailsClick,
+}: PreviousAnswerRowProps) {
+  const isPending = status === "grading";
+  const isInteractive = Boolean(onToggle);
+  const evaluationCostLabel = formatEvaluationCost(cost);
+  const rowClassName = [
+    "previous-row",
+    isPending ? "previous-row-pending" : "previous-row-resolved",
+    isExpanded ? "previous-row-open" : "previous-row-collapsed",
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const mainContent = (
+    <>
+      <div className="previous-copy">
+        <div className="previous-field previous-question-field">
+          <span className="previous-field-label">{questionLabel}</span>
+          <MarkdownInline
+            as="p"
+            className="previous-question"
+            enableMath
+            text={question}
+          />
+          {isPending ? (
+            <p
+              className="previous-question-feedback previous-question-feedback-pending"
+              aria-live="polite"
+            >
+              Evaluating...
+            </p>
+          ) : (
+            <MarkdownContent
+              className="previous-question-feedback"
+              enableMath
+              text={feedback ?? "No feedback returned."}
+            />
+          )}
+        </div>
+
+        <div
+          className="previous-detail-grid"
+          hidden={!isExpanded}
+          id={detailId}
+        >
+          <div className="previous-field">
+            <span className="previous-field-label">Correct answer</span>
+            {correctAnswer ? (
+              <MarkdownInline
+                as="p"
+                className="previous-answer"
+                enableMath
+                text={correctAnswer}
+              />
+            ) : (
+              <p className="previous-answer previous-answer-empty">
+                No correct answer recorded.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <span className="previous-row-meta">
+        <span className="previous-time-control">
+          <time
+            className="previous-time"
+            dateTime={timestamp ? new Date(timestamp).toISOString() : undefined}
+          >
+            {timeLabel}
+          </time>
+          {isInteractive ? (
+            <ChevronDown className="previous-collapse-icon" aria-hidden="true" />
+          ) : null}
+        </span>
+        {evaluationCostLabel ? (
+          <span
+            className="previous-cost-label"
+            aria-label={`Evaluation cost ${evaluationCostLabel}`}
+          >
+            eval {evaluationCostLabel}
+          </span>
+        ) : null}
+      </span>
+    </>
+  );
+
+  return (
+    <li className={rowClassName} key={id}>
+      <div className="previous-score-slot">
+        {isPending ? (
+          <span className="pending-spinner" aria-hidden="true" />
+        ) : (
+          <PreviousAnswerScore score={score} />
+        )}
+      </div>
+
+      {onToggle ? (
+        <button
+          className="previous-row-main-button"
+          type="button"
+          onClick={onToggle}
+          aria-expanded={isExpanded}
+          aria-controls={detailId}
+        >
+          {mainContent}
+        </button>
+      ) : (
+        <div className="previous-row-main-button previous-row-main-static">
+          {mainContent}
+        </div>
+      )}
+
+      {isExpanded && onDetailsClick ? (
+        <button
+          className="previous-details-link"
+          type="button"
+          onClick={onDetailsClick}
+        >
+          {detailsLabel}
+        </button>
+      ) : null}
+    </li>
+  );
+}

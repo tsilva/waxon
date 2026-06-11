@@ -22,6 +22,10 @@ import {
   MarkdownContent as SharedMarkdownContent,
   MarkdownInline as SharedMarkdownInline,
 } from "@/app/MarkdownContent";
+import {
+  PreviousAnswerRow,
+  PreviousAnswerScore,
+} from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import type {
   DeckEmbeddingPlot as DeckEmbeddingPlotResponse,
@@ -760,22 +764,6 @@ function formatDueBadge(item: ReviewQueueItem): string {
   return formatDurationBadge(item.msUntilDue);
 }
 
-function scoreTone(score: number | null) {
-  if (score === null) {
-    return "neutral";
-  }
-
-  if (score >= SCHEDULED_SCORE_THRESHOLD) {
-    return "high";
-  }
-
-  if (score === SCHEDULED_SCORE_THRESHOLD - 1) {
-    return "medium";
-  }
-
-  return "low";
-}
-
 function formatEvaluationPhase(phase: EvaluationPhase | null): string {
   switch (phase) {
     case "queued":
@@ -816,32 +804,6 @@ function formatEvaluationActivity(
   return `Active ${elapsedMinutes}m ago`;
 }
 
-function PreviousAnswerScore({
-  score,
-  className,
-  label,
-}: {
-  score: number | null;
-  className?: string;
-  label?: string;
-}) {
-  const displayScore = score === null ? "-" : score;
-  const accessibleLabel = label ?? (
-    score === null ? "No score" : `Score ${score} out of 10`
-  );
-
-  return (
-    <span
-      className={`previous-score-shell${className ? ` ${className}` : ""}`}
-      aria-label={accessibleLabel}
-    >
-      <span className={`previous-score score-${scoreTone(score)}`}>
-        {displayScore}
-      </span>
-    </span>
-  );
-}
-
 function IconTooltip({
   label,
   children,
@@ -867,19 +829,6 @@ function formatScore(score: number | null): string {
 
 function formatAverageScore(score: number | null): string {
   return score === null ? "N/A" : `${score.toFixed(1)}/10`;
-}
-
-function formatEvaluationCost(cost: number | null): string | null {
-  if (cost === null || !Number.isFinite(cost)) {
-    return null;
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4,
-  }).format(cost);
 }
 
 function formatReviewDate(timestamp: number | null): string {
@@ -5258,127 +5207,29 @@ export default function ReviewApp({
 
             <ol className="previous-list">
               {visiblePreviousAnswers.map((item, index) => {
-                const isPending = item.status === "grading";
                 const isDetailsExpanded = expandedPreviousAnswerIds.has(item.id);
-                const evaluationCostLabel = formatEvaluationCost(item.cost);
                 const detailId = `previous-answer-details-${index}-${item.id.replace(
                   /[^A-Za-z0-9_-]/g,
                   "-",
                 )}`;
 
                 return (
-                  <li
-                    className={`previous-row ${
-                      isPending
-                        ? "previous-row-pending"
-                        : "previous-row-resolved"
-                    } ${
-                      isDetailsExpanded
-                        ? "previous-row-open"
-                        : "previous-row-collapsed"
-                    }`}
+                  <PreviousAnswerRow
+                    id={item.id}
                     key={item.id}
-                  >
-                    <div className="previous-score-slot">
-                      {isPending ? (
-                        <span className="pending-spinner" aria-hidden="true" />
-                      ) : (
-                        <PreviousAnswerScore score={item.score} />
-                      )}
-                    </div>
-
-                    <button
-                      className="previous-row-main-button"
-                      type="button"
-                      onClick={() => togglePreviousAnswerDetails(item.id)}
-                      aria-expanded={isDetailsExpanded}
-                      aria-controls={detailId}
-                    >
-                      <div className="previous-copy">
-                        <div className="previous-field previous-question-field">
-                          <span className="previous-field-label">Question</span>
-                          <MarkdownInline
-                            as="p"
-                            className="previous-question"
-                            text={item.question}
-                          />
-                          {isPending ? (
-                            <p
-                              className="previous-question-feedback previous-question-feedback-pending"
-                              aria-live="polite"
-                            >
-                              Evaluating...
-                            </p>
-                          ) : (
-                            <MarkdownContent
-                              className="previous-question-feedback"
-                              text={item.justification ?? "No feedback returned."}
-                            />
-                          )}
-                        </div>
-
-                        <div
-                          className="previous-detail-grid"
-                          hidden={!isDetailsExpanded}
-                          id={detailId}
-                        >
-                          <div className="previous-field">
-                            <span className="previous-field-label">
-                              Correct answer
-                            </span>
-                            {item.correctAnswer ? (
-                              <MarkdownInline
-                                as="p"
-                                className="previous-answer"
-                                text={item.correctAnswer}
-                              />
-                            ) : (
-                              <p className="previous-answer previous-answer-empty">
-                                No correct answer recorded.
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <span className="previous-row-meta">
-                        <span className="previous-time-control">
-                          <time
-                            className="previous-time"
-                            dateTime={
-                              item.timestamp
-                                ? new Date(item.timestamp).toISOString()
-                                : undefined
-                            }
-                          >
-                            {item.timeLabel}
-                          </time>
-                          <ChevronDown
-                            className="previous-collapse-icon"
-                            aria-hidden="true"
-                          />
-                        </span>
-                        {evaluationCostLabel ? (
-                          <span
-                            className="previous-cost-label"
-                            aria-label={`Evaluation cost ${evaluationCostLabel}`}
-                          >
-                            eval {evaluationCostLabel}
-                          </span>
-                        ) : null}
-                      </span>
-                    </button>
-
-                    {isDetailsExpanded ? (
-                      <button
-                        className="previous-details-link"
-                        type="button"
-                        onClick={() => selectQuestion(item.question)}
-                      >
-                        More details
-                      </button>
-                    ) : null}
-                  </li>
+                    question={item.question}
+                    status={item.status}
+                    score={item.score}
+                    feedback={item.justification}
+                    correctAnswer={item.correctAnswer}
+                    cost={item.cost}
+                    timestamp={item.timestamp}
+                    timeLabel={item.timeLabel}
+                    isExpanded={isDetailsExpanded}
+                    detailId={detailId}
+                    onDetailsClick={() => selectQuestion(item.question)}
+                    onToggle={() => togglePreviousAnswerDetails(item.id)}
+                  />
                 );
               })}
 
