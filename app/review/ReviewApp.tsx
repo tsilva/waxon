@@ -3,11 +3,20 @@
 import { useClerk, useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
-import { AnswerComposer } from "@/app/AnswerComposer";
+import {
+  AnswerComposer,
+  ComposerMicButton,
+} from "@/app/AnswerComposer";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
 import { DAY, SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
+import {
+  getSpeechRecognitionConstructor,
+  mergeTranscriptText,
+  type SpeechRecognition,
+  type SpeechStatus,
+} from "@/app/lib/speechRecognition";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import {
   MarkdownContent as SharedMarkdownContent,
@@ -30,12 +39,10 @@ import {
   Flag,
   Info,
   Layers,
-  Mic,
   Plus,
   Search,
   Settings,
   Sparkles,
-  Square,
   Trash2,
   Upload,
   User,
@@ -644,45 +651,6 @@ async function fetchReviewSessionQueue(input: {
   return data.items;
 }
 
-type SpeechStatus =
-  | "idle"
-  | "starting"
-  | "listening"
-  | "unsupported"
-  | "error";
-
-type SpeechRecognitionAlternative = {
-  transcript: string;
-};
-
-type SpeechRecognitionResult = {
-  isFinal: boolean;
-  [index: number]: SpeechRecognitionAlternative;
-};
-
-type SpeechRecognitionResultList = {
-  length: number;
-  [index: number]: SpeechRecognitionResult;
-};
-
-type SpeechRecognitionEvent = Event & {
-  resultIndex: number;
-  results: SpeechRecognitionResultList;
-};
-
-type SpeechRecognition = EventTarget & {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  onend: (() => void) | null;
-  onerror: ((event: Event) => void) | null;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  start: () => void;
-  stop: () => void;
-};
-
-type SpeechRecognitionConstructor = new () => SpeechRecognition;
-
 type QuestionStats = {
   questionId: string | null;
   question: string;
@@ -990,20 +958,6 @@ function formatNextDue(stats: QuestionStats): string {
   return `In ${formatDurationBadge(stats.msUntilDue)}`;
 }
 
-function mergeTranscriptText(base: string, addition: string): string {
-  const trimmedAddition = addition.trim();
-
-  if (!trimmedAddition) {
-    return base;
-  }
-
-  if (!base.trim()) {
-    return trimmedAddition;
-  }
-
-  return /\s$/.test(base) ? `${base}${trimmedAddition}` : `${base} ${trimmedAddition}`;
-}
-
 function extractTerminalSpeechCommand(
   baseAnswer: string,
   transcript: string,
@@ -1028,28 +982,6 @@ function extractTerminalSpeechCommand(
     heldText: transcript.slice(commandStart).trim(),
     submitAnswer: mergeTranscriptText(baseAnswer, beforeCommand),
   };
-}
-
-function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const speechWindow = window as Window &
-    typeof globalThis & {
-      SpeechRecognition?: SpeechRecognitionConstructor;
-      webkitSpeechRecognition?: SpeechRecognitionConstructor;
-    };
-
-  return speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition ?? null;
-}
-
-function MicrophoneIcon() {
-  return <Mic aria-hidden="true" />;
-}
-
-function StopIcon() {
-  return <Square aria-hidden="true" fill="currentColor" />;
 }
 
 function UploadIcon() {
@@ -5290,23 +5222,12 @@ export default function ReviewApp({
                   }
                 >
                   {(tooltipId) => (
-                    <button
-                      className={`composer-mic ${
-                        isSpeechActive ? "composer-mic-active" : ""
-                      }`}
-                      type="button"
-                      aria-label={
-                        isSpeechActive
-                          ? "Stop voice answer"
-                          : "Start voice answer"
-                      }
-                      aria-describedby={tooltipId}
-                      aria-pressed={isSpeechActive}
+                    <ComposerMicButton
+                      isActive={isSpeechActive}
+                      tooltipId={tooltipId}
                       onClick={isSpeechActive ? stopSpeech : startSpeech}
                       disabled={isSubmitting || isFlaggingQuestion}
-                    >
-                      {isSpeechActive ? <StopIcon /> : <MicrophoneIcon />}
-                    </button>
+                    />
                   )}
                 </IconTooltip>
               }
