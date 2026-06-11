@@ -6563,9 +6563,10 @@ textarea {
 }
 
 .learn-chat-evaluation-list .previous-row {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
+  grid-template-columns: minmax(0, 1fr) 46px;
+  gap: 18px;
   width: 100%;
+  align-items: start;
   border-color: rgb(227 218 196 / 88%);
   background: rgb(255 252 245 / 98%);
   padding: 18px 20px;
@@ -6576,18 +6577,17 @@ textarea {
   grid-row: 1;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
-  padding-right: 62px;
+  padding-right: 0;
 }
 
 .learn-chat-evaluation-list .previous-score-slot {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 1;
-  justify-self: end;
+  justify-self: start;
   align-self: start;
   width: 46px;
   height: 46px;
-  margin-top: 2px;
-  z-index: 1;
+  margin-top: 0;
 }
 
 .learn-chat-evaluation-list .previous-score {
@@ -7560,21 +7560,29 @@ textarea {
   }
 
   .learn-chat-evaluation-list .previous-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    gap: 12px;
     padding: 16px;
   }
 
   .learn-chat-evaluation-list .previous-row-main-button {
-    padding-right: 56px;
+    padding-right: 0;
   }
 
   .learn-chat-evaluation-list .previous-score-slot {
-    grid-column: 1;
+    grid-column: 2;
     grid-row: 1;
-    justify-self: end;
+    justify-self: start;
     align-self: start;
+    width: 42px;
+    height: 42px;
     margin-top: 0;
+  }
+
+  .learn-chat-evaluation-list .previous-score {
+    width: 42px;
+    height: 42px;
+    font-size: 17px;
   }
 
   .learn-chat-evaluation-list .previous-row-meta {

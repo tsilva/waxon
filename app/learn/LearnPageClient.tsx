@@ -91,7 +91,7 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
 const QUESTION_EVALUATION_SNIPPET_PATTERN =
   /^<!--\s*waxon:evaluation-snippet score=(\d{1,2})\s*-->\s*/u;
 const QUESTION_EVALUATION_SCORE_LINE_PATTERN =
-  /^(?:\*\*)?Score\s+\d{1,2}\s*\/\s*10(?:\*\*)?\s*/iu;
+  /^(?:\*\*)?Score\s+\d{1,2}\s*\/\s*10(?:\*\*)?$/iu;
 
 const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -129,12 +129,15 @@ function parseQuestionEvaluationSnippet(
   }
 
   const normalizedScore = Math.max(0, Math.min(10, score));
-  const body = content
+  const bodyBlocks = content
     .replace(QUESTION_EVALUATION_SNIPPET_PATTERN, "")
     .trim()
-    .replace(QUESTION_EVALUATION_SCORE_LINE_PATTERN, "")
-    .trim();
-  const [firstBlock = "", ...remainingBlocks] = body.split(/\n{2,}/u);
+    .split(/\n{2,}/u)
+    .map((block) => block.trim())
+    .filter(
+      (block) => block && !QUESTION_EVALUATION_SCORE_LINE_PATTERN.test(block),
+    );
+  const [firstBlock = "", ...remainingBlocks] = bodyBlocks;
   const firstLine = firstBlock.replace(/^#{1,6}\s+/u, "").trim();
   const firstLineIsTitle =
     firstLine.length > 0 &&
@@ -142,6 +145,7 @@ function parseQuestionEvaluationSnippet(
     remainingBlocks.length > 0 &&
     !/[.!?]\s*$/u.test(firstLine);
   const question = firstLineIsTitle ? firstLine : `Score ${normalizedScore}/10`;
+  const body = bodyBlocks.join("\n\n").trim();
   const feedback = firstLineIsTitle ? remainingBlocks.join("\n\n").trim() : body;
 
   return {
