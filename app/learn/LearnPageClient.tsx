@@ -78,6 +78,7 @@ type LearnChatMessage = {
 
 type LearnQuestionEvaluationSnippet = {
   content: string;
+  question: string;
   score: number;
 };
 
@@ -89,6 +90,8 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
 
 const QUESTION_EVALUATION_SNIPPET_PATTERN =
   /^<!--\s*waxon:evaluation-snippet score=(\d{1,2})\s*-->\s*/u;
+const QUESTION_EVALUATION_SCORE_LINE_PATTERN =
+  /^(?:\*\*)?Score\s+\d{1,2}\s*\/\s*10(?:\*\*)?\s*/iu;
 
 const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -125,9 +128,26 @@ function parseQuestionEvaluationSnippet(
     return null;
   }
 
+  const normalizedScore = Math.max(0, Math.min(10, score));
+  const body = content
+    .replace(QUESTION_EVALUATION_SNIPPET_PATTERN, "")
+    .trim()
+    .replace(QUESTION_EVALUATION_SCORE_LINE_PATTERN, "")
+    .trim();
+  const [firstBlock = "", ...remainingBlocks] = body.split(/\n{2,}/u);
+  const firstLine = firstBlock.replace(/^#{1,6}\s+/u, "").trim();
+  const firstLineIsTitle =
+    firstLine.length > 0 &&
+    firstLine.length <= 80 &&
+    remainingBlocks.length > 0 &&
+    !/[.!?]\s*$/u.test(firstLine);
+  const question = firstLineIsTitle ? firstLine : `Score ${normalizedScore}/10`;
+  const feedback = firstLineIsTitle ? remainingBlocks.join("\n\n").trim() : body;
+
   return {
-    content: content.replace(QUESTION_EVALUATION_SNIPPET_PATTERN, "").trim(),
-    score: Math.max(0, Math.min(10, score)),
+    content: feedback || body || "Evaluation recorded.",
+    question,
+    score: normalizedScore,
   };
 }
 
@@ -1027,7 +1047,7 @@ export default function LearnPageClient() {
                           >
                             <PreviousAnswerRow
                               id={message.id}
-                              question={`Score ${evaluationSnippet.score}/10`}
+                              question={evaluationSnippet.question}
                               questionLabel="Evaluation"
                               status="resolved"
                               score={evaluationSnippet.score}
