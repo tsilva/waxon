@@ -3,11 +3,11 @@
 import { useClerk, useUser } from "@clerk/nextjs";
 import {
   BookOpen,
-  Check,
-  ChevronRight,
   Loader2,
   PlusCircle,
   Settings,
+  Square,
+  SquareCheck,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -906,14 +906,19 @@ export default function LearnPageClient() {
 
                         return (
                           <li
-                            className={isCurrent ? "learn-toc-current" : ""}
+                            className={[
+                              isCurrent ? "learn-toc-current" : "",
+                              isDone ? "learn-toc-complete" : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
                             key={`${pageIndex}-${page.title}`}
                           >
-                            <span>
+                            <span className="learn-toc-status">
                               {isDone ? (
-                                <Check aria-hidden="true" />
+                                <SquareCheck aria-hidden="true" />
                               ) : (
-                                <ChevronRight aria-hidden="true" />
+                                <Square aria-hidden="true" />
                               )}
                             </span>
                             <p>{page.title}</p>
@@ -939,10 +944,17 @@ export default function LearnPageClient() {
                       type="button"
                       onClick={startNewCourse}
                     >
-                      <span aria-hidden="true">
+                      <span className="learn-course-new-kicker">
                         <PlusCircle aria-hidden="true" />
+                        Create
                       </span>
-                      <strong>New</strong>
+                      <strong>New course</strong>
+                      <small>Ready for a learning goal</small>
+                      <span className="learn-course-new-rail" aria-hidden="true">
+                        <i />
+                        <i />
+                        <i />
+                      </span>
                     </button>
                     {sortedCourses.map((course) => (
                       <article
