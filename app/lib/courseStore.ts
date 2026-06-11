@@ -9,6 +9,7 @@ import {
 import { getCurrentUser } from "./auth";
 import {
   coursePageCount,
+  flatCoursePageIndex,
   nextCoursePosition,
   validateCourseToc,
   type CourseChoice,
@@ -284,6 +285,17 @@ async function hydrateCourse(input: {
     (item) => item.id === input.row.deckId,
   );
   const toc = validateCourseToc(input.row.toc);
+  const position = {
+    chapterIndex: 0,
+    pageIndex: Math.min(
+      flatCoursePageIndex({
+        tocValue: input.row.toc,
+        chapterIndex: input.row.currentChapterIndex,
+        pageIndex: input.row.currentPageIndex,
+      }),
+      Math.max(toc.pages.length - 1, 0),
+    ),
+  };
 
   return {
     id: input.row.id,
@@ -295,8 +307,8 @@ async function hydrateCourse(input: {
     description: input.row.description,
     toc,
     status: toCourseStatus(input.row.status),
-    currentChapterIndex: input.row.currentChapterIndex,
-    currentPageIndex: input.row.currentPageIndex,
+    currentChapterIndex: position.chapterIndex,
+    currentPageIndex: position.pageIndex,
     totalPages: coursePageCount(toc),
     generatedPages: Number(input.row.generatedPages ?? 0),
     chatMessageCount: Number(input.row.chatMessageCount ?? 0),
@@ -321,6 +333,7 @@ export async function getCourse(courseId: string): Promise<CourseDetail | null> 
     return null;
   }
 
+  const rawToc = row.toc;
   const course = await hydrateCourse({ row, userId: user.id });
   const [pageRows, chatRows] = await Promise.all([
     db
@@ -337,7 +350,20 @@ export async function getCourse(courseId: string): Promise<CourseDetail | null> 
 
   return {
     ...course,
-    pages: pageRows.map(toCoursePage),
+    pages: pageRows.map((row) => {
+      const page = toCoursePage(row);
+      const pageIndex = flatCoursePageIndex({
+        tocValue: rawToc,
+        chapterIndex: row.chapterIndex,
+        pageIndex: row.pageIndex,
+      });
+
+      return {
+        ...page,
+        chapterIndex: 0,
+        pageIndex,
+      };
+    }),
     chatMessages: chatRows.map(toCourseChatMessage),
   };
 }
@@ -500,12 +526,10 @@ function courseQuestionProvenance(input: {
   chapterIndex: number;
   pageIndex: number;
 }): string {
-  const chapter = input.course.toc.chapters[input.chapterIndex];
-  const page = chapter?.pages[input.pageIndex];
+  const page = input.course.toc.pages[input.pageIndex];
 
   return [
     `Course: ${input.course.title}`,
-    chapter ? `Chapter ${input.chapterIndex + 1}: ${chapter.title}` : "",
     page ? `Page ${input.pageIndex + 1}: ${page.title}` : "",
   ]
     .filter(Boolean)
@@ -513,12 +537,10 @@ function courseQuestionProvenance(input: {
 }
 
 function courseChatQuestionProvenance(course: CourseDetail): string {
-  const chapter = course.toc.chapters[course.currentChapterIndex];
-  const page = chapter?.pages[course.currentPageIndex];
+  const page = course.toc.pages[course.currentPageIndex];
 
   return [
     `Course chat: ${course.title}`,
-    chapter ? `Chapter ${course.currentChapterIndex + 1}: ${chapter.title}` : "",
     page ? `Milestone ${course.currentPageIndex + 1}: ${page.title}` : "",
   ]
     .filter(Boolean)

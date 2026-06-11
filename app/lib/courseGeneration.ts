@@ -218,14 +218,13 @@ function parseCourseQuestionAttemptToolResult(
 }
 
 function currentCourseMilestone(course: CourseDetail) {
-  const chapter = course.toc.chapters[course.currentChapterIndex];
-  const page = chapter?.pages[course.currentPageIndex];
+  const page = course.toc.pages[course.currentPageIndex];
 
-  if (!chapter || !page) {
+  if (!page) {
     throw new Error("Course current position does not exist.");
   }
 
-  return { chapter, page };
+  return { page };
 }
 
 function compactCourseMessages(messages: CourseChatMessage[]) {
@@ -241,32 +240,22 @@ export function buildFallbackCourseToc(topic: string): CourseToc {
   return {
     title,
     description: `A focused chat course about ${title}.`,
-    chapters: [
+    pages: [
       {
-        title: "Core Model",
-        pages: [
-          {
-            title: "Main Idea",
-            objective: `State the central idea behind ${title}.`,
-          },
-          {
-            title: "Working Parts",
-            objective: `Explain the most important moving parts in ${title}.`,
-          },
-        ],
+        title: "Main Idea",
+        objective: `State the central idea behind ${title}.`,
       },
       {
-        title: "Practice",
-        pages: [
-          {
-            title: "Apply It",
-            objective: `Use ${title} in a small concrete example.`,
-          },
-          {
-            title: "Check Understanding",
-            objective: `Recognize a common mistake or limitation in ${title}.`,
-          },
-        ],
+        title: "Working Parts",
+        objective: `Explain the most important moving parts in ${title}.`,
+      },
+      {
+        title: "Apply It",
+        objective: `Use ${title} in a small concrete example.`,
+      },
+      {
+        title: "Check Understanding",
+        objective: `Recognize a common mistake or limitation in ${title}.`,
       },
     ],
   };
@@ -329,7 +318,7 @@ export async function evaluateCourseChatProgress(input: {
   course: CourseDetail;
   messages: CourseChatMessage[];
 } & CourseCostObserver): Promise<CourseProgressDecision> {
-  const { chapter, page } = currentCourseMilestone(input.course);
+  const { page } = currentCourseMilestone(input.course);
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: false,
@@ -337,7 +326,7 @@ export async function evaluateCourseChatProgress(input: {
       operation: "course_chat_progress",
       userId: input.userId,
       deckId: input.course.id,
-      question: `${chapter.title}: ${page.title}`,
+      question: page.title,
     },
     body: {
       model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
@@ -359,7 +348,6 @@ export async function evaluateCourseChatProgress(input: {
           role: "user",
           content: [
             `Course title: ${input.course.title}`,
-            `Current chapter: ${chapter.title}`,
             `Current milestone: ${page.title}`,
             `Milestone objective: ${page.objective}`,
             `Conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
@@ -409,7 +397,7 @@ export async function generateCourseQuestionAttemptToolResult(input: {
     };
   }
 
-  const { chapter, page } = currentCourseMilestone(input.course);
+  const { page } = currentCourseMilestone(input.course);
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: false,
@@ -417,7 +405,7 @@ export async function generateCourseQuestionAttemptToolResult(input: {
       operation: "course_question_attempt_tool",
       userId: input.userId,
       deckId: input.course.deckId,
-      question: `${chapter.title}: ${page.title}`,
+      question: page.title,
     },
     body: {
       model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
@@ -443,7 +431,6 @@ export async function generateCourseQuestionAttemptToolResult(input: {
           role: "user",
           content: [
             `Course title: ${input.course.title}`,
-            `Current chapter: ${chapter.title}`,
             `Current milestone: ${page.title}`,
             `Milestone objective: ${page.objective}`,
             `Previous assistant message:\n${previousAssistantMessage.content.slice(0, 4_000)}`,
@@ -486,7 +473,7 @@ export async function streamCourseChatTurn(input: {
     return message;
   }
 
-  const { chapter, page } = currentCourseMilestone(input.course);
+  const { page } = currentCourseMilestone(input.course);
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: true,
@@ -495,7 +482,7 @@ export async function streamCourseChatTurn(input: {
       operation: "course_chat_turn",
       userId: input.userId,
       deckId: input.course.id,
-      question: `${chapter.title}: ${page.title}`,
+      question: page.title,
     },
     body: {
       model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
@@ -507,6 +494,11 @@ export async function streamCourseChatTurn(input: {
           content: [
             "You are Waxon's Learn chat tutor.",
             "Run a milestone-driven course entirely inside chat.",
+            "Maximize the probability that a learner at any knowledge level can understand the explanation deeply.",
+            "Start from concrete intuition and plain language, define necessary jargon before relying on it, and make every causal or mathematical step feel motivated.",
+            "When a prerequisite idea is needed, add a one-sentence bridge instead of assuming the learner already knows it.",
+            "Connect three layers whenever useful: the intuitive picture, the precise technical claim, and a small example.",
+            "Keep the explanation approachable without removing the real concept or hiding important mechanics.",
             "Be a great tutor: explain the intuition first, then the mechanics, then a small concrete example when useful.",
             "Use metaphors and analogies when they make the idea easier, but keep them technically accurate and brief.",
             "Do not compress the explanation into a dense summary. Teach enough for a motivated learner to build a mental model.",
@@ -531,8 +523,6 @@ export async function streamCourseChatTurn(input: {
             `Course title: ${input.course.title}`,
             `Course description: ${input.course.description}`,
             `Full TOC JSON: ${JSON.stringify(input.course.toc)}`,
-            `Current chapter index: ${input.course.currentChapterIndex}`,
-            `Current chapter: ${chapter.title}`,
             `Current milestone index: ${input.course.currentPageIndex}`,
             `Current milestone: ${page.title}`,
             `Milestone objective: ${page.objective}`,
@@ -602,9 +592,10 @@ export async function generateCourseToc(input: {
           content: [
             `Topic: ${input.topic}`,
             "Create a mini-course table of contents.",
+            "The TOC must be flat. Do not group pages into chapters or sections.",
             "Return JSON with shape:",
-            "{\"title\":\"...\",\"description\":\"...\",\"chapters\":[{\"title\":\"...\",\"pages\":[{\"title\":\"...\",\"objective\":\"...\"}]}]}",
-            "Use 3-5 chapters, 2-4 pages per chapter, and no more than 16 total pages.",
+            "{\"title\":\"...\",\"description\":\"...\",\"pages\":[{\"title\":\"...\",\"objective\":\"...\"}]}",
+            "Use 6-12 pages, and no more than 16 total pages.",
             "Keep titles specific and useful for a learner.",
           ].join("\n"),
         },
@@ -632,10 +623,9 @@ export async function generateCoursePage(input: {
   pageIndex: number;
   previousSummaries: string[];
 }): Promise<CoursePageContent> {
-  const chapter = input.toc.chapters[input.chapterIndex];
-  const page = chapter?.pages[input.pageIndex];
+  const page = input.toc.pages[input.pageIndex];
 
-  if (!chapter || !page) {
+  if (input.chapterIndex !== 0 || !page) {
     throw new Error("Course page position does not exist.");
   }
 
@@ -646,7 +636,7 @@ export async function generateCoursePage(input: {
       operation: "course_page",
       userId: input.userId,
       deckId: input.courseId,
-      question: `${chapter.title}: ${page.title}`,
+      question: page.title,
     },
     body: {
       model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
@@ -664,8 +654,6 @@ export async function generateCoursePage(input: {
           content: [
             `Original topic: ${input.topic}`,
             `Full course TOC JSON: ${JSON.stringify(input.toc)}`,
-            `Current chapter index: ${input.chapterIndex}`,
-            `Current chapter title: ${chapter.title}`,
             `Current page index: ${input.pageIndex}`,
             `Current page title: ${page.title}`,
             `Current page objective: ${page.objective}`,

@@ -5,15 +5,10 @@ export type CourseTocPage = {
   objective: string;
 };
 
-export type CourseTocChapter = {
-  title: string;
-  pages: CourseTocPage[];
-};
-
 export type CourseToc = {
   title: string;
   description: string;
-  chapters: CourseTocChapter[];
+  pages: CourseTocPage[];
 };
 
 export type CourseChoice = {
@@ -45,8 +40,6 @@ export type CoursePageContent = {
 
 const MAX_COURSE_TITLE_CHARS = 90;
 const MAX_COURSE_DESCRIPTION_CHARS = 320;
-const MAX_CHAPTERS = 5;
-const MAX_PAGES_PER_CHAPTER = 4;
 export const MAX_COURSE_PAGES = 16;
 const MAX_PAGE_TITLE_CHARS = 120;
 const MAX_OBJECTIVE_CHARS = 260;
@@ -99,61 +92,47 @@ export function validateCourseToc(value: unknown): CourseToc {
     normalizeText(record.description),
     MAX_COURSE_DESCRIPTION_CHARS,
   );
-  const rawChapters = readArray(record.chapters, "chapters").slice(0, MAX_CHAPTERS);
 
   if (!title) {
     throw new Error("Course title is required.");
   }
 
-  const chapters: CourseTocChapter[] = [];
-  let totalPages = 0;
+  const rawPages = Array.isArray(record.pages)
+    ? record.pages
+    : readOptionalArray(record.chapters).flatMap((rawChapter) => {
+        const chapter = readObject(rawChapter);
+        return readOptionalArray(chapter.pages);
+      });
+  const pages: CourseTocPage[] = [];
 
-  for (const rawChapter of rawChapters) {
-    const chapter = readObject(rawChapter);
-    const chapterTitle = truncateText(
-      normalizeText(chapter.title),
-      MAX_PAGE_TITLE_CHARS,
-    );
-    const rawPages = readArray(chapter.pages, "chapter.pages").slice(
-      0,
-      MAX_PAGES_PER_CHAPTER,
-    );
-    const pages: CourseTocPage[] = [];
-
-    for (const rawPage of rawPages) {
-      if (totalPages >= MAX_COURSE_PAGES) {
-        break;
-      }
-
-      const page = readObject(rawPage);
-      const pageTitle = truncateText(
-        normalizeText(page.title),
-        MAX_PAGE_TITLE_CHARS,
-      );
-      const objective = truncateText(
-        normalizeText(page.objective),
-        MAX_OBJECTIVE_CHARS,
-      );
-
-      if (pageTitle && objective) {
-        pages.push({ title: pageTitle, objective });
-        totalPages += 1;
-      }
+  for (const rawPage of rawPages) {
+    if (pages.length >= MAX_COURSE_PAGES) {
+      break;
     }
 
-    if (chapterTitle && pages.length > 0) {
-      chapters.push({ title: chapterTitle, pages });
+    const page = readObject(rawPage);
+    const pageTitle = truncateText(
+      normalizeText(page.title),
+      MAX_PAGE_TITLE_CHARS,
+    );
+    const objective = truncateText(
+      normalizeText(page.objective),
+      MAX_OBJECTIVE_CHARS,
+    );
+
+    if (pageTitle && objective) {
+      pages.push({ title: pageTitle, objective });
     }
   }
 
-  if (chapters.length === 0 || totalPages === 0) {
+  if (pages.length === 0) {
     throw new Error("Course TOC must include at least one page.");
   }
 
   return {
     title,
     description,
-    chapters,
+    pages,
   };
 }
 
@@ -319,7 +298,7 @@ export function validateCoursePageContent(value: unknown): CoursePageContent {
 }
 
 export function coursePageCount(toc: CourseToc): number {
-  return toc.chapters.reduce((count, chapter) => count + chapter.pages.length, 0);
+  return toc.pages.length;
 }
 
 export function coursePositionExists(input: {
@@ -327,7 +306,7 @@ export function coursePositionExists(input: {
   chapterIndex: number;
   pageIndex: number;
 }): boolean {
-  return Boolean(input.toc.chapters[input.chapterIndex]?.pages[input.pageIndex]);
+  return input.chapterIndex === 0 && Boolean(input.toc.pages[input.pageIndex]);
 }
 
 export function nextCoursePosition(input: {
@@ -335,25 +314,47 @@ export function nextCoursePosition(input: {
   chapterIndex: number;
   pageIndex: number;
 }): { chapterIndex: number; pageIndex: number } | null {
-  const chapter = input.toc.chapters[input.chapterIndex];
-
-  if (!chapter) {
+  if (!coursePositionExists(input)) {
     return null;
   }
 
-  if (input.pageIndex + 1 < chapter.pages.length) {
+  if (input.pageIndex + 1 < input.toc.pages.length) {
     return {
-      chapterIndex: input.chapterIndex,
+      chapterIndex: 0,
       pageIndex: input.pageIndex + 1,
     };
   }
 
-  if (input.chapterIndex + 1 < input.toc.chapters.length) {
-    return {
-      chapterIndex: input.chapterIndex + 1,
-      pageIndex: 0,
-    };
+  return null;
+}
+
+export function flatCoursePageIndex(input: {
+  tocValue: unknown;
+  chapterIndex: number;
+  pageIndex: number;
+}): number {
+  const record = readObject(input.tocValue);
+
+  if (Array.isArray(record.pages)) {
+    return Math.max(0, input.pageIndex);
   }
 
-  return null;
+  const rawChapters = readOptionalArray(record.chapters);
+  let index = Math.max(0, input.pageIndex);
+
+  for (
+    let chapterIndex = 0;
+    chapterIndex < Math.max(0, input.chapterIndex);
+    chapterIndex += 1
+  ) {
+    const chapter = rawChapters[chapterIndex];
+
+    if (!chapter || typeof chapter !== "object" || Array.isArray(chapter)) {
+      continue;
+    }
+
+    index += readOptionalArray((chapter as Record<string, unknown>).pages).length;
+  }
+
+  return index;
 }

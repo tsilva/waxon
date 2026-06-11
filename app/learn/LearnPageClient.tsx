@@ -22,12 +22,9 @@ import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 type CourseToc = {
   title: string;
   description: string;
-  chapters: Array<{
+  pages: Array<{
     title: string;
-    pages: Array<{
-      title: string;
-      objective: string;
-    }>;
+    objective: string;
   }>;
 };
 
@@ -111,10 +108,7 @@ function courseProgressLabel(course: Course): string {
   }
 
   const totalPages = Math.max(course.totalPages, 1);
-  const currentPage = Math.min(
-    pageOrdinal(course, course.currentChapterIndex, course.currentPageIndex),
-    totalPages,
-  );
+  const currentPage = Math.min(course.currentPageIndex + 1, totalPages);
 
   return `${currentPage} of ${totalPages}`;
 }
@@ -167,37 +161,15 @@ async function readApiJson<T>(response: Response): Promise<T> {
   return data;
 }
 
-function pageOrdinal(course: Course, chapterIndex: number, pageIndex: number) {
-  let ordinal = 0;
-
-  for (let index = 0; index < course.toc.chapters.length; index += 1) {
-    if (index < chapterIndex) {
-      ordinal += course.toc.chapters[index]?.pages.length ?? 0;
-      continue;
-    }
-
-    if (index === chapterIndex) {
-      ordinal += pageIndex + 1;
-      break;
-    }
-  }
-
-  return ordinal;
-}
-
 function isMilestoneComplete(
   course: Course,
-  chapterIndex: number,
   pageIndex: number,
 ) {
   if (course.status === "completed") {
     return true;
   }
 
-  return (
-    pageOrdinal(course, chapterIndex, pageIndex) <
-    pageOrdinal(course, course.currentChapterIndex, course.currentPageIndex)
-  );
+  return pageIndex < course.currentPageIndex;
 }
 
 function parseSseEvent(rawEvent: string): { event: string; data: unknown } | null {
@@ -728,40 +700,33 @@ export default function LearnPageClient() {
                 <aside className="learn-chat-toc" aria-label="Course outline">
                   <p className="learn-kicker">{selectedCourse.title}</p>
                   <nav className="learn-toc" aria-label="Course table of contents">
-                    {selectedCourse.toc.chapters.map((chapter, chapterIndex) => (
-                      <section className="learn-toc-chapter" key={chapter.title}>
-                        <h2>{chapter.title}</h2>
-                        <ol>
-                          {chapter.pages.map((page, pageIndex) => {
-                            const isCurrent =
-                              selectedCourse.currentChapterIndex === chapterIndex &&
-                              selectedCourse.currentPageIndex === pageIndex &&
-                              selectedCourse.status !== "completed";
-                            const isDone = isMilestoneComplete(
-                              selectedCourse,
-                              chapterIndex,
-                              pageIndex,
-                            );
+                    <ol>
+                      {selectedCourse.toc.pages.map((page, pageIndex) => {
+                        const isCurrent =
+                          selectedCourse.currentPageIndex === pageIndex &&
+                          selectedCourse.status !== "completed";
+                        const isDone = isMilestoneComplete(
+                          selectedCourse,
+                          pageIndex,
+                        );
 
-                            return (
-                              <li
-                                className={isCurrent ? "learn-toc-current" : ""}
-                                key={`${chapterIndex}-${pageIndex}-${page.title}`}
-                              >
-                                <span>
-                                  {isDone ? (
-                                    <Check aria-hidden="true" />
-                                  ) : (
-                                    <ChevronRight aria-hidden="true" />
-                                  )}
-                                </span>
-                                <p>{page.title}</p>
-                              </li>
-                            );
-                          })}
-                        </ol>
-                      </section>
-                    ))}
+                        return (
+                          <li
+                            className={isCurrent ? "learn-toc-current" : ""}
+                            key={`${pageIndex}-${page.title}`}
+                          >
+                            <span>
+                              {isDone ? (
+                                <Check aria-hidden="true" />
+                              ) : (
+                                <ChevronRight aria-hidden="true" />
+                              )}
+                            </span>
+                            <p>{page.title}</p>
+                          </li>
+                        );
+                      })}
+                    </ol>
                   </nav>
                 </aside>
               ) : showCourseList ? (
@@ -879,18 +844,22 @@ export default function LearnPageClient() {
                   ) : null}
                   <AnswerComposer
                     id="learn-topic-input"
-                    className="learn-chat-composer"
+                    className={
+                      selectedCourse
+                        ? "learn-course-answer-composer"
+                        : "learn-chat-composer"
+                    }
                     value={topic}
                     onValueChange={setTopic}
                     onSubmit={submitChatPrompt}
                     onKeyDown={handleChatComposerKeyDown}
                     placeholder={
                       selectedCourse
-                        ? "Answer here"
+                        ? "Type your answer here..."
                         : "Learn convolutional neural networks for vision"
                     }
                     ariaLabel={selectedCourse ? "Answer here" : "Learning goal"}
-                    rows={1}
+                    rows={selectedCourse ? 4 : 1}
                     disabled={isStreaming}
                     submitDisabled={!topic.trim() || isStreaming}
                     submitAriaLabel={isStreaming ? streamingStatus : "Send"}
