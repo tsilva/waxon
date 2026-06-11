@@ -17,6 +17,7 @@ import {
   ComposerMicButton,
 } from "@/app/AnswerComposer";
 import { MarkdownContent } from "@/app/MarkdownContent";
+import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
@@ -1005,6 +1006,26 @@ export default function LearnPageClient() {
                           : null;
                       const messageContent =
                         evaluationSnippet?.content ?? message.content;
+                      if (evaluationSnippet) {
+                        return (
+                          <ol
+                            className="previous-list learn-chat-evaluation-list"
+                            key={message.id}
+                            aria-label="Question evaluation"
+                          >
+                            <PreviousAnswerRow
+                              id={message.id}
+                              question={`Score ${evaluationSnippet.score}/10`}
+                              questionLabel="Evaluation"
+                              status="resolved"
+                              score={evaluationSnippet.score}
+                              feedback={evaluationSnippet.content}
+                              timeLabel="Just now"
+                            />
+                          </ol>
+                        );
+                      }
+
                       const messageKind = evaluationSnippet
                         ? "evaluation"
                         : message.role;
