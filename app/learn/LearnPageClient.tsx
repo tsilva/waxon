@@ -10,7 +10,8 @@ import {
   SquareCheck,
   Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import {
   AnswerComposer,
@@ -80,6 +81,10 @@ type LearnQuestionEvaluationSnippet = {
   content: string;
   question: string;
   score: number;
+};
+
+type LearnPageClientProps = {
+  initialCourseId?: string;
 };
 
 const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
@@ -255,7 +260,10 @@ function parseSseEvent(rawEvent: string): { event: string; data: unknown } | nul
   }
 }
 
-export default function LearnPageClient() {
+export default function LearnPageClient({
+  initialCourseId,
+}: LearnPageClientProps = {}) {
+  const router = useRouter();
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
   const isLocalAuth = isLocalTestAuthEnabled();
@@ -316,18 +324,46 @@ export default function LearnPageClient() {
 
   usePageScrollLock(Boolean(courseSettingsCourse));
 
+  const syncCourse = useCallback((course: Course) => {
+    setCourses((items) => {
+      const existing = items.filter((item) => item.id !== course.id);
+
+      return [course, ...existing].sort(
+        (left, right) => right.updatedAt - left.updatedAt,
+      );
+    });
+  }, []);
+
+  const applySelectedCourse = useCallback((course: Course) => {
+    setSelectedCourse(course);
+    setIsStartingNewCourse(false);
+    syncCourse(course);
+    setChatMessages(
+      course.chatMessages?.length
+        ? course.chatMessages.map(storedMessageToLearnMessage)
+        : [INITIAL_CHAT_MESSAGE],
+    );
+    setTopic("");
+  }, [syncCourse]);
+
   useEffect(() => {
     let isCancelled = false;
 
     async function boot() {
       try {
-        const [userResponse, queueResponse, coursesResponse] =
+        const courseResponsePromise = initialCourseId
+          ? fetch(`/api/courses/${encodeURIComponent(initialCourseId)}`, {
+              cache: "no-store",
+            })
+          : Promise.resolve(null);
+        const [userResponse, queueResponse, coursesResponse, courseResponse] =
           await Promise.all([
             fetch("/api/user", { cache: "no-store" }),
             fetch("/api/queue-status?mode=review&includeReviewQueue=0", {
               cache: "no-store",
             }),
             fetch("/api/courses", { cache: "no-store" }),
+            courseResponsePromise,
           ]);
         const userData = await readApiJson<UserProfile>(userResponse);
         const queueData = (await readApiJson<{ queueRemaining?: number }>(
@@ -336,6 +372,9 @@ export default function LearnPageClient() {
         const coursesData = await readApiJson<{ courses?: Course[] }>(
           coursesResponse,
         );
+        const courseData = courseResponse
+          ? await readApiJson<{ course: Course }>(courseResponse)
+          : null;
 
         if (isCancelled) {
           return;
@@ -344,6 +383,9 @@ export default function LearnPageClient() {
         setCurrentUser(userData);
         setDueCount(queueData.queueRemaining ?? 0);
         setCourses(coursesData.courses ?? []);
+        if (courseData) {
+          applySelectedCourse(courseData.course);
+        }
       } catch (bootError) {
         if (!isCancelled) {
           setError(
@@ -364,7 +406,7 @@ export default function LearnPageClient() {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [applySelectedCourse, initialCourseId]);
 
   useEffect(() => {
     const thread = chatThreadRef.current;
@@ -544,16 +586,6 @@ export default function LearnPageClient() {
     });
   }
 
-  function syncCourse(course: Course) {
-    setCourses((items) => {
-      const existing = items.filter((item) => item.id !== course.id);
-
-      return [course, ...existing].sort(
-        (left, right) => right.updatedAt - left.updatedAt,
-      );
-    });
-  }
-
   async function selectCourse(courseId: string) {
     if (isStreaming || loadingCourseId) {
       return;
@@ -569,15 +601,8 @@ export default function LearnPageClient() {
       });
       const data = await readApiJson<{ course: Course }>(response);
 
-      setSelectedCourse(data.course);
-      setIsStartingNewCourse(false);
-      syncCourse(data.course);
-      setChatMessages(
-        data.course.chatMessages?.length
-          ? data.course.chatMessages.map(storedMessageToLearnMessage)
-          : [INITIAL_CHAT_MESSAGE],
-      );
-      setTopic("");
+      applySelectedCourse(data.course);
+      router.push(`/learn/courses/${encodeURIComponent(data.course.id)}`);
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -601,6 +626,7 @@ export default function LearnPageClient() {
     setTopic("");
     setDraftConversationCost(0);
     setError(null);
+    router.push("/learn");
   }
 
   function openCourseSettings(course: Course) {
@@ -652,6 +678,7 @@ export default function LearnPageClient() {
         setChatMessages([INITIAL_CHAT_MESSAGE]);
         setDraftConversationCost(0);
         setTopic("");
+        router.replace("/learn");
       }
 
       if (loadingCourseId === course.id) {
@@ -754,6 +781,9 @@ export default function LearnPageClient() {
               setSelectedCourse(data.course);
               setIsStartingNewCourse(false);
               syncCourse(data.course);
+              router.replace(
+                `/learn/courses/${encodeURIComponent(data.course.id)}`,
+              );
             }
           } else if (parsed?.event === "delta") {
             const data = parsed.data as { delta?: unknown };
@@ -789,6 +819,9 @@ export default function LearnPageClient() {
               setSelectedCourse(data.course);
               setIsStartingNewCourse(false);
               syncCourse(data.course);
+              router.replace(
+                `/learn/courses/${encodeURIComponent(data.course.id)}`,
+              );
             } else if (typeof data.turnCost === "number" && data.turnCost > 0) {
               const turnCost = data.turnCost;
 
