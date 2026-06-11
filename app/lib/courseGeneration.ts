@@ -16,6 +16,8 @@ import type { CourseDetail } from "./courseStore";
 const COURSE_JSON_RESPONSE_FORMAT = { type: "json_object" };
 const MAX_INTAKE_MESSAGE_CHARS = 500;
 const MAX_INTAKE_TOPIC_CHARS = 800;
+const QUESTION_EVALUATION_SNIPPET_PATTERN =
+  /^<!--\s*waxon:evaluation-snippet score=\d{1,2}\s*-->\s*/u;
 
 type CourseCostObserver = {
   onCost?: (cost: number) => void;
@@ -230,7 +232,9 @@ function currentCourseMilestone(course: CourseDetail) {
 function compactCourseMessages(messages: CourseChatMessage[]) {
   return messages.slice(-10).map((message) => ({
     role: message.role,
-    content: message.content.slice(0, 1_200),
+    content: message.content
+      .replace(QUESTION_EVALUATION_SNIPPET_PATTERN, "")
+      .slice(0, 1_200),
   }));
 }
 

@@ -12,11 +12,20 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
-import { AnswerComposer } from "@/app/AnswerComposer";
+import {
+  AnswerComposer,
+  ComposerMicButton,
+} from "@/app/AnswerComposer";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import {
+  getSpeechRecognitionConstructor,
+  mergeTranscriptText,
+  type SpeechRecognition,
+  type SpeechStatus,
+} from "@/app/lib/speechRecognition";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 
 type CourseToc = {
@@ -66,11 +75,19 @@ type LearnChatMessage = {
   status?: string;
 };
 
+type LearnQuestionEvaluationSnippet = {
+  content: string;
+  score: number;
+};
+
 const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
   id: "learn-chat-intro",
   role: "assistant",
   content: "What do you want to learn?",
 };
+
+const QUESTION_EVALUATION_SNIPPET_PATTERN =
+  /^<!--\s*waxon:evaluation-snippet score=(\d{1,2})\s*-->\s*/u;
 
 const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -90,6 +107,27 @@ function chatMessageId() {
 
 function pendingStatus(message: LearnChatMessage): string {
   return message.status?.trim() || "Thinking...";
+}
+
+function parseQuestionEvaluationSnippet(
+  content: string,
+): LearnQuestionEvaluationSnippet | null {
+  const match = content.match(QUESTION_EVALUATION_SNIPPET_PATTERN);
+
+  if (!match) {
+    return null;
+  }
+
+  const score = Number.parseInt(match[1] ?? "", 10);
+
+  if (!Number.isFinite(score)) {
+    return null;
+  }
+
+  return {
+    content: content.replace(QUESTION_EVALUATION_SNIPPET_PATTERN, "").trim(),
+    score: Math.max(0, Math.min(10, score)),
+  };
 }
 
 function storedMessageToLearnMessage(
@@ -218,7 +256,12 @@ export default function LearnPageClient() {
   const [isDeletingCourse, setIsDeletingCourse] = useState(false);
   const [courseSettingsMessage, setCourseSettingsMessage] =
     useState<string | null>(null);
+  const [speechPreview, setSpeechPreview] = useState("");
+  const [speechStatus, setSpeechStatus] = useState<SpeechStatus>("idle");
+  const [speechMessage, setSpeechMessage] = useState<string | null>(null);
   const chatThreadRef = useRef<HTMLDivElement | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const keepListeningRef = useRef(false);
   const canViewAdmin = isAdminEmail(currentUser?.email);
   const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
   const menuDisplayName =
@@ -232,6 +275,12 @@ export default function LearnPageClient() {
     chatMessages.find(
       (message) => message.role === "assistant" && !message.content,
     )?.status ?? "Thinking...";
+  const displayedTopic =
+    selectedCourse && speechPreview
+      ? mergeTranscriptText(topic, speechPreview)
+      : topic;
+  const isSpeechActive =
+    speechStatus === "starting" || speechStatus === "listening";
   const conversationCostLabel = formatConversationCost(
     selectedCourse?.conversationCost ?? draftConversationCost,
   );
@@ -324,6 +373,13 @@ export default function LearnPageClient() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [courseSettingsCourse, isDeletingCourse]);
 
+  useEffect(() => {
+    return () => {
+      keepListeningRef.current = false;
+      recognitionRef.current?.stop();
+    };
+  }, []);
+
   function appendAssistantDelta(messageId: string, delta: string) {
     setChatMessages((messages) =>
       messages.map((message) =>
@@ -342,6 +398,127 @@ export default function LearnPageClient() {
     );
   }
 
+  function appendSpeechText(text: string) {
+    setTopic((current) => mergeTranscriptText(current, text));
+  }
+
+  function stopSpeech() {
+    keepListeningRef.current = false;
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setSpeechPreview("");
+    setSpeechMessage(null);
+    setSpeechStatus("idle");
+  }
+
+  function startSpeech() {
+    const SpeechRecognitionConstructor = getSpeechRecognitionConstructor();
+
+    if (!SpeechRecognitionConstructor) {
+      setSpeechStatus("unsupported");
+      setSpeechMessage("Speech recognition is not available in this browser.");
+      return;
+    }
+
+    keepListeningRef.current = true;
+    setSpeechStatus("starting");
+    setSpeechMessage("Starting microphone...");
+
+    const recognition = new SpeechRecognitionConstructor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language || "en-US";
+    recognition.onresult = (event) => {
+      let finalTranscript = "";
+      let interimTranscript = "";
+
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        const transcript = result[0]?.transcript ?? "";
+
+        if (result.isFinal) {
+          finalTranscript = mergeTranscriptText(finalTranscript, transcript);
+        } else {
+          interimTranscript = mergeTranscriptText(interimTranscript, transcript);
+        }
+      }
+
+      setSpeechPreview(interimTranscript);
+
+      if (finalTranscript) {
+        setSpeechPreview("");
+        appendSpeechText(finalTranscript);
+      }
+    };
+    recognition.onerror = () => {
+      setSpeechStatus("error");
+      setSpeechMessage("Microphone transcription stopped.");
+    };
+    recognition.onend = () => {
+      if (!keepListeningRef.current) {
+        return;
+      }
+
+      try {
+        recognition.start();
+      } catch {
+        setSpeechStatus("error");
+        setSpeechMessage("Microphone transcription stopped.");
+      }
+    };
+
+    recognitionRef.current = recognition;
+
+    try {
+      recognition.start();
+      setSpeechStatus("listening");
+      setSpeechMessage("Streaming speech into the answer.");
+    } catch {
+      setSpeechStatus("error");
+      setSpeechMessage("Microphone transcription could not start.");
+    }
+  }
+
+  function insertQuestionEvaluationSnippet(
+    assistantMessageId: string,
+    content: string,
+  ) {
+    const parsedSnippet = parseQuestionEvaluationSnippet(content);
+
+    if (!parsedSnippet?.content) {
+      return;
+    }
+
+    setChatMessages((messages) => {
+      const snippetMessageId = `${assistantMessageId}-evaluation`;
+      const snippetMessage: LearnChatMessage = {
+        id: snippetMessageId,
+        role: "assistant",
+        content,
+      };
+
+      if (messages.some((message) => message.id === snippetMessageId)) {
+        return messages.map((message) =>
+          message.id === snippetMessageId ? snippetMessage : message,
+        );
+      }
+
+      const assistantIndex = messages.findIndex(
+        (message) => message.id === assistantMessageId,
+      );
+
+      if (assistantIndex === -1) {
+        return [...messages, snippetMessage];
+      }
+
+      return [
+        ...messages.slice(0, assistantIndex),
+        snippetMessage,
+        ...messages.slice(assistantIndex),
+      ];
+    });
+  }
+
   function syncCourse(course: Course) {
     setCourses((items) => {
       const existing = items.filter((item) => item.id !== course.id);
@@ -357,6 +534,7 @@ export default function LearnPageClient() {
       return;
     }
 
+    stopSpeech();
     setError(null);
     setLoadingCourseId(courseId);
 
@@ -391,6 +569,7 @@ export default function LearnPageClient() {
       return;
     }
 
+    stopSpeech();
     setSelectedCourse(null);
     setIsStartingNewCourse(true);
     setChatMessages([INITIAL_CHAT_MESSAGE]);
@@ -468,7 +647,7 @@ export default function LearnPageClient() {
 
   async function submitChatPrompt(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const content = topic.trim();
+    const content = displayedTopic.trim();
 
     if (!content || isStreaming) {
       return;
@@ -489,6 +668,7 @@ export default function LearnPageClient() {
     const nextMessages = [...chatMessages, userMessage];
 
     setTopic("");
+    stopSpeech();
     setError(null);
     setIsStreaming(true);
     setChatMessages([...nextMessages, assistantMessage]);
@@ -556,6 +736,15 @@ export default function LearnPageClient() {
             if (typeof data.delta === "string") {
               appendAssistantDelta(assistantMessageId, data.delta);
             }
+          } else if (parsed?.event === "evaluation") {
+            const data = parsed.data as { content?: unknown };
+
+            if (typeof data.content === "string") {
+              insertQuestionEvaluationSnippet(
+                assistantMessageId,
+                data.content,
+              );
+            }
           } else if (parsed?.event === "error") {
             const data = parsed.data as { error?: unknown };
 
@@ -606,7 +795,11 @@ export default function LearnPageClient() {
           : "Could not continue Learn chat.",
       );
       setChatMessages((messages) =>
-        messages.filter((message) => message.id !== assistantMessageId),
+        messages.filter(
+          (message) =>
+            message.id !== assistantMessageId &&
+            message.id !== `${assistantMessageId}-evaluation`,
+        ),
       );
     } finally {
       setIsStreaming(false);
@@ -805,33 +998,51 @@ export default function LearnPageClient() {
                   }
                 >
                   <div className="learn-chat-thread" ref={chatThreadRef}>
-                    {chatMessages.map((message) => (
-                      <div
-                        className={`learn-chat-message learn-chat-message-${message.role}`}
-                        key={message.id}
-                      >
-                        {message.content ? (
-                          <MarkdownContent
-                            className={`learn-chat-message-content learn-chat-message-content-${message.role}`}
-                            text={message.content}
-                            enableCodeBlocks
-                            enableHeadings={message.role === "assistant"}
-                            enableMath={message.role === "assistant"}
-                          />
-                        ) : (
-                          <span
-                            className="learn-chat-pending"
-                            role="status"
-                            aria-live="polite"
-                          >
-                            <span className="pending-spinner" aria-hidden="true" />
-                            <span className="learn-chat-pending-status">
-                              {pendingStatus(message)}
+                    {chatMessages.map((message) => {
+                      const evaluationSnippet =
+                        message.role === "assistant"
+                          ? parseQuestionEvaluationSnippet(message.content)
+                          : null;
+                      const messageContent =
+                        evaluationSnippet?.content ?? message.content;
+                      const messageKind = evaluationSnippet
+                        ? "evaluation"
+                        : message.role;
+
+                      return (
+                        <div
+                          className={`learn-chat-message learn-chat-message-${message.role} learn-chat-message-${messageKind}`}
+                          key={message.id}
+                        >
+                          {messageContent ? (
+                            <MarkdownContent
+                              className={`learn-chat-message-content learn-chat-message-content-${messageKind}`}
+                              text={messageContent}
+                              enableCodeBlocks
+                              enableHeadings={
+                                message.role === "assistant" &&
+                                !evaluationSnippet
+                              }
+                              enableMath={message.role === "assistant"}
+                            />
+                          ) : (
+                            <span
+                              className="learn-chat-pending"
+                              role="status"
+                              aria-live="polite"
+                            >
+                              <span
+                                className="pending-spinner"
+                                aria-hidden="true"
+                              />
+                              <span className="learn-chat-pending-status">
+                                {pendingStatus(message)}
+                              </span>
                             </span>
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                          )}
+                        </div>
+                      );
+                    })}
                     <div className="learn-chat-end" />
                   </div>
                   {conversationCostLabel ? (
@@ -849,8 +1060,11 @@ export default function LearnPageClient() {
                         ? "learn-course-answer-composer"
                         : "learn-chat-composer"
                     }
-                    value={topic}
-                    onValueChange={setTopic}
+                    value={selectedCourse ? displayedTopic : topic}
+                    onValueChange={(nextTopic) => {
+                      setSpeechPreview("");
+                      setTopic(nextTopic);
+                    }}
                     onSubmit={submitChatPrompt}
                     onKeyDown={handleChatComposerKeyDown}
                     placeholder={
@@ -868,6 +1082,25 @@ export default function LearnPageClient() {
                       isStreaming ? (
                         <Loader2 className="learn-spin-icon" aria-hidden="true" />
                       ) : undefined
+                    }
+                    secondaryAction={
+                      selectedCourse ? (
+                        <ComposerMicButton
+                          isActive={isSpeechActive}
+                          onClick={isSpeechActive ? stopSpeech : startSpeech}
+                          disabled={isStreaming}
+                        />
+                      ) : undefined
+                    }
+                    after={
+                      selectedCourse && speechMessage ? (
+                        <p
+                          className={`speech-status speech-status-${speechStatus}`}
+                          aria-live="polite"
+                        >
+                          {speechMessage}
+                        </p>
+                      ) : null
                     }
                   />
                 </section>

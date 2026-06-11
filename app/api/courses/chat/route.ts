@@ -34,6 +34,25 @@ const MAX_CHAT_MESSAGE_CHARS = 1_500;
 const MAX_STORED_CHAT_MESSAGES = 200;
 const MAX_TOPIC_CHARS = 800;
 
+function buildQuestionEvaluationSnippet(input: {
+  score: number;
+  justification: string;
+}): CourseChatMessage {
+  const score = Math.max(0, Math.min(10, Math.round(input.score)));
+  const justification =
+    input.justification.trim().replace(/\s+/g, " ") ||
+    "Evaluation recorded.";
+
+  return {
+    role: "assistant",
+    content: [
+      `<!-- waxon:evaluation-snippet score=${score} -->`,
+      `**Score ${score}/10**`,
+      justification,
+    ].join("\n\n"),
+  };
+}
+
 function normalizeStoredMessages(value: unknown): CourseChatMessage[] {
   if (!Array.isArray(value)) {
     return [];
@@ -136,6 +155,7 @@ export async function POST(request: Request) {
             turnCost += cost;
           }
         };
+        let questionEvaluationSnippet: CourseChatMessage | null = null;
 
         try {
           if (courseId) {
@@ -161,6 +181,16 @@ export async function POST(request: Request) {
             if (
               questionAttempt.toolCall === "record_course_question_attempt"
             ) {
+              questionEvaluationSnippet = buildQuestionEvaluationSnippet({
+                score: questionAttempt.score,
+                justification: questionAttempt.justification,
+              });
+              send("evaluation", {
+                score: questionAttempt.score,
+                justification: questionAttempt.justification,
+                content: questionEvaluationSnippet.content,
+              });
+
               await recordCourseChatQuestionAttempt({
                 course,
                 question: questionAttempt.question,
@@ -251,6 +281,7 @@ export async function POST(request: Request) {
             courseId: course.id,
             messages: [
               ...storedMessages,
+              ...(questionEvaluationSnippet ? [questionEvaluationSnippet] : []),
               { role: "assistant", content: assistantContent },
             ],
           });

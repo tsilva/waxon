@@ -6026,7 +6026,7 @@ textarea {
   gap: 28px;
   width: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   padding: 26px clamp(22px, 3vw, 34px) 34px;
 }
 
@@ -6409,7 +6409,7 @@ textarea {
   align-items: stretch;
   width: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .learn-chat-layout-empty {
@@ -6478,7 +6478,7 @@ textarea {
   min-height: 0;
   margin: 0;
   padding-top: 12px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .learn-chat-thread {
@@ -6584,6 +6584,27 @@ textarea {
   font-size: 0.92em;
 }
 
+.learn-chat-message-evaluation {
+  max-width: min(540px, 100%);
+  border-color: rgb(166 124 82 / 28%);
+  background: rgb(252 247 236 / 88%);
+  box-shadow: none;
+}
+
+.learn-chat-message-content-evaluation {
+  gap: 5px;
+  color: var(--muted-strong);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.42;
+}
+
+.learn-chat-message-content-evaluation strong {
+  color: var(--accent);
+  font-weight: 840;
+}
+
 .learn-chat-message-content-user {
   font-family: var(--font-ui);
   font-size: 13px;
@@ -6626,6 +6647,10 @@ textarea {
   border-radius: 999px;
   padding: 10px 10px 10px 18px;
   background: #ffffff;
+}
+
+.learn-course-answer-composer .composer-row {
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
 .learn-chat-composer .composer-input {
@@ -7817,7 +7842,7 @@ textarea {
     min-width: 0;
     max-width: 100%;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
     padding: 20px 18px 24px;
   }
 
@@ -7834,7 +7859,7 @@ textarea {
     width: 100%;
     max-width: 100%;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .learn-chat-layout-empty {

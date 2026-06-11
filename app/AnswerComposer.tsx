@@ -1,9 +1,14 @@
 "use client";
 
-import { ArrowUp } from "lucide-react";
+import {
+  ArrowUp,
+  Mic,
+  Square,
+} from "lucide-react";
 import {
   FormEvent,
   KeyboardEvent,
+  MouseEventHandler,
   ReactNode,
   Ref,
   useEffect,
@@ -57,6 +62,41 @@ type AnswerComposerProps = {
   after?: ReactNode;
   onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
 };
+
+type ComposerMicButtonProps = {
+  isActive: boolean;
+  disabled?: boolean;
+  tooltipId?: string;
+  onClick: MouseEventHandler<HTMLButtonElement>;
+};
+
+export function ComposerMicButton({
+  isActive,
+  disabled = false,
+  tooltipId,
+  onClick,
+}: ComposerMicButtonProps) {
+  const label = isActive ? "Stop voice answer" : "Start voice answer";
+
+  return (
+    <button
+      className={`composer-mic ${isActive ? "composer-mic-active" : ""}`}
+      type="button"
+      aria-label={label}
+      aria-describedby={tooltipId}
+      aria-pressed={isActive}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {isActive ? (
+        <Square aria-hidden="true" fill="currentColor" />
+      ) : (
+        <Mic aria-hidden="true" />
+      )}
+    </button>
+  );
+}
 
 export function AnswerComposer({
   id,
