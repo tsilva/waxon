@@ -6047,7 +6047,6 @@ textarea {
 .learn-kicker,
 .learn-course-item span,
 .learn-course-item small,
-.learn-toc-chapter h2,
 .learn-progress-pill,
 .learn-loading,
 .learn-feedback,
@@ -6557,9 +6556,9 @@ textarea {
 .learn-chat-message-content-assistant {
   color: var(--ink);
   font-family: var(--font-question);
-  font-size: clamp(17px, 1.32vw, 19px);
+  font-size: 15px;
   font-weight: 430;
-  line-height: 1.58;
+  line-height: 1.52;
 }
 
 .learn-chat-message-content-assistant .markdown-heading {
@@ -6747,20 +6746,7 @@ textarea {
   min-width: 0;
 }
 
-.learn-toc-chapter {
-  display: grid;
-  gap: 7px;
-}
-
-.learn-toc-chapter h2 {
-  margin: 0;
-  color: var(--muted-strong);
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.25;
-}
-
-.learn-toc-chapter ol {
+.learn-toc > ol {
   display: grid;
   gap: 4px;
   margin: 0;
@@ -6768,7 +6754,7 @@ textarea {
   list-style: none;
 }
 
-.learn-toc-chapter li {
+.learn-toc li {
   display: grid;
   grid-template-columns: 17px minmax(0, 1fr);
   gap: 5px;
@@ -6784,20 +6770,20 @@ textarea {
   color: var(--ink);
 }
 
-.learn-toc-chapter li span {
+.learn-toc li span {
   display: grid;
   place-items: center;
   width: 19px;
   height: 19px;
 }
 
-.learn-toc-chapter li svg {
+.learn-toc li svg {
   width: 14px;
   height: 14px;
   color: var(--accent);
 }
 
-.learn-toc-chapter li p {
+.learn-toc li p {
   margin: 0;
   font-size: 13px;
   font-weight: 680;
@@ -7912,6 +7898,10 @@ textarea {
   }
 
   .learn-toc {
+    min-width: 0;
+  }
+
+  .learn-toc > ol {
     grid-auto-flow: column;
     grid-auto-columns: minmax(210px, 78%);
     overflow-x: auto;
@@ -7919,7 +7909,7 @@ textarea {
     scroll-snap-type: x proximity;
   }
 
-  .learn-toc-chapter {
+  .learn-toc li {
     scroll-snap-align: start;
   }
 

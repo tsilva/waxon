@@ -32,21 +32,18 @@ test("validateCourseToc normalizes and caps generated course shape", () => {
   const toc = validateCourseToc({
     title: " Bayesian inference ",
     description: " Learn the core mechanics. ",
-    chapters: Array.from({ length: 6 }, (_, chapterIndex) => ({
-      title: `Chapter ${chapterIndex + 1}`,
-      pages: Array.from({ length: 4 }, (_, pageIndex) => ({
-        title: `Page ${chapterIndex + 1}.${pageIndex + 1}`,
-        objective: "Understand the next idea.",
-      })),
+    pages: Array.from({ length: 20 }, (_, pageIndex) => ({
+      title: `Page ${pageIndex + 1}`,
+      objective: "Understand the next idea.",
     })),
   });
 
   assert.equal(toc.title, "Bayesian inference");
-  assert.equal(toc.chapters.length, 4);
+  assert.equal(toc.pages.length, MAX_COURSE_PAGES);
   assert.equal(coursePageCount(toc), MAX_COURSE_PAGES);
 });
 
-test("nextCoursePosition advances within and across chapters", () => {
+test("validateCourseToc flattens legacy chaptered course shape", () => {
   const toc = validateCourseToc({
     title: "Course",
     description: "Description",
@@ -65,15 +62,32 @@ test("nextCoursePosition advances within and across chapters", () => {
     ],
   });
 
+  assert.deepEqual(
+    toc.pages.map((page) => page.title),
+    ["One A", "One B", "Two A"],
+  );
+});
+
+test("nextCoursePosition advances through flat pages", () => {
+  const toc = validateCourseToc({
+    title: "Course",
+    description: "Description",
+    pages: [
+      { title: "One A", objective: "A" },
+      { title: "One B", objective: "B" },
+      { title: "Two A", objective: "A" },
+    ],
+  });
+
   assert.deepEqual(nextCoursePosition({ toc, chapterIndex: 0, pageIndex: 0 }), {
     chapterIndex: 0,
     pageIndex: 1,
   });
   assert.deepEqual(nextCoursePosition({ toc, chapterIndex: 0, pageIndex: 1 }), {
-    chapterIndex: 1,
-    pageIndex: 0,
+    chapterIndex: 0,
+    pageIndex: 2,
   });
-  assert.equal(nextCoursePosition({ toc, chapterIndex: 1, pageIndex: 0 }), null);
+  assert.equal(nextCoursePosition({ toc, chapterIndex: 0, pageIndex: 2 }), null);
 });
 
 test("parseCoursePageJson accepts valid markdown page and MCQ", () => {
