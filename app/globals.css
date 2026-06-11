@@ -6227,28 +6227,71 @@ textarea {
 }
 
 .learn-course-new {
-  align-content: center;
-  justify-items: center;
-  gap: 10px;
-  border-style: dashed;
-  background: rgb(255 252 245 / 72%);
-  text-align: center;
+  position: relative;
+  align-content: start;
+  justify-items: start;
+  gap: 8px;
+  min-height: 116px;
+  overflow: hidden;
+  border-color: rgb(166 124 82 / 30%);
+  background:
+    linear-gradient(135deg, rgb(255 252 245 / 92%), rgb(247 241 227 / 62%)),
+    var(--surface);
+  text-align: left;
 }
 
-.learn-course-new span {
+.learn-course-new::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--accent);
+  content: "";
+  opacity: 0.78;
+}
+
+.learn-course-new .learn-course-new-kicker {
   justify-content: center;
+  width: fit-content;
+  border: 1px solid rgb(166 124 82 / 20%);
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgb(255 252 245 / 76%);
+  color: var(--accent);
 }
 
-.learn-course-item.learn-course-new span svg {
-  width: 20px;
-  height: 20px;
+.learn-course-new .learn-course-new-kicker svg {
+  width: 14px;
+  height: 14px;
+}
+
+.learn-course-new .learn-course-new-rail {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  gap: 5px;
+  color: var(--accent);
+  opacity: 0.64;
+}
+
+.learn-course-new .learn-course-new-rail i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .learn-course-item.learn-course-new strong {
   color: var(--accent);
-  font-size: clamp(24px, 2.5vw, 32px);
+  max-width: calc(100% - 32px);
+  font-size: 19px;
   font-weight: 780;
-  line-height: 1;
+  line-height: 1.14;
+}
+
+.learn-course-item.learn-course-new small {
+  max-width: calc(100% - 58px);
+  color: rgb(117 103 84 / 76%);
 }
 
 .learn-course-item:disabled {
@@ -6519,6 +6562,35 @@ textarea {
   padding-right: 0;
 }
 
+.learn-chat-evaluation-list .previous-row {
+  width: 100%;
+  padding-right: 12px;
+}
+
+.learn-chat-evaluation-list .previous-row-main-button {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.learn-chat-evaluation-list .previous-row-meta {
+  align-items: flex-start;
+  flex-direction: row;
+  min-height: 0;
+}
+
+.learn-chat-evaluation-list .previous-question-feedback {
+  max-width: none;
+  font-family: var(--font-question);
+  font-size: 15px;
+  font-weight: 430;
+  line-height: 1.52;
+}
+
+.learn-chat-evaluation-list .previous-question-feedback .markdown-paragraph,
+.learn-chat-evaluation-list .previous-question-feedback .markdown-list {
+  overflow-wrap: anywhere;
+}
+
 .learn-chat-end {
   width: 1px;
   height: 1px;
@@ -6776,8 +6848,8 @@ textarea {
 
 .learn-toc li {
   display: grid;
-  grid-template-columns: 17px minmax(0, 1fr);
-  gap: 5px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 6px;
   align-items: start;
   min-height: 30px;
   border-radius: 7px;
@@ -6790,17 +6862,23 @@ textarea {
   color: var(--ink);
 }
 
-.learn-toc li span {
+.learn-toc-status {
   display: grid;
   place-items: center;
-  width: 19px;
-  height: 19px;
+  width: 20px;
+  height: 20px;
 }
 
-.learn-toc li svg {
-  width: 14px;
-  height: 14px;
-  color: var(--accent);
+.learn-toc-status svg {
+  width: 16px;
+  height: 16px;
+  color: rgb(159 139 122 / 78%);
+  stroke-width: 2;
+}
+
+.learn-toc-complete .learn-toc-status svg {
+  color: var(--success);
+  stroke-width: 2.2;
 }
 
 .learn-toc li p {
