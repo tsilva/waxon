@@ -36,7 +36,7 @@ export async function GET(request: Request) {
       query: url.searchParams.get("q"),
       tagSlug: url.searchParams.get("tag"),
       status: readStatus(url.searchParams.get("status")),
-      limit: readPositiveInteger(url.searchParams.get("limit"), 500),
+      limit: readPositiveInteger(url.searchParams.get("limit"), 50),
       offset: readNonNegativeInteger(url.searchParams.get("offset")),
     }),
   );
