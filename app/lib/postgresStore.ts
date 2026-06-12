@@ -2173,7 +2173,7 @@ export async function upsertDueQuestions(input: {
           questionProvenance: row.questionProvenance,
           sourceText: inputQuestion?.sourceText,
           proposedConceptSlugs: inputQuestion?.proposedConceptSlugs,
-          fallbackSlug: row.deckName,
+          fallbackSlug: "needs-concept-tagging",
         };
       }),
     });

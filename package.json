@@ -16,6 +16,7 @@
     "deck:simplify-questions": "node .codex/skills/deck-cleanup-questions/scripts/deck-cleanup-questions.mjs",
     "answers:backfill-concise": "node scripts/backfill-concise-answers.mjs",
     "embeddings:backfill": "node scripts/backfill-question-embeddings.mjs",
+    "concepts:backfill": "node scripts/backfill-concept-tags.mjs",
     "start": "node scripts/next-server.mjs start",
     "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mts",
     "lint": "eslint .",
