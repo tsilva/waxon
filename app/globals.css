@@ -6949,7 +6949,8 @@ textarea {
 
 .learn-chat-end {
   width: 1px;
-  height: 1px;
+  height: clamp(92px, 12vh, 128px);
+  flex: 0 0 clamp(92px, 12vh, 128px);
 }
 
 .learn-chat-message {
