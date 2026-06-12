@@ -16,6 +16,7 @@ import type {
   ConceptTagSummary,
 } from "@/app/lib/conceptTags";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
 type TagsPageClientProps = {
@@ -364,7 +365,12 @@ export default function TagsPageClient({
                     <ol>
                       {taggedQuestions.map((question) => (
                         <li key={question.questionId}>
-                          <span>{question.question}</span>
+                          <MarkdownInline
+                            as="p"
+                            className="tags-question-text"
+                            enableMath
+                            text={question.question}
+                          />
                           <small>
                             due{" "}
                             {new Intl.DateTimeFormat(undefined, {
