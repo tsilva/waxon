@@ -5122,11 +5122,13 @@ textarea {
   background: rgb(255 253 248 / 62%);
 }
 
-.tags-question-panel span {
+.tags-question-text {
+  margin: 0;
   color: var(--ink-soft);
   font-size: 13px;
   font-weight: 650;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .tags-question-panel small {

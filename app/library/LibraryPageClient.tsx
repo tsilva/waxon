@@ -11,6 +11,7 @@ import type {
   QuestionBankPage,
   QuestionBankStatusFilter,
 } from "@/app/lib/questionBank";
+import { MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
 type LibraryPageClientProps = {
@@ -267,7 +268,12 @@ export default function LibraryPageClient({
                       )}
                     </button>
                     <div className="library-question-main">
-                      <p>{item.question}</p>
+                      <MarkdownInline
+                        as="p"
+                        className="library-question-text"
+                        enableMath
+                        text={item.question}
+                      />
                       <div className="library-chip-row">
                         {item.conceptSlugs.length === 0 ? (
                           <span className="library-chip library-chip-muted">
