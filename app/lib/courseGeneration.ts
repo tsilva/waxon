@@ -10,6 +10,11 @@ import {
   type CoursePageContent,
   type CourseToc,
 } from "./courseContent";
+import { ensureCourseChatTurnHasLearnerQuestion } from "./courseChatTurn.ts";
+import {
+  normalizePartialCourseToc,
+  type PartialCourseToc,
+} from "./courseTocStream.ts";
 import { parseScore } from "./evaluateAnswerParsing";
 import type { CourseDetail } from "./courseStore";
 
@@ -546,24 +551,17 @@ export async function streamCourseChatTurn(input: {
 
   reportResponseCost(input, body.usage);
 
-  const generatedText = extractChatCompletionText(body);
-  const hasLearnerQuestion =
-    generatedText.includes("?") || /\bA\)\s+\S[\s\S]*\bB\)/u.test(generatedText);
+  const ensuredTurn = ensureCourseChatTurnHasLearnerQuestion({
+    text: extractChatCompletionText(body),
+    pageTitle: page.title,
+    pageObjective: page.objective,
+  });
 
-  if (!hasLearnerQuestion) {
-    const separator = /[.!?)]\s*$/u.test(generatedText.trim()) ? "\n\n" : ".\n\n";
-    const fallbackQuestion = [
-      `${separator}**Checkpoint**`,
-      `Focus on this milestone: ${page.objective}`,
-      "What is the main idea of this milestone in your own words?",
-    ].join("\n\n");
-
-    input.onTextDelta(fallbackQuestion);
-
-    return `${generatedText}${fallbackQuestion}`;
+  if (ensuredTurn.appendedText) {
+    input.onTextDelta(ensuredTurn.appendedText);
   }
 
-  return generatedText;
+  return ensuredTurn.text;
 }
 
 export async function generateCourseToc(input: {
@@ -571,10 +569,29 @@ export async function generateCourseToc(input: {
   model?: string;
   topic: string;
   userId: string;
+  onPartialToc?: (toc: PartialCourseToc) => void;
 } & CourseCostObserver): Promise<CourseToc> {
+  let streamedContent = "";
+  let lastPartialSignature = "";
+  const onTextDelta = input.onPartialToc
+    ? (delta: string) => {
+        streamedContent += delta;
+        const partialToc = normalizePartialCourseToc(streamedContent);
+        const partialSignature = JSON.stringify(partialToc);
+
+        if (
+          partialSignature !== lastPartialSignature &&
+          (partialToc.title || partialToc.description || partialToc.pages.length > 0)
+        ) {
+          lastPartialSignature = partialSignature;
+          input.onPartialToc?.(partialToc);
+        }
+      }
+    : undefined;
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
-    stream: false,
+    stream: true,
+    onTextDelta,
     trace: {
       operation: "course_toc",
       userId: input.userId,

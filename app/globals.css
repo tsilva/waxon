@@ -6748,6 +6748,16 @@ textarea {
   stroke-width: 2.2;
 }
 
+.learn-toc-status .pending-spinner {
+  width: 15px;
+  height: 15px;
+  border-width: 2px;
+}
+
+.learn-toc-streaming {
+  color: var(--muted-strong);
+}
+
 .learn-toc li p {
   margin: 0;
   font-size: 13px;

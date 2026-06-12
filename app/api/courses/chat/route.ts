@@ -253,7 +253,14 @@ export async function POST(request: Request) {
               topic: intakeDecision.topic,
               userId: user.id,
               onCost: addTurnCost,
-            }).catch(() => buildFallbackCourseToc(intakeDecision.topic));
+              onPartialToc: (partialToc) => {
+                send("toc", { toc: partialToc, complete: false });
+              },
+            }).catch(() => {
+              return buildFallbackCourseToc(intakeDecision.topic);
+            });
+
+            send("toc", { toc, complete: true });
 
             course = await createCourse({
               topic: intakeDecision.topic,
@@ -263,7 +270,7 @@ export async function POST(request: Request) {
           }
 
           send("status", { status: "Writing lesson" });
-          await streamCourseChatTurn({
+          assistantContent = await streamCourseChatTurn({
             apiKey: openRouterConfig.apiKey,
             model: openRouterConfig.model,
             userId: user.id,
