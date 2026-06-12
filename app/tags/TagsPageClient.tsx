@@ -365,7 +365,14 @@ export default function TagsPageClient({
                       {taggedQuestions.map((question) => (
                         <li key={question.questionId}>
                           <span>{question.question}</span>
-                          <small>{question.deckName}</small>
+                          <small>
+                            due{" "}
+                            {new Intl.DateTimeFormat(undefined, {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            }).format(new Date(question.nextDue))}
+                          </small>
                         </li>
                       ))}
                     </ol>

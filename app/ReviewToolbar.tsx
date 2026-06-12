@@ -11,7 +11,13 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 
-type ReviewToolbarTab = "learn" | "review" | "tags" | "stats" | "admin";
+type ReviewToolbarTab =
+  | "learn"
+  | "review"
+  | "library"
+  | "tags"
+  | "stats"
+  | "admin";
 
 type ReviewToolbarProps = {
   activeTab: ReviewToolbarTab;
@@ -128,6 +134,14 @@ export function ReviewToolbar({
             onClick={onReviewClick}
           >
             Review
+          </Link>
+          <Link
+            className={tabClass(activeTab === "library")}
+            href="/library"
+            role="tab"
+            aria-selected={activeTab === "library"}
+          >
+            Library
           </Link>
           <Link
             className={tabClass(activeTab === "tags")}

@@ -8,5 +8,5 @@ type DeckPageProps = {
 
 export default async function DeckPage({ params }: DeckPageProps) {
   await params;
-  redirect("/tags");
+  redirect("/library");
 }

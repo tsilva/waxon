@@ -10,6 +10,7 @@ const isProtectedRoute = createRouteMatcher([
   "/api(.*)",
   "/decks(.*)",
   "/learn(.*)",
+  "/library(.*)",
   "/review(.*)",
   "/stats(.*)",
 ]);
