@@ -10,6 +10,7 @@ import {
   SquareCheck,
   Trash2,
 } from "lucide-react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
@@ -818,9 +819,6 @@ export default function LearnPageClient({
               setDraftCourseToc(null);
               setIsStartingNewCourse(false);
               syncCourse(data.course);
-              router.replace(
-                `/learn/courses/${encodeURIComponent(data.course.id)}`,
-              );
             }
           } else if (parsed?.event === "toc") {
             const data = parsed.data as { toc?: Partial<CourseToc> };
@@ -886,20 +884,27 @@ export default function LearnPageClient({
             };
 
             if (data.course) {
+              if (data.chatMessages?.length) {
+                setChatMessages(
+                  data.chatMessages.map(storedMessageToLearnMessage),
+                );
+              }
+
               setSelectedCourse(data.course);
               setDraftCourseToc(null);
               setIsStartingNewCourse(false);
               syncCourse(data.course);
-              router.replace(
-                `/learn/courses/${encodeURIComponent(data.course.id)}`,
-              );
+
+              if (selectedCourse?.id !== data.course.id) {
+                router.replace(
+                  `/learn/courses/${encodeURIComponent(data.course.id)}`,
+                );
+              }
             } else if (typeof data.turnCost === "number" && data.turnCost > 0) {
               const turnCost = data.turnCost;
 
               setDraftConversationCost((cost) => cost + turnCost);
-            }
-
-            if (data.chatMessages?.length) {
+            } else if (data.chatMessages?.length) {
               setChatMessages(
                 data.chatMessages.map(storedMessageToLearnMessage),
               );
@@ -1010,8 +1015,25 @@ export default function LearnPageClient({
 
           {isBooting ? (
             <div className="learn-loading" role="status">
-              <span className="pending-spinner" aria-hidden="true" />
-              <span>Loading Learn</span>
+              <Image
+                className="learn-loading-image"
+                src="/learn/loading-study.png"
+                alt=""
+                width={360}
+                height={360}
+                priority
+                unoptimized
+                aria-hidden="true"
+              />
+              <div className="learn-loading-copy">
+                <span className="pending-spinner" aria-hidden="true" />
+                <span>Loading Learn</span>
+              </div>
+              <div className="learn-loading-skeleton" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </div>
             </div>
           ) : null}
 
