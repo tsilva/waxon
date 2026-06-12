@@ -2378,6 +2378,10 @@ textarea {
   .question-swap-layer-exiting {
     animation: none;
   }
+
+  .learn-loading-skeleton span {
+    animation: none;
+  }
 }
 
 .previous-score {
@@ -6690,13 +6694,82 @@ textarea {
 }
 
 .learn-loading {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 160px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 18px;
+  min-height: min(520px, 100%);
   color: var(--muted-strong);
   font-size: 13px;
   font-weight: 760;
+  text-align: center;
+}
+
+.learn-loading-image {
+  width: min(280px, 44vw);
+  height: auto;
+  opacity: 0.92;
+  filter: saturate(0.92);
+  mix-blend-mode: multiply;
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 58%, transparent 77%);
+  mask-image: radial-gradient(ellipse at center, #000 58%, transparent 77%);
+}
+
+.learn-loading-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  box-shadow: 0 10px 30px rgba(80, 61, 43, 0.06);
+}
+
+.learn-loading-skeleton {
+  display: grid;
+  gap: 8px;
+  width: min(320px, 64vw);
+}
+
+.learn-loading-skeleton span {
+  display: block;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--line-soft) 72%, transparent),
+    color-mix(in srgb, var(--accent) 16%, var(--line-soft)),
+    color-mix(in srgb, var(--line-soft) 72%, transparent)
+  );
+  opacity: 0.68;
+  transform-origin: center;
+  animation: learn-loading-pulse 1.8s ease-in-out infinite;
+}
+
+.learn-loading-skeleton span:nth-child(2) {
+  width: 82%;
+  justify-self: center;
+  animation-delay: 120ms;
+}
+
+.learn-loading-skeleton span:nth-child(3) {
+  width: 56%;
+  justify-self: center;
+  animation-delay: 240ms;
+}
+
+@keyframes learn-loading-pulse {
+  0%,
+  100% {
+    opacity: 0.34;
+    transform: scaleX(0.92);
+  }
+
+  50% {
+    opacity: 0.72;
+    transform: scaleX(1);
+  }
 }
 
 .learn-toc {
