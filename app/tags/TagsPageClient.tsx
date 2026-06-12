@@ -9,8 +9,9 @@ import {
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
+import { isAdminEmail } from "@/app/lib/adminAccess";
 import type {
   ConceptTaggedQuestionSummary,
   ConceptTagSummary,
@@ -20,13 +21,20 @@ import { MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
 type TagsPageClientProps = {
-  initialConceptTags: ConceptTagSummary[];
-  initialUser: {
+  initialConceptTags?: ConceptTagSummary[] | null;
+  initialUser?: {
     displayName: string;
     email: string;
     avatarUrl: string | null;
-  };
-  showAdmin: boolean;
+  } | null;
+  showAdmin?: boolean;
+};
+
+type UserProfileResponse = {
+  id: string;
+  displayName: string;
+  email: string;
+  avatarUrl: string | null;
 };
 
 type ConceptTagMutationResponse =
@@ -61,13 +69,15 @@ async function patchConceptTag(payload: Record<string, unknown>) {
 }
 
 export default function TagsPageClient({
-  initialConceptTags,
-  initialUser,
-  showAdmin,
+  initialConceptTags = null,
+  initialUser = null,
+  showAdmin = false,
 }: TagsPageClientProps) {
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
-  const [conceptTags, setConceptTags] = useState(initialConceptTags);
+  const [conceptTags, setConceptTags] = useState(initialConceptTags ?? []);
+  const [currentUser, setCurrentUser] = useState(initialUser);
+  const [isTagsLoading, setIsTagsLoading] = useState(initialConceptTags === null);
   const [query, setQuery] = useState("");
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [draftSlug, setDraftSlug] = useState("");
@@ -92,15 +102,79 @@ export default function TagsPageClient({
   const dueCount = conceptTags
     .filter((tag) => tag.active)
     .reduce((total, tag) => total + tag.dueCount, 0);
-  const menuAvatarUrl = clerkUser?.imageUrl || initialUser.avatarUrl || null;
+  const canViewAdmin =
+    showAdmin ||
+    isAdminEmail(
+      clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email,
+    );
+  const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
   const menuDisplayName =
     clerkUser?.fullName ||
     clerkUser?.username ||
-    initialUser.displayName ||
+    currentUser?.displayName ||
     "Account";
   const menuEmail =
-    clerkUser?.primaryEmailAddress?.emailAddress || initialUser.email || "";
+    clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
   const isLocalAuth = isLocalTestAuthEnabled();
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let isActive = true;
+
+    async function loadTagsPageData() {
+      setIsTagsLoading(true);
+      setMessage(null);
+
+      try {
+        const [userResponse, tagsResponse] = await Promise.all([
+          fetch("/api/user", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/concept-tags", {
+            cache: "no-store",
+            signal: controller.signal,
+          }),
+        ]);
+        const userData = (await userResponse.json()) as UserProfileResponse & {
+          error?: string;
+        };
+        const tagsData = (await tagsResponse.json()) as {
+          conceptTags?: ConceptTagSummary[];
+          error?: string;
+        };
+
+        if (!userResponse.ok) {
+          throw new Error(userData.error || "Could not load profile.");
+        }
+
+        if (!tagsResponse.ok) {
+          throw new Error(tagsData.error || "Could not load concept tags.");
+        }
+
+        if (isActive) {
+          setCurrentUser(userData);
+          setConceptTags(tagsData.conceptTags ?? []);
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        if (isActive) {
+          setMessage(error instanceof Error ? error.message : "Could not load tags.");
+        }
+      } finally {
+        if (isActive) {
+          setIsTagsLoading(false);
+        }
+      }
+    }
+
+    void loadTagsPageData();
+
+    return () => {
+      isActive = false;
+      controller.abort();
+    };
+  }, []);
 
   function replaceConceptTag(nextTag: ConceptTagSummary) {
     setConceptTags((currentTags) => {
@@ -222,6 +296,35 @@ export default function TagsPageClient({
   }
 
   function renderTagRows(tags: ConceptTagSummary[]) {
+    if (isTagsLoading && tags.length === 0) {
+      return (
+        <ol
+          className="tags-list tags-list-loading"
+          aria-label="Loading concept tags"
+          aria-busy="true"
+        >
+          {Array.from({ length: 5 }, (_, index) => (
+            <li className="tags-row" key={index}>
+              <span className="tags-active-toggle deck-skeleton-toggle" />
+              <div className="tags-row-main">
+                <span className="admin-skeleton-line tags-skeleton-title" />
+                <span className="admin-skeleton-line tags-skeleton-copy" />
+              </div>
+              <div className="tags-row-meta">
+                <span className="admin-skeleton-pill" />
+                <span className="admin-skeleton-pill" />
+              </div>
+              <div className="tags-row-actions">
+                <span className="deck-icon-button deck-skeleton-toggle" />
+                <span className="deck-icon-button deck-skeleton-toggle" />
+                <span className="deck-icon-button deck-skeleton-toggle" />
+              </div>
+            </li>
+          ))}
+        </ol>
+      );
+    }
+
     if (tags.length === 0) {
       return <p className="tags-empty">No matching concept tags.</p>;
     }
@@ -398,7 +501,7 @@ export default function TagsPageClient({
         <ReviewToolbar
           activeTab="tags"
           dueCount={dueCount}
-          showAdmin={showAdmin}
+          showAdmin={canViewAdmin}
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
@@ -440,6 +543,7 @@ export default function TagsPageClient({
             <span>{conceptTags.length} tags</span>
             <span>{activeTags.length} active</span>
             <span>{mutedTags.length} muted</span>
+            <span>{isTagsLoading ? "loading" : "ready"}</span>
           </div>
 
           <section className="tags-section" aria-label="Active tags">

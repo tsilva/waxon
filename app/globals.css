@@ -2801,6 +2801,29 @@ textarea {
   line-height: 1.35;
 }
 
+.stats-skeleton-number {
+  width: 54px;
+  height: 24px;
+}
+
+.stats-skeleton-heading {
+  width: min(190px, 70%);
+}
+
+.stats-skeleton-subheading {
+  width: min(118px, 45%);
+  height: 10px;
+}
+
+.stats-skeleton-chart {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: clamp(14px, 2vw, 24px);
+  min-height: 190px;
+  padding: 26px 18px 0;
+}
+
 .stats-page-chart-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5240,6 +5263,27 @@ textarea {
   font-family: var(--font-ui);
   font-size: 13px;
   font-weight: 650;
+}
+
+.tags-list-loading,
+.library-question-list-loading {
+  pointer-events: none;
+}
+
+.tags-skeleton-title,
+.library-skeleton-title {
+  width: min(360px, 78%);
+}
+
+.tags-skeleton-copy,
+.library-skeleton-copy {
+  width: min(260px, 56%);
+  height: 10px;
+}
+
+.library-skeleton-date {
+  width: 78px;
+  height: 10px;
 }
 
 .library-stage {

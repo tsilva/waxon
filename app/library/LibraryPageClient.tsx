@@ -4,6 +4,7 @@ import { useClerk, useUser } from "@clerk/nextjs";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
+import { isAdminEmail } from "@/app/lib/adminAccess";
 import type { ConceptTagSummary } from "@/app/lib/conceptTags";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import type {
@@ -14,15 +15,22 @@ import type {
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
+type UserProfileResponse = {
+  id: string;
+  displayName: string;
+  email: string;
+  avatarUrl: string | null;
+};
+
 type LibraryPageClientProps = {
-  initialQuestionBank: QuestionBankPage;
-  initialConceptTags: ConceptTagSummary[];
-  initialUser: {
+  initialQuestionBank?: QuestionBankPage | null;
+  initialConceptTags?: ConceptTagSummary[] | null;
+  initialUser?: {
     displayName: string;
     email: string;
     avatarUrl: string | null;
-  };
-  showAdmin: boolean;
+  } | null;
+  showAdmin?: boolean;
 };
 
 const statusOptions: Array<{
@@ -34,6 +42,11 @@ const statusOptions: Array<{
   { value: "flagged", label: "Flagged" },
   { value: "untagged", label: "Untagged" },
 ];
+
+const EMPTY_QUESTION_BANK: QuestionBankPage = {
+  items: [],
+  total: 0,
+};
 
 function formatDate(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
@@ -60,39 +73,112 @@ function questionStatus(item: QuestionBankItem, now: number): string {
 }
 
 export default function LibraryPageClient({
-  initialQuestionBank,
-  initialConceptTags,
+  initialQuestionBank = null,
+  initialConceptTags = null,
   initialUser,
-  showAdmin,
+  showAdmin = false,
 }: LibraryPageClientProps) {
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
-  const [questionBank, setQuestionBank] = useState(initialQuestionBank);
+  const [questionBank, setQuestionBank] = useState(
+    initialQuestionBank ?? EMPTY_QUESTION_BANK,
+  );
+  const [conceptTags, setConceptTags] = useState(initialConceptTags ?? []);
+  const [currentUser, setCurrentUser] = useState(initialUser ?? null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<QuestionBankStatusFilter>("all");
   const [tagSlug, setTagSlug] = useState("");
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(initialQuestionBank === null);
+  const [isMetadataLoading, setIsMetadataLoading] = useState(
+    initialConceptTags === null || initialUser === null,
+  );
   const [message, setMessage] = useState<string | null>(null);
   const accountWidgetsCustomPages = useMemo(
     () => createAccountWidgetsCustomPages(),
     [],
   );
   const now = Date.now();
-  const activeTags = initialConceptTags.filter((tag) => tag.active);
+  const activeTags = conceptTags.filter((tag) => tag.active);
   const dueCount = activeTags.reduce((total, tag) => total + tag.dueCount, 0);
-  const menuAvatarUrl = clerkUser?.imageUrl || initialUser.avatarUrl || null;
+  const canViewAdmin =
+    showAdmin ||
+    isAdminEmail(
+      clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email,
+    );
+  const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
   const menuDisplayName =
     clerkUser?.fullName ||
     clerkUser?.username ||
-    initialUser.displayName ||
+    currentUser?.displayName ||
     "Account";
   const menuEmail =
-    clerkUser?.primaryEmailAddress?.emailAddress || initialUser.email || "";
+    clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
   const isLocalAuth = isLocalTestAuthEnabled();
+  const isInitialQuestionBankLoading =
+    isLoading && questionBank.items.length === 0 && questionBank.total === 0;
 
   useEffect(() => {
     const controller = new AbortController();
+    let isActive = true;
+
+    async function loadShellData() {
+      setIsMetadataLoading(true);
+
+      try {
+        const [userResponse, tagsResponse] = await Promise.all([
+          fetch("/api/user", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/concept-tags", {
+            cache: "no-store",
+            signal: controller.signal,
+          }),
+        ]);
+        const userData = (await userResponse.json()) as UserProfileResponse & {
+          error?: string;
+        };
+        const tagsData = (await tagsResponse.json()) as {
+          conceptTags?: ConceptTagSummary[];
+          error?: string;
+        };
+
+        if (!userResponse.ok) {
+          throw new Error(userData.error || "Could not load profile.");
+        }
+
+        if (!tagsResponse.ok) {
+          throw new Error(tagsData.error || "Could not load tags.");
+        }
+
+        if (isActive) {
+          setCurrentUser(userData);
+          setConceptTags(tagsData.conceptTags ?? []);
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        if (isActive) {
+          setMessage(error instanceof Error ? error.message : "Could not load data.");
+        }
+      } finally {
+        if (isActive) {
+          setIsMetadataLoading(false);
+        }
+      }
+    }
+
+    void loadShellData();
+
+    return () => {
+      isActive = false;
+      controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let isActive = true;
     const timeout = window.setTimeout(() => {
       const params = new URLSearchParams();
 
@@ -109,8 +195,10 @@ export default function LibraryPageClient({
       }
 
       params.set("limit", "500");
-      setIsLoading(true);
-      setMessage(null);
+      if (isActive) {
+        setIsLoading(true);
+        setMessage(null);
+      }
 
       fetch(`/api/question-bank?${params.toString()}`, {
         cache: "no-store",
@@ -125,21 +213,30 @@ export default function LibraryPageClient({
             throw new Error(data.error || "Could not load question bank.");
           }
 
-          setQuestionBank(data);
+          if (isActive) {
+            setQuestionBank(data);
+          }
         })
         .catch((error) => {
           if (error instanceof DOMException && error.name === "AbortError") {
             return;
           }
 
-          setMessage(
-            error instanceof Error ? error.message : "Could not load question bank.",
-          );
+          if (isActive) {
+            setMessage(
+              error instanceof Error ? error.message : "Could not load question bank.",
+            );
+          }
         })
-        .finally(() => setIsLoading(false));
+        .finally(() => {
+          if (isActive) {
+            setIsLoading(false);
+          }
+        });
     }, 220);
 
     return () => {
+      isActive = false;
       window.clearTimeout(timeout);
       controller.abort();
     };
@@ -151,7 +248,7 @@ export default function LibraryPageClient({
         <ReviewToolbar
           activeTab="library"
           dueCount={dueCount}
-          showAdmin={showAdmin}
+          showAdmin={canViewAdmin}
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
@@ -221,7 +318,7 @@ export default function LibraryPageClient({
                 onChange={(event) => setTagSlug(event.target.value)}
               >
                 <option value="">Any tag</option>
-                {initialConceptTags.map((tag) => (
+                {conceptTags.map((tag) => (
                   <option key={tag.id} value={tag.slug}>
                     {tag.slug}
                   </option>
@@ -235,10 +332,34 @@ export default function LibraryPageClient({
           <div className="tags-summary-strip library-summary-strip">
             <span>{questionBank.total} questions</span>
             <span>{questionBank.items.length} shown</span>
-            <span>{isLoading ? "loading" : "ready"}</span>
+            <span>{isLoading || isMetadataLoading ? "loading" : "ready"}</span>
           </div>
 
-          {questionBank.items.length === 0 ? (
+          {isInitialQuestionBankLoading ? (
+            <ol
+              className="library-question-list library-question-list-loading"
+              aria-label="Loading questions"
+              aria-busy="true"
+            >
+              {Array.from({ length: 8 }, (_, index) => (
+                <li className="library-question-row" key={index}>
+                  <span className="library-question-toggle deck-skeleton-toggle" />
+                  <div className="library-question-main">
+                    <span className="admin-skeleton-line library-skeleton-title" />
+                    <span className="admin-skeleton-line library-skeleton-copy" />
+                    <div className="library-chip-row">
+                      <span className="admin-skeleton-pill" />
+                      <span className="admin-skeleton-pill" />
+                    </div>
+                  </div>
+                  <div className="library-question-meta">
+                    <span className="admin-skeleton-pill" />
+                    <span className="admin-skeleton-line library-skeleton-date" />
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : questionBank.items.length === 0 ? (
             <p className="tags-empty">No matching questions.</p>
           ) : (
             <ol className="library-question-list">
