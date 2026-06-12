@@ -1926,6 +1926,7 @@ export default function ReviewApp({
     null,
   );
   const isLearnTopUpPendingRef = useRef(false);
+  const topUpLearnQueueRef = useRef<(() => Promise<void>) | null>(null);
   const learnTopUpCooldownUntilRef = useRef(0);
 
   const togglePreviousAnswerDetails = useCallback((id: string) => {
@@ -3680,7 +3681,18 @@ export default function ReviewApp({
         ),
       );
 
-      await advanceReviewSessionQueue({ appendToMessages: true });
+      const nextSessionItem = await advanceReviewSessionQueue({
+        appendToMessages: true,
+      });
+
+      if (!nextSessionItem) {
+        if (submittedDeckId) {
+          rememberLearnTargetDeck(submittedDeckId);
+        }
+
+        learnTopUpCooldownUntilRef.current = 0;
+        await topUpLearnQueueRef.current?.();
+      }
 
       return true;
     } catch (submitError) {
@@ -3716,6 +3728,7 @@ export default function ReviewApp({
     clearPendingSpeechCommand,
     currentDeckId,
     currentDeckName,
+    rememberLearnTargetDeck,
   ]);
 
   const flagCurrentQuestion = useCallback(async () => {
@@ -4796,6 +4809,10 @@ export default function ReviewApp({
     selectedDeckDetailId,
     selectedDeckId,
   ]);
+
+  useEffect(() => {
+    topUpLearnQueueRef.current = topUpLearnQueue;
+  }, [topUpLearnQueue]);
 
   const selectedQuestionStats = useMemo<QuestionStats | null>(() => {
     if (!selectedQuestion) {

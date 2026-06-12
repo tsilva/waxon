@@ -11,7 +11,6 @@ import {
   Trash2,
 } from "lucide-react";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import {
@@ -292,10 +291,26 @@ function parseSseEvent(rawEvent: string): { event: string; data: unknown } | nul
   }
 }
 
+function learnCoursePath(courseId: string): string {
+  return `/learn/courses/${encodeURIComponent(courseId)}`;
+}
+
+function updateLearnHistory(pathname: string, mode: "push" | "replace") {
+  if (typeof window === "undefined" || window.location.pathname === pathname) {
+    return;
+  }
+
+  if (mode === "replace") {
+    window.history.replaceState(null, "", pathname);
+    return;
+  }
+
+  window.history.pushState(null, "", pathname);
+}
+
 export default function LearnPageClient({
   initialCourseId,
 }: LearnPageClientProps = {}) {
-  const router = useRouter();
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
   const isLocalAuth = isLocalTestAuthEnabled();
@@ -636,7 +651,7 @@ export default function LearnPageClient({
       const data = await readApiJson<{ course: Course }>(response);
 
       applySelectedCourse(data.course);
-      router.push(`/learn/courses/${encodeURIComponent(data.course.id)}`);
+      updateLearnHistory(learnCoursePath(data.course.id), "push");
     } catch (loadError) {
       setError(
         loadError instanceof Error
@@ -661,7 +676,7 @@ export default function LearnPageClient({
     setTopic("");
     setDraftConversationCost(0);
     setError(null);
-    router.push("/learn");
+    updateLearnHistory("/learn", "push");
   }
 
   function openCourseSettings(course: Course) {
@@ -714,7 +729,7 @@ export default function LearnPageClient({
         setChatMessages([INITIAL_CHAT_MESSAGE]);
         setDraftConversationCost(0);
         setTopic("");
-        router.replace("/learn");
+        updateLearnHistory("/learn", "replace");
       }
 
       if (loadingCourseId === course.id) {
@@ -896,9 +911,7 @@ export default function LearnPageClient({
               syncCourse(data.course);
 
               if (selectedCourse?.id !== data.course.id) {
-                router.replace(
-                  `/learn/courses/${encodeURIComponent(data.course.id)}`,
-                );
+                updateLearnHistory(learnCoursePath(data.course.id), "replace");
               }
             } else if (typeof data.turnCost === "number" && data.turnCost > 0) {
               const turnCost = data.turnCost;
