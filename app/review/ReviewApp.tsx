@@ -260,7 +260,7 @@ let reviewSessionSnapshot: ReviewSessionSnapshot | null = null;
 
 const REVIEW_TAB_PATHS: Record<ActiveTab, string> = {
   review: "/review",
-  queue: "/tags",
+  queue: "/library",
   stats: "/stats",
 };
 const LEARN_TARGET_DECK_STORAGE_KEY = "waxon:learn-target-deck-id";

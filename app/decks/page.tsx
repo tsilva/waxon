@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default async function DecksPage() {
-  redirect("/tags");
+  redirect("/library");
 }
