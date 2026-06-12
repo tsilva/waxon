@@ -260,7 +260,7 @@ let reviewSessionSnapshot: ReviewSessionSnapshot | null = null;
 
 const REVIEW_TAB_PATHS: Record<ActiveTab, string> = {
   review: "/review",
-  queue: "/decks",
+  queue: "/tags",
   stats: "/stats",
 };
 const LEARN_TARGET_DECK_STORAGE_KEY = "waxon:learn-target-deck-id";
@@ -270,8 +270,8 @@ type ReviewRouteState = {
   deckSlug: string | null;
 };
 
-function deckPath(deckSlug?: string | null): string {
-  return deckSlug ? `/decks/${encodeURIComponent(deckSlug)}` : REVIEW_TAB_PATHS.queue;
+function deckPath(): string {
+  return REVIEW_TAB_PATHS.queue;
 }
 
 function getStoredLearnTargetDeckId() {
@@ -1956,7 +1956,7 @@ export default function ReviewApp({
       }
 
       const nextPath =
-        nextTab === "queue" ? deckPath(deckSlug) : REVIEW_TAB_PATHS[nextTab];
+        nextTab === "queue" ? deckPath() : REVIEW_TAB_PATHS[nextTab];
 
       if (window.location.pathname !== nextPath) {
         window.history.pushState(
@@ -2626,13 +2626,6 @@ export default function ReviewApp({
     },
     [navigateToTab, rememberLearnTargetDeck, resetDeckQueueState, selectedDeckDetailId],
   );
-
-  const closeDeckQueue = useCallback(() => {
-    setSelectedDeckDetailId(null);
-    setRouteDeckSlug(null);
-    resetDeckQueueState();
-    navigateToTab("queue");
-  }, [navigateToTab, resetDeckQueueState]);
 
   const deleteEditingDeck = useCallback(async () => {
     if (!editingDeck || isCreatingDeck || isDeckDeleting) {
@@ -5131,7 +5124,7 @@ export default function ReviewApp({
         <ReviewToolbar
           activeTab={
             activeTab === "queue"
-              ? "decks"
+              ? "tags"
               : activeTab === "stats"
                 ? "stats"
                 : "review"
@@ -5142,10 +5135,6 @@ export default function ReviewApp({
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
           onReviewClick={(event) => navigateToTab("review", event)}
-          onDecksClick={(event) => {
-            event.preventDefault();
-            closeDeckQueue();
-          }}
           onStatsClick={(event) => navigateToTab("stats", event)}
           onManageAccount={() => {
             if (isLocalAuth) {

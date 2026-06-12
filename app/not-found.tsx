@@ -11,8 +11,8 @@ export default function NotFoundPage() {
         <h1>Page not found</h1>
         <p>The page you requested is not available.</p>
         <p>
-          Return to <Link href="/review">review</Link> or browse your{" "}
-          <Link href="/decks">decks</Link>.
+          Return to <Link href="/review">review</Link> or adjust your{" "}
+          <Link href="/tags">tags</Link>.
         </p>
       </article>
     </main>
