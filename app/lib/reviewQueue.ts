@@ -802,7 +802,7 @@ function restoreFailedQuestion(
   logQueueFlushStatus(state, "restored-failed-evaluation-question");
 }
 
-function appendRetryQuestion(
+function prependRetryQuestion(
   state: QueueState,
   question: DueQuestion | null,
 ): void {
@@ -811,10 +811,10 @@ function appendRetryQuestion(
   }
 
   state.queue = [
-    ...state.queue.filter((item) => questionKey(item) !== questionKey(question)),
     question,
+    ...state.queue.filter((item) => questionKey(item) !== questionKey(question)),
   ];
-  logQueueFlushStatus(state, "appended-retry-question");
+  logQueueFlushStatus(state, "prepended-retry-question");
 }
 
 function persistEvaluationFailure(
@@ -1047,7 +1047,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       savedEvaluationNextDue = evaluationNextDue;
 
       if (result.score < SCHEDULED_SCORE_THRESHOLD) {
-        appendRetryQuestion(state, persisted);
+        prependRetryQuestion(state, persisted);
       }
     } else {
       await persistEvaluationResolution({

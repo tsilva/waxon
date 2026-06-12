@@ -190,6 +190,14 @@ type PreviousAnswerItem = {
   timeLabel: string;
 };
 
+type QuestionSwapLayer = {
+  key: string;
+  questionId: string | null;
+  question: string;
+  deckName: string | null;
+  phase: "current" | "entering" | "exiting";
+};
+
 type ActiveTab = "review" | "queue" | "stats";
 
 type ReviewAppProps = {
@@ -701,6 +709,7 @@ const SPEECH_COMMAND_SETTLE_MS = 1000;
 const STALE_EVALUATION_GRADING_MS = 120_000;
 const EVALUATION_STATUS_POLL_MS = 750;
 const LEARN_TOP_UP_COOLDOWN_MS = 20_000;
+const QUESTION_SWAP_ANIMATION_MS = 140;
 
 function createEmptyDeckEmbeddingPlot(): DeckEmbeddingPlotResponse {
   return {
@@ -714,6 +723,13 @@ const MAX_AVATAR_UPLOAD_BYTES = 512 * 1024;
 const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit)[.!?]*$/i;
 const DEFAULT_GENERATED_QUESTION_COUNT = 5;
 const MAX_GENERATED_QUESTION_COUNT = 10;
+
+function questionSwapLayerKey(
+  questionId: string | null,
+  question: string,
+): string {
+  return questionId ? `question-${questionId}` : `question-${question}`;
+}
 
 function MarkdownInline(
   props: Omit<ComponentProps<typeof SharedMarkdownInline>, "enableMath">,
@@ -1085,9 +1101,17 @@ type DailyScoreBucket = DailyCountBucket & {
   averageScore: number | null;
 };
 
+type DailyQueueEstimateBucket = {
+  dayStart: number;
+  label: string;
+  scheduledValue: number;
+  estimatedQueue: number;
+};
+
 type StatsAnalytics = {
   scheduledBuckets: DailyCountBucket[];
   processedBuckets: DailyScoreBucket[];
+  estimatedQueueBuckets: DailyQueueEstimateBucket[];
   scheduledTotal: number;
   processedTotal: number;
   averageScore: number | null;
@@ -1179,6 +1203,18 @@ function buildStatsAnalytics(stats: StatsResponse | null): StatsAnalytics {
       scoreTotal.count > 0 ? scoreTotal.total / scoreTotal.count : null;
   });
 
+  let estimatedQueue = 0;
+  const estimatedQueueBuckets = scheduledBuckets.map((bucket) => {
+    estimatedQueue += bucket.value;
+
+    return {
+      dayStart: bucket.dayStart,
+      label: bucket.label,
+      scheduledValue: bucket.value,
+      estimatedQueue,
+    };
+  });
+
   const processedTotal = scoreTotals.reduce(
     (total, item) => total + item.count,
     0,
@@ -1188,6 +1224,7 @@ function buildStatsAnalytics(stats: StatsResponse | null): StatsAnalytics {
   return {
     scheduledBuckets,
     processedBuckets,
+    estimatedQueueBuckets,
     scheduledTotal: scheduledBuckets.reduce(
       (total, item) => total + item.value,
       0,
@@ -1269,6 +1306,30 @@ function DailyBarChart({
         );
       })}
     </svg>
+  );
+}
+
+function EstimatedQueueList({
+  buckets,
+}: {
+  buckets: DailyQueueEstimateBucket[];
+}) {
+  return (
+    <ol className="estimated-queue-list" aria-label="Estimated review queue by day">
+      {buckets.map((bucket, index) => (
+        <li className="estimated-queue-row" key={bucket.dayStart}>
+          <span className="estimated-queue-date">
+            {index === 0 ? "Today" : bucket.label}
+          </span>
+          <span className="estimated-queue-due">
+            {bucket.scheduledValue} due
+          </span>
+          <strong className="estimated-queue-count">
+            {bucket.estimatedQueue}
+          </strong>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -1604,6 +1665,26 @@ export default function ReviewApp({
   const [question, setQuestion] = useState<string | null>(
     () => cachedSessionRef.current?.question ?? null,
   );
+  const [questionSwapLayers, setQuestionSwapLayers] = useState<
+    QuestionSwapLayer[]
+  >(() => {
+    const cachedQuestion = cachedSessionRef.current?.question ?? null;
+
+    return cachedQuestion
+      ? [
+          {
+            key: questionSwapLayerKey(
+              cachedSessionRef.current?.currentQuestionId ?? null,
+              cachedQuestion,
+            ),
+            questionId: cachedSessionRef.current?.currentQuestionId ?? null,
+            question: cachedQuestion,
+            deckName: cachedSessionRef.current?.currentDeckName ?? null,
+            phase: "current",
+          },
+        ]
+      : [];
+  });
   const [currentSessionItem, setCurrentSessionItem] =
     useState<ReviewQueueItem | null>(
       () => cachedSessionRef.current?.currentSessionItem ?? null,
@@ -1805,6 +1886,7 @@ export default function ReviewApp({
   const [reviewQueueVersion, setReviewQueueVersion] = useState(0);
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
+  const questionSwapTimerRef = useRef<number | null>(null);
   const questionIdRef = useRef(currentQuestionId);
   const currentSessionItemRef = useRef(currentSessionItem);
   const sessionQueueRef = useRef(sessionQueue);
@@ -1923,6 +2005,65 @@ export default function ReviewApp({
   useEffect(() => {
     questionRef.current = question;
   }, [question]);
+
+  useEffect(() => {
+    return () => {
+      if (questionSwapTimerRef.current) {
+        window.clearTimeout(questionSwapTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!question) {
+      if (!isLoadingQuestion) {
+        setQuestionSwapLayers([]);
+      }
+
+      return;
+    }
+
+    const nextLayer: QuestionSwapLayer = {
+      key: questionSwapLayerKey(currentQuestionId, question),
+      questionId: currentQuestionId,
+      question,
+      deckName: currentDeckName,
+      phase: "entering",
+    };
+
+    if (questionSwapTimerRef.current) {
+      window.clearTimeout(questionSwapTimerRef.current);
+      questionSwapTimerRef.current = null;
+    }
+
+    setQuestionSwapLayers((currentLayers) => {
+      const activeLayer =
+        currentLayers.find((layer) => layer.phase !== "exiting") ??
+        currentLayers.at(-1);
+
+      if (!activeLayer) {
+        return [{ ...nextLayer, phase: "entering" }];
+      }
+
+      if (activeLayer.key === nextLayer.key) {
+        return [{ ...nextLayer, phase: activeLayer.phase }];
+      }
+
+      return [
+        { ...activeLayer, phase: "exiting" },
+        nextLayer,
+      ];
+    });
+
+    questionSwapTimerRef.current = window.setTimeout(() => {
+      setQuestionSwapLayers((currentLayers) =>
+        currentLayers
+          .filter((layer) => layer.key === nextLayer.key)
+          .map((layer) => ({ ...layer, phase: "current" })),
+      );
+      questionSwapTimerRef.current = null;
+    }, QUESTION_SWAP_ANIMATION_MS);
+  }, [currentDeckName, currentQuestionId, isLoadingQuestion, question]);
 
   useEffect(() => {
     questionIdRef.current = currentQuestionId;
@@ -3397,7 +3538,14 @@ export default function ReviewApp({
         continue;
       }
 
-      const nextQueue = [...sessionQueueRef.current, updatedRetryItem];
+      const nextQueue = [
+        updatedRetryItem,
+        ...sessionQueueRef.current.filter(
+          (item) =>
+            item.questionId !== updatedRetryItem.questionId &&
+            item.question !== updatedRetryItem.question,
+        ),
+      ];
 
       sessionQueueRef.current = nextQueue;
       setSessionQueue(nextQueue);
@@ -4365,6 +4513,69 @@ export default function ReviewApp({
     activeLearnGenerationProgress.generated === 0
       ? "Waiting for the first complete streamed question."
       : "Finalizing generated questions.");
+  const hasQuestionSwapLayers = questionSwapLayers.length > 0;
+  const renderQuestionSwapLayer = (layer: QuestionSwapLayer) => {
+    const isExiting = layer.phase === "exiting";
+
+    return (
+      <div
+        key={layer.key}
+        className={`question-swap-layer question-swap-layer-${layer.phase}`}
+        aria-hidden={isExiting ? true : undefined}
+      >
+        <div className="question-source">
+          {layer.deckName ? (
+            <>
+              <Layers aria-hidden="true" />
+              <span className="question-source-label">
+                {layer.deckName}
+              </span>
+            </>
+          ) : null}
+          {!isExiting ? (
+            <>
+              <IconTooltip label="Question details">
+                {(tooltipId) => (
+                  <button
+                    className="question-details-trigger"
+                    type="button"
+                    aria-label="View current question details"
+                    aria-describedby={tooltipId}
+                    onClick={() =>
+                      selectQuestion(layer.question, layer.questionId)
+                    }
+                  >
+                    <Info aria-hidden="true" />
+                  </button>
+                )}
+              </IconTooltip>
+              <IconTooltip label="Flag question">
+                {(tooltipId) => (
+                  <button
+                    className="question-flag-trigger"
+                    type="button"
+                    aria-label="Flag current question"
+                    aria-describedby={tooltipId}
+                    onClick={() => {
+                      void flagCurrentQuestion();
+                    }}
+                    disabled={isSubmitting || isFlaggingQuestion}
+                  >
+                    <Flag aria-hidden="true" />
+                  </button>
+                )}
+              </IconTooltip>
+            </>
+          ) : null}
+        </div>
+        <MarkdownInline
+          as="h2"
+          className="question-title"
+          text={layer.question}
+        />
+      </div>
+    );
+  };
   const scheduledReviewCount = reviewQueue.filter(
     (item) => item.status === "scheduled",
   ).length;
@@ -4955,62 +5166,14 @@ export default function ReviewApp({
         >
           <section className="question-area" aria-live="polite">
             <div
-              key={isLoadingQuestion ? "loading" : question ?? "empty"}
-              className={`question-copy ${
-                !isLoadingQuestion && question ? "question-copy-enter" : ""
-              }`}
+              className="question-copy"
             >
-              {isLoadingQuestion ? (
+              {isLoadingQuestion && !hasQuestionSwapLayers ? (
                 <h2 className="question-title">Loading next question...</h2>
-              ) : question ? (
-                <>
-                  <div className="question-source">
-                    {currentDeckName ? (
-                      <>
-                        <Layers aria-hidden="true" />
-                        <span className="question-source-label">
-                          {currentDeckName}
-                        </span>
-                      </>
-                    ) : null}
-                    <IconTooltip label="Question details">
-                      {(tooltipId) => (
-                        <button
-                          className="question-details-trigger"
-                          type="button"
-                          aria-label="View current question details"
-                          aria-describedby={tooltipId}
-                          onClick={() =>
-                            selectQuestion(question, currentQuestionId)
-                          }
-                        >
-                          <Info aria-hidden="true" />
-                        </button>
-                      )}
-                    </IconTooltip>
-                    <IconTooltip label="Flag question">
-                      {(tooltipId) => (
-                        <button
-                          className="question-flag-trigger"
-                          type="button"
-                          aria-label="Flag current question"
-                          aria-describedby={tooltipId}
-                          onClick={() => {
-                            void flagCurrentQuestion();
-                          }}
-                          disabled={isSubmitting || isFlaggingQuestion}
-                        >
-                          <Flag aria-hidden="true" />
-                        </button>
-                      )}
-                    </IconTooltip>
-                  </div>
-                  <MarkdownInline
-                    as="h2"
-                    className="question-title"
-                    text={question}
-                  />
-                </>
+              ) : hasQuestionSwapLayers ? (
+                <div className="question-swap-stack">
+                  {questionSwapLayers.map(renderQuestionSwapLayer)}
+                </div>
               ) : isLearnTopUpPending ? (
                 <div
                   className="learn-generation-panel"
@@ -5322,6 +5485,20 @@ export default function ReviewApp({
                 <DailyBarChart
                   buckets={statsAnalytics.scheduledBuckets}
                   ariaLabel="Scheduled reviews per day for the next 14 days"
+                />
+              )}
+            </section>
+
+            <section className="stats-page-chart-panel stats-page-chart-panel-wide">
+              <div className="stats-section-heading">
+                <h3>Estimated queue by day</h3>
+                <span>Next 14 days</span>
+              </div>
+              {isStatsLoading && !statsData ? (
+                <div className="daily-stats-empty">Loading stats...</div>
+              ) : (
+                <EstimatedQueueList
+                  buckets={statsAnalytics.estimatedQueueBuckets}
                 />
               )}
             </section>

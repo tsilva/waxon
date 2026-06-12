@@ -73,17 +73,7 @@ export async function GET() {
         lt(questions.nextDue, scheduledUntil),
       ),
     )
-    .groupBy(sql`
-      CASE
-        WHEN ${questions.nextDue} <= ${now} THEN ${todayStart}
-        ELSE (
-          extract(epoch from date_trunc(
-            'day',
-            to_timestamp(${questions.nextDue} / 1000.0)
-          )) * 1000
-        )::bigint
-      END
-    `);
+    .groupBy(sql`1`);
   const processedBucketsQuery = db
     .select({
       dayStart: sql<number>`
@@ -105,14 +95,7 @@ export async function GET() {
         lt(questionAttempts.resolvedAt, processedUntil),
       ),
     )
-    .groupBy(sql`
-      (
-        extract(epoch from date_trunc(
-          'day',
-          to_timestamp(${questionAttempts.resolvedAt} / 1000.0)
-        )) * 1000
-      )::bigint
-    `);
+    .groupBy(sql`1`);
   const [
     [{ value: dueCount = 0 } = { value: 0 }],
     [{ value: cardCount = 0 } = { value: 0 }],

@@ -1459,6 +1459,7 @@ textarea {
 }
 
 .question-copy {
+  display: grid;
   width: 100%;
   min-width: 0;
   padding-top: 0;
@@ -1466,6 +1467,29 @@ textarea {
 
 .question-copy-enter {
   animation: question-fade-in 180ms ease-out both;
+}
+
+.question-swap-stack {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+}
+
+.question-swap-layer {
+  grid-area: 1 / 1;
+  width: 100%;
+  min-width: 0;
+  will-change: opacity, transform;
+}
+
+.question-swap-layer-entering {
+  animation: question-swap-in 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.question-swap-layer-exiting {
+  pointer-events: none;
+  animation: question-swap-out 120ms cubic-bezier(0.55, 0.06, 0.68, 0.19)
+    both;
 }
 
 .question-title {
@@ -2313,6 +2337,30 @@ textarea {
   }
 }
 
+@keyframes question-swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes question-swap-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .pending-spinner {
     animation: none;
@@ -2323,6 +2371,11 @@ textarea {
   }
 
   .question-copy-enter {
+    animation: none;
+  }
+
+  .question-swap-layer-entering,
+  .question-swap-layer-exiting {
     animation: none;
   }
 }
@@ -2806,6 +2859,60 @@ textarea {
 
 .daily-stats-y-axis {
   text-anchor: start;
+}
+
+.estimated-queue-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.estimated-queue-row {
+  display: grid;
+  grid-template-columns: minmax(66px, 0.9fr) minmax(64px, 0.8fr) minmax(44px, auto);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid rgb(227 218 196 / 72%);
+  border-radius: 8px;
+  background: rgb(255 253 247 / 58%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 72%);
+}
+
+.estimated-queue-date,
+.estimated-queue-due,
+.estimated-queue-count {
+  min-width: 0;
+  font-family: var(--font-ui);
+  line-height: 1.15;
+}
+
+.estimated-queue-date {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 820;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.estimated-queue-due {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  text-align: right;
+}
+
+.estimated-queue-count {
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 840;
+  text-align: right;
 }
 
 .daily-stats-empty {
@@ -7253,6 +7360,17 @@ textarea {
   .daily-stats-value,
   .daily-stats-axis {
     font-size: 11px;
+  }
+
+  .estimated-queue-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .estimated-queue-row {
+    grid-template-columns: minmax(64px, 1fr) minmax(62px, auto) minmax(38px, auto);
+    min-height: 40px;
+    padding: 8px 9px;
   }
 
   .embedding-plot-panel {
