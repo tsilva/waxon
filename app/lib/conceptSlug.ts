@@ -1,4 +1,5 @@
 const MIN_SLUG_WORDS = 2;
+const FALLBACK_CONCEPT_SLUG = "needs-concept-tagging";
 
 export function normalizeConceptSlug(value: unknown): string {
   if (typeof value !== "string") {
@@ -33,6 +34,20 @@ export function isUsefulConceptSlug(slug: string): boolean {
   }
 
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug);
+}
+
+export function fallbackConceptSlug(): string {
+  return FALLBACK_CONCEPT_SLUG;
+}
+
+export function isScaffoldingConceptSlug(slug: string): boolean {
+  const normalized = normalizeConceptSlug(slug);
+
+  return (
+    normalized === "general-knowledge" ||
+    normalized === FALLBACK_CONCEPT_SLUG ||
+    normalized.startsWith("course-")
+  );
 }
 
 export function normalizeConceptSlugList(value: unknown): string[] {

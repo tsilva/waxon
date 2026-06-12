@@ -20,12 +20,16 @@ import {
 } from "./openRouter";
 import { vectorLiteral } from "./vectorLiteral";
 export {
+  fallbackConceptSlug,
   isUsefulConceptSlug,
   normalizeConceptSlug,
   normalizeConceptSlugList,
+  isScaffoldingConceptSlug,
 } from "./conceptSlug";
 import {
+  fallbackConceptSlug,
   isUsefulConceptSlug,
+  isScaffoldingConceptSlug,
   normalizeConceptSlug,
   normalizeConceptSlugList,
 } from "./conceptSlug";
@@ -88,15 +92,37 @@ function deterministicFallbackSlug(input: ConceptTaggedQuestion): string {
     return proposed;
   }
 
-  const contextSlug = normalizeConceptSlug(
-    input.fallbackSlug || input.questionProvenance || "general-knowledge",
-  );
+  const contextSlug = normalizeConceptSlug(input.fallbackSlug);
 
-  if (isUsefulConceptSlug(contextSlug)) {
+  if (isUsefulConceptSlug(contextSlug) && !isScaffoldingConceptSlug(contextSlug)) {
     return contextSlug;
   }
 
-  return "general-knowledge";
+  return fallbackConceptSlug();
+}
+
+function visibleConceptTagClause() {
+  return sql`
+    ${conceptTags.slug} NOT LIKE 'course-%'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM decks legacy_decks
+      WHERE legacy_decks.user_id = ${conceptTags.userId}
+        AND coalesce(nullif(lower(
+          regexp_replace(
+            regexp_replace(
+              regexp_replace(unaccent(legacy_decks.name), '[^A-Za-z0-9]+', '-', 'g'),
+              '(^-+|-+$)',
+              '',
+              'g'
+            ),
+            '-+',
+            '-',
+            'g'
+          )
+        ), ''), 'untitled-deck') = ${conceptTags.slug}
+    )
+  `;
 }
 
 function buildTaggingContext(question: ConceptTaggedQuestion): string {
@@ -176,7 +202,7 @@ async function loadRelevantConceptTags(input: {
         slug: conceptTags.slug,
       })
       .from(conceptTags)
-      .where(eq(conceptTags.userId, input.userId))
+      .where(and(eq(conceptTags.userId, input.userId), visibleConceptTagClause()))
       .orderBy(conceptTags.slug)
       .limit(MAX_RELEVANT_TAGS);
 
@@ -188,6 +214,25 @@ async function loadRelevantConceptTags(input: {
       SELECT id, slug
       FROM concept_tags
       WHERE user_id = $1
+        AND slug NOT LIKE 'course-%'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM decks legacy_decks
+          WHERE legacy_decks.user_id = concept_tags.user_id
+            AND coalesce(nullif(lower(
+              regexp_replace(
+                regexp_replace(
+                  regexp_replace(unaccent(legacy_decks.name), '[^A-Za-z0-9]+', '-', 'g'),
+                  '(^-+|-+$)',
+                  '',
+                  'g'
+                ),
+                '-+',
+                '-',
+                'g'
+              )
+            ), ''), 'untitled-deck') = concept_tags.slug
+        )
       ORDER BY
         CASE WHEN embedding IS NULL THEN 1 ELSE 0 END ASC,
         embedding <=> $2::vector ASC,
@@ -216,6 +261,7 @@ function buildConceptTaggingPrompt(input: {
     "Create a new slug only when no existing slug fits.",
     "Slugs must be full, self-disambiguating concept phrases.",
     "Do not use acronym-only slugs such as ppo, rl, cnn, or kl unless the acronym is globally unambiguous.",
+    "Do not use source, deck, course, lesson, or container labels as concept slugs.",
     "Return strict JSON only: {\"assignments\":[{\"questionId\":\"...\",\"conceptSlugs\":[\"...\"]}]}",
     JSON.stringify({
       questions: input.questions.map((question) => ({
@@ -510,7 +556,7 @@ export async function listConceptTags(input: {
       eq(questionConceptTags.conceptTagId, conceptTags.id),
     )
     .leftJoin(questions, eq(questions.id, questionConceptTags.questionId))
-    .where(eq(conceptTags.userId, input.userId))
+    .where(and(eq(conceptTags.userId, input.userId), visibleConceptTagClause()))
     .groupBy(
       conceptTags.id,
       conceptTags.slug,
@@ -735,6 +781,7 @@ export async function getQuestionConceptSlugs(input: {
         eq(conceptTags.userId, input.userId),
         eq(decks.userId, input.userId),
         inArray(questionConceptTags.questionId, questionIds),
+        visibleConceptTagClause(),
       ),
     )
     .orderBy(conceptTags.slug);
