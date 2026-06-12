@@ -5340,6 +5340,33 @@ textarea {
   list-style: none;
 }
 
+.library-load-more-button {
+  justify-self: center;
+  min-height: 38px;
+  border: 1px solid rgb(166 124 82 / 34%);
+  border-radius: 8px;
+  padding: 0 16px;
+  background: #fffdf8;
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.library-load-more-button:hover,
+.library-load-more-button:focus-visible {
+  border-color: rgb(166 124 82 / 50%);
+  background: #ffffff;
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 2px;
+}
+
+.library-load-more-button:disabled {
+  color: var(--muted);
+  cursor: wait;
+}
+
 .library-question-row {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr) auto;

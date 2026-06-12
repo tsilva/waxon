@@ -1,8 +1,8 @@
 import { pool } from "@/app/db/client";
 import { normalizeConceptSlug } from "./conceptSlug";
 
-const DEFAULT_QUESTION_BANK_LIMIT = 500;
-const MAX_QUESTION_BANK_LIMIT = 1_000;
+const DEFAULT_QUESTION_BANK_LIMIT = 50;
+const MAX_QUESTION_BANK_LIMIT = 100;
 
 export type QuestionBankStatusFilter = "all" | "due" | "flagged" | "untagged";
 
@@ -20,6 +20,8 @@ export type QuestionBankItem = {
 export type QuestionBankPage = {
   items: QuestionBankItem[];
   total: number;
+  hasMore: boolean;
+  nextOffset: number | null;
 };
 
 function normalizeStatus(value: unknown): QuestionBankStatusFilter {
@@ -47,29 +49,15 @@ export async function listQuestionBankItems(input: {
     ),
   );
   const offset = Math.max(0, Math.floor(input.offset ?? 0));
+  const pageLimit = limit + 1;
   const now = Math.round(Date.now());
   const result = await pool.query(
     `
-      WITH owned_questions AS (
+      WITH visible_concept_tags AS (
         SELECT
-          q.id,
-          q.question,
-          q.concise_answer,
-          q.question_provenance,
-          q.next_due,
-          q.created_at,
-          q.flagged_at
-        FROM questions q
-        INNER JOIN decks d ON d.id = q.deck_id
-        WHERE d.user_id = $1
-          AND d.archived_at IS NULL
-      ),
-      visible_tag_links AS (
-        SELECT
-          qct.question_id,
+          ct.id,
           ct.slug
-        FROM question_concept_tags qct
-        INNER JOIN concept_tags ct ON ct.id = qct.concept_tag_id
+        FROM concept_tags ct
         WHERE ct.user_id = $1
           AND ct.slug NOT LIKE 'course-%'
           AND NOT EXISTS (
@@ -84,76 +72,102 @@ export async function listQuestionBankItems(input: {
                     '',
                     'g'
                   ),
-                  '-+',
-                  '-',
-                  'g'
-                )
-              ), ''), 'untitled-deck') = ct.slug
+                '-+',
+                '-',
+                'g'
+              )
+            ), ''), 'untitled-deck') = ct.slug
           )
       ),
-      question_rows AS (
+      filtered_questions AS (
         SELECT
-          oq.id,
-          oq.question,
-          oq.concise_answer,
-          oq.question_provenance,
-          oq.next_due,
-          oq.created_at,
-          oq.flagged_at,
-          coalesce(array_remove(array_agg(vtl.slug ORDER BY vtl.slug), NULL), '{}') AS concept_slugs
-        FROM owned_questions oq
-        LEFT JOIN visible_tag_links vtl ON vtl.question_id = oq.id
-        GROUP BY
-          oq.id,
-          oq.question,
-          oq.concise_answer,
-          oq.question_provenance,
-          oq.next_due,
-          oq.created_at,
-          oq.flagged_at
-      ),
-      filtered AS (
-        SELECT *
-        FROM question_rows
-        WHERE ($2::text = ''
-            OR question ILIKE '%' || $2::text || '%'
-            OR concise_answer ILIKE '%' || $2::text || '%'
-            OR question_provenance ILIKE '%' || $2::text || '%'
+          q.id,
+          q.question,
+          q.concise_answer,
+          q.question_provenance,
+          q.next_due,
+          q.created_at,
+          q.flagged_at
+        FROM questions q
+        INNER JOIN decks d ON d.id = q.deck_id
+        WHERE d.user_id = $1
+          AND d.archived_at IS NULL
+          AND ($2::text = ''
+            OR q.question ILIKE '%' || $2::text || '%'
+            OR q.concise_answer ILIKE '%' || $2::text || '%'
+            OR q.question_provenance ILIKE '%' || $2::text || '%'
             OR EXISTS (
-              SELECT 1 FROM unnest(concept_slugs) slug
-              WHERE slug ILIKE '%' || $2::text || '%'
+              SELECT 1
+              FROM question_concept_tags qct
+              INNER JOIN visible_concept_tags vct ON vct.id = qct.concept_tag_id
+              WHERE qct.question_id = q.id
+                AND vct.slug ILIKE '%' || $2::text || '%'
             ))
-          AND ($3::text = '' OR $3::text = ANY(concept_slugs))
+          AND ($3::text = '' OR EXISTS (
+            SELECT 1
+            FROM question_concept_tags qct
+            INNER JOIN visible_concept_tags vct ON vct.id = qct.concept_tag_id
+            WHERE qct.question_id = q.id
+              AND vct.slug = $3::text
+          ))
           AND (
             $4::text = 'all'
-            OR ($4::text = 'due' AND next_due <= $5 AND flagged_at IS NULL)
-            OR ($4::text = 'flagged' AND flagged_at IS NOT NULL)
-            OR ($4::text = 'untagged' AND cardinality(concept_slugs) = 0)
+            OR ($4::text = 'due' AND q.next_due <= $5 AND q.flagged_at IS NULL)
+            OR ($4::text = 'flagged' AND q.flagged_at IS NOT NULL)
+            OR ($4::text = 'untagged' AND NOT EXISTS (
+              SELECT 1
+              FROM question_concept_tags qct
+              INNER JOIN visible_concept_tags vct ON vct.id = qct.concept_tag_id
+              WHERE qct.question_id = q.id
+            ))
           )
+      ),
+      page_questions AS (
+        SELECT *
+        FROM filtered_questions
+        ORDER BY
+          flagged_at IS NOT NULL ASC,
+          next_due ASC,
+          created_at DESC,
+          question ASC
+        LIMIT $6 OFFSET $7
       )
       SELECT
-        id::text,
-        question,
-        concise_answer,
-        question_provenance,
-        next_due,
-        created_at,
-        flagged_at,
-        concept_slugs,
-        count(*) OVER() AS total
-      FROM filtered
+        pq.id::text,
+        pq.question,
+        pq.concise_answer,
+        pq.question_provenance,
+        pq.next_due,
+        pq.created_at,
+        pq.flagged_at,
+        coalesce(
+          array_agg(vct.slug ORDER BY vct.slug) FILTER (WHERE vct.slug IS NOT NULL),
+          '{}'
+        ) AS concept_slugs
+      FROM page_questions pq
+      LEFT JOIN question_concept_tags qct ON qct.question_id = pq.id
+      LEFT JOIN visible_concept_tags vct ON vct.id = qct.concept_tag_id
+      GROUP BY
+        pq.id,
+        pq.question,
+        pq.concise_answer,
+        pq.question_provenance,
+        pq.next_due,
+        pq.created_at,
+        pq.flagged_at
       ORDER BY
-        flagged_at IS NOT NULL ASC,
-        next_due ASC,
-        created_at DESC,
-        question ASC
-      LIMIT $6 OFFSET $7
+        pq.flagged_at IS NOT NULL ASC,
+        pq.next_due ASC,
+        pq.created_at DESC,
+        pq.question ASC
     `,
-    [input.userId, query, tagSlug, status, now, limit, offset],
+    [input.userId, query, tagSlug, status, now, pageLimit, offset],
   );
+  const hasMore = result.rows.length > limit;
+  const pageRows = hasMore ? result.rows.slice(0, limit) : result.rows;
 
   return {
-    items: result.rows.map((row) => ({
+    items: pageRows.map((row) => ({
       questionId: String(row.id),
       question: String(row.question ?? ""),
       conciseAnswer: row.concise_answer ? String(row.concise_answer) : null,
@@ -167,6 +181,8 @@ export async function listQuestionBankItems(input: {
         ? row.concept_slugs.map(String).filter(Boolean)
         : [],
     })),
-    total: Number(result.rows[0]?.total) || 0,
+    total: offset + pageRows.length + (hasMore ? 1 : 0),
+    hasMore,
+    nextOffset: hasMore ? offset + pageRows.length : null,
   };
 }

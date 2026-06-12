@@ -2,7 +2,7 @@
 
 import { useClerk, useUser } from "@clerk/nextjs";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import type { ConceptTagSummary } from "@/app/lib/conceptTags";
@@ -46,7 +46,10 @@ const statusOptions: Array<{
 const EMPTY_QUESTION_BANK: QuestionBankPage = {
   items: [],
   total: 0,
+  hasMore: false,
+  nextOffset: null,
 };
+const LIBRARY_PAGE_SIZE = 50;
 
 function formatDate(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
@@ -72,6 +75,57 @@ function questionStatus(item: QuestionBankItem, now: number): string {
   return "scheduled";
 }
 
+function questionBankParams(input: {
+  query: string;
+  status: QuestionBankStatusFilter;
+  tagSlug: string;
+  offset: number;
+}): URLSearchParams {
+  const params = new URLSearchParams({
+    limit: String(LIBRARY_PAGE_SIZE),
+    offset: String(Math.max(0, Math.floor(input.offset))),
+  });
+
+  if (input.query.trim()) {
+    params.set("q", input.query.trim());
+  }
+
+  if (input.status !== "all") {
+    params.set("status", input.status);
+  }
+
+  if (input.tagSlug) {
+    params.set("tag", input.tagSlug);
+  }
+
+  return params;
+}
+
+async function fetchQuestionBankPage(input: {
+  query: string;
+  status: QuestionBankStatusFilter;
+  tagSlug: string;
+  offset: number;
+  signal?: AbortSignal;
+}): Promise<QuestionBankPage> {
+  const response = await fetch(
+    `/api/question-bank?${questionBankParams(input).toString()}`,
+    {
+      cache: "no-store",
+      signal: input.signal,
+    },
+  );
+  const data = (await response.json()) as QuestionBankPage & {
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(data.error || "Could not load question bank.");
+  }
+
+  return data;
+}
+
 export default function LibraryPageClient({
   initialQuestionBank = null,
   initialConceptTags = null,
@@ -90,6 +144,7 @@ export default function LibraryPageClient({
   const [tagSlug, setTagSlug] = useState("");
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(initialQuestionBank === null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isMetadataLoading, setIsMetadataLoading] = useState(
     initialConceptTags === null || initialUser === null,
   );
@@ -117,6 +172,9 @@ export default function LibraryPageClient({
   const isLocalAuth = isLocalTestAuthEnabled();
   const isInitialQuestionBankLoading =
     isLoading && questionBank.items.length === 0 && questionBank.total === 0;
+  const questionCountLabel = questionBank.hasMore
+    ? `${questionBank.items.length}+ questions`
+    : `${questionBank.items.length} questions`;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -180,41 +238,23 @@ export default function LibraryPageClient({
     const controller = new AbortController();
     let isActive = true;
     const timeout = window.setTimeout(() => {
-      const params = new URLSearchParams();
-
-      if (query.trim()) {
-        params.set("q", query.trim());
-      }
-
-      if (status !== "all") {
-        params.set("status", status);
-      }
-
-      if (tagSlug) {
-        params.set("tag", tagSlug);
-      }
-
-      params.set("limit", "500");
       if (isActive) {
         setIsLoading(true);
+        setIsLoadingMore(false);
         setMessage(null);
       }
 
-      fetch(`/api/question-bank?${params.toString()}`, {
-        cache: "no-store",
+      fetchQuestionBankPage({
+        query,
+        status,
+        tagSlug,
+        offset: 0,
         signal: controller.signal,
       })
-        .then(async (response) => {
-          const data = (await response.json()) as QuestionBankPage & {
-            error?: string;
-          };
-
-          if (!response.ok) {
-            throw new Error(data.error || "Could not load question bank.");
-          }
-
+        .then((data) => {
           if (isActive) {
             setQuestionBank(data);
+            setExpandedQuestionId(null);
           }
         })
         .catch((error) => {
@@ -241,6 +281,44 @@ export default function LibraryPageClient({
       controller.abort();
     };
   }, [query, status, tagSlug]);
+
+  const loadMoreQuestions = useCallback(async () => {
+    if (questionBank.nextOffset === null || isLoadingMore) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    setMessage(null);
+
+    try {
+      const data = await fetchQuestionBankPage({
+        query,
+        status,
+        tagSlug,
+        offset: questionBank.nextOffset,
+      });
+
+      setQuestionBank((current) => {
+        const existingIds = new Set(
+          current.items.map((item) => item.questionId),
+        );
+        const appendedItems = data.items.filter(
+          (item) => !existingIds.has(item.questionId),
+        );
+
+        return {
+          ...data,
+          items: [...current.items, ...appendedItems],
+        };
+      });
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Could not load more questions.",
+      );
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [isLoadingMore, query, questionBank.nextOffset, status, tagSlug]);
 
   return (
     <main className="page page-review page-library">
@@ -330,9 +408,13 @@ export default function LibraryPageClient({
           {message ? <p className="deck-editor-status">{message}</p> : null}
 
           <div className="tags-summary-strip library-summary-strip">
-            <span>{questionBank.total} questions</span>
+            <span>{questionCountLabel}</span>
             <span>{questionBank.items.length} shown</span>
-            <span>{isLoading || isMetadataLoading ? "loading" : "ready"}</span>
+            <span>
+              {isLoading || isMetadataLoading || isLoadingMore
+                ? "loading"
+                : "ready"}
+            </span>
           </div>
 
           {isInitialQuestionBankLoading ? (
@@ -440,6 +522,17 @@ export default function LibraryPageClient({
               })}
             </ol>
           )}
+
+          {questionBank.hasMore && !isInitialQuestionBankLoading ? (
+            <button
+              className="library-load-more-button"
+              type="button"
+              disabled={isLoadingMore}
+              onClick={() => void loadMoreQuestions()}
+            >
+              {isLoadingMore ? "Loading..." : "Load more"}
+            </button>
+          ) : null}
         </section>
       </section>
     </main>
