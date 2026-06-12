@@ -10,7 +10,7 @@ import {
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
-import { DAY, SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
+import { SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
 import {
   getSpeechRecognitionConstructor,
   mergeTranscriptText,
@@ -106,21 +106,6 @@ type ReviewSessionQueueResponse = {
   items: ReviewQueueItem[];
 };
 
-type StatsResponse = {
-  now: number;
-  dueCount: number;
-  cardCount: number;
-  scheduledBuckets: Array<{
-    dayStart: number;
-    value: number;
-  }>;
-  processedBuckets: Array<{
-    dayStart: number;
-    value: number;
-    averageScore: number;
-  }>;
-};
-
 type EvaluationStatusResponse = {
   evaluations: EvaluationQueueItem[];
 };
@@ -198,12 +183,15 @@ type QuestionSwapLayer = {
   phase: "current" | "entering" | "exiting";
 };
 
-type ActiveTab = "review" | "queue" | "stats";
+type ActiveTab = "review" | "queue";
 
 type ReviewAppProps = {
   initialActiveTab?: ActiveTab;
   initialDeckSlug?: string | null;
   initialDecks?: DeckManagementItem[];
+  initialCurrentUser?: UserProfileResponse | null;
+  initialPreviousAnswerStatus?: QueueStatusResponse | null;
+  initialReviewSessionQueue?: ReviewQueueItem[] | null;
 };
 
 type ReviewSessionSnapshot = {
@@ -261,7 +249,6 @@ let reviewSessionSnapshot: ReviewSessionSnapshot | null = null;
 const REVIEW_TAB_PATHS: Record<ActiveTab, string> = {
   review: "/review",
   queue: "/library",
-  stats: "/stats",
 };
 const LEARN_TARGET_DECK_STORAGE_KEY = "waxon:learn-target-deck-id";
 
@@ -465,13 +452,6 @@ function getReviewRouteStateFromPathname(pathname: string): ReviewRouteState | n
   if (pathname === REVIEW_TAB_PATHS.queue) {
     return {
       activeTab: "queue",
-      deckSlug: null,
-    };
-  }
-
-  if (pathname === REVIEW_TAB_PATHS.stats) {
-    return {
-      activeTab: "stats",
       deckSlug: null,
     };
   }
@@ -1096,347 +1076,6 @@ function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
   );
 }
 
-type DailyCountBucket = {
-  dayStart: number;
-  label: string;
-  value: number;
-};
-
-type DailyScoreBucket = DailyCountBucket & {
-  averageScore: number | null;
-};
-
-type DailyQueueEstimateBucket = {
-  dayStart: number;
-  label: string;
-  scheduledValue: number;
-  estimatedQueue: number;
-};
-
-type StatsAnalytics = {
-  scheduledBuckets: DailyCountBucket[];
-  processedBuckets: DailyScoreBucket[];
-  estimatedQueueBuckets: DailyQueueEstimateBucket[];
-  scheduledTotal: number;
-  processedTotal: number;
-  averageScore: number | null;
-};
-
-function startOfLocalDay(timestamp: number): number {
-  const date = new Date(timestamp);
-
-  return new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-  ).getTime();
-}
-
-function formatStatsDate(timestamp: number): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-  }).format(new Date(timestamp));
-}
-
-function createDailyBuckets(startDay: number): DailyCountBucket[] {
-  return Array.from({ length: 14 }, (_, index) => {
-    const dayStart = startDay + index * DAY;
-
-    return {
-      dayStart,
-      label: formatStatsDate(dayStart),
-      value: 0,
-    };
-  });
-}
-
-function buildStatsAnalytics(stats: StatsResponse | null): StatsAnalytics {
-  const now = stats?.now ?? Date.now();
-  const todayStart = startOfLocalDay(now);
-  const scheduledBuckets = createDailyBuckets(todayStart);
-  const processedBuckets: DailyScoreBucket[] = createDailyBuckets(
-    todayStart - 13 * DAY,
-  ).map(
-    (bucket) => ({
-      ...bucket,
-      averageScore: null,
-    }),
-  );
-  const scoreTotals = processedBuckets.map(() => ({ total: 0, count: 0 }));
-  const scheduledBucketIndex = new Map(
-    scheduledBuckets.map((bucket, index) => [bucket.dayStart, index]),
-  );
-  const processedBucketIndex = new Map(
-    processedBuckets.map((bucket, index) => [bucket.dayStart, index]),
-  );
-
-  for (const item of stats?.scheduledBuckets ?? []) {
-    if (!Number.isFinite(item.dayStart) || !Number.isFinite(item.value)) {
-      continue;
-    }
-
-    const index = scheduledBucketIndex.get(startOfLocalDay(item.dayStart));
-
-    if (index !== undefined) {
-      scheduledBuckets[index].value += item.value;
-    }
-  }
-
-  for (const item of stats?.processedBuckets ?? []) {
-    if (
-      !Number.isFinite(item.dayStart) ||
-      !Number.isFinite(item.value) ||
-      !Number.isFinite(item.averageScore)
-    ) {
-      continue;
-    }
-
-    const index = processedBucketIndex.get(startOfLocalDay(item.dayStart));
-
-    if (index !== undefined) {
-      processedBuckets[index].value += item.value;
-      scoreTotals[index].total += item.averageScore * item.value;
-      scoreTotals[index].count += item.value;
-    }
-  }
-
-  processedBuckets.forEach((bucket, index) => {
-    const scoreTotal = scoreTotals[index];
-
-    bucket.averageScore =
-      scoreTotal.count > 0 ? scoreTotal.total / scoreTotal.count : null;
-  });
-
-  let estimatedQueue = 0;
-  const estimatedQueueBuckets = scheduledBuckets.map((bucket) => {
-    estimatedQueue += bucket.value;
-
-    return {
-      dayStart: bucket.dayStart,
-      label: bucket.label,
-      scheduledValue: bucket.value,
-      estimatedQueue,
-    };
-  });
-
-  const processedTotal = scoreTotals.reduce(
-    (total, item) => total + item.count,
-    0,
-  );
-  const scoreTotal = scoreTotals.reduce((total, item) => total + item.total, 0);
-
-  return {
-    scheduledBuckets,
-    processedBuckets,
-    estimatedQueueBuckets,
-    scheduledTotal: scheduledBuckets.reduce(
-      (total, item) => total + item.value,
-      0,
-    ),
-    processedTotal,
-    averageScore: processedTotal > 0 ? scoreTotal / processedTotal : null,
-  };
-}
-
-function DailyBarChart({
-  buckets,
-  ariaLabel,
-}: {
-  buckets: DailyCountBucket[];
-  ariaLabel: string;
-}) {
-  const width = 720;
-  const height = 190;
-  const paddingX = 34;
-  const paddingTop = 24;
-  const paddingBottom = 34;
-  const plotWidth = width - paddingX * 2;
-  const plotHeight = height - paddingTop - paddingBottom;
-  const maxValue = Math.max(1, ...buckets.map((bucket) => bucket.value));
-  const barGap = 9;
-  const barWidth = Math.max(
-    8,
-    (plotWidth - barGap * (buckets.length - 1)) / buckets.length,
-  );
-
-  return (
-    <svg
-      className="daily-stats-chart daily-stats-bar-chart"
-      role="img"
-      aria-label={ariaLabel}
-      viewBox={`0 0 ${width} ${height}`}
-    >
-      {[0, 0.5, 1].map((ratio) => (
-        <line
-          className="daily-stats-grid-line"
-          key={ratio}
-          x1={paddingX}
-          x2={width - paddingX}
-          y1={paddingTop + plotHeight * ratio}
-          y2={paddingTop + plotHeight * ratio}
-        />
-      ))}
-      {buckets.map((bucket, index) => {
-        const barHeight = (bucket.value / maxValue) * plotHeight;
-        const x = paddingX + index * (barWidth + barGap);
-        const y = paddingTop + plotHeight - barHeight;
-        const shouldLabel = index === 0 || index === buckets.length - 1 || index % 3 === 0;
-
-        return (
-          <g key={bucket.dayStart}>
-            <rect
-              className="daily-stats-bar"
-              x={x}
-              y={y}
-              width={barWidth}
-              height={Math.max(2, barHeight)}
-              rx="4"
-            />
-            {bucket.value > 0 ? (
-              <text className="daily-stats-value" x={x + barWidth / 2} y={y - 7}>
-                {bucket.value}
-              </text>
-            ) : null}
-            {shouldLabel ? (
-              <text
-                className="daily-stats-axis"
-                x={x + barWidth / 2}
-                y={height - 8}
-              >
-                {bucket.label}
-              </text>
-            ) : null}
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-function EstimatedQueueList({
-  buckets,
-}: {
-  buckets: DailyQueueEstimateBucket[];
-}) {
-  return (
-    <ol className="estimated-queue-list" aria-label="Estimated review queue by day">
-      {buckets.map((bucket, index) => (
-        <li className="estimated-queue-row" key={bucket.dayStart}>
-          <span className="estimated-queue-date">
-            {index === 0 ? "Today" : bucket.label}
-          </span>
-          <span className="estimated-queue-due">
-            {bucket.scheduledValue} due
-          </span>
-          <strong className="estimated-queue-count">
-            {bucket.estimatedQueue}
-          </strong>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-function DailyScoreChart({ buckets }: { buckets: DailyScoreBucket[] }) {
-  const width = 720;
-  const height = 190;
-  const paddingX = 34;
-  const paddingTop = 24;
-  const paddingBottom = 34;
-  const plotWidth = width - paddingX * 2;
-  const plotHeight = height - paddingTop - paddingBottom;
-  const points = buckets
-    .map((bucket, index) => {
-      if (bucket.averageScore === null) {
-        return null;
-      }
-
-      const x =
-        buckets.length === 1
-          ? paddingX + plotWidth / 2
-          : paddingX + (index / (buckets.length - 1)) * plotWidth;
-      const y = paddingTop + ((10 - bucket.averageScore) / 10) * plotHeight;
-
-      return { ...bucket, x, y };
-    })
-    .filter(
-      (
-        point,
-      ): point is DailyScoreBucket & {
-        x: number;
-        y: number;
-        averageScore: number;
-      } => point !== null,
-    );
-  const path = points
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
-    .join(" ");
-
-  if (points.length === 0) {
-    return (
-      <div className="daily-stats-empty">
-        Average score will appear after reviews are processed.
-      </div>
-    );
-  }
-
-  return (
-    <svg
-      className="daily-stats-chart daily-stats-line-chart"
-      role="img"
-      aria-label="Average score per day"
-      viewBox={`0 0 ${width} ${height}`}
-    >
-      {[0, 0.5, 1].map((ratio) => (
-        <line
-          className="daily-stats-grid-line"
-          key={ratio}
-          x1={paddingX}
-          x2={width - paddingX}
-          y1={paddingTop + plotHeight * ratio}
-          y2={paddingTop + plotHeight * ratio}
-        />
-      ))}
-      <text className="daily-stats-axis daily-stats-y-axis" x="14" y={paddingTop + 4}>
-        10
-      </text>
-      <text
-        className="daily-stats-axis daily-stats-y-axis"
-        x="18"
-        y={height - paddingBottom + 4}
-      >
-        0
-      </text>
-      {path ? <path className="daily-stats-line" d={path} /> : null}
-      {points.map((point) => (
-        <g key={point.dayStart}>
-          <circle className="daily-stats-point" cx={point.x} cy={point.y} r="5" />
-          <text className="daily-stats-value" x={point.x} y={point.y - 10}>
-            {point.averageScore.toFixed(1)}
-          </text>
-        </g>
-      ))}
-      {buckets.map((bucket, index) => {
-        if (!(index === 0 || index === buckets.length - 1 || index % 3 === 0)) {
-          return null;
-        }
-
-        const x =
-          buckets.length === 1
-            ? paddingX + plotWidth / 2
-            : paddingX + (index / (buckets.length - 1)) * plotWidth;
-
-        return (
-          <text className="daily-stats-axis" key={bucket.dayStart} x={x} y={height - 8}>
-            {bucket.label}
-          </text>
-        );
-      })}
-    </svg>
-  );
-}
-
 function DeckEmbeddingPlot({
   plot,
   reviewQueue,
@@ -1626,6 +1265,9 @@ export default function ReviewApp({
   initialActiveTab = "review",
   initialDeckSlug = null,
   initialDecks = [],
+  initialCurrentUser = null,
+  initialPreviousAnswerStatus = null,
+  initialReviewSessionQueue = null,
 }: ReviewAppProps) {
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
@@ -1646,8 +1288,21 @@ export default function ReviewApp({
   const canUseCachedQueueState =
     !initialRoutedDeckId ||
     cachedSessionRef.current?.selectedDeckDetailId === initialRoutedDeckId;
+  const cachedHasLoadedQuestion =
+    cachedSessionRef.current?.hasLoadedQuestion ?? false;
+  const canUseInitialReviewSession =
+    initialActiveTab === "review" &&
+    !cachedHasLoadedQuestion &&
+    initialReviewSessionQueue !== null;
+  const initialReviewSessionItem = canUseInitialReviewSession
+    ? initialReviewSessionQueue[0] ?? null
+    : null;
+  const initialReviewSessionRemainingQueue =
+    canUseInitialReviewSession && initialReviewSessionItem
+      ? initialReviewSessionQueue.slice(1)
+      : [];
   const hasLoadedQuestionRef = useRef(
-    cachedSessionRef.current?.hasLoadedQuestion ?? false,
+    cachedHasLoadedQuestion || canUseInitialReviewSession,
   );
   const hasLoadedQueueStatusRef = useRef(
     canUseCachedQueueState
@@ -1656,6 +1311,9 @@ export default function ReviewApp({
   );
   const hasLoadedDecksRef = useRef(
     cachedSessionRef.current?.hasLoadedDecks ?? initialDecks.length > 0,
+  );
+  const hasLoadedPreviousAnswerStatusRef = useRef(
+    initialPreviousAnswerStatus !== null,
   );
   const loadedQueueSortKeyRef = useRef<QueueSortKey | null>(
     canUseCachedQueueState
@@ -1668,23 +1326,37 @@ export default function ReviewApp({
       : null,
   );
   const [question, setQuestion] = useState<string | null>(
-    () => cachedSessionRef.current?.question ?? null,
+    () =>
+      cachedSessionRef.current?.question ??
+      initialReviewSessionItem?.question ??
+      null,
   );
   const [questionSwapLayers, setQuestionSwapLayers] = useState<
     QuestionSwapLayer[]
   >(() => {
-    const cachedQuestion = cachedSessionRef.current?.question ?? null;
+    const cachedQuestion =
+      cachedSessionRef.current?.question ??
+      initialReviewSessionItem?.question ??
+      null;
 
     return cachedQuestion
       ? [
           {
             key: questionSwapLayerKey(
-              cachedSessionRef.current?.currentQuestionId ?? null,
+              cachedSessionRef.current?.currentQuestionId ??
+                initialReviewSessionItem?.questionId ??
+                null,
               cachedQuestion,
             ),
-            questionId: cachedSessionRef.current?.currentQuestionId ?? null,
+            questionId:
+              cachedSessionRef.current?.currentQuestionId ??
+              initialReviewSessionItem?.questionId ??
+              null,
             question: cachedQuestion,
-            deckName: cachedSessionRef.current?.currentDeckName ?? null,
+            deckName:
+              cachedSessionRef.current?.currentDeckName ??
+              initialReviewSessionItem?.deckName ??
+              null,
             phase: "current",
           },
         ]
@@ -1692,19 +1364,32 @@ export default function ReviewApp({
   });
   const [currentSessionItem, setCurrentSessionItem] =
     useState<ReviewQueueItem | null>(
-      () => cachedSessionRef.current?.currentSessionItem ?? null,
+      () =>
+        cachedSessionRef.current?.currentSessionItem ??
+        initialReviewSessionItem,
     );
   const [sessionQueue, setSessionQueue] = useState<ReviewQueueItem[]>(
-    () => cachedSessionRef.current?.sessionQueue ?? [],
+    () =>
+      cachedSessionRef.current?.sessionQueue ??
+      initialReviewSessionRemainingQueue,
   );
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(
-    () => cachedSessionRef.current?.currentQuestionId ?? null,
+    () =>
+      cachedSessionRef.current?.currentQuestionId ??
+      initialReviewSessionItem?.questionId ??
+      null,
   );
   const [currentDeckName, setCurrentDeckName] = useState<string | null>(
-    () => cachedSessionRef.current?.currentDeckName ?? null,
+    () =>
+      cachedSessionRef.current?.currentDeckName ??
+      initialReviewSessionItem?.deckName ??
+      null,
   );
   const [currentDeckId, setCurrentDeckId] = useState<string | null>(
-    () => cachedSessionRef.current?.currentDeckId ?? null,
+    () =>
+      cachedSessionRef.current?.currentDeckId ??
+      initialReviewSessionItem?.deckId ??
+      null,
   );
   const [answer, setAnswer] = useState(
     () => cachedSessionRef.current?.answer ?? "",
@@ -1715,16 +1400,23 @@ export default function ReviewApp({
   const [speechStatus, setSpeechStatus] = useState<SpeechStatus>("idle");
   const [speechMessage, setSpeechMessage] = useState<string | null>(null);
   const [queueRemaining, setQueueRemaining] = useState(
-    () => cachedSessionRef.current?.queueRemaining ?? 0,
+    () =>
+      cachedSessionRef.current?.queueRemaining ??
+      initialReviewSessionRemainingQueue.length,
   );
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>(
-    () => cachedSessionRef.current?.evaluations ?? [],
+    () =>
+      cachedSessionRef.current?.evaluations ??
+      initialPreviousAnswerStatus?.evaluations ??
+      [],
   );
   const [recentAttempts, setRecentAttempts] = useState<QuestionAttempt[]>(
     () =>
       canUseCachedQueueState
-        ? cachedSessionRef.current?.recentAttempts ?? []
-        : [],
+        ? cachedSessionRef.current?.recentAttempts ??
+          initialPreviousAnswerStatus?.recentAttempts ??
+          []
+        : initialPreviousAnswerStatus?.recentAttempts ?? [],
   );
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>(
     () =>
@@ -1736,11 +1428,6 @@ export default function ReviewApp({
         ? cachedSessionRef.current?.reviewQueueTotal ?? 0
         : 0,
   );
-  const [statsData, setStatsData] = useState<StatsResponse | null>(null);
-  const [isStatsLoading, setIsStatsLoading] = useState(
-    () => initialActiveTab === "stats",
-  );
-  const [statsError, setStatsError] = useState<string | null>(null);
   const [isQueuePageLoading, setIsQueuePageLoading] = useState(
     () =>
       initialActiveTab === "queue" &&
@@ -1848,7 +1535,7 @@ export default function ReviewApp({
   const [isEmbeddingMapOpen, setIsEmbeddingMapOpen] = useState(false);
   const [isQuestionGeneratorOpen, setIsQuestionGeneratorOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfileResponse | null>(
-    () => cachedSessionRef.current?.currentUser ?? null,
+    () => cachedSessionRef.current?.currentUser ?? initialCurrentUser,
   );
   const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
@@ -2383,11 +2070,6 @@ export default function ReviewApp({
     0,
   );
   const totalCardCount = decks.reduce((total, deck) => total + deck.cardCount, 0);
-  const statsAnalytics = useMemo(
-    () => buildStatsAnalytics(statsData),
-    [statsData],
-  );
-
   const loadDecks = useCallback(async () => {
     setIsDecksLoading(true);
     setDeckPageMessage(null);
@@ -2779,7 +2461,7 @@ export default function ReviewApp({
   ]);
 
   useEffect(() => {
-    if (cachedSessionRef.current?.currentUser) {
+    if (cachedSessionRef.current?.currentUser || initialCurrentUser) {
       return;
     }
 
@@ -2812,7 +2494,7 @@ export default function ReviewApp({
     return () => {
       isActive = false;
     };
-  }, []);
+  }, [initialCurrentUser]);
 
   useEffect(() => {
     if (!isSettingsOpen) {
@@ -3170,34 +2852,11 @@ export default function ReviewApp({
 
       setEvaluations(data.evaluations);
       setRecentAttempts(data.recentAttempts ?? []);
+      hasLoadedPreviousAnswerStatusRef.current = true;
     } catch {
       // Previous answers are supplemental; keep the review loop usable.
     }
   }, [previousAnswerStatusUrl]);
-
-  const loadStats = useCallback(async () => {
-    setIsStatsLoading(true);
-    setStatsError(null);
-
-    try {
-      const response = await fetch("/api/stats", {
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        throw new Error("Could not load stats.");
-      }
-
-      const data = (await response.json()) as StatsResponse;
-
-      setStatsData(data);
-      setQueueRemaining(data.dueCount);
-    } catch {
-      setStatsError("Could not load stats.");
-    } finally {
-      setIsStatsLoading(false);
-    }
-  }, []);
 
   const loadDeckEmbeddingPlot = useCallback(async (limit = QUEUE_PAGE_SIZE) => {
     if (!selectedDeckDetailId) {
@@ -3234,7 +2893,9 @@ export default function ReviewApp({
       return;
     }
 
-    void loadPreviousAnswerStatus();
+    if (!hasLoadedPreviousAnswerStatusRef.current) {
+      void loadPreviousAnswerStatus();
+    }
 
     if (hasLoadedQuestionRef.current) {
       return;
@@ -3247,14 +2908,6 @@ export default function ReviewApp({
     loadPreviousAnswerStatus,
     reviewQueueVersion,
   ]);
-
-  useEffect(() => {
-    if (activeTab !== "stats") {
-      return;
-    }
-
-    void loadStats();
-  }, [activeTab, loadStats, reviewQueueVersion]);
 
   useEffect(() => {
     if (activeTab !== "queue" || !selectedDeckDetailId) {
@@ -5139,20 +4792,13 @@ export default function ReviewApp({
     >
       <section className="review-shell" aria-label="Flashcard learning">
         <ReviewToolbar
-          activeTab={
-            activeTab === "queue"
-              ? "tags"
-              : activeTab === "stats"
-                ? "stats"
-                : "review"
-          }
+          activeTab={activeTab === "queue" ? "tags" : "review"}
           dueCount={queueRemaining}
           showAdmin={canViewAdmin}
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
           onReviewClick={(event) => navigateToTab("review", event)}
-          onStatsClick={(event) => navigateToTab("stats", event)}
           onManageAccount={() => {
             if (isLocalAuth) {
               setIsSettingsOpen(true);
@@ -5447,106 +5093,6 @@ export default function ReviewApp({
             ) : null}
           </section>
         </div>
-
-        <section
-          className="stats-stage"
-          hidden={activeTab !== "stats"}
-          aria-label="Review statistics"
-        >
-          <div className="stats-page-header">
-            <div>
-              <p className="stats-page-kicker">Review stats</p>
-              <h2>Stats</h2>
-            </div>
-          </div>
-
-          <dl className="stats-page-summary" aria-label="Review summary">
-            <div>
-              <dt>{statsData?.dueCount ?? queueRemaining}</dt>
-              <dd>due now</dd>
-            </div>
-            <div>
-              <dt>{statsAnalytics.scheduledTotal}</dt>
-              <dd>scheduled 14d</dd>
-            </div>
-            <div>
-              <dt>{statsAnalytics.processedTotal}</dt>
-              <dd>processed 14d</dd>
-            </div>
-            <div>
-              <dt>
-                {statsAnalytics.averageScore === null
-                  ? "-"
-                  : statsAnalytics.averageScore.toFixed(1)}
-              </dt>
-              <dd>avg score</dd>
-            </div>
-          </dl>
-
-          {statsError ? (
-            <p className="stats-page-status" role="status">
-              {statsError}
-            </p>
-          ) : null}
-
-          <div className="stats-page-chart-grid" aria-busy={isStatsLoading}>
-            <section className="stats-page-chart-panel">
-              <div className="stats-section-heading">
-                <h3>Scheduled per day</h3>
-                <span>Next 14 days</span>
-              </div>
-              {isStatsLoading && !statsData ? (
-                <div className="daily-stats-empty">Loading stats...</div>
-              ) : (
-                <DailyBarChart
-                  buckets={statsAnalytics.scheduledBuckets}
-                  ariaLabel="Scheduled reviews per day for the next 14 days"
-                />
-              )}
-            </section>
-
-            <section className="stats-page-chart-panel stats-page-chart-panel-wide">
-              <div className="stats-section-heading">
-                <h3>Estimated queue by day</h3>
-                <span>Next 14 days</span>
-              </div>
-              {isStatsLoading && !statsData ? (
-                <div className="daily-stats-empty">Loading stats...</div>
-              ) : (
-                <EstimatedQueueList
-                  buckets={statsAnalytics.estimatedQueueBuckets}
-                />
-              )}
-            </section>
-
-            <section className="stats-page-chart-panel">
-              <div className="stats-section-heading">
-                <h3>Processed per day</h3>
-                <span>Last 14 days</span>
-              </div>
-              {isStatsLoading && !statsData ? (
-                <div className="daily-stats-empty">Loading stats...</div>
-              ) : (
-                <DailyBarChart
-                  buckets={statsAnalytics.processedBuckets}
-                  ariaLabel="Processed reviews per day for the last 14 days"
-                />
-              )}
-            </section>
-
-            <section className="stats-page-chart-panel stats-page-chart-panel-wide">
-              <div className="stats-section-heading">
-                <h3>Average score per day</h3>
-                <span>Last 14 days</span>
-              </div>
-              {isStatsLoading && !statsData ? (
-                <div className="daily-stats-empty">Loading stats...</div>
-              ) : (
-                <DailyScoreChart buckets={statsAnalytics.processedBuckets} />
-              )}
-            </section>
-          </div>
-        </section>
 
         <section
           className={`queue-stage ${
