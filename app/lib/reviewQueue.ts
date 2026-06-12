@@ -733,6 +733,46 @@ export async function loadReviewSessionQueue(input: {
   };
 }
 
+export async function loadInitialReviewPageData(): Promise<{
+  currentUser: Awaited<ReturnType<typeof getCurrentUser>>;
+  reviewSessionQueue: {
+    items: ReviewQueueItem[];
+  };
+  previousAnswerStatus: QueueStatusSnapshot;
+}> {
+  const user = await getCurrentUser();
+  const state = getQueueStateForUser(user.id);
+  const now = Date.now();
+  const [dueQuestions, previousAnswerStatus] = await Promise.all([
+    getDueQuestions(now, {
+      userId: user.id,
+      limit: REVIEW_SESSION_QUEUE_LIMIT,
+    }),
+    queueStatusForUser(user.id, {
+      limit: 0,
+      offset: 0,
+      includeReviewQueue: false,
+      includeQuestionAttempts: false,
+      includeRecentAttempts: true,
+      includeDeckEmbeddingPlot: false,
+      includeQueueCounts: false,
+    }),
+  ]);
+
+  return {
+    currentUser: user,
+    reviewSessionQueue: {
+      items: dueQuestions.map((item) =>
+        toReviewQueueItem(item, {
+          now,
+          latest: state.latestByQuestionKey[questionKey(item)],
+        }),
+      ),
+    },
+    previousAnswerStatus,
+  };
+}
+
 async function initializeQueue(): Promise<QueueContext> {
   const { user, state } = await ensureQueueContext();
 
