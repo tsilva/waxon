@@ -1,8 +1,9 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
+import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { DAY } from "@/app/lib/scheduler";
 import type { StatsResponse } from "@/app/lib/stats";
@@ -16,9 +17,9 @@ type UserProfileResponse = {
 };
 
 type StatsPageClientProps = {
-  currentUser: UserProfileResponse;
-  showAdmin: boolean;
-  stats: StatsResponse;
+  currentUser?: UserProfileResponse | null;
+  showAdmin?: boolean;
+  stats?: StatsResponse | null;
 };
 
 type DailyCountBucket = {
@@ -46,6 +47,16 @@ type StatsAnalytics = {
   processedTotal: number;
   averageScore: number | null;
 };
+
+function createEmptyStats(): StatsResponse {
+  return {
+    now: Date.now(),
+    dueCount: 0,
+    cardCount: 0,
+    scheduledBuckets: [],
+    processedBuckets: [],
+  };
+}
 
 function startOfLocalDay(timestamp: number): number {
   const date = new Date(timestamp);
@@ -359,35 +370,143 @@ function DailyScoreChart({ buckets }: { buckets: DailyScoreBucket[] }) {
   );
 }
 
+function StatsDashboardSkeleton() {
+  return (
+    <div className="stats-page-chart-grid" aria-label="Loading review stats">
+      {["Scheduled per day", "Estimated queue by day", "Processed per day", "Average score per day"].map(
+        (title, index) => (
+          <section
+            className={`stats-page-chart-panel ${
+              index % 2 === 1 ? "stats-page-chart-panel-wide" : ""
+            }`}
+            key={title}
+          >
+            <div className="stats-section-heading">
+              <div className="admin-skeleton-stack">
+                <span className="admin-skeleton-line stats-skeleton-heading" />
+                <span className="admin-skeleton-line stats-skeleton-subheading" />
+              </div>
+            </div>
+            <div className="stats-skeleton-chart">
+              {Array.from({ length: 9 }, (_, barIndex) => (
+                <span
+                  className="admin-skeleton-bar"
+                  key={barIndex}
+                  style={
+                    {
+                      "--bar-height": `${48 + ((barIndex * 37) % 126)}px`,
+                    } as CSSProperties
+                  }
+                />
+              ))}
+            </div>
+          </section>
+        ),
+      )}
+    </div>
+  );
+}
+
 export default function StatsPageClient({
-  currentUser,
-  showAdmin,
-  stats,
+  currentUser: initialCurrentUser = null,
+  showAdmin = false,
+  stats: initialStats = null,
 }: StatsPageClientProps) {
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
   const isLocalAuth = isLocalTestAuthEnabled();
+  const [currentUser, setCurrentUser] = useState(initialCurrentUser);
+  const [stats, setStats] = useState(initialStats);
+  const [isStatsLoading, setIsStatsLoading] = useState(initialStats === null);
+  const [statsMessage, setStatsMessage] = useState<string | null>(null);
+  const emptyStats = useMemo(() => createEmptyStats(), []);
   const accountWidgetsCustomPages = useMemo(
     () => createAccountWidgetsCustomPages(),
     [],
   );
-  const statsAnalytics = useMemo(() => buildStatsAnalytics(stats), [stats]);
-  const menuAvatarUrl = clerkUser?.imageUrl || currentUser.avatarUrl || null;
+  const renderedStats = stats ?? emptyStats;
+  const statsAnalytics = useMemo(
+    () => buildStatsAnalytics(renderedStats),
+    [renderedStats],
+  );
+  const canViewAdmin =
+    showAdmin ||
+    isAdminEmail(
+      clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email,
+    );
+  const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
   const menuDisplayName =
     clerkUser?.fullName ||
     clerkUser?.username ||
-    currentUser.displayName ||
+    currentUser?.displayName ||
     "Account";
   const menuEmail =
-    clerkUser?.primaryEmailAddress?.emailAddress || currentUser.email || "";
+    clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let isActive = true;
+
+    async function loadStatsPageData() {
+      setIsStatsLoading(true);
+      setStatsMessage(null);
+
+      try {
+        const [userResponse, statsResponse] = await Promise.all([
+          fetch("/api/user", { cache: "no-store", signal: controller.signal }),
+          fetch("/api/stats", { cache: "no-store", signal: controller.signal }),
+        ]);
+        const userData = (await userResponse.json()) as UserProfileResponse & {
+          error?: string;
+        };
+        const statsData = (await statsResponse.json()) as StatsResponse & {
+          error?: string;
+        };
+
+        if (!userResponse.ok) {
+          throw new Error(userData.error || "Could not load profile.");
+        }
+
+        if (!statsResponse.ok) {
+          throw new Error(statsData.error || "Could not load stats.");
+        }
+
+        if (isActive) {
+          setCurrentUser(userData);
+          setStats(statsData);
+        }
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+
+        if (isActive) {
+          setStatsMessage(
+            error instanceof Error ? error.message : "Could not load stats.",
+          );
+        }
+      } finally {
+        if (isActive) {
+          setIsStatsLoading(false);
+        }
+      }
+    }
+
+    void loadStatsPageData();
+
+    return () => {
+      isActive = false;
+      controller.abort();
+    };
+  }, []);
 
   return (
     <main className="page">
       <section className="review-shell" aria-label="Review statistics">
         <ReviewToolbar
           activeTab="stats"
-          dueCount={stats.dueCount}
-          showAdmin={showAdmin}
+          dueCount={renderedStats.dueCount}
+          showAdmin={canViewAdmin}
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
@@ -417,20 +536,40 @@ export default function StatsPageClient({
 
           <dl className="stats-page-summary" aria-label="Review summary">
             <div>
-              <dt>{stats.dueCount}</dt>
+              <dt>
+                {isStatsLoading && stats === null ? (
+                  <span className="admin-skeleton-line stats-skeleton-number" />
+                ) : (
+                  renderedStats.dueCount
+                )}
+              </dt>
               <dd>due now</dd>
             </div>
             <div>
-              <dt>{statsAnalytics.scheduledTotal}</dt>
+              <dt>
+                {isStatsLoading && stats === null ? (
+                  <span className="admin-skeleton-line stats-skeleton-number" />
+                ) : (
+                  statsAnalytics.scheduledTotal
+                )}
+              </dt>
               <dd>scheduled 14d</dd>
             </div>
             <div>
-              <dt>{statsAnalytics.processedTotal}</dt>
+              <dt>
+                {isStatsLoading && stats === null ? (
+                  <span className="admin-skeleton-line stats-skeleton-number" />
+                ) : (
+                  statsAnalytics.processedTotal
+                )}
+              </dt>
               <dd>processed 14d</dd>
             </div>
             <div>
               <dt>
-                {statsAnalytics.averageScore === null
+                {isStatsLoading && stats === null ? (
+                  <span className="admin-skeleton-line stats-skeleton-number" />
+                ) : statsAnalytics.averageScore === null
                   ? "-"
                   : statsAnalytics.averageScore.toFixed(1)}
               </dt>
@@ -438,7 +577,14 @@ export default function StatsPageClient({
             </div>
           </dl>
 
-          <div className="stats-page-chart-grid">
+          {statsMessage ? (
+            <p className="stats-page-status">{statsMessage}</p>
+          ) : null}
+
+          {isStatsLoading && stats === null ? (
+            <StatsDashboardSkeleton />
+          ) : (
+            <div className="stats-page-chart-grid">
             <section className="stats-page-chart-panel">
               <div className="stats-section-heading">
                 <h3>Scheduled per day</h3>
@@ -478,7 +624,8 @@ export default function StatsPageClient({
               </div>
               <DailyScoreChart buckets={statsAnalytics.processedBuckets} />
             </section>
-          </div>
+            </div>
+          )}
         </section>
       </section>
     </main>
