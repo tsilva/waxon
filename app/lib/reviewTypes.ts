@@ -62,6 +62,7 @@ export type ReviewQueueItem = {
   referenceAnswer: string | null;
   lastJustification: string | null;
   attempts: QuestionAttempt[];
+  conceptSlugs: string[];
 };
 
 export type DeckEmbeddingPlotPoint = {

@@ -66,6 +66,8 @@ type GeneratedQuestionPayload = {
   conciseAnswer: string;
   sourceLabel?: string;
   coverageLabel?: string;
+  proposedConceptSlugs?: string[];
+  sourceText?: string;
 };
 
 type ExistingQuestionContext = {
@@ -292,9 +294,10 @@ function buildQuestionGenerationSystemPrompt(questionQualityReference: string): 
     "Avoid generic questions such as 'What is the key idea behind the topic?'",
     "Each question needs a short expected answer for dedupe embeddings; do not include explanations, numbering, or preambles.",
     "Do not duplicate existing questions, near-duplicates, or current modal review queue questions.",
-    "Return compact keys: q=question, a=short expected answer, s=prompt or filename, c=covered concept.",
+    "Return compact keys: q=question, a=short expected answer, s=prompt or filename, c=covered concept slug.",
+    "The c value must be one full self-disambiguating lowercase kebab-case concept slug, not an acronym-only tag.",
     "Return JSON only:",
-    '{"questions":[{"q":"...","a":"short expected answer","s":"Prompt or filename","c":"short covered concept"}]}',
+    '{"questions":[{"q":"...","a":"short expected answer","s":"Prompt or filename","c":"concept-slug"}]}',
     "Shared question-quality reference:",
     questionQualityReference,
   ].join("\n\n");
@@ -343,6 +346,10 @@ function normalizeGeneratedQuestions(
       conciseAnswer,
       sourceLabel: normalizeText(record.sourceLabel ?? record.s) || "OpenRouter",
       coverageLabel: normalizeText(record.coverageLabel ?? record.c) || question,
+      proposedConceptSlugs: Array.isArray(record.conceptSlugs)
+        ? record.conceptSlugs.map(normalizeText).filter(Boolean)
+        : [normalizeText(record.proposedConceptSlug ?? record.c)].filter(Boolean),
+      sourceText: normalizeText(record.sourceText ?? record.s),
     });
   }
 

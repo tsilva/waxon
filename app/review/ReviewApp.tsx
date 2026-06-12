@@ -555,6 +555,8 @@ type GeneratedQuestionCandidate = {
   question: string;
   conciseAnswer: string;
   coverageLabel: string;
+  proposedConceptSlugs: string[];
+  sourceText: string;
   status: GeneratedQuestionStatus;
 };
 
@@ -569,11 +571,13 @@ type GenerateQuestionsResponse =
   | {
       ok: true;
       model: string;
-      questions: Array<{
-        question: string;
-        conciseAnswer?: string;
-        coverageLabel?: string;
-      }>;
+        questions: Array<{
+          question: string;
+          conciseAnswer?: string;
+          coverageLabel?: string;
+          proposedConceptSlugs?: string[];
+          sourceText?: string;
+        }>;
     }
   | {
       ok: false;
@@ -682,6 +686,7 @@ type QuestionStats = {
   conciseAnswer: string | null;
   referenceAnswer: string | null;
   lastJustification: string | null;
+  conceptSlugs: string[];
 };
 
 type AnswerHistoryEntry = {
@@ -4138,6 +4143,8 @@ export default function ReviewApp({
         question: item.question,
         conciseAnswer: item.conciseAnswer || "",
         coverageLabel: item.coverageLabel || item.question,
+        proposedConceptSlugs: item.proposedConceptSlugs ?? [],
+        sourceText: item.sourceText ?? generatorScope,
         status: "new" as const,
       }));
 
@@ -4216,6 +4223,8 @@ export default function ReviewApp({
           questions: questionsToAdd.map((item) => ({
             question: item.question,
             conciseAnswer: item.conciseAnswer,
+            proposedConceptSlugs: item.proposedConceptSlugs,
+            sourceText: item.sourceText,
           })),
         }),
       });
@@ -5004,6 +5013,7 @@ export default function ReviewApp({
         queueItem?.lastJustification ??
         latestResolvedEvaluation?.justification ??
         null,
+      conceptSlugs: queueItem?.conceptSlugs ?? [],
     };
   }, [
     currentTime,
@@ -6564,6 +6574,18 @@ export default function ReviewApp({
                     className="stats-feedback-copy"
                     text={selectedQuestionStats.questionProvenance}
                   />
+                </div>
+              ) : null}
+              {selectedQuestionStats.conceptSlugs.length > 0 ? (
+                <div className="stats-feedback">
+                  <span>Concepts</span>
+                  <div className="stats-concept-list">
+                    {selectedQuestionStats.conceptSlugs.map((slug) => (
+                      <span className="stats-concept-chip" key={slug}>
+                        {slug}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </div>

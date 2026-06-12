@@ -631,6 +631,8 @@ export async function saveCoursePage(input: {
       {
         question: input.page.question,
         conciseAnswer: input.page.correctAnswer,
+        proposedConceptSlugs: input.page.proposedConceptSlugs,
+        sourceText: input.page.body,
         questionProvenance: courseQuestionProvenance({
           course: input.course,
           chapterIndex: input.chapterIndex,

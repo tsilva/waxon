@@ -36,6 +36,7 @@ export type CoursePageContent = {
   correctAnswer: string;
   explanation: string;
   widget: CourseMultipleChoiceWidget;
+  proposedConceptSlugs: string[];
 };
 
 const MAX_COURSE_TITLE_CHARS = 90;
@@ -48,6 +49,8 @@ const MAX_PAGE_SUMMARY_CHARS = 700;
 const MAX_PAGE_QUESTION_CHARS = 1_200;
 const MAX_CHOICE_TEXT_CHARS = 500;
 const MAX_EXPLANATION_CHARS = 1_200;
+const MAX_CONCEPT_SLUGS = 3;
+const MAX_CONCEPT_SLUG_CHARS = 120;
 
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
@@ -233,6 +236,12 @@ export function validateCoursePageContent(value: unknown): CoursePageContent {
     normalizeText(widgetRecord.explanation),
     MAX_EXPLANATION_CHARS,
   );
+  const proposedConceptSlugs = readOptionalArray(
+    record.proposedConceptSlugs ?? record.conceptSlugs,
+  )
+    .map((slug) => truncateText(normalizeText(slug), MAX_CONCEPT_SLUG_CHARS))
+    .filter(Boolean)
+    .slice(0, MAX_CONCEPT_SLUGS);
 
   if (!title || !body || !summary || !question) {
     throw new Error("Course page requires title, body, summary, and question.");
@@ -294,6 +303,7 @@ export function validateCoursePageContent(value: unknown): CoursePageContent {
     correctAnswer,
     explanation,
     widget,
+    proposedConceptSlugs,
   };
 }
 

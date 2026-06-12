@@ -23,6 +23,7 @@ import {
   type QuestionInput,
   type QueuedQuestionsSortKey,
 } from "./postgresStore";
+import { questionHasActiveConceptTag } from "./conceptTags";
 import {
   evaluateAnswer,
   EVALUATION_TIMEOUT_MS,
@@ -704,6 +705,7 @@ function toReviewQueueItem(
     referenceAnswer: item.referenceAnswer,
     lastJustification: input.latest?.justification ?? latestAttempt?.justification ?? null,
     attempts: input.attempts ?? [],
+    conceptSlugs: item.conceptSlugs,
   };
 }
 
@@ -1181,11 +1183,12 @@ export async function submitAnswer(input: {
     throw new Error("Question not found.");
   }
 
-  const snapshotDeck = (await listDecks({ userId: user.id })).find(
-    (deck) => deck.id === snapshot.deckId,
-  );
-
-  if (!snapshotDeck?.inReviewRotation) {
+  if (
+    !(await questionHasActiveConceptTag({
+      userId: user.id,
+      questionId: snapshot.questionId,
+    }))
+  ) {
     throw new Error("Question is not in review.");
   }
 
@@ -1327,6 +1330,22 @@ export async function addQuestionsToDeck(input: {
         question.questionProvenance?.trim().replace(/\s+/g, " ") ?? "",
       ]),
   );
+  const proposedSlugsByQuestion = new Map(
+    input.questions
+      .filter((question): question is QuestionInput => typeof question !== "string")
+      .map((question) => [
+        question.question.trim().replace(/\s+/g, " ").toLowerCase(),
+        question.proposedConceptSlugs ?? [],
+      ]),
+  );
+  const sourceTextByQuestion = new Map(
+    input.questions
+      .filter((question): question is QuestionInput => typeof question !== "string")
+      .map((question) => [
+        question.question.trim().replace(/\s+/g, " ").toLowerCase(),
+        question.sourceText ?? "",
+      ]),
+  );
 
   const addedQuestions = await upsertDueQuestions({
     questions: gateResult.accepted.map((candidate) => ({
@@ -1334,6 +1353,9 @@ export async function addQuestionsToDeck(input: {
       conciseAnswer: candidate.conciseAnswer,
       questionProvenance:
         provenanceByQuestion.get(candidate.question.toLowerCase()) ?? "",
+      proposedConceptSlugs:
+        proposedSlugsByQuestion.get(candidate.question.toLowerCase()) ?? [],
+      sourceText: sourceTextByQuestion.get(candidate.question.toLowerCase()) ?? "",
     })),
     sourceQuestion: input.sourceQuestion ?? null,
     now: Date.now(),

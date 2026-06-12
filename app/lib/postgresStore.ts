@@ -45,6 +45,12 @@ import type {
   QuestionAttempt,
 } from "./reviewTypes";
 import { vectorLiteral } from "./vectorLiteral";
+import {
+  activeConceptEligibilityClause,
+  assignConceptSlugsForQuestions,
+  ensureFallbackConceptTagForDeck,
+  getQuestionConceptSlugs,
+} from "./conceptTags";
 
 export type QuestionRow = {
   question_id: string;
@@ -62,6 +68,7 @@ export type QuestionRow = {
   reference_answer: string;
   flagged_at: number | null;
   created_at: number;
+  concept_slugs?: string[];
 };
 
 export type DueQuestion = {
@@ -80,6 +87,7 @@ export type DueQuestion = {
   referenceAnswer: string | null;
   flaggedAt: number | null;
   createdAt: number;
+  conceptSlugs: string[];
 };
 
 export type QuestionEmbedding = {
@@ -122,6 +130,7 @@ export type PersistedEvaluation = {
   referenceAnswer: string | null;
   flaggedAt: number | null;
   createdAt: number;
+  conceptSlugs: string[];
 } | null;
 
 const EVALUATION_PHASES = new Set<EvaluationPhase>([
@@ -291,7 +300,23 @@ function toDueQuestion(row: QuestionRow): DueQuestion {
     referenceAnswer: row.reference_answer || null,
     flaggedAt: row.flagged_at,
     createdAt: row.created_at,
+    conceptSlugs: row.concept_slugs ?? [],
   };
+}
+
+async function enrichDueQuestionsWithConceptSlugs(
+  userId: string,
+  items: DueQuestion[],
+): Promise<DueQuestion[]> {
+  const slugsByQuestionId = await getQuestionConceptSlugs({
+    userId,
+    questionIds: items.map((item) => item.questionId),
+  });
+
+  return items.map((item) => ({
+    ...item,
+    conceptSlugs: slugsByQuestionId.get(item.questionId) ?? item.conceptSlugs,
+  }));
 }
 
 function deckSlug(input: string): string {
@@ -523,6 +548,11 @@ async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext
 
   if (questionCount > 0) {
     await copyDefaultDeckEmbeddingsToUserDeck(context);
+    await ensureFallbackConceptTagForDeck({
+      userId: context.userId,
+      deckId: context.deckId,
+      slug: DEFAULT_DECK.slug,
+    });
     seededUserIds.add(context.userId);
     return context;
   }
@@ -548,6 +578,11 @@ async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext
     .onConflictDoNothing();
 
   await copyDefaultDeckEmbeddingsToUserDeck(context);
+  await ensureFallbackConceptTagForDeck({
+    userId: context.userId,
+    deckId: context.deckId,
+    slug: DEFAULT_DECK.slug,
+  });
 
   seededUserIds.add(context.userId);
   return context;
@@ -1117,7 +1152,7 @@ export async function getDueQuestions(
   const offset = Math.max(0, Math.floor(input.offset ?? 0));
   const whereClause = and(
     eq(decks.userId, context.userId),
-    input.deckId ? eq(questions.deckId, input.deckId) : eq(decks.inReviewRotation, true),
+    input.deckId ? eq(questions.deckId, input.deckId) : activeConceptEligibilityClause(context.userId),
     isNull(decks.archivedAt),
     isNull(questions.flaggedAt),
     lte(questions.nextDue, Math.round(now)),
@@ -1150,15 +1185,18 @@ export async function getDueQuestions(
     .limit(limit ?? 2_147_483_647)
     .offset(offset);
 
-  return rows
-    .map(toDueQuestion)
-    .filter((row) => Number.isFinite(row.nextDue) && row.nextDue <= now)
-    .sort(
-      (a, b) =>
-        a.nextDue - b.nextDue ||
-        a.createdAt - b.createdAt ||
-        a.question.localeCompare(b.question),
-      );
+  return enrichDueQuestionsWithConceptSlugs(
+    context.userId,
+    rows
+      .map(toDueQuestion)
+      .filter((row) => Number.isFinite(row.nextDue) && row.nextDue <= now)
+      .sort(
+        (a, b) =>
+          a.nextDue - b.nextDue ||
+          a.createdAt - b.createdAt ||
+          a.question.localeCompare(b.question),
+      ),
+  );
 }
 
 export async function countDueQuestions(
@@ -1175,7 +1213,7 @@ export async function countDueQuestions(
         eq(decks.userId, context.userId),
         input.deckId
           ? eq(questions.deckId, input.deckId)
-          : eq(decks.inReviewRotation, true),
+          : activeConceptEligibilityClause(context.userId),
         isNull(decks.archivedAt),
         isNull(questions.flaggedAt),
         lte(questions.nextDue, Math.round(now)),
@@ -1202,7 +1240,7 @@ export async function getNextScheduledQuestionDue(
         eq(decks.userId, context.userId),
         input.deckId
           ? eq(questions.deckId, input.deckId)
-          : eq(decks.inReviewRotation, true),
+          : activeConceptEligibilityClause(context.userId),
         isNull(decks.archivedAt),
         isNull(questions.flaggedAt),
         gt(questions.nextDue, Math.round(now)),
@@ -1231,7 +1269,7 @@ export async function getQueuedQuestionsPage(
   ).filter(Boolean);
   const whereClause = and(
     eq(decks.userId, context.userId),
-    input.deckId ? sql`true` : eq(decks.inReviewRotation, true),
+    input.deckId ? sql`true` : activeConceptEligibilityClause(context.userId),
     input.deckId ? eq(questions.deckId, input.deckId) : sql`true`,
     isNull(questions.flaggedAt),
     isNull(decks.archivedAt),
@@ -1275,7 +1313,10 @@ export async function getQueuedQuestionsPage(
     .offset(Math.max(0, Math.floor(input.offset)));
 
   return {
-    items: rows.map(toDueQuestion).filter((row) => Number.isFinite(row.nextDue)),
+    items: await enrichDueQuestionsWithConceptSlugs(
+      context.userId,
+      rows.map(toDueQuestion).filter((row) => Number.isFinite(row.nextDue)),
+    ),
     total,
   };
 }
@@ -1358,7 +1399,14 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
     let paramIndex = input.startIndex;
 
     if (!targetDeckId) {
-      clauses.push(`d.in_review_rotation = true`);
+      clauses.push(`exists (
+          select 1
+          from question_concept_tags qct
+          join concept_tags ct on ct.id = qct.concept_tag_id
+          where qct.question_id = q.id
+            and ct.user_id = $${input.userIndex}
+            and ct.active = true
+        )`);
     }
 
     if (targetDeckId) {
@@ -1456,7 +1504,10 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
   );
 
   return {
-    items: rowsResult.rows.map(rawQuestionRowToDueQuestion),
+    items: await enrichDueQuestionsWithConceptSlugs(
+      context.userId,
+      rowsResult.rows.map(rawQuestionRowToDueQuestion),
+    ),
     total,
   };
 }
@@ -1465,24 +1516,30 @@ export async function getQuestionSnapshot(
   question: string,
   input: UserContextInput = {},
 ): Promise<DueQuestion | null> {
+  const context = await ensureSeedData(input);
   const [row] = await selectQuestionRows(eq(questions.question, question), {
     ...input,
     deckScope: "all",
   });
 
-  return row ? toDueQuestion(row) : null;
+  return row
+    ? (await enrichDueQuestionsWithConceptSlugs(context.userId, [toDueQuestion(row)]))[0] ?? null
+    : null;
 }
 
 export async function getQuestionSnapshotById(
   questionId: string,
   input: UserContextInput = {},
 ): Promise<DueQuestion | null> {
+  const context = await ensureSeedData(input);
   const [row] = await selectQuestionRows(eq(questions.id, questionId), {
     ...input,
     deckScope: "all",
   });
 
-  return row ? toDueQuestion(row) : null;
+  return row
+    ? (await enrichDueQuestionsWithConceptSlugs(context.userId, [toDueQuestion(row)]))[0] ?? null
+    : null;
 }
 
 export async function flagQuestionForReview(input: {
@@ -1613,10 +1670,14 @@ export async function getRecentQuestionAttempts(
   const deckWhereClause = input.deckId
     ? eq(decks.id, input.deckId)
     : input.deckScope === "rotation"
-      ? and(eq(decks.inReviewRotation, true), isNull(decks.archivedAt))
+      ? isNull(decks.archivedAt)
       : input.deckScope === "all"
         ? sql`true`
         : eq(decks.id, context.deckId);
+  const questionWhereClause =
+    input.deckId || input.deckScope !== "rotation"
+      ? sql`true`
+      : activeConceptEligibilityClause(context.userId);
 
   const rows = await db
     .select({
@@ -1652,6 +1713,7 @@ export async function getRecentQuestionAttempts(
         excludeQuestions.length > 0
           ? notInArray(questionAttempts.question, excludeQuestions)
           : sql`true`,
+        questionWhereClause,
       ),
     )
     .orderBy(desc(questionAttempts.submittedAt), desc(questionAttempts.id))
@@ -1839,7 +1901,7 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
   const context = await ensureSeedData(input);
   const deckWhereClause = input.deckId
     ? eq(decks.id, input.deckId)
-    : and(eq(decks.inReviewRotation, true), isNull(decks.archivedAt));
+    : and(isNull(decks.archivedAt), activeConceptEligibilityClause(context.userId));
   const activeSince = Math.round(input.activeSince);
   const resolvedSince = Math.round(input.resolvedSince);
 
@@ -1995,6 +2057,8 @@ export type QuestionInput = {
   question: string;
   conciseAnswer?: string | null;
   questionProvenance?: string | null;
+  proposedConceptSlugs?: string[] | null;
+  sourceText?: string | null;
 };
 
 function normalizeGeneratedQuestions(
@@ -2023,6 +2087,14 @@ function normalizeGeneratedQuestions(
         typeof item === "string"
           ? ""
           : (item.questionProvenance ?? "").trim().replace(/\s+/g, " "),
+      proposedConceptSlugs:
+        typeof item === "string" || !Array.isArray(item.proposedConceptSlugs)
+          ? []
+          : item.proposedConceptSlugs,
+      sourceText:
+        typeof item === "string"
+          ? ""
+          : (item.sourceText ?? "").trim().slice(0, 4_000),
     });
   }
 
@@ -2084,7 +2156,40 @@ export async function upsertDueQuestions(input: {
     { userId: context.userId, deckId: targetDeckId },
   );
 
-  return rows.map(toDueQuestion);
+  const dueQuestions = rows.map(toDueQuestion);
+
+  try {
+    await assignConceptSlugsForQuestions({
+      userId: context.userId,
+      questions: dueQuestions.map((row) => {
+        const inputQuestion = generatedQuestions.find(
+          (question) => questionSlug(question.question) === questionSlug(row.question),
+        );
+
+        return {
+          questionId: row.questionId,
+          question: row.question,
+          conciseAnswer: row.conciseAnswer,
+          questionProvenance: row.questionProvenance,
+          sourceText: inputQuestion?.sourceText,
+          proposedConceptSlugs: inputQuestion?.proposedConceptSlugs,
+          fallbackSlug: row.deckName,
+        };
+      }),
+    });
+  } catch (error) {
+    console.warn("[waxon] concept tag assignment failed", error);
+  }
+
+  const conceptSlugsByQuestionId = await getQuestionConceptSlugs({
+    userId: context.userId,
+    questionIds: dueQuestions.map((question) => question.questionId),
+  });
+
+  return dueQuestions.map((question) => ({
+    ...question,
+    conceptSlugs: conceptSlugsByQuestionId.get(question.questionId) ?? [],
+  }));
 }
 
 export async function applyEvaluationToPostgres(input: {
@@ -2125,8 +2230,10 @@ export async function applyEvaluationToPostgres(input: {
       .where(
         and(
           eq(decks.userId, context.userId),
-          eq(decks.inReviewRotation, true),
           isNull(decks.archivedAt),
+          input.questionId
+            ? sql`true`
+            : activeConceptEligibilityClause(context.userId),
           input.questionId
             ? eq(questions.id, input.questionId)
             : eq(questions.question, input.question),
@@ -2228,6 +2335,7 @@ export async function applyEvaluationToPostgres(input: {
       conciseAnswer: conciseAnswer || null,
       flaggedAt: row.flagged_at,
       createdAt: row.created_at,
+      conceptSlugs: [],
     };
   });
 }
