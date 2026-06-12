@@ -308,6 +308,7 @@ export default function LearnPageClient({
   ]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [draftCourseToc, setDraftCourseToc] = useState<CourseToc | null>(null);
   const [isStartingNewCourse, setIsStartingNewCourse] = useState(false);
   const [draftConversationCost, setDraftConversationCost] = useState(0);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -367,6 +368,7 @@ export default function LearnPageClient({
 
   const applySelectedCourse = useCallback((course: Course) => {
     setSelectedCourse(course);
+    setDraftCourseToc(null);
     setIsStartingNewCourse(false);
     syncCourse(course);
     setChatMessages(
@@ -652,6 +654,7 @@ export default function LearnPageClient({
 
     stopSpeech();
     setSelectedCourse(null);
+    setDraftCourseToc(null);
     setIsStartingNewCourse(true);
     setChatMessages([INITIAL_CHAT_MESSAGE]);
     setTopic("");
@@ -706,6 +709,7 @@ export default function LearnPageClient({
 
       if (selectedCourse?.id === course.id) {
         setSelectedCourse(null);
+        setDraftCourseToc(null);
         setChatMessages([INITIAL_CHAT_MESSAGE]);
         setDraftConversationCost(0);
         setTopic("");
@@ -754,6 +758,7 @@ export default function LearnPageClient({
     stopSpeech();
     setError(null);
     setIsStreaming(true);
+    setDraftCourseToc(null);
     setChatMessages([...nextMessages, assistantMessage]);
 
     try {
@@ -810,11 +815,45 @@ export default function LearnPageClient({
 
             if (data.course) {
               setSelectedCourse(data.course);
+              setDraftCourseToc(null);
               setIsStartingNewCourse(false);
               syncCourse(data.course);
               router.replace(
                 `/learn/courses/${encodeURIComponent(data.course.id)}`,
               );
+            }
+          } else if (parsed?.event === "toc") {
+            const data = parsed.data as { toc?: Partial<CourseToc> };
+            const toc = data.toc;
+
+            if (
+              toc &&
+              typeof toc === "object" &&
+              !Array.isArray(toc) &&
+              Array.isArray(toc.pages)
+            ) {
+              setDraftCourseToc({
+                title:
+                  typeof toc.title === "string" && toc.title.trim()
+                    ? toc.title
+                    : "Generating TOC",
+                description:
+                  typeof toc.description === "string" ? toc.description : "",
+                pages: toc.pages.flatMap((page) => {
+                  if (!page || typeof page !== "object") {
+                    return [];
+                  }
+
+                  const title =
+                    typeof page.title === "string" ? page.title.trim() : "";
+                  const objective =
+                    typeof page.objective === "string"
+                      ? page.objective.trim()
+                      : "";
+
+                  return title && objective ? [{ title, objective }] : [];
+                }),
+              });
             }
           } else if (parsed?.event === "delta") {
             const data = parsed.data as { delta?: unknown };
@@ -848,6 +887,7 @@ export default function LearnPageClient({
 
             if (data.course) {
               setSelectedCourse(data.course);
+              setDraftCourseToc(null);
               setIsStartingNewCourse(false);
               syncCourse(data.course);
               router.replace(
@@ -890,6 +930,7 @@ export default function LearnPageClient({
             message.id !== `${assistantMessageId}-evaluation`,
         ),
       );
+      setDraftCourseToc(null);
     } finally {
       setIsStreaming(false);
     }
@@ -910,7 +951,13 @@ export default function LearnPageClient({
   }
 
   const showCourseList =
-    !selectedCourse && courses.length > 0 && !isStartingNewCourse;
+    !selectedCourse &&
+    !draftCourseToc &&
+    courses.length > 0 &&
+    !isStartingNewCourse;
+  const visibleCourseToc = selectedCourse?.toc ?? draftCourseToc;
+  const visibleCourseTitle =
+    selectedCourse?.title ?? draftCourseToc?.title ?? "Generating TOC";
   const sortedCourses = useMemo(
     () =>
       [...courses].sort(
@@ -971,26 +1018,31 @@ export default function LearnPageClient({
           {!isBooting ? (
             <div
               className={`learn-chat-layout ${
-                selectedCourse
+                selectedCourse || draftCourseToc
                   ? ""
                   : showCourseList
                     ? "learn-chat-layout-course-list"
                     : "learn-chat-layout-empty"
               }`}
             >
-              {selectedCourse ? (
-                <aside className="learn-chat-toc" aria-label="Course outline">
-                  <p className="learn-kicker">{selectedCourse.title}</p>
+              {visibleCourseToc ? (
+                <aside
+                  className="learn-chat-toc"
+                  aria-label="Course outline"
+                  aria-live={selectedCourse ? undefined : "polite"}
+                >
+                  <p className="learn-kicker">{visibleCourseTitle}</p>
                   <nav className="learn-toc" aria-label="Course table of contents">
                     <ol>
-                      {selectedCourse.toc.pages.map((page, pageIndex) => {
+                      {visibleCourseToc.pages.map((page, pageIndex) => {
                         const isCurrent =
-                          selectedCourse.currentPageIndex === pageIndex &&
-                          selectedCourse.status !== "completed";
-                        const isDone = isMilestoneComplete(
-                          selectedCourse,
-                          pageIndex,
-                        );
+                          selectedCourse
+                            ? selectedCourse.currentPageIndex === pageIndex &&
+                              selectedCourse.status !== "completed"
+                            : pageIndex === 0;
+                        const isDone = selectedCourse
+                          ? isMilestoneComplete(selectedCourse, pageIndex)
+                          : false;
 
                         return (
                           <li
@@ -1013,6 +1065,17 @@ export default function LearnPageClient({
                           </li>
                         );
                       })}
+                      {!selectedCourse ? (
+                        <li className="learn-toc-streaming">
+                          <span className="learn-toc-status">
+                            <span
+                              className="pending-spinner"
+                              aria-hidden="true"
+                            />
+                          </span>
+                          <p>Generating TOC</p>
+                        </li>
+                      ) : null}
                     </ol>
                   </nav>
                 </aside>
