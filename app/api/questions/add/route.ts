@@ -17,6 +17,9 @@ const MAX_DECK_ID_CHARS = 180;
 const MAX_QUESTION_CHARS = 1_200;
 const MAX_CONCISE_ANSWER_CHARS = 800;
 const MAX_PROVENANCE_CHARS = 360;
+const MAX_SOURCE_TEXT_CHARS = 4_000;
+const MAX_PROPOSED_CONCEPT_SLUGS = 8;
+const MAX_PROPOSED_CONCEPT_SLUG_CHARS = 120;
 
 export async function POST(request: Request) {
   const parsed = await readJsonBodyWithLimit(
@@ -92,6 +95,8 @@ export async function POST(request: Request) {
       question: string;
       conciseAnswer?: unknown;
       questionProvenance?: unknown;
+      proposedConceptSlugs?: unknown;
+      sourceText?: unknown;
     };
     const normalizedQuestion = normalizeBoundedText(record.question, {
       field: "question",
@@ -123,10 +128,33 @@ export async function POST(request: Request) {
       return questionProvenance.response;
     }
 
+    const sourceText = normalizeBoundedText(record.sourceText, {
+      field: "sourceText",
+      maxLength: MAX_SOURCE_TEXT_CHARS,
+      required: false,
+    });
+
+    if (!sourceText.ok) {
+      return sourceText.response;
+    }
+
+    const proposedConceptSlugs = Array.isArray(record.proposedConceptSlugs)
+      ? record.proposedConceptSlugs
+          .slice(0, MAX_PROPOSED_CONCEPT_SLUGS)
+          .map((slug) =>
+            typeof slug === "string"
+              ? slug.trim().slice(0, MAX_PROPOSED_CONCEPT_SLUG_CHARS)
+              : "",
+          )
+          .filter(Boolean)
+      : [];
+
     questions.push({
       question: normalizedQuestion.value,
       conciseAnswer: conciseAnswer.value,
       questionProvenance: questionProvenance.value,
+      proposedConceptSlugs,
+      sourceText: sourceText.value,
     });
   }
 

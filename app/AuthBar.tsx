@@ -17,6 +17,7 @@ const reviewShellRoutes = [
   "/review",
   "/queue",
   "/decks",
+  "/tags",
   "/stats",
   "/admin",
 ];

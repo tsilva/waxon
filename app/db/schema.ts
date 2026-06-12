@@ -9,6 +9,7 @@ import {
   index,
   integer,
   jsonb,
+  primaryKey,
   pgTable,
   serial,
   text,
@@ -328,6 +329,62 @@ export const questionEmbeddings = pgTable(
     check(
       "question_embeddings_updated_at_check",
       sql`${table.updatedAt} >= ${table.createdAt}`,
+    ),
+  ],
+);
+
+export const conceptTags = pgTable(
+  "concept_tags",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    active: boolean("active").notNull().default(true),
+    embedding: vector("embedding"),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => [
+    uniqueIndex("concept_tags_user_slug_idx").on(table.userId, table.slug),
+    index("concept_tags_user_active_idx").on(table.userId, table.active),
+    check("concept_tags_slug_nonempty_check", sql`length(trim(${table.slug})) > 0`),
+    check(
+      "concept_tags_slug_format_check",
+      sql`${table.slug} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`,
+    ),
+    check("concept_tags_created_at_check", sql`${table.createdAt} >= 0`),
+    check(
+      "concept_tags_updated_at_check",
+      sql`${table.updatedAt} >= ${table.createdAt}`,
+    ),
+  ],
+);
+
+export const questionConceptTags = pgTable(
+  "question_concept_tags",
+  {
+    questionId: uuid("question_id")
+      .notNull()
+      .references(() => questions.id, { onDelete: "cascade" }),
+    conceptTagId: uuid("concept_tag_id")
+      .notNull()
+      .references(() => conceptTags.id, { onDelete: "cascade" }),
+    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
+  },
+  (table) => [
+    primaryKey({
+      name: "question_concept_tags_pkey",
+      columns: [table.questionId, table.conceptTagId],
+    }),
+    index("question_concept_tags_tag_question_idx").on(
+      table.conceptTagId,
+      table.questionId,
+    ),
+    check(
+      "question_concept_tags_created_at_check",
+      sql`${table.createdAt} >= 0`,
     ),
   ],
 );

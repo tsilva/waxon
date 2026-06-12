@@ -11,7 +11,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 
-type ReviewToolbarTab = "learn" | "review" | "decks" | "stats" | "admin";
+type ReviewToolbarTab = "learn" | "review" | "decks" | "tags" | "stats" | "admin";
 
 type ReviewToolbarProps = {
   activeTab: ReviewToolbarTab;
@@ -23,6 +23,7 @@ type ReviewToolbarProps = {
   onReviewClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onLearnClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onDecksClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
+  onTagsClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onStatsClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onAdminClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onManageAccount: () => void;
@@ -43,6 +44,7 @@ export function ReviewToolbar({
   onReviewClick,
   onLearnClick,
   onDecksClick,
+  onTagsClick,
   onStatsClick,
   onAdminClick,
   onManageAccount,
@@ -139,6 +141,15 @@ export function ReviewToolbar({
             onClick={onDecksClick}
           >
             Decks
+          </Link>
+          <Link
+            className={tabClass(activeTab === "tags")}
+            href="/tags"
+            role="tab"
+            aria-selected={activeTab === "tags"}
+            onClick={onTagsClick}
+          >
+            Tags
           </Link>
           {showAdmin ? (
             <Link
