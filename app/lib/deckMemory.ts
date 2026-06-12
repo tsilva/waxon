@@ -85,51 +85,6 @@ export function normalizeDeckMemory(
   return source.slice(0, MAX_DECK_MEMORY_CHARS);
 }
 
-export function replaceMemorySection(
-  memory: string,
-  heading: string,
-  body: string,
-): string {
-  const sectionHeading = `## ${heading}`;
-  const escapedHeading = escapeMarkdownHeading(heading);
-  const sectionPattern = new RegExp(
-    `(^##\\s+${escapedHeading}\\s*$)[\\s\\S]*?(?=^##\\s+|(?![\\s\\S]))`,
-    "imu",
-  );
-  const replacement = `${sectionHeading}\n${body.trim()}\n\n`;
-
-  if (sectionPattern.test(memory)) {
-    return memory.replace(sectionPattern, replacement);
-  }
-
-  return `${memory.trim()}\n\n${replacement}`;
-}
-
-export function appendMemoryNote(
-  memory: string,
-  heading: string,
-  text: string,
-): string {
-  const currentSection = memory.match(
-    new RegExp(`^##\\s+${escapeMarkdownHeading(heading)}\\s*$`, "imu"),
-  );
-
-  if (!currentSection) {
-    return replaceMemorySection(memory, heading, `- ${text.trim()}`);
-  }
-
-  const escapedHeading = escapeMarkdownHeading(heading);
-  const sectionPattern = new RegExp(
-    `(^##\\s+${escapedHeading}\\s*$[\\s\\S]*?)(?=^##\\s+|(?![\\s\\S]))`,
-    "imu",
-  );
-
-  return memory.replace(
-    sectionPattern,
-    (section) => `${section.trim()}\n- ${text.trim()}\n\n`,
-  );
-}
-
 export function memorySectionBody(memory: string, heading: string): string {
   const escapedHeading = escapeMarkdownHeading(heading);
   const match = memory.match(
@@ -140,38 +95,6 @@ export function memorySectionBody(memory: string, heading: string): string {
   );
 
   return match?.[1]?.trim() ?? "";
-}
-
-export function normalizedMemorySectionLines(section: string): string[] {
-  return section
-    .split("\n")
-    .map((line) => line.trim().replace(/^[-*]\s*/u, "").trim())
-    .filter(Boolean);
-}
-
-export function dedupeMemorySections(memory: string): string {
-  const parts = memory.split(/(?=^##\s+)/gim);
-  const [preamble = "", ...sections] = parts;
-  const seen = new Set<string>();
-  const keptSections: string[] = [];
-
-  for (const section of sections) {
-    const heading = section.match(/^##\s+(.+?)\s*$/im)?.[1]?.trim().toLowerCase();
-
-    if (!heading) {
-      keptSections.push(section.trim());
-      continue;
-    }
-
-    if (seen.has(heading)) {
-      continue;
-    }
-
-    seen.add(heading);
-    keptSections.push(section.trim());
-  }
-
-  return [preamble.trim(), ...keptSections].filter(Boolean).join("\n\n");
 }
 
 function buildDeckMemorySystemPrompt(): string {
