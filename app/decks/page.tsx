@@ -1,8 +1,5 @@
-import ReviewApp from "../review/ReviewApp";
-import { listDecks } from "../lib/postgresStore";
+import { redirect } from "next/navigation";
 
 export default async function DecksPage() {
-  const decks = await listDecks();
-
-  return <ReviewApp initialActiveTab="queue" initialDecks={decks} />;
+  redirect("/tags");
 }

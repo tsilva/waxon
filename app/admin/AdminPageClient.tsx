@@ -1489,7 +1489,6 @@ export function AdminPageClient({
             }
           }}
           onReviewClick={persistAdminPageCache}
-          onDecksClick={persistAdminPageCache}
         />
 
         <div className="admin-stage">

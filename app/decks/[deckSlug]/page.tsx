@@ -1,5 +1,4 @@
-import ReviewApp from "../../review/ReviewApp";
-import { listDecks } from "../../lib/postgresStore";
+import { redirect } from "next/navigation";
 
 type DeckPageProps = {
   params: Promise<{
@@ -8,14 +7,6 @@ type DeckPageProps = {
 };
 
 export default async function DeckPage({ params }: DeckPageProps) {
-  const { deckSlug } = await params;
-  const decks = await listDecks();
-
-  return (
-    <ReviewApp
-      initialActiveTab="queue"
-      initialDeckSlug={deckSlug}
-      initialDecks={decks}
-    />
-  );
+  await params;
+  redirect("/tags");
 }
