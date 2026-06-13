@@ -26,6 +26,10 @@ import {
   parseQuestionEvaluationSnippet,
   type LearnQuestionEvaluationSnippet,
 } from "@/app/lib/courseEvaluationSnippet";
+import {
+  parseCourseMessageMetrics,
+  type CourseMessageMetrics,
+} from "@/app/lib/courseMessageMetrics";
 import { isCourseChatTurnComplete } from "@/app/lib/courseChatTurn";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import {
@@ -81,6 +85,7 @@ type LearnChatMessage = {
   id: string;
   role: "assistant" | "user";
   content: string;
+  metrics?: CourseMessageMetrics | null;
   status?: string;
   interrupted?: boolean;
   createdAt?: number;
@@ -127,6 +132,7 @@ function pendingStatus(message: LearnChatMessage): string {
 function LearnQuestionEvaluationCard({
   id,
   snippet,
+  metrics,
   fallbackQuestion,
   createdAt,
   isExpanded,
@@ -135,6 +141,7 @@ function LearnQuestionEvaluationCard({
 }: {
   id: string;
   snippet: LearnQuestionEvaluationSnippet;
+  metrics?: CourseMessageMetrics | null;
   fallbackQuestion: string | null;
   createdAt?: number;
   isExpanded: boolean;
@@ -168,6 +175,11 @@ function LearnQuestionEvaluationCard({
         onToggle={onToggle}
         onDetailsClick={onDetailsClick}
       />
+      {metrics ? (
+        <li className="learn-chat-evaluation-metrics-row">
+          <LearnChatMessageMetrics metrics={metrics} />
+        </li>
+      ) : null}
     </ol>
   );
 }
@@ -233,9 +245,10 @@ function storedMessageToLearnMessage(
   message: StoredCourseChatMessage,
   index: number,
 ): LearnChatMessage {
+  const parsedMetrics = parseCourseMessageMetrics(message.content);
   const isEvaluationSnippet =
     message.role === "assistant" &&
-    isQuestionEvaluationSnippet(message.content);
+    isQuestionEvaluationSnippet(parsedMetrics.content);
   const id =
     typeof message.id === "string" && message.id.trim()
       ? message.id
@@ -245,11 +258,12 @@ function storedMessageToLearnMessage(
     id,
     role: message.role,
     content: message.content,
+    metrics: parsedMetrics.metrics,
     createdAt: message.createdAt,
     interrupted:
       message.role === "assistant" &&
       !isEvaluationSnippet &&
-      !isCourseChatTurnComplete(message.content),
+      !isCourseChatTurnComplete(parsedMetrics.content),
   };
 }
 
@@ -275,6 +289,58 @@ function formatConversationCost(cost: number): string | null {
     minimumFractionDigits: cost < 0.01 ? 4 : 2,
     maximumFractionDigits: cost < 0.01 ? 4 : 2,
   }).format(cost);
+}
+
+function formatMessagePrice(cost: number | null | undefined): string | null {
+  if (cost === null || cost === undefined || !Number.isFinite(cost)) {
+    return null;
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: cost < 0.01 ? 4 : 2,
+    maximumFractionDigits: cost < 0.01 ? 4 : 2,
+  }).format(cost);
+}
+
+function formatTokensPerSecond(
+  tokensPerSecond: number | null | undefined,
+): string | null {
+  if (
+    tokensPerSecond === null ||
+    tokensPerSecond === undefined ||
+    !Number.isFinite(tokensPerSecond)
+  ) {
+    return null;
+  }
+
+  return `${tokensPerSecond.toFixed(tokensPerSecond < 10 ? 1 : 0)} tok/s`;
+}
+
+function LearnChatMessageMetrics({
+  metrics,
+}: {
+  metrics: CourseMessageMetrics | null | undefined;
+}) {
+  const price = formatMessagePrice(metrics?.cost);
+  const tokensPerSecond = formatTokensPerSecond(metrics?.tokensPerSecond);
+  const items = [price, tokensPerSecond].filter(
+    (item): item is string => Boolean(item),
+  );
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <p
+      className="learn-chat-message-metrics"
+      aria-label={`Response metrics: ${items.join(", ")}`}
+    >
+      {items.join(" / ")}
+    </p>
+  );
 }
 
 function formatCourseUpdatedAt(timestamp: number): string {
@@ -979,6 +1045,7 @@ export default function LearnPageClient({
               course?: Course;
               chatMessages?: StoredCourseChatMessage[];
               turnCost?: unknown;
+              responseMetrics?: CourseMessageMetrics | null;
             };
 
             if (data.course) {
@@ -996,10 +1063,25 @@ export default function LearnPageClient({
               if (selectedCourse?.id !== data.course.id) {
                 updateLearnHistory(learnCoursePath(data.course.id), "replace");
               }
-            } else if (typeof data.turnCost === "number" && data.turnCost > 0) {
-              const turnCost = data.turnCost;
+            } else if (
+              typeof data.turnCost === "number" ||
+              data.responseMetrics
+            ) {
+              const turnCost =
+                typeof data.turnCost === "number" ? data.turnCost : 0;
 
-              setDraftConversationCost((cost) => cost + turnCost);
+              if (turnCost > 0) {
+                setDraftConversationCost((cost) => cost + turnCost);
+              }
+              if (data.responseMetrics) {
+                setChatMessages((messages) =>
+                  messages.map((message) =>
+                    message.id === assistantMessageId
+                      ? { ...message, metrics: data.responseMetrics }
+                      : message,
+                  ),
+                );
+              }
             } else if (data.chatMessages?.length) {
               setChatMessages(
                 data.chatMessages.map(storedMessageToLearnMessage),
@@ -1281,12 +1363,20 @@ export default function LearnPageClient({
                 >
                   <div className="learn-chat-thread" ref={chatThreadRef}>
                     {chatMessages.map((message, messageIndex) => {
+                      const parsedMessage = parseCourseMessageMetrics(
+                        message.content,
+                      );
+                      const visibleMessageContent = parsedMessage.content;
+                      const messageMetrics =
+                        message.metrics ?? parsedMessage.metrics;
                       const evaluationSnippet =
                         message.role === "assistant"
-                          ? parseQuestionEvaluationSnippet(message.content)
+                          ? parseQuestionEvaluationSnippet(
+                              visibleMessageContent,
+                            )
                           : null;
                       const messageContent =
-                        evaluationSnippet?.content ?? message.content;
+                        evaluationSnippet?.content ?? visibleMessageContent;
                       if (evaluationSnippet) {
                         const fallbackQuestion = findPreviousLearnerQuestion(
                           chatMessages,
@@ -1302,6 +1392,7 @@ export default function LearnPageClient({
                             key={message.id}
                             id={message.id}
                             snippet={evaluationSnippet}
+                            metrics={messageMetrics}
                             fallbackQuestion={fallbackQuestion}
                             createdAt={message.createdAt}
                             isExpanded={expandedLearnEvaluationIds.has(
@@ -1353,6 +1444,9 @@ export default function LearnPageClient({
                                   final question finished.
                                 </p>
                               ) : null}
+                              <LearnChatMessageMetrics
+                                metrics={messageMetrics}
+                              />
                             </div>
                           ) : (
                             <span
