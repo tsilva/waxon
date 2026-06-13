@@ -117,6 +117,9 @@ export const decks = pgTable(
   },
   (table) => [
     uniqueIndex("decks_user_slug_idx").on(table.userId, table.slug),
+    index("decks_active_user_updated_idx")
+      .on(table.userId, table.updatedAt.desc(), table.name)
+      .where(sql`${table.archivedAt} IS NULL`),
     index("decks_user_rotation_archive_idx").on(
       table.userId,
       table.inReviewRotation,
@@ -231,6 +234,16 @@ export const questionAttempts = pgTable(
       table.question,
       table.submittedAt.desc(),
     ),
+    index("question_attempts_deck_submitted_idx").on(
+      table.deckId,
+      table.submittedAt.desc(),
+      table.id.desc(),
+    ),
+    index("question_attempts_deck_resolved_idx").on(
+      table.deckId,
+      table.resolvedAt.desc(),
+      table.id.desc(),
+    ),
     index("question_attempts_question_id_submitted_idx").on(
       table.questionId,
       table.submittedAt.desc(),
@@ -294,6 +307,14 @@ export const questionEmbeddings = pgTable(
       table.sourceVersion,
       table.isCurrent,
     ),
+    index("question_embeddings_current_nonempty_lookup_idx")
+      .on(
+        table.deckId,
+        table.embeddingModel,
+        table.embeddingKind,
+        table.sourceVersion,
+      )
+      .where(sql`${table.isCurrent} = true AND ${table.sourceHash} <> ''`),
     index("question_embeddings_question_lookup_idx").on(
       table.questionId,
       table.embeddingModel,
@@ -591,6 +612,7 @@ export const answerEvaluations = pgTable(
       table.deckId,
       table.submittedAt.desc(),
     ),
+    index("answer_evaluations_trace_id_idx").on(table.traceId),
     check("answer_evaluations_id_nonempty_check", sql`length(trim(${table.id})) > 0`),
     check(
       "answer_evaluations_trace_id_nonempty_check",

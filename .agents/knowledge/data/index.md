@@ -1,3 +1,3 @@
 # Data
 
-No verified data contracts are stored yet. Add concise, source-backed notes here for database schemas, datasets, metrics, evaluation datasets, and data lineage.
+* [Postgres vector index constraints](postgres-vector-indexes.md) - pgvector index patterns for Waxon's 3072-dimensional embeddings.

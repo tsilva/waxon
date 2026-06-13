@@ -22,10 +22,10 @@ Install dependencies with `pnpm install`. The project package manager is `pnpm@1
 When starting the dev server as an agent, follow the repo instruction to avoid fixed ports:
 
 ```bash
-pnpm dev -- --port auto
+pnpm dev --port auto
 ```
 
-The wrapper in `scripts/next-server.mjs` converts `--port auto` or `--port=auto` into a random available port and prints the selected port.
+The wrapper in `scripts/next-server.mjs` converts `--port auto` or `--port=auto` into a random available port and prints the selected port. With pnpm 10, do not add an extra `--`; `pnpm dev -- --port auto` can pass `--port` through as a positional directory to Next.
 
 # Environment
 
@@ -66,7 +66,7 @@ Local development login and signup buttons automatically enter the app as a test
 # Commands
 
 ```bash
-pnpm dev -- --port auto
+pnpm dev --port auto
 pnpm build
 pnpm db:generate
 pnpm db:migrate

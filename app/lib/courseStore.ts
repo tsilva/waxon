@@ -1,10 +1,11 @@
-import { and, asc, count, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import {
   courseChatMessages,
   coursePageAttempts,
   coursePages,
   courses,
+  decks,
 } from "@/app/db/schema";
 import { getCurrentUser } from "./auth";
 import {
@@ -21,7 +22,6 @@ import {
   applyEvaluationToPostgres,
   createDeck,
   deleteDeck,
-  listDecks,
   upsertDueQuestions,
   type DueQuestion,
 } from "./postgresStore";
@@ -232,28 +232,12 @@ async function createUniqueCourseDeck(input: {
 }
 
 async function loadCourseRows(userId: string, courseId?: string) {
-  const pageCounts = db
-    .select({
-      courseId: coursePages.courseId,
-      generatedPages: count(coursePages.id).as("generated_pages"),
-    })
-    .from(coursePages)
-    .groupBy(coursePages.courseId)
-    .as("page_counts");
-  const chatCounts = db
-    .select({
-      courseId: courseChatMessages.courseId,
-      chatMessageCount: count(courseChatMessages.id).as("chat_message_count"),
-    })
-    .from(courseChatMessages)
-    .groupBy(courseChatMessages.courseId)
-    .as("chat_counts");
-
   return db
     .select({
       id: courses.id,
       userId: courses.userId,
       deckId: courses.deckId,
+      deckName: decks.name,
       topicPrompt: courses.topicPrompt,
       title: courses.title,
       description: courses.description,
@@ -264,12 +248,26 @@ async function loadCourseRows(userId: string, courseId?: string) {
       conversationCost: courses.conversationCost,
       createdAt: courses.createdAt,
       updatedAt: courses.updatedAt,
-      generatedPages: pageCounts.generatedPages,
-      chatMessageCount: chatCounts.chatMessageCount,
+      generatedPages: sql<number>`(
+        SELECT count(*)::int
+        FROM ${coursePages}
+        WHERE ${coursePages.courseId} = ${courses.id}
+      )`,
+      chatMessageCount: sql<number>`(
+        SELECT count(*)::int
+        FROM ${courseChatMessages}
+        WHERE ${courseChatMessages.courseId} = ${courses.id}
+      )`,
     })
     .from(courses)
-    .leftJoin(pageCounts, eq(pageCounts.courseId, courses.id))
-    .leftJoin(chatCounts, eq(chatCounts.courseId, courses.id))
+    .innerJoin(
+      decks,
+      and(
+        eq(decks.id, courses.deckId),
+        eq(decks.userId, courses.userId),
+        isNull(decks.archivedAt),
+      ),
+    )
     .where(
       courseId
         ? and(eq(courses.userId, userId), eq(courses.id, courseId))
@@ -278,13 +276,9 @@ async function loadCourseRows(userId: string, courseId?: string) {
     .orderBy(desc(courses.updatedAt));
 }
 
-async function hydrateCourse(input: {
+function hydrateCourse(input: {
   row: Awaited<ReturnType<typeof loadCourseRows>>[number];
-  userId: string;
-}): Promise<CourseRecord> {
-  const deck = (await listDecks({ userId: input.userId })).find(
-    (item) => item.id === input.row.deckId,
-  );
+}): CourseRecord {
   const toc = validateCourseToc(input.row.toc);
   const position = {
     chapterIndex: 0,
@@ -302,7 +296,7 @@ async function hydrateCourse(input: {
     id: input.row.id,
     userId: input.row.userId,
     deckId: input.row.deckId,
-    deckName: deck?.name ?? baseCourseDeckName(input.row.title),
+    deckName: input.row.deckName ?? baseCourseDeckName(input.row.title),
     topicPrompt: input.row.topicPrompt,
     title: input.row.title,
     description: input.row.description,
@@ -323,7 +317,7 @@ export async function listCourses(): Promise<CourseRecord[]> {
   const user = await getCurrentUser();
   const rows = await loadCourseRows(user.id);
 
-  return Promise.all(rows.map((row) => hydrateCourse({ row, userId: user.id })));
+  return rows.map((row) => hydrateCourse({ row }));
 }
 
 export async function getCourse(courseId: string): Promise<CourseDetail | null> {
@@ -335,7 +329,7 @@ export async function getCourse(courseId: string): Promise<CourseDetail | null> 
   }
 
   const rawToc = row.toc;
-  const course = await hydrateCourse({ row, userId: user.id });
+  const course = hydrateCourse({ row });
   const [pageRows, chatRows] = await Promise.all([
     db
       .select()
@@ -507,19 +501,24 @@ export async function getCoursePageByPosition(input: {
   chapterIndex: number;
   pageIndex: number;
 }): Promise<CoursePageRecord | null> {
-  const course = await getCourse(input.courseId);
+  const user = await getCurrentUser();
+  const [row] = await db
+    .select()
+    .from(coursePages)
+    .innerJoin(
+      courses,
+      and(eq(courses.id, coursePages.courseId), eq(courses.userId, user.id)),
+    )
+    .where(
+      and(
+        eq(coursePages.courseId, input.courseId),
+        eq(coursePages.chapterIndex, input.chapterIndex),
+        eq(coursePages.pageIndex, input.pageIndex),
+      ),
+    )
+    .limit(1);
 
-  if (!course) {
-    return null;
-  }
-
-  return (
-    course.pages.find(
-      (page) =>
-        page.chapterIndex === input.chapterIndex &&
-        page.pageIndex === input.pageIndex,
-    ) ?? null
-  );
+  return row ? toCoursePage(row.course_pages) : null;
 }
 
 function courseQuestionProvenance(input: {
