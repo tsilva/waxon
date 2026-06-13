@@ -4,6 +4,7 @@ import {
   ensureCourseChatTurnHasLearnerQuestion,
   isCourseChatTurnComplete,
 } from "../app/lib/courseChatTurn.ts";
+import { parseCourseQuestionAttemptToolResult } from "../app/lib/courseQuestionAttemptParsing.ts";
 import { normalizePartialCourseToc } from "../app/lib/courseTocStream.ts";
 
 test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for empty output", () => {
@@ -106,4 +107,54 @@ test("normalizePartialCourseToc handles escaped strings in streamed properties",
 
   assert.equal(partialToc.title, 'PPO "entropy" loss');
   assert.equal(partialToc.description, "A \\ B");
+});
+
+test("parseCourseQuestionAttemptToolResult accepts snake_case correct answer fields", () => {
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question: "What happens when advantage is negative?",
+      answer: "It goes down.",
+      answer_summary: "Learner said probability decreases.",
+      concise_answer: "Probability decreases.",
+      correct_answer: "The sampled action's probability decreases.",
+      justification: "Correct.",
+      score: 10,
+    }),
+    "fallback answer",
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.equal(
+      result.correctAnswer,
+      "The sampled action's probability decreases.",
+    );
+    assert.equal(result.conciseAnswer, "Probability decreases.");
+  }
+});
+
+test("parseCourseQuestionAttemptToolResult falls back to useful correct feedback", () => {
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question: "What happens when advantage is negative?",
+      answer: "It goes down.",
+      answerSummary: "Learner said probability decreases.",
+      justification:
+        "Correct. A negative advantage pushes the sampled action's probability downward.",
+      score: 10,
+    }),
+    "fallback answer",
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.equal(
+      result.correctAnswer,
+      "A negative advantage pushes the sampled action's probability downward.",
+    );
+  }
 });

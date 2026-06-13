@@ -12,10 +12,13 @@ import {
 } from "./courseContent";
 import { ensureCourseChatTurnHasLearnerQuestion } from "./courseChatTurn.ts";
 import {
+  parseCourseQuestionAttemptToolResult,
+  type CourseQuestionAttemptToolResult,
+} from "./courseQuestionAttemptParsing";
+import {
   normalizePartialCourseToc,
   type PartialCourseToc,
 } from "./courseTocStream.ts";
-import { parseScore } from "./evaluateAnswerParsing";
 import type { CourseDetail } from "./courseStore";
 
 const COURSE_JSON_RESPONSE_FORMAT = { type: "json_object" };
@@ -59,31 +62,11 @@ export type CourseProgressDecision =
       reason: string;
     };
 
-export type CourseQuestionAttemptToolResult =
-  | {
-      toolCall: "record_course_question_attempt";
-      question: string;
-      answer: string;
-      answerSummary: string;
-      conciseAnswer: string;
-      correctAnswer: string;
-      justification: string;
-      score: number;
-    }
-  | {
-      toolCall: "skip_course_question_attempt";
-      reason: string;
-    };
+export type { CourseQuestionAttemptToolResult };
 
 function normalizeIntakeText(value: unknown, maxLength: number): string {
   return typeof value === "string"
     ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
-    : "";
-}
-
-function normalizeMultilineText(value: unknown, maxLength: number): string {
-  return typeof value === "string"
-    ? value.trim().replace(/\n{3,}/g, "\n\n").slice(0, maxLength)
     : "";
 }
 
@@ -163,64 +146,6 @@ function parseCourseProgressDecision(source: string): CourseProgressDecision {
   return {
     toolCall: "continue_current_milestone",
     reason: reason || "The learner needs another short check.",
-  };
-}
-
-function parseCourseQuestionAttemptToolResult(
-  source: string,
-  fallbackAnswer: string,
-): CourseQuestionAttemptToolResult {
-  const value = extractJsonObject(source);
-
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {
-      toolCall: "skip_course_question_attempt",
-      reason: "Question attempt tool returned no JSON object.",
-    };
-  }
-
-  const record = value as Record<string, unknown>;
-  const toolCall = normalizeIntakeText(record.toolCall, 80);
-
-  if (toolCall !== "record_course_question_attempt") {
-    return {
-      toolCall: "skip_course_question_attempt",
-      reason:
-        normalizeIntakeText(record.reason, 500) ||
-        "No learner-facing question was answered.",
-    };
-  }
-
-  const question = normalizeMultilineText(record.question, 1_200);
-  const answer =
-    normalizeMultilineText(record.answer, 4_000) ||
-    normalizeMultilineText(fallbackAnswer, 4_000);
-  const score = parseScore(record.score);
-
-  if (!question || !answer || score === null) {
-    return {
-      toolCall: "skip_course_question_attempt",
-      reason: "Question attempt tool returned an incomplete record.",
-    };
-  }
-
-  return {
-    toolCall,
-    question,
-    answer,
-    answerSummary:
-      normalizeIntakeText(record.answerSummary ?? record.answer_summary, 240) ||
-      answer.slice(0, 240),
-    conciseAnswer:
-      normalizeIntakeText(record.conciseAnswer ?? record.correctAnswer, 400) ||
-      "See course explanation.",
-    correctAnswer:
-      normalizeIntakeText(record.correctAnswer ?? record.conciseAnswer, 400) ||
-      "See course explanation.",
-    justification:
-      normalizeIntakeText(record.justification, 240) ||
-      "Recorded from course chat.",
-    score,
   };
 }
 
@@ -430,6 +355,8 @@ export async function generateCourseQuestionAttemptToolResult(input: {
             "If the previous assistant message ended with a real learner-facing question and the latest user message answers it, return a record_course_question_attempt tool call.",
             "Extract the exact learner-facing question, preserving multiple-choice options if present.",
             "Grade the answer from 0 to 10 using normal Waxon review standards.",
+            "Always write correctAnswer as the concise ideal answer to the tutor question, even when the learner was fully correct.",
+            "Do not leave correctAnswer or conciseAnswer blank, null, generic, or omitted in a record_course_question_attempt call.",
             "If there is no answerable tutor question, or the user is asking a new unrelated course-management question, skip.",
             "Return strict JSON only.",
             "Record shape: {\"toolCall\":\"record_course_question_attempt\",\"question\":\"...\",\"answer\":\"...\",\"answerSummary\":\"...\",\"conciseAnswer\":\"...\",\"correctAnswer\":\"...\",\"justification\":\"...\",\"score\":number}.",

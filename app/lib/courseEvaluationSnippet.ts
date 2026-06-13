@@ -30,6 +30,30 @@ function decodeEvaluationMetadata(value: string | undefined): string | null {
   }
 }
 
+function inferCorrectAnswerFromFeedback(
+  feedback: string,
+  score: number,
+): string | null {
+  if (score < 9) {
+    return null;
+  }
+
+  const normalized = feedback.trim().replace(/\s+/g, " ");
+
+  if (!normalized) {
+    return null;
+  }
+
+  const withoutCorrectLead = normalized
+    .replace(/^(?:correct|right|yes)[.!]?\s+/iu, "")
+    .replace(/^that's\s+(?:correct|right)[.!]?\s+/iu, "")
+    .trim();
+
+  return withoutCorrectLead && withoutCorrectLead !== normalized
+    ? withoutCorrectLead
+    : null;
+}
+
 export function isQuestionEvaluationSnippet(content: string): boolean {
   return QUESTION_EVALUATION_SNIPPET_PATTERN.test(content);
 }
@@ -92,11 +116,14 @@ export function parseQuestionEvaluationSnippet(
   const question = metadata.question ?? (firstLineIsTitle ? firstLine : null);
   const body = bodyBlocks.join("\n\n").trim();
   const feedback = firstLineIsTitle ? remainingBlocks.join("\n\n").trim() : body;
+  const visibleFeedback = feedback || body || "Evaluation recorded.";
 
   return {
-    content: feedback || body || "Evaluation recorded.",
+    content: visibleFeedback,
     question,
-    correctAnswer: metadata.correctAnswer,
+    correctAnswer:
+      metadata.correctAnswer ??
+      inferCorrectAnswerFromFeedback(visibleFeedback, normalizedScore),
     score: normalizedScore,
   };
 }

@@ -61,3 +61,19 @@ test("parseQuestionEvaluationSnippet strips metadata comments from the visible b
   assert.equal(parsed?.content, "Needs more detail.");
   assert.equal(parsed?.correctAnswer, "Expected answer.");
 });
+
+test("parseQuestionEvaluationSnippet infers high-score correct answers from feedback without metadata", () => {
+  const content = [
+    "<!-- waxon:evaluation-snippet score=10 -->",
+    `<!-- waxon:evaluation-question ${encodeURIComponent("What happens when advantage is negative?")} -->`,
+    "**Score 10/10**",
+    "Correct. A negative advantage pushes the sampled action's probability downward.",
+  ].join("\n\n");
+
+  const parsed = parseQuestionEvaluationSnippet(content);
+
+  assert.equal(
+    parsed?.correctAnswer,
+    "A negative advantage pushes the sampled action's probability downward.",
+  );
+});
