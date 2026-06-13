@@ -63,6 +63,7 @@ type StoredCourseChatMessage = {
   id: string;
   role: "assistant" | "user";
   content: string;
+  createdAt?: number;
 };
 
 type UserProfile = {
@@ -77,11 +78,13 @@ type LearnChatMessage = {
   content: string;
   status?: string;
   interrupted?: boolean;
+  createdAt?: number;
 };
 
 type LearnQuestionEvaluationSnippet = {
   content: string;
   question: string | null;
+  correctAnswer: string | null;
   score: number;
 };
 
@@ -99,6 +102,8 @@ const QUESTION_EVALUATION_SNIPPET_PATTERN =
   /^<!--\s*waxon:evaluation-snippet score=(\d{1,2})\s*-->\s*/u;
 const QUESTION_EVALUATION_QUESTION_PATTERN =
   /^<!--\s*waxon:evaluation-question\s+([A-Za-z0-9%._~-]+)\s*-->\s*/u;
+const QUESTION_EVALUATION_CORRECT_ANSWER_PATTERN =
+  /^<!--\s*waxon:evaluation-correct-answer\s+([A-Za-z0-9%._~-]+)\s*-->\s*/u;
 const QUESTION_EVALUATION_SCORE_LINE_PATTERN =
   /^(?:\*\*)?Score\s+\d{1,2}\s*\/\s*10(?:\*\*)?$/iu;
 
@@ -122,6 +127,18 @@ function pendingStatus(message: LearnChatMessage): string {
   return message.status?.trim() || "Thinking...";
 }
 
+function decodeEvaluationMetadata(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(value).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function parseQuestionEvaluationSnippet(
   content: string,
 ): LearnQuestionEvaluationSnippet | null {
@@ -142,18 +159,15 @@ function parseQuestionEvaluationSnippet(
   const questionMatch = withoutScoreComment.match(
     QUESTION_EVALUATION_QUESTION_PATTERN,
   );
-  let metadataQuestion: string | null = null;
-
-  if (questionMatch?.[1]) {
-    try {
-      metadataQuestion = decodeURIComponent(questionMatch[1]).trim() || null;
-    } catch {
-      metadataQuestion = null;
-    }
-  }
+  const metadataQuestion = decodeEvaluationMetadata(questionMatch?.[1]);
+  const correctAnswerMatch = withoutScoreComment.match(
+    QUESTION_EVALUATION_CORRECT_ANSWER_PATTERN,
+  );
+  const metadataCorrectAnswer = decodeEvaluationMetadata(correctAnswerMatch?.[1]);
 
   const bodyBlocks = withoutScoreComment
     .replace(QUESTION_EVALUATION_QUESTION_PATTERN, "")
+    .replace(QUESTION_EVALUATION_CORRECT_ANSWER_PATTERN, "")
     .trim()
     .split(/\n{2,}/u)
     .map((block) => block.trim())
@@ -174,18 +188,30 @@ function parseQuestionEvaluationSnippet(
   return {
     content: feedback || body || "Evaluation recorded.",
     question,
+    correctAnswer: metadataCorrectAnswer,
     score: normalizedScore,
   };
 }
 
 function LearnQuestionEvaluationCard({
+  id,
   snippet,
   fallbackQuestion,
+  createdAt,
+  isExpanded,
+  onToggle,
+  onDetailsClick,
 }: {
+  id: string;
   snippet: LearnQuestionEvaluationSnippet;
   fallbackQuestion: string | null;
+  createdAt?: number;
+  isExpanded: boolean;
+  onToggle: () => void;
+  onDetailsClick: () => void;
 }) {
   const question = snippet.question ?? fallbackQuestion ?? "Course question";
+  const detailId = `${id.replace(/[^A-Za-z0-9_-]/g, "-")}-details`;
 
   return (
     <ol
@@ -193,14 +219,23 @@ function LearnQuestionEvaluationCard({
       aria-label={`Question evaluation: ${question}`}
     >
       <PreviousAnswerRow
-        id={`learn-evaluation-${snippet.score}-${question}`}
+        id={id}
         question={question}
         status="resolved"
         score={snippet.score}
         feedback={snippet.content}
-        correctAnswer={null}
-        timeLabel="Evaluation"
+        correctAnswer={snippet.correctAnswer}
+        timestamp={createdAt}
+        timeLabel={
+          typeof createdAt === "number"
+            ? formatCourseUpdatedAt(createdAt)
+            : "Just now"
+        }
+        isExpanded={isExpanded}
+        detailId={detailId}
         className="learn-chat-evaluation-row"
+        onToggle={onToggle}
+        onDetailsClick={onDetailsClick}
       />
     </ol>
   );
@@ -264,6 +299,7 @@ function storedMessageToLearnMessage(
     id: message.id,
     role: message.role,
     content: message.content,
+    createdAt: message.createdAt,
     interrupted:
       message.role === "assistant" &&
       !isEvaluationSnippet &&
@@ -392,6 +428,9 @@ export default function LearnPageClient({
   const [chatMessages, setChatMessages] = useState<LearnChatMessage[]>([
     INITIAL_CHAT_MESSAGE,
   ]);
+  const [expandedLearnEvaluationIds, setExpandedLearnEvaluationIds] = useState<
+    Set<string>
+  >(() => new Set());
   const [courses, setCourses] = useState<Course[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
   const [draftCourseToc, setDraftCourseToc] = useState<CourseToc | null>(null);
@@ -456,6 +495,7 @@ export default function LearnPageClient({
     setSelectedCourse(course);
     setDraftCourseToc(null);
     setIsStartingNewCourse(false);
+    setExpandedLearnEvaluationIds(new Set());
     syncCourse(course);
     setChatMessages(
       course.chatMessages?.length
@@ -743,6 +783,7 @@ export default function LearnPageClient({
     setDraftCourseToc(null);
     setIsStartingNewCourse(true);
     setChatMessages([INITIAL_CHAT_MESSAGE]);
+    setExpandedLearnEvaluationIds(new Set());
     setTopic("");
     setDraftConversationCost(0);
     setError(null);
@@ -797,6 +838,7 @@ export default function LearnPageClient({
         setSelectedCourse(null);
         setDraftCourseToc(null);
         setChatMessages([INITIAL_CHAT_MESSAGE]);
+        setExpandedLearnEvaluationIds(new Set());
         setDraftConversationCost(0);
         setTopic("");
         updateLearnHistory("/learn", "replace");
@@ -816,6 +858,26 @@ export default function LearnPageClient({
     } finally {
       setIsDeletingCourse(false);
     }
+  }
+
+  function toggleLearnEvaluationDetails(messageId: string) {
+    setExpandedLearnEvaluationIds((expandedIds) => {
+      const nextIds = new Set(expandedIds);
+
+      if (nextIds.has(messageId)) {
+        nextIds.delete(messageId);
+      } else {
+        nextIds.add(messageId);
+      }
+
+      return nextIds;
+    });
+  }
+
+  function openLearnEvaluationDetails(question: string) {
+    const params = new URLSearchParams({ question });
+
+    window.location.assign(`/review?${params.toString()}`);
   }
 
   async function submitChatPrompt(event: React.FormEvent<HTMLFormElement>) {
@@ -1275,14 +1337,31 @@ export default function LearnPageClient({
                       const messageContent =
                         evaluationSnippet?.content ?? message.content;
                       if (evaluationSnippet) {
+                        const fallbackQuestion = findPreviousLearnerQuestion(
+                          chatMessages,
+                          messageIndex,
+                        );
+                        const evaluationQuestion =
+                          evaluationSnippet.question ??
+                          fallbackQuestion ??
+                          "Course question";
+
                         return (
                           <LearnQuestionEvaluationCard
                             key={message.id}
+                            id={message.id}
                             snippet={evaluationSnippet}
-                            fallbackQuestion={findPreviousLearnerQuestion(
-                              chatMessages,
-                              messageIndex,
+                            fallbackQuestion={fallbackQuestion}
+                            createdAt={message.createdAt}
+                            isExpanded={expandedLearnEvaluationIds.has(
+                              message.id,
                             )}
+                            onToggle={() =>
+                              toggleLearnEvaluationDetails(message.id)
+                            }
+                            onDetailsClick={() =>
+                              openLearnEvaluationDetails(evaluationQuestion)
+                            }
                           />
                         );
                       }
