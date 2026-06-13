@@ -1217,6 +1217,22 @@ textarea {
   gap: 16px;
 }
 
+.reader-actions-placeholder {
+  width: 164px;
+  height: 42px;
+  flex: 0 0 auto;
+}
+
+.persistent-toolbar-actions {
+  position: fixed;
+  top: calc(clamp(16px, 1.6vw, 24px) + 15px);
+  right: max(
+    calc((100vw - 1200px) / 2 + clamp(26px, 3.8vw, 62px)),
+    calc(clamp(16px, 1.6vw, 24px) + clamp(26px, 3.8vw, 62px))
+  );
+  z-index: 70;
+}
+
 .queue-summary {
   display: inline-flex;
   align-items: center;
@@ -7607,6 +7623,16 @@ textarea {
 
   .reader-actions {
     gap: 10px;
+  }
+
+  .reader-actions-placeholder {
+    width: 102px;
+    height: 34px;
+  }
+
+  .persistent-toolbar-actions {
+    top: 12px;
+    right: 18px;
   }
 
   .queue-summary {

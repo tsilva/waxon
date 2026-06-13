@@ -27,6 +27,7 @@ import {
   PreviousAnswerScore,
 } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
+import { localSettingsEvent } from "@/app/toolbarEvents";
 import type {
   DeckEmbeddingPlot as DeckEmbeddingPlotResponse,
   DeckEmbeddingPlotPoint,
@@ -2511,6 +2512,17 @@ export default function ReviewApp({
 
     return () => window.removeEventListener("keydown", closeSettingsOnEscape);
   }, [isSettingsOpen]);
+
+  useEffect(() => {
+    function openLocalSettings() {
+      setIsSettingsOpen(true);
+    }
+
+    window.addEventListener(localSettingsEvent, openLocalSettings);
+
+    return () =>
+      window.removeEventListener(localSettingsEvent, openLocalSettings);
+  }, []);
 
   useEffect(() => {
     if (!isQuestionGeneratorOpen) {
