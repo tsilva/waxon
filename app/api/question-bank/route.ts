@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
 import {
   listQuestionBankItems,
+  normalizeQuestionBankSort,
   type QuestionBankStatusFilter,
 } from "@/app/lib/questionBank";
 
@@ -34,8 +35,9 @@ export async function GET(request: Request) {
     await listQuestionBankItems({
       userId: user.id,
       query: url.searchParams.get("q"),
-      tagSlug: url.searchParams.get("tag"),
+      tagSlugs: url.searchParams.getAll("tag"),
       status: readStatus(url.searchParams.get("status")),
+      sort: normalizeQuestionBankSort(url.searchParams.get("sort")),
       limit: readPositiveInteger(url.searchParams.get("limit"), 50),
       offset: readNonNegativeInteger(url.searchParams.get("offset")),
     }),

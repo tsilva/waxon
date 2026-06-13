@@ -11,6 +11,7 @@ import {
   reformatMultipleChoiceQuestionForReview,
   stripMultipleChoiceOptionsFromQuestion,
 } from "../app/lib/courseQuestionAttemptParsing.ts";
+import { requireCourseMilestoneMastery } from "../app/lib/courseProgress.ts";
 import { normalizePartialCourseToc } from "../app/lib/courseTocStream.ts";
 
 test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for empty output", () => {
@@ -111,6 +112,35 @@ test("shouldShowCourseChatInterruptedWarning only flags the latest incomplete tu
       content: "Why does that matter for PPO?",
     }),
     false,
+  );
+});
+
+test("requireCourseMilestoneMastery only advances after high-scoring evaluation", () => {
+  const proposedAdvance = {
+    toolCall: "mark_milestone_done" as const,
+    reason: "The learner answered correctly.",
+  };
+
+  assert.deepEqual(
+    requireCourseMilestoneMastery({
+      progressDecision: proposedAdvance,
+      evaluationScore: 9,
+    }),
+    proposedAdvance,
+  );
+  assert.equal(
+    requireCourseMilestoneMastery({
+      progressDecision: proposedAdvance,
+      evaluationScore: 8,
+    }).toolCall,
+    "continue_current_milestone",
+  );
+  assert.equal(
+    requireCourseMilestoneMastery({
+      progressDecision: proposedAdvance,
+      evaluationScore: null,
+    }).toolCall,
+    "continue_current_milestone",
   );
 });
 

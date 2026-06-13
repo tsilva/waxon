@@ -5,6 +5,12 @@ const DEFAULT_QUESTION_BANK_LIMIT = 50;
 const MAX_QUESTION_BANK_LIMIT = 100;
 
 export type QuestionBankStatusFilter = "all" | "due" | "flagged" | "untagged";
+export type QuestionBankSort =
+  | "due"
+  | "created-desc"
+  | "created-asc"
+  | "updated-desc"
+  | "updated-asc";
 
 export type QuestionBankItem = {
   questionId: string;
@@ -13,6 +19,7 @@ export type QuestionBankItem = {
   questionProvenance: string | null;
   nextDue: number;
   createdAt: number;
+  updatedAt: number;
   flaggedAt: number | null;
   conceptSlugs: string[];
 };
@@ -24,23 +31,62 @@ export type QuestionBankPage = {
   nextOffset: number | null;
 };
 
+function normalizeQuestionBankTagSlugs(value: unknown): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  const seen = new Set<string>();
+  const slugs: string[] = [];
+
+  for (const item of values) {
+    const slug = normalizeConceptSlug(item);
+
+    if (!slug || seen.has(slug)) {
+      continue;
+    }
+
+    seen.add(slug);
+    slugs.push(slug);
+
+    if (slugs.length >= 8) {
+      break;
+    }
+  }
+
+  return slugs;
+}
+
 function normalizeStatus(value: unknown): QuestionBankStatusFilter {
   return value === "due" || value === "flagged" || value === "untagged"
     ? value
     : "all";
 }
 
+export function normalizeQuestionBankSort(value: unknown): QuestionBankSort {
+  return value === "created-desc" ||
+    value === "created-asc" ||
+    value === "updated-desc" ||
+    value === "updated-asc"
+    ? value
+    : "due";
+}
+
 export async function listQuestionBankItems(input: {
   userId: string;
   query?: string | null;
   tagSlug?: string | null;
+  tagSlugs?: string[] | null;
   status?: QuestionBankStatusFilter | null;
+  sort?: QuestionBankSort | null;
   limit?: number | null;
   offset?: number | null;
 }): Promise<QuestionBankPage> {
   const query = input.query?.trim() ?? "";
-  const tagSlug = normalizeConceptSlug(input.tagSlug);
+  const tagSlugs = normalizeQuestionBankTagSlugs(
+    input.tagSlugs && input.tagSlugs.length > 0
+      ? input.tagSlugs
+      : input.tagSlug,
+  );
   const status = normalizeStatus(input.status);
+  const sort = normalizeQuestionBankSort(input.sort);
   const limit = Math.max(
     1,
     Math.min(
@@ -87,6 +133,7 @@ export async function listQuestionBankItems(input: {
           q.question_provenance,
           q.next_due,
           q.created_at,
+          q.updated_at,
           q.flagged_at
         FROM questions q
         INNER JOIN decks d ON d.id = q.deck_id
@@ -103,12 +150,16 @@ export async function listQuestionBankItems(input: {
               WHERE qct.question_id = q.id
                 AND vct.slug ILIKE '%' || $2::text || '%'
             ))
-          AND ($3::text = '' OR EXISTS (
+          AND (cardinality($3::text[]) = 0 OR NOT EXISTS (
             SELECT 1
-            FROM question_concept_tags qct
-            INNER JOIN visible_concept_tags vct ON vct.id = qct.concept_tag_id
-            WHERE qct.question_id = q.id
-              AND vct.slug = $3::text
+            FROM unnest($3::text[]) selected_tag(slug)
+            WHERE NOT EXISTS (
+              SELECT 1
+              FROM question_concept_tags qct
+              INNER JOIN visible_concept_tags vct ON vct.id = qct.concept_tag_id
+              WHERE qct.question_id = q.id
+                AND vct.slug = selected_tag.slug
+            )
           ))
           AND (
             $4::text = 'all'
@@ -126,8 +177,12 @@ export async function listQuestionBankItems(input: {
         SELECT *
         FROM filtered_questions
         ORDER BY
-          flagged_at IS NOT NULL ASC,
-          next_due ASC,
+          CASE WHEN $8::text = 'due' THEN flagged_at IS NOT NULL END ASC,
+          CASE WHEN $8::text = 'due' THEN next_due END ASC,
+          CASE WHEN $8::text = 'created-desc' THEN created_at END DESC,
+          CASE WHEN $8::text = 'created-asc' THEN created_at END ASC,
+          CASE WHEN $8::text = 'updated-desc' THEN updated_at END DESC,
+          CASE WHEN $8::text = 'updated-asc' THEN updated_at END ASC,
           created_at DESC,
           question ASC
         LIMIT $6 OFFSET $7
@@ -139,6 +194,7 @@ export async function listQuestionBankItems(input: {
         pq.question_provenance,
         pq.next_due,
         pq.created_at,
+        pq.updated_at,
         pq.flagged_at,
         coalesce(
           array_agg(vct.slug ORDER BY vct.slug) FILTER (WHERE vct.slug IS NOT NULL),
@@ -154,14 +210,19 @@ export async function listQuestionBankItems(input: {
         pq.question_provenance,
         pq.next_due,
         pq.created_at,
+        pq.updated_at,
         pq.flagged_at
       ORDER BY
-        pq.flagged_at IS NOT NULL ASC,
-        pq.next_due ASC,
+        CASE WHEN $8::text = 'due' THEN pq.flagged_at IS NOT NULL END ASC,
+        CASE WHEN $8::text = 'due' THEN pq.next_due END ASC,
+        CASE WHEN $8::text = 'created-desc' THEN pq.created_at END DESC,
+        CASE WHEN $8::text = 'created-asc' THEN pq.created_at END ASC,
+        CASE WHEN $8::text = 'updated-desc' THEN pq.updated_at END DESC,
+        CASE WHEN $8::text = 'updated-asc' THEN pq.updated_at END ASC,
         pq.created_at DESC,
         pq.question ASC
     `,
-    [input.userId, query, tagSlug, status, now, pageLimit, offset],
+    [input.userId, query, tagSlugs, status, now, pageLimit, offset, sort],
   );
   const hasMore = result.rows.length > limit;
   const pageRows = hasMore ? result.rows.slice(0, limit) : result.rows;
@@ -176,6 +237,7 @@ export async function listQuestionBankItems(input: {
         : null,
       nextDue: Number(row.next_due) || 0,
       createdAt: Number(row.created_at) || 0,
+      updatedAt: Number(row.updated_at) || 0,
       flaggedAt: row.flagged_at === null ? null : Number(row.flagged_at) || 0,
       conceptSlugs: Array.isArray(row.concept_slugs)
         ? row.concept_slugs.map(String).filter(Boolean)
