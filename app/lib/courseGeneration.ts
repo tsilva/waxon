@@ -27,6 +27,7 @@ import {
   type PartialCourseToc,
 } from "./courseTocStream.ts";
 import type { CourseDetail } from "./courseStore";
+import type { CourseProgressDecision } from "./courseProgress.ts";
 
 const COURSE_JSON_RESPONSE_FORMAT = { type: "json_object" };
 const MAX_INTAKE_MESSAGE_CHARS = 500;
@@ -59,16 +60,6 @@ export type CourseChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
-
-export type CourseProgressDecision =
-  | {
-      toolCall: "mark_milestone_done";
-      reason: string;
-    }
-  | {
-      toolCall: "continue_current_milestone";
-      reason: string;
-    };
 
 export type { CourseQuestionAttemptToolResult };
 
@@ -291,8 +282,10 @@ export async function evaluateCourseChatProgress(input: {
           content: [
             "You are controlling Waxon's milestone progress tool.",
             "Decide whether the learner's latest answer shows enough understanding to finish the current TOC milestone.",
-            "Use mark_milestone_done only when the learner correctly explains or selects the core idea.",
-            "Use continue_current_milestone when the answer is missing, vague, wrong, or only partially correct.",
+            "Be conservative: a learner should stay on the current milestone until they have clearly grasped its objective.",
+            "Use mark_milestone_done only when the learner demonstrates the core idea with enough specificity to transfer it, such as a correct explanation in their own words or a correct selection plus a clear reason.",
+            "Do not advance for a lucky multiple-choice letter, a keyword match, a vague answer, a partially correct answer, or an answer that omits the causal/mechanistic point of the milestone.",
+            "Use continue_current_milestone when the learner needs more practice on the same topic; the next tutor turn should present the same milestone from a new angle and ask a different question.",
             "Return strict JSON only with shape {\"toolCall\":\"mark_milestone_done\"|\"continue_current_milestone\",\"reason\":\"...\"}.",
           ].join(" "),
         },
@@ -470,8 +463,8 @@ export async function streamCourseChatTurn(input: {
             "End every turn with exactly one learner-facing question, and make it the final sentence or final multiple-choice block.",
             "Questions can be short free-response or multiple choice.",
             "If multiple choice, write choices directly in chat as A), B), C), D). Do not use widgets, JSON, markdown tables, or hidden metadata.",
-            "If the previous answer completed a milestone, briefly acknowledge it and move to the next milestone.",
-            "If the previous answer did not complete the milestone, give concise corrective feedback and ask a smaller follow-up question.",
+            "If the progress tool says the previous answer completed a milestone, briefly acknowledge it and move to the next milestone.",
+            "If the progress tool says the previous answer did not complete the milestone, do not advance. Stay on the same milestone, reteach the same topic from a different angle, and ask a different targeted question that tests the same objective.",
             "Do not mention tool calls or internal progress decisions.",
           ].join(" "),
         },

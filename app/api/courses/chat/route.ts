@@ -12,8 +12,11 @@ import {
   generateCourseToc,
   streamCourseChatTurn,
   type CourseChatMessage,
-  type CourseProgressDecision,
 } from "@/app/lib/courseGeneration";
+import {
+  requireCourseMilestoneMastery,
+  type CourseProgressDecision,
+} from "@/app/lib/courseProgress";
 import {
   addCourseConversationCost,
   advanceCourseProgress,
@@ -71,6 +74,11 @@ function buildQuestionEvaluationSnippet(input: {
       .join("\n\n"),
   };
 }
+
+type CourseQuestionEvaluationResult = {
+  message: CourseChatMessage;
+  score: number;
+};
 
 function normalizeStoredMessages(value: unknown): CourseChatMessage[] {
   if (!Array.isArray(value)) {
@@ -259,8 +267,9 @@ export async function POST(request: Request) {
             turnCost += cost;
           }
         };
-        let questionEvaluationSnippet: CourseChatMessage | null = null;
-        let questionEvaluationPromise: Promise<CourseChatMessage | null> =
+        let questionEvaluationResult: CourseQuestionEvaluationResult | null =
+          null;
+        let questionEvaluationPromise: Promise<CourseQuestionEvaluationResult | null> =
           Promise.resolve(null);
         let finalCoursePromise: Promise<CourseDetail> | null = null;
 
@@ -333,7 +342,10 @@ export async function POST(request: Request) {
                     content: evaluationSnippetWithMetrics.content,
                   });
 
-                  return evaluationSnippetWithMetrics;
+                  return {
+                    message: evaluationSnippetWithMetrics,
+                    score: questionAttempt.score,
+                  };
                 })()
               : Promise.resolve(null);
             send("status", { status: "Planning next step" });
@@ -350,6 +362,14 @@ export async function POST(request: Request) {
               reason: "Progress evaluation was unavailable.",
             }));
             progressDecision = await progressDecisionPromise;
+
+            if (progressDecision.toolCall === "mark_milestone_done") {
+              questionEvaluationResult = await questionEvaluationPromise;
+              progressDecision = requireCourseMilestoneMastery({
+                progressDecision,
+                evaluationScore: questionEvaluationResult?.score ?? null,
+              });
+            }
 
             if (progressDecision.toolCall === "mark_milestone_done") {
               course = await advanceCourseProgress(course.id);
@@ -506,7 +526,7 @@ export async function POST(request: Request) {
               send("delta", { delta });
             },
           });
-          questionEvaluationSnippet = await questionEvaluationPromise;
+          questionEvaluationResult ??= await questionEvaluationPromise;
 
           if (finalCoursePromise) {
             course = await finalCoursePromise;
@@ -516,7 +536,9 @@ export async function POST(request: Request) {
             courseId: course.id,
             messages: [
               ...storedMessages,
-              ...(questionEvaluationSnippet ? [questionEvaluationSnippet] : []),
+              ...(questionEvaluationResult
+                ? [questionEvaluationResult.message]
+                : []),
               {
                 role: "assistant",
                 content: appendCourseMessageMetrics(

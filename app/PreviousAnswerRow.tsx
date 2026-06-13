@@ -23,9 +23,11 @@ export type PreviousAnswerRowProps = {
   detailsLabel?: string;
   className?: string;
   leadingContent?: ReactNode;
+  questionLabelContent?: ReactNode;
   supportingContent?: ReactNode;
   detailsContent?: ReactNode;
   metaContent?: ReactNode;
+  secondaryMetaContent?: ReactNode;
   onToggle?: () => void;
   onDetailsClick?: () => void;
 };
@@ -100,9 +102,11 @@ export function PreviousAnswerRow({
   detailsLabel = "More details",
   className,
   leadingContent,
+  questionLabelContent,
   supportingContent,
   detailsContent,
   metaContent,
+  secondaryMetaContent,
   onToggle,
   onDetailsClick,
 }: PreviousAnswerRowProps) {
@@ -121,7 +125,14 @@ export function PreviousAnswerRow({
     <>
       <div className="previous-copy">
         <div className="previous-field previous-question-field">
-          <span className="previous-field-label">{questionLabel}</span>
+          <span className="previous-label-row">
+            <span className="previous-field-label">{questionLabel}</span>
+            {questionLabelContent !== undefined ? (
+              <span className="previous-label-content">
+                {questionLabelContent}
+              </span>
+            ) : null}
+          </span>
           <MarkdownInline
             as="p"
             className="previous-question"
@@ -191,12 +202,17 @@ export function PreviousAnswerRow({
                 <ChevronDown className="previous-collapse-icon" aria-hidden="true" />
               ) : null}
             </span>
-            {evaluationCostLabel ? (
-              <span
-                className="previous-cost-label"
-                aria-label={`Evaluation cost ${evaluationCostLabel}`}
-              >
-                eval {evaluationCostLabel}
+            {evaluationCostLabel || secondaryMetaContent ? (
+              <span className="previous-secondary-meta">
+                {evaluationCostLabel ? (
+                  <span
+                    className="previous-cost-label"
+                    aria-label={`Evaluation cost ${evaluationCostLabel}`}
+                  >
+                    eval {evaluationCostLabel}
+                  </span>
+                ) : null}
+                {secondaryMetaContent}
               </span>
             ) : null}
           </>

@@ -1,8 +1,14 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
-import { ChevronDown, Search } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronDown, Search, X } from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import type { ConceptTagSummary } from "@/app/lib/conceptTags";
@@ -10,6 +16,7 @@ import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import type {
   QuestionBankItem,
   QuestionBankPage,
+  QuestionBankSort,
   QuestionBankStatusFilter,
 } from "@/app/lib/questionBank";
 import { MarkdownInline } from "@/app/MarkdownContent";
@@ -44,6 +51,17 @@ const statusOptions: Array<{
   { value: "untagged", label: "Untagged" },
 ];
 
+const sortOptions: Array<{
+  value: QuestionBankSort;
+  label: string;
+}> = [
+  { value: "due", label: "Due date" },
+  { value: "created-desc", label: "Created newest" },
+  { value: "created-asc", label: "Created oldest" },
+  { value: "updated-desc", label: "Updated newest" },
+  { value: "updated-asc", label: "Updated oldest" },
+];
+
 const EMPTY_QUESTION_BANK: QuestionBankPage = {
   items: [],
   total: 0,
@@ -51,6 +69,7 @@ const EMPTY_QUESTION_BANK: QuestionBankPage = {
   nextOffset: null,
 };
 const LIBRARY_PAGE_SIZE = 50;
+const LIBRARY_TAG_SUGGESTION_LIMIT = 8;
 
 function formatDate(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
@@ -79,7 +98,8 @@ function questionStatus(item: QuestionBankItem, now: number): string {
 function questionBankParams(input: {
   query: string;
   status: QuestionBankStatusFilter;
-  tagSlug: string;
+  tagSlugs: string[];
+  sort: QuestionBankSort;
   offset: number;
 }): URLSearchParams {
   const params = new URLSearchParams({
@@ -95,8 +115,14 @@ function questionBankParams(input: {
     params.set("status", input.status);
   }
 
-  if (input.tagSlug) {
-    params.set("tag", input.tagSlug);
+  for (const tagSlug of input.tagSlugs) {
+    if (tagSlug) {
+      params.append("tag", tagSlug);
+    }
+  }
+
+  if (input.sort !== "due") {
+    params.set("sort", input.sort);
   }
 
   return params;
@@ -105,7 +131,8 @@ function questionBankParams(input: {
 async function fetchQuestionBankPage(input: {
   query: string;
   status: QuestionBankStatusFilter;
-  tagSlug: string;
+  tagSlugs: string[];
+  sort: QuestionBankSort;
   offset: number;
   signal?: AbortSignal;
 }): Promise<QuestionBankPage> {
@@ -127,6 +154,14 @@ async function fetchQuestionBankPage(input: {
   return data;
 }
 
+function tagSearchInputValue(query: string, tagDraft: string | null): string {
+  if (tagDraft === null) {
+    return query;
+  }
+
+  return `${query.trimEnd()}${query.trim() ? " " : ""}#${tagDraft}`;
+}
+
 export default function LibraryPageClient({
   initialQuestionBank = null,
   initialConceptTags = null,
@@ -142,8 +177,13 @@ export default function LibraryPageClient({
   const [currentUser, setCurrentUser] = useState(initialUser ?? null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<QuestionBankStatusFilter>("all");
-  const [tagSlug, setTagSlug] = useState("");
+  const [selectedTagSlugs, setSelectedTagSlugs] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState<string | null>(null);
+  const [activeTagOptionIndex, setActiveTagOptionIndex] = useState(0);
+  const [sort, setSort] = useState<QuestionBankSort>("due");
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
+  const [selectedQuestionDetails, setSelectedQuestionDetails] =
+    useState<QuestionBankItem | null>(null);
   const [isLoading, setIsLoading] = useState(initialQuestionBank === null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isMetadataLoading, setIsMetadataLoading] = useState(
@@ -176,6 +216,116 @@ export default function LibraryPageClient({
   const questionCountLabel = questionBank.hasMore
     ? `${questionBank.items.length}+ questions`
     : `${questionBank.items.length} questions`;
+  const matchingTagOptions = useMemo(() => {
+    if (tagDraft === null) {
+      return [];
+    }
+
+    const draft = tagDraft.trim().toLowerCase();
+
+    return conceptTags
+      .filter((tag) => !selectedTagSlugs.includes(tag.slug))
+      .filter((tag) => !draft || tag.slug.includes(draft))
+      .slice(0, LIBRARY_TAG_SUGGESTION_LIMIT);
+  }, [conceptTags, selectedTagSlugs, tagDraft]);
+  const safeActiveTagOptionIndex =
+    matchingTagOptions.length === 0
+      ? 0
+      : Math.min(activeTagOptionIndex, matchingTagOptions.length - 1);
+  const isTagPickerOpen = tagDraft !== null;
+  const searchInputValue = tagSearchInputValue(query, tagDraft);
+
+  const addSelectedTag = useCallback((slug: string) => {
+    setSelectedTagSlugs((current) =>
+      current.includes(slug) ? current : [...current, slug],
+    );
+    setTagDraft(null);
+    setActiveTagOptionIndex(0);
+  }, []);
+
+  const removeSelectedTag = useCallback((slug: string) => {
+    setSelectedTagSlugs((current) => current.filter((item) => item !== slug));
+  }, []);
+
+  const handleSearchInputChange = useCallback((value: string) => {
+    const tagTriggerMatch = value.match(/(^|\s)#([^\s#]*)$/u);
+
+    if (tagTriggerMatch?.index !== undefined) {
+      const triggerPrefix = tagTriggerMatch[1] ?? "";
+      const triggerStart = tagTriggerMatch.index + triggerPrefix.length;
+
+      setQuery(value.slice(0, triggerStart).trimEnd());
+      setTagDraft(tagTriggerMatch[2] ?? "");
+      setActiveTagOptionIndex(0);
+      return;
+    }
+
+    setQuery(value);
+    setTagDraft(null);
+    setActiveTagOptionIndex(0);
+  }, []);
+
+  const handleSearchKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (tagDraft !== null) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setActiveTagOptionIndex((current) =>
+            matchingTagOptions.length === 0
+              ? 0
+              : (current + 1) % matchingTagOptions.length,
+          );
+          return;
+        }
+
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setActiveTagOptionIndex((current) =>
+            matchingTagOptions.length === 0
+              ? 0
+              : (current - 1 + matchingTagOptions.length) %
+                  matchingTagOptions.length,
+          );
+          return;
+        }
+
+        if (event.key === "Enter" || event.key === "Tab") {
+          const selectedOption = matchingTagOptions[safeActiveTagOptionIndex];
+
+          if (selectedOption) {
+            event.preventDefault();
+            addSelectedTag(selectedOption.slug);
+          }
+          return;
+        }
+
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setTagDraft(null);
+          setActiveTagOptionIndex(0);
+        }
+
+        return;
+      }
+
+      if (
+        event.key === "Backspace" &&
+        query.length === 0 &&
+        selectedTagSlugs.length > 0
+      ) {
+        event.preventDefault();
+        setSelectedTagSlugs((current) => current.slice(0, -1));
+      }
+    },
+    [
+      addSelectedTag,
+      matchingTagOptions,
+      query.length,
+      safeActiveTagOptionIndex,
+      selectedTagSlugs.length,
+      tagDraft,
+    ],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -248,7 +398,8 @@ export default function LibraryPageClient({
       fetchQuestionBankPage({
         query,
         status,
-        tagSlug,
+        tagSlugs: selectedTagSlugs,
+        sort,
         offset: 0,
         signal: controller.signal,
       })
@@ -281,7 +432,7 @@ export default function LibraryPageClient({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [query, status, tagSlug]);
+  }, [query, status, selectedTagSlugs, sort]);
 
   const loadMoreQuestions = useCallback(async () => {
     if (questionBank.nextOffset === null || isLoadingMore) {
@@ -295,7 +446,8 @@ export default function LibraryPageClient({
       const data = await fetchQuestionBankPage({
         query,
         status,
-        tagSlug,
+        tagSlugs: selectedTagSlugs,
+        sort,
         offset: questionBank.nextOffset,
       });
 
@@ -319,7 +471,14 @@ export default function LibraryPageClient({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [isLoadingMore, query, questionBank.nextOffset, status, tagSlug]);
+  }, [
+    isLoadingMore,
+    query,
+    questionBank.nextOffset,
+    selectedTagSlugs,
+    status,
+    sort,
+  ]);
 
   return (
     <main className="page page-review page-library">
@@ -378,33 +537,114 @@ export default function LibraryPageClient({
                 ))}
               </select>
             </label>
-            <label className="library-tag-filter-label">
-              <span>Tag</span>
+            <label className="library-sort-filter-label">
+              <span>Sort</span>
               <select
-                value={tagSlug}
-                onChange={(event) => setTagSlug(event.target.value)}
+                value={sort}
+                onChange={(event) =>
+                  setSort(event.target.value as QuestionBankSort)
+                }
               >
-                <option value="">Any tag</option>
-                {conceptTags.map((tag) => (
-                  <option key={tag.id} value={tag.slug}>
-                    {tag.slug}
+                {sortOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
             </label>
-            <label className="deck-search-label library-search-label">
-              <span className="sr-only">Search question bank</span>
-              <span className="deck-search-shell">
+            <div
+              className="deck-search-label library-search-label"
+              onBlur={(event) => {
+                const nextTarget = event.relatedTarget as Node | null;
+
+                if (!nextTarget || !event.currentTarget.contains(nextTarget)) {
+                  setTagDraft(null);
+                  setActiveTagOptionIndex(0);
+                }
+              }}
+            >
+              <label className="sr-only" htmlFor="library-question-search">
+                Search question bank
+              </label>
+              <span
+                className={`deck-search-shell library-token-search-shell${
+                  isTagPickerOpen ? " library-token-search-shell-open" : ""
+                }`}
+              >
                 <Search aria-hidden="true" />
-                <input
-                  className="deck-search-input"
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search questions"
-                />
+                <span className="library-search-token-row">
+                  {selectedTagSlugs.map((slug) => (
+                    <button
+                      className="library-search-tag-token"
+                      key={slug}
+                      type="button"
+                      aria-label={`Remove tag ${slug}`}
+                      onClick={() => removeSelectedTag(slug)}
+                    >
+                      <span>#{slug}</span>
+                      <X aria-hidden="true" />
+                    </button>
+                  ))}
+                  <input
+                    id="library-question-search"
+                    className="deck-search-input library-token-search-input"
+                    type="search"
+                    value={searchInputValue}
+                    onChange={(event) =>
+                      handleSearchInputChange(event.target.value)
+                    }
+                    onKeyDown={handleSearchKeyDown}
+                    placeholder={
+                      selectedTagSlugs.length > 0
+                        ? "Search or type #"
+                        : "Search questions or type #tag"
+                    }
+                    role="combobox"
+                    aria-expanded={isTagPickerOpen}
+                    aria-controls="library-tag-suggestions"
+                    aria-activedescendant={
+                      isTagPickerOpen && matchingTagOptions.length > 0
+                        ? `library-tag-suggestion-${matchingTagOptions[safeActiveTagOptionIndex].id}`
+                        : undefined
+                    }
+                  />
+                </span>
               </span>
-            </label>
+              {isTagPickerOpen ? (
+                <div
+                  className="library-tag-suggestions"
+                  id="library-tag-suggestions"
+                  role="listbox"
+                  aria-label="Tag suggestions"
+                >
+                  {matchingTagOptions.length === 0 ? (
+                    <p>No matching tags</p>
+                  ) : (
+                    matchingTagOptions.map((tag, index) => (
+                      <button
+                        className={`library-tag-suggestion${
+                          index === safeActiveTagOptionIndex
+                            ? " library-tag-suggestion-active"
+                            : ""
+                        }`}
+                        id={`library-tag-suggestion-${tag.id}`}
+                        key={tag.id}
+                        type="button"
+                        role="option"
+                        aria-selected={index === safeActiveTagOptionIndex}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          addSelectedTag(tag.slug);
+                        }}
+                      >
+                        <span>#{tag.slug}</span>
+                        <small>{tag.questionCount} questions</small>
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
 
           {message ? <p className="deck-editor-status">{message}</p> : null}
@@ -464,7 +704,8 @@ export default function LibraryPageClient({
                     detailId={detailId}
                     className="library-previous-row"
                     onToggle={toggleQuestion}
-                    supportingContent={
+                    onDetailsClick={() => setSelectedQuestionDetails(item)}
+                    questionLabelContent={
                       <div className="library-chip-row">
                         {item.conceptSlugs.length === 0 ? (
                           <span className="library-chip library-chip-muted">
@@ -479,6 +720,7 @@ export default function LibraryPageClient({
                         )}
                       </div>
                     }
+                    supportingContent={null}
                     detailsContent={
                       <>
                         {item.conciseAnswer ? (
@@ -504,6 +746,12 @@ export default function LibraryPageClient({
                           <span className="previous-field-label">Created</span>
                           <p className="previous-answer previous-answer-empty">
                             {formatDate(item.createdAt)}
+                          </p>
+                        </div>
+                        <div className="previous-field">
+                          <span className="previous-field-label">Updated</span>
+                          <p className="previous-answer previous-answer-empty">
+                            {formatDate(item.updatedAt)}
                           </p>
                         </div>
                       </>
@@ -544,6 +792,112 @@ export default function LibraryPageClient({
           ) : null}
         </section>
       </section>
+
+      {selectedQuestionDetails ? (
+        <div
+          className="stats-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedQuestionDetails(null);
+            }
+          }}
+        >
+          <section
+            className="stats-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="library-details-title"
+          >
+            <div className="stats-modal-header">
+              <div>
+                <p className="stats-modal-kicker">Question details</p>
+                <div id="library-details-title">
+                  <MarkdownInline
+                    as="h2"
+                    className="stats-modal-title"
+                    enableMath
+                    text={selectedQuestionDetails.question}
+                  />
+                </div>
+                <p className="stats-modal-question-id">
+                  <span>Question ID:</span>
+                  <code>{selectedQuestionDetails.questionId}</code>
+                </p>
+              </div>
+              <button
+                className="stats-modal-close"
+                type="button"
+                aria-label="Close question details"
+                onClick={() => setSelectedQuestionDetails(null)}
+              />
+            </div>
+
+            <div className="stats-grid" aria-label="Question summary">
+              <div className="stats-tile">
+                <span>Status</span>
+                <strong>{questionStatus(selectedQuestionDetails, now)}</strong>
+              </div>
+              <div className="stats-tile">
+                <span>Next due</span>
+                <strong>{formatDate(selectedQuestionDetails.nextDue)}</strong>
+              </div>
+              <div className="stats-tile">
+                <span>Created</span>
+                <strong>{formatDate(selectedQuestionDetails.createdAt)}</strong>
+              </div>
+              <div className="stats-tile">
+                <span>Updated</span>
+                <strong>{formatDate(selectedQuestionDetails.updatedAt)}</strong>
+              </div>
+            </div>
+
+            <div className="stats-history-panel">
+              <div className="stats-section-heading">
+                <h3>Answer</h3>
+              </div>
+              {selectedQuestionDetails.conciseAnswer ? (
+                <MarkdownInline
+                  as="p"
+                  className="previous-answer"
+                  enableMath
+                  text={selectedQuestionDetails.conciseAnswer}
+                />
+              ) : (
+                <p className="stats-empty">No answer recorded.</p>
+              )}
+            </div>
+
+            {selectedQuestionDetails.questionProvenance ? (
+              <div className="stats-history-panel">
+                <div className="stats-section-heading">
+                  <h3>Source</h3>
+                </div>
+                <p className="previous-answer previous-answer-empty">
+                  {selectedQuestionDetails.questionProvenance}
+                </p>
+              </div>
+            ) : null}
+
+            <div className="stats-history-panel">
+              <div className="stats-section-heading">
+                <h3>Concepts</h3>
+              </div>
+              {selectedQuestionDetails.conceptSlugs.length === 0 ? (
+                <p className="stats-empty">No concepts tagged.</p>
+              ) : (
+                <div className="stats-concept-list">
+                  {selectedQuestionDetails.conceptSlugs.map((slug) => (
+                    <span className="stats-concept-chip" key={slug}>
+                      {slug}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }

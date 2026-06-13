@@ -172,14 +172,12 @@ function LearnQuestionEvaluationCard({
         isExpanded={isExpanded}
         detailId={detailId}
         className="learn-chat-evaluation-row"
+        secondaryMetaContent={
+          metrics ? <LearnChatMessageMetrics metrics={metrics} /> : null
+        }
         onToggle={onToggle}
         onDetailsClick={onDetailsClick}
       />
-      {metrics ? (
-        <li className="learn-chat-evaluation-metrics-row">
-          <LearnChatMessageMetrics metrics={metrics} />
-        </li>
-      ) : null}
     </ol>
   );
 }

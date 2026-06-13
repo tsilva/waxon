@@ -133,17 +133,6 @@ export function ReviewToolbar({
         </Link>
         <div className="reader-tabs" role="tablist" aria-label="Waxon views">
           <Link
-            className={tabClass(activeTab === "learn")}
-            href="/learn"
-            role="tab"
-            id="learn-tab"
-            aria-selected={activeTab === "learn"}
-            aria-controls="learn-panel"
-            onClick={onLearnClick}
-          >
-            Learn
-          </Link>
-          <Link
             className={tabClass(activeTab === "review")}
             href="/review"
             role="tab"
@@ -153,6 +142,17 @@ export function ReviewToolbar({
             onClick={onReviewClick}
           >
             Review
+          </Link>
+          <Link
+            className={tabClass(activeTab === "learn")}
+            href="/learn"
+            role="tab"
+            id="learn-tab"
+            aria-selected={activeTab === "learn"}
+            aria-controls="learn-panel"
+            onClick={onLearnClick}
+          >
+            Learn
           </Link>
           <Link
             className={tabClass(activeTab === "library")}
