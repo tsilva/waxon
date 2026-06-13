@@ -10,7 +10,6 @@ import {
   SquareCheck,
   Trash2,
 } from "lucide-react";
-import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import {
@@ -387,6 +386,62 @@ function isMilestoneComplete(
   }
 
   return pageIndex < course.currentPageIndex;
+}
+
+function LearnLoadingPlaceholders() {
+  return (
+    <div
+      className="learn-chat-layout learn-loading-layout"
+      role="status"
+      aria-label="Loading Learn"
+      aria-busy="true"
+    >
+      <aside
+        className="learn-chat-toc learn-loading-toc"
+        aria-hidden="true"
+      >
+        <span className="admin-skeleton-line learn-loading-kicker" />
+        <nav className="learn-toc" aria-label="Loading course outline">
+          <ol>
+            {Array.from({ length: 5 }, (_, index) => (
+              <li className="learn-loading-toc-row" key={index}>
+                <span className="learn-toc-status">
+                  <span className="deck-skeleton-toggle learn-loading-check" />
+                </span>
+                <span className="admin-skeleton-line learn-loading-toc-line" />
+              </li>
+            ))}
+          </ol>
+        </nav>
+      </aside>
+
+      <section
+        className="learn-chat-panel learn-loading-panel"
+        aria-hidden="true"
+      >
+        <div className="learn-chat-thread learn-loading-thread">
+          <div className="learn-chat-message learn-chat-message-assistant learn-loading-message">
+            <span className="admin-skeleton-line learn-loading-message-line learn-loading-message-line-long" />
+            <span className="admin-skeleton-line learn-loading-message-line" />
+            <span className="admin-skeleton-line learn-loading-message-line learn-loading-message-line-short" />
+          </div>
+          <div className="learn-chat-message learn-chat-message-user learn-loading-message learn-loading-message-user">
+            <span className="admin-skeleton-line learn-loading-message-line" />
+          </div>
+          <div className="learn-chat-message learn-chat-message-assistant learn-loading-message">
+            <span className="admin-skeleton-line learn-loading-message-line learn-loading-message-line-medium" />
+            <span className="admin-skeleton-line learn-loading-message-line learn-loading-message-line-short" />
+          </div>
+        </div>
+        <div className="composer composer-loading learn-loading-composer">
+          <div className="composer-row composer-loading-row">
+            <div className="composer-loading-input" />
+            <div className="composer-loading-button composer-loading-button-accent" />
+          </div>
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function parseSseEvent(rawEvent: string): { event: string; data: unknown } | null {
@@ -1191,29 +1246,7 @@ export default function LearnPageClient({
             </p>
           ) : null}
 
-          {isBooting ? (
-            <div className="learn-loading" role="status">
-              <Image
-                className="learn-loading-image"
-                src="/learn/loading-study.png"
-                alt=""
-                width={360}
-                height={360}
-                priority
-                unoptimized
-                aria-hidden="true"
-              />
-              <div className="learn-loading-copy">
-                <span className="pending-spinner" aria-hidden="true" />
-                <span>Loading Learn</span>
-              </div>
-              <div className="learn-loading-skeleton" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </div>
-            </div>
-          ) : null}
+          {isBooting ? <LearnLoadingPlaceholders /> : null}
 
           {!isBooting ? (
             <div
