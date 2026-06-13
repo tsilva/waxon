@@ -63,29 +63,44 @@ function setTraceIdentity(input: {
 export async function getCurrentUser(): Promise<AuthenticatedUser> {
   if (isLocalTestAuthEnabled()) {
     const now = Date.now();
-    const deckId = getDeckIdForUser(localTestUser.id);
+    const [existingLocalUser] = await db
+      .select({
+        id: users.id,
+        displayName: users.displayName,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+      })
+      .from(users)
+      .where(eq(users.email, localTestUser.email))
+      .limit(1);
+
+    const localUserId = existingLocalUser?.id ?? localTestUser.id;
+    const localUserDisplayName =
+      existingLocalUser?.displayName ?? localTestUser.displayName;
+    const localUserEmail = existingLocalUser?.email ?? localTestUser.email;
+    const deckId = getDeckIdForUser(localUserId);
 
     setTraceIdentity({
-      userId: localTestUser.id,
+      userId: localUserId,
       deckId,
-      email: localTestUser.email,
-      displayName: localTestUser.displayName,
+      email: localUserEmail,
+      displayName: localUserDisplayName,
     });
 
     const [row] = await db
       .insert(users)
       .values({
-        id: localTestUser.id,
-        displayName: localTestUser.displayName,
-        email: localTestUser.email,
+        id: localUserId,
+        displayName: localUserDisplayName,
+        email: localUserEmail,
         createdAt: now,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: users.id,
         set: {
-          displayName: localTestUser.displayName,
-          email: localTestUser.email,
+          displayName: localUserDisplayName,
+          email: localUserEmail,
           updatedAt: now,
         },
       })

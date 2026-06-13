@@ -496,7 +496,7 @@ export async function streamCourseChatTurn(input: {
     body: {
       model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
       temperature: 0.5,
-      max_tokens: 1_400,
+      max_tokens: 2_200,
       messages: [
         {
           role: "system",

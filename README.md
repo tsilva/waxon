@@ -50,13 +50,15 @@ In local development, login and signup buttons automatically enter the app as a
 test user:
 
 ```text
-id: local-test
-email: local-test@waxon.local
+email: eng.tiago.silva@gmail.com
 ```
 
-This keeps `/review`, `/decks`, `/admin`, and app API routes testable without a
-Clerk browser session. To test the real Clerk flow locally, disable the local
-test user:
+When a user with that email exists in the configured database, local dev auth
+uses that existing app user id so user-owned resources remain visible. If the
+user does not exist, Waxon creates a fallback `local-test` user with that email.
+This keeps `/review`, `/decks`, `/admin`, `/learn`, `/library`, `/stats`, and app
+API routes testable without a Clerk browser session. To test the real Clerk flow
+locally, disable the local test user:
 
 ```bash
 NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1
