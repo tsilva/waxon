@@ -56,6 +56,53 @@ export function stripMultipleChoiceOptionsFromQuestion(question: string): string
   return lines.slice(0, firstChoiceLineIndex).join("\n").trim();
 }
 
+function formatInlineMathTarget(value: string): string {
+  const normalized = value.trim().replace(/\s+/g, " ");
+
+  if (/^\$.*\$$/u.test(normalized) || /`/.test(normalized)) {
+    return normalized;
+  }
+
+  const equationPattern = /\b[A-Za-z][A-Za-z0-9_]*\s*[=<>]\s*[-+]?\d+(?:\.\d+)?\b/gu;
+
+  if (equationPattern.test(normalized)) {
+    return normalized.replace(equationPattern, (match) => `$${match}$`);
+  }
+
+  return /(?:^|\s)[a-zA-Z]\s*[+\-*/^]/u.test(normalized)
+    ? `$${normalized}$`
+    : normalized;
+}
+
+export function reformatMultipleChoiceQuestionForReview(question: string): string {
+  const stem = stripMultipleChoiceOptionsFromQuestion(question)
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\s*[:.]\s*$/u, "");
+
+  const meaningMatch = stem.match(
+    /^choose\s+(?:the\s+)?(?:best|correct|most\s+accurate)\s+(?:meaning|interpretation)\s+of\s+(.+)$/iu,
+  );
+
+  if (meaningMatch?.[1]) {
+    return `What does ${formatInlineMathTarget(meaningMatch[1])} mean?`;
+  }
+
+  const answerMatch = stem.match(
+    /^choose\s+(?:the\s+)?(?:best|correct|most\s+accurate)\s+(?:answer|option|choice)\s*(?:to|for)?\s*(.+)$/iu,
+  );
+
+  if (answerMatch?.[1]) {
+    const remainder = answerMatch[1].trim().replace(/\s*[:.]\s*$/u, "");
+
+    if (remainder && !/^(?:the\s+)?(?:question|prompt)$/iu.test(remainder)) {
+      return /\?$/u.test(remainder) ? remainder : `${remainder}?`;
+    }
+  }
+
+  return stem;
+}
+
 function normalizeRecordText(
   record: Record<string, unknown>,
   keys: string[],
@@ -119,7 +166,7 @@ export function parseCourseQuestionAttemptToolResult(
   }
 
   const question = normalizeMultilineText(
-    stripMultipleChoiceOptionsFromQuestion(
+    reformatMultipleChoiceQuestionForReview(
       normalizeMultilineText(record.question, 1_200),
     ),
     1_200,
