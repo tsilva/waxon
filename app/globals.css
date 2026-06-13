@@ -6971,7 +6971,7 @@ textarea {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 4px 6px 0 0;
+  padding: 4px clamp(24px, 2.4vw, 34px) 0 0;
   scroll-behavior: smooth;
 }
 
@@ -7110,6 +7110,7 @@ textarea {
 }
 
 .learn-chat-message-metrics {
+  justify-self: end;
   margin: 0;
   color: rgb(117 103 84 / 66%);
   font-family: var(--font-ui);
@@ -7117,6 +7118,7 @@ textarea {
   font-weight: 760;
   line-height: 1.25;
   overflow-wrap: anywhere;
+  text-align: right;
 }
 
 .learn-chat-evaluation-metrics-row {
@@ -8493,6 +8495,10 @@ textarea {
 
   .learn-chat-message {
     max-width: 92%;
+  }
+
+  .learn-chat-thread {
+    padding-right: 6px;
   }
 
   .learn-toc {

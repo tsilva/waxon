@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  excerptCourseMessageForPrompt,
   ensureCourseChatTurnHasLearnerQuestion,
   isCourseChatTurnComplete,
+  shouldShowCourseChatInterruptedWarning,
 } from "../app/lib/courseChatTurn.ts";
 import {
   parseCourseQuestionAttemptToolResult,
@@ -83,6 +85,58 @@ test("isCourseChatTurnComplete accepts terminal questions and multiple choice", 
     true,
   );
   assert.equal(isCourseChatTurnComplete("In your own"), false);
+});
+
+test("shouldShowCourseChatInterruptedWarning only flags the latest incomplete tutor turn", () => {
+  assert.equal(
+    shouldShowCourseChatInterruptedWarning({
+      role: "assistant",
+      content: "High explained variance usually me",
+    }),
+    true,
+  );
+
+  assert.equal(
+    shouldShowCourseChatInterruptedWarning({
+      role: "assistant",
+      content: "High explained variance usually me",
+      hasLaterStoredMessage: true,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldShowCourseChatInterruptedWarning({
+      role: "assistant",
+      content: "Why does that matter for PPO?",
+    }),
+    false,
+  );
+});
+
+test("excerptCourseMessageForPrompt preserves final learner question", () => {
+  const finalQuestion =
+    "In PPO, explained variance mainly evaluates which component?";
+  const longLesson = [
+    "Milestone 1: What explained variance measures in PPO",
+    "In PPO, explained variance is a metric for the value function, not directly for the policy.".repeat(
+      18,
+    ),
+    "Key pieces:",
+    "- Observed returns: what happened",
+    "- Value predictions: what the value function guessed",
+    finalQuestion,
+    "A) The policy's action choices",
+    "B) The value function's return predictions",
+  ].join("\n\n");
+
+  const excerpt = excerptCourseMessageForPrompt(longLesson, 1_200);
+
+  assert.ok(excerpt.length <= 1_200);
+  assert.match(excerpt, /Milestone 1/u);
+  assert.match(excerpt, /middle omitted/u);
+  assert.match(excerpt, /explained variance mainly evaluates/u);
+  assert.match(excerpt, /value function's return predictions/u);
 });
 
 test("normalizePartialCourseToc extracts complete streamed TOC pages", () => {

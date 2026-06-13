@@ -44,6 +44,28 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
   };
 }
 
+export function excerptCourseMessageForPrompt(
+  content: string,
+  maxLength: number,
+): string {
+  const normalizedContent = content.trim();
+
+  if (
+    normalizedContent.length <= maxLength ||
+    !Number.isFinite(maxLength) ||
+    maxLength < 80
+  ) {
+    return normalizedContent;
+  }
+
+  const marker = "\n\n... [middle omitted] ...\n\n";
+  const remainingLength = Math.max(maxLength - marker.length, 1);
+  const headLength = Math.ceil(remainingLength / 2);
+  const tailLength = Math.floor(remainingLength / 2);
+
+  return `${normalizedContent.slice(0, headLength)}${marker}${normalizedContent.slice(-tailLength)}`;
+}
+
 export function isCourseChatTurnComplete(text: string): boolean {
   const normalizedText = text.trim();
 
@@ -75,4 +97,21 @@ export function isCourseChatTurnComplete(text: string): boolean {
   }
 
   return multipleChoiceLabels.has("A") && multipleChoiceLabels.has("B");
+}
+
+export function shouldShowCourseChatInterruptedWarning(input: {
+  role: "assistant" | "user";
+  content: string;
+  isEvaluationSnippet?: boolean;
+  hasLaterStoredMessage?: boolean;
+}): boolean {
+  if (
+    input.role !== "assistant" ||
+    input.isEvaluationSnippet ||
+    input.hasLaterStoredMessage
+  ) {
+    return false;
+  }
+
+  return !isCourseChatTurnComplete(input.content);
 }

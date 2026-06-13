@@ -10,7 +10,10 @@ import {
   type CoursePageContent,
   type CourseToc,
 } from "./courseContent";
-import { ensureCourseChatTurnHasLearnerQuestion } from "./courseChatTurn.ts";
+import {
+  ensureCourseChatTurnHasLearnerQuestion,
+  excerptCourseMessageForPrompt,
+} from "./courseChatTurn.ts";
 import {
   metricsFromOpenRouterUsage,
   type CourseMessageMetrics,
@@ -174,9 +177,10 @@ function currentCourseMilestone(course: CourseDetail) {
 function compactCourseMessages(messages: CourseChatMessage[]) {
   return messages.slice(-10).map((message) => ({
     role: message.role,
-    content: message.content
-      .replace(QUESTION_EVALUATION_SNIPPET_PATTERN, "")
-      .slice(0, 1_200),
+    content: excerptCourseMessageForPrompt(
+      message.content.replace(QUESTION_EVALUATION_SNIPPET_PATTERN, ""),
+      1_200,
+    ),
   }));
 }
 
@@ -385,8 +389,8 @@ export async function generateCourseQuestionAttemptToolResult(input: {
             `Course title: ${input.course.title}`,
             `Current milestone: ${page.title}`,
             `Milestone objective: ${page.objective}`,
-            `Previous assistant message:\n${previousAssistantMessage.content.slice(0, 4_000)}`,
-            `Latest learner answer:\n${latestUserMessage.content.slice(0, 4_000)}`,
+            `Previous assistant message:\n${excerptCourseMessageForPrompt(previousAssistantMessage.content, 4_000)}`,
+            `Latest learner answer:\n${excerptCourseMessageForPrompt(latestUserMessage.content, 4_000)}`,
           ].join("\n\n"),
         },
       ],
