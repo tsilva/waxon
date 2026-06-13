@@ -60,7 +60,7 @@ type Course = {
 };
 
 type StoredCourseChatMessage = {
-  id: string;
+  id?: string;
   role: "assistant" | "user";
   content: string;
   createdAt?: number;
@@ -101,9 +101,9 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
 const QUESTION_EVALUATION_SNIPPET_PATTERN =
   /^<!--\s*waxon:evaluation-snippet score=(\d{1,2})\s*-->\s*/u;
 const QUESTION_EVALUATION_QUESTION_PATTERN =
-  /^<!--\s*waxon:evaluation-question\s+([A-Za-z0-9%._~-]+)\s*-->\s*/u;
+  /^\s*<!--\s*waxon:evaluation-question\s+([^\s]+)\s*-->\s*/u;
 const QUESTION_EVALUATION_CORRECT_ANSWER_PATTERN =
-  /^<!--\s*waxon:evaluation-correct-answer\s+([A-Za-z0-9%._~-]+)\s*-->\s*/u;
+  /^\s*<!--\s*waxon:evaluation-correct-answer\s+([^\s]+)\s*-->\s*/u;
 const QUESTION_EVALUATION_SCORE_LINE_PATTERN =
   /^(?:\*\*)?Score\s+\d{1,2}\s*\/\s*10(?:\*\*)?$/iu;
 
@@ -288,15 +288,30 @@ function findPreviousLearnerQuestion(
   return null;
 }
 
+function courseChatFallbackId(message: StoredCourseChatMessage, index: number) {
+  const createdAt =
+    typeof message.createdAt === "number" && Number.isFinite(message.createdAt)
+      ? message.createdAt
+      : "unknown";
+  const role = message.role === "assistant" ? "assistant" : "user";
+
+  return `stored-course-chat-${createdAt}-${index}-${role}`;
+}
+
 function storedMessageToLearnMessage(
   message: StoredCourseChatMessage,
+  index: number,
 ): LearnChatMessage {
   const isEvaluationSnippet =
     message.role === "assistant" &&
     QUESTION_EVALUATION_SNIPPET_PATTERN.test(message.content);
+  const id =
+    typeof message.id === "string" && message.id.trim()
+      ? message.id
+      : courseChatFallbackId(message, index);
 
   return {
-    id: message.id,
+    id,
     role: message.role,
     content: message.content,
     createdAt: message.createdAt,
