@@ -5,7 +5,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  toolbarDueCountEvent,
   toolbarSnapshotEvent,
+  type ToolbarDueCountDetail,
   type ToolbarSnapshotDetail,
 } from "@/app/toolbarEvents";
 import {
@@ -27,6 +29,7 @@ type ReviewToolbarProps = {
   activeTab: ReviewToolbarTab;
   actions?: "inline" | "placeholder";
   dueCount: number;
+  dueCountSource?: "local" | "review-queue";
   showAdmin: boolean;
   menuAvatarUrl: string | null;
   menuDisplayName: string;
@@ -62,6 +65,7 @@ export function ReviewToolbar({
   activeTab,
   actions = "placeholder",
   dueCount,
+  dueCountSource = "local",
   showAdmin,
   menuAvatarUrl,
   menuDisplayName,
@@ -89,7 +93,6 @@ export function ReviewToolbar({
 
     const detail: ToolbarSnapshotDetail = {
       activeTab,
-      dueCount,
       menuAvatarUrl,
       menuDisplayName,
       menuEmail,
@@ -99,11 +102,20 @@ export function ReviewToolbar({
   }, [
     actions,
     activeTab,
-    dueCount,
     menuAvatarUrl,
     menuDisplayName,
     menuEmail,
   ]);
+
+  useEffect(() => {
+    if (actions !== "placeholder" || dueCountSource !== "review-queue") {
+      return;
+    }
+
+    const detail: ToolbarDueCountDetail = { dueCount };
+
+    window.dispatchEvent(new CustomEvent(toolbarDueCountEvent, { detail }));
+  }, [actions, dueCount, dueCountSource]);
 
   return (
     <header className="reader-header">
