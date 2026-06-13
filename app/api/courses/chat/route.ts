@@ -218,6 +218,8 @@ export async function POST(request: Request) {
               });
             }
 
+            send("status", { status: "Planning next step" });
+
             progressDecision = await evaluateCourseChatProgress({
               apiKey: openRouterConfig.apiKey,
               model: openRouterConfig.model,

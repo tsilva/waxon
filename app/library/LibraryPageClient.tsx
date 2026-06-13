@@ -1,7 +1,7 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
-import { ChevronDown, ChevronRight, Search } from "lucide-react";
+import { ChevronDown, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
@@ -13,6 +13,7 @@ import type {
   QuestionBankStatusFilter,
 } from "@/app/lib/questionBank";
 import { MarkdownInline } from "@/app/MarkdownContent";
+import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
 type UserProfileResponse = {
@@ -359,18 +360,6 @@ export default function LibraryPageClient({
                 Library
               </h1>
             </div>
-            <label className="deck-search-label library-search-label">
-              <span className="sr-only">Search question bank</span>
-              <span className="deck-search-shell">
-                <Search aria-hidden="true" />
-                <input
-                  className="deck-search-input"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search questions"
-                />
-              </span>
-            </label>
           </div>
 
           <div className="library-filter-row" aria-label="Question bank filters">
@@ -403,6 +392,19 @@ export default function LibraryPageClient({
                 ))}
               </select>
             </label>
+            <label className="deck-search-label library-search-label">
+              <span className="sr-only">Search question bank</span>
+              <span className="deck-search-shell">
+                <Search aria-hidden="true" />
+                <input
+                  className="deck-search-input"
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search questions"
+                />
+              </span>
+            </label>
           </div>
 
           {message ? <p className="deck-editor-status">{message}</p> : null}
@@ -424,19 +426,14 @@ export default function LibraryPageClient({
               aria-busy="true"
             >
               {Array.from({ length: 8 }, (_, index) => (
-                <li className="library-question-row" key={index}>
-                  <span className="library-question-toggle deck-skeleton-toggle" />
-                  <div className="library-question-main">
-                    <span className="admin-skeleton-line library-skeleton-title" />
-                    <span className="admin-skeleton-line library-skeleton-copy" />
-                    <div className="library-chip-row">
-                      <span className="admin-skeleton-pill" />
-                      <span className="admin-skeleton-pill" />
-                    </div>
-                  </div>
-                  <div className="library-question-meta">
-                    <span className="admin-skeleton-pill" />
-                    <span className="admin-skeleton-line library-skeleton-date" />
+                <li
+                  className="previous-row previous-row-placeholder library-previous-placeholder"
+                  key={index}
+                >
+                  <div className="previous-placeholder-score" />
+                  <div className="previous-placeholder-copy">
+                    <span />
+                    <span />
                   </div>
                 </li>
               ))}
@@ -448,35 +445,26 @@ export default function LibraryPageClient({
               {questionBank.items.map((item) => {
                 const isExpanded = expandedQuestionId === item.questionId;
                 const statusLabel = questionStatus(item, now);
+                const detailId = `library-question-details-${item.questionId.replace(
+                  /[^A-Za-z0-9_-]/g,
+                  "-",
+                )}`;
+                const toggleQuestion = () =>
+                  setExpandedQuestionId(isExpanded ? null : item.questionId);
 
                 return (
-                  <li className="library-question-row" key={item.questionId}>
-                    <button
-                      className="library-question-toggle"
-                      type="button"
-                      aria-expanded={isExpanded}
-                      aria-label={
-                        isExpanded
-                          ? `Collapse ${item.question}`
-                          : `Expand ${item.question}`
-                      }
-                      onClick={() =>
-                        setExpandedQuestionId(isExpanded ? null : item.questionId)
-                      }
-                    >
-                      {isExpanded ? (
-                        <ChevronDown aria-hidden="true" />
-                      ) : (
-                        <ChevronRight aria-hidden="true" />
-                      )}
-                    </button>
-                    <div className="library-question-main">
-                      <MarkdownInline
-                        as="p"
-                        className="library-question-text"
-                        enableMath
-                        text={item.question}
-                      />
+                  <PreviousAnswerRow
+                    id={item.questionId}
+                    key={item.questionId}
+                    question={item.question}
+                    status="resolved"
+                    score={null}
+                    feedback={null}
+                    isExpanded={isExpanded}
+                    detailId={detailId}
+                    className="library-previous-row"
+                    onToggle={toggleQuestion}
+                    supportingContent={
                       <div className="library-chip-row">
                         {item.conceptSlugs.length === 0 ? (
                           <span className="library-chip library-chip-muted">
@@ -490,34 +478,55 @@ export default function LibraryPageClient({
                           ))
                         )}
                       </div>
-                      {isExpanded ? (
-                        <div className="library-question-detail">
-                          {item.conciseAnswer ? (
-                            <p>
-                              <strong>Answer</strong>
-                              <span>{item.conciseAnswer}</span>
+                    }
+                    detailsContent={
+                      <>
+                        {item.conciseAnswer ? (
+                          <div className="previous-field">
+                            <span className="previous-field-label">Answer</span>
+                            <MarkdownInline
+                              as="p"
+                              className="previous-answer"
+                              enableMath
+                              text={item.conciseAnswer}
+                            />
+                          </div>
+                        ) : null}
+                        {item.questionProvenance ? (
+                          <div className="previous-field">
+                            <span className="previous-field-label">Source</span>
+                            <p className="previous-answer previous-answer-empty">
+                              {item.questionProvenance}
                             </p>
-                          ) : null}
-                          {item.questionProvenance ? (
-                            <p>
-                              <strong>Source</strong>
-                              <span>{item.questionProvenance}</span>
-                            </p>
-                          ) : null}
-                          <p>
-                            <strong>Created</strong>
-                            <span>{formatDate(item.createdAt)}</span>
+                          </div>
+                        ) : null}
+                        <div className="previous-field">
+                          <span className="previous-field-label">Created</span>
+                          <p className="previous-answer previous-answer-empty">
+                            {formatDate(item.createdAt)}
                           </p>
                         </div>
-                      ) : null}
-                    </div>
-                    <div className="library-question-meta">
-                      <span className={`library-status library-status-${statusLabel}`}>
-                        {statusLabel}
-                      </span>
-                      <span>{formatDate(item.nextDue)}</span>
-                    </div>
-                  </li>
+                      </>
+                    }
+                    metaContent={
+                      <>
+                        <span
+                          className={`library-status library-status-${statusLabel}`}
+                        >
+                          {statusLabel}
+                        </span>
+                        <span className="previous-time-control">
+                          <span className="previous-time">
+                            {formatDate(item.nextDue)}
+                          </span>
+                          <ChevronDown
+                            className="previous-collapse-icon"
+                            aria-hidden="true"
+                          />
+                        </span>
+                      </>
+                    }
+                  />
                 );
               })}
             </ol>

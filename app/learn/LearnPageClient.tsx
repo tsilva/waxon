@@ -960,6 +960,7 @@ export default function LearnPageClient({
             const data = parsed.data as { content?: unknown };
 
             if (typeof data.content === "string") {
+              updateAssistantStatus(assistantMessageId, "Planning next step");
               insertQuestionEvaluationSnippet(
                 assistantMessageId,
                 data.content,

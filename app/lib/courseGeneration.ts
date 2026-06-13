@@ -390,6 +390,7 @@ export async function generateCourseQuestionAttemptToolResult(input: {
   return parseCourseQuestionAttemptToolResult(
     extractChatCompletionText(body),
     latestUserMessage.content,
+    previousAssistantMessage.content,
   );
 }
 
