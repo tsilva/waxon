@@ -353,7 +353,7 @@ export async function generateCourseQuestionAttemptToolResult(input: {
             "You are filling Waxon's server-side course question attempt tool.",
             "Look at the tutor's previous assistant message and the learner's latest user message.",
             "If the previous assistant message ended with a real learner-facing question and the latest user message answers it, return a record_course_question_attempt tool call.",
-            "Extract the exact learner-facing question, preserving multiple-choice options if present.",
+            "Extract only the learner-facing question stem; if it was multiple choice, do not include A/B/C/D options in the question field.",
             "Grade the answer from 0 to 10 using normal Waxon review standards.",
             "Always write correctAnswer as the concise ideal answer to the tutor question, even when the learner was fully correct.",
             "Do not leave correctAnswer or conciseAnswer blank, null, generic, or omitted in a record_course_question_attempt call.",

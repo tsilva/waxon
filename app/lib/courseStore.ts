@@ -25,6 +25,7 @@ import {
   upsertDueQuestions,
   type DueQuestion,
 } from "./postgresStore";
+import { stripMultipleChoiceOptionsFromQuestion } from "./courseQuestionAttemptParsing";
 
 export type CourseStatus = "active" | "completed";
 
@@ -550,7 +551,9 @@ function courseChatQuestionProvenance(course: CourseDetail): string {
 export async function recordCourseChatQuestionAttempt(
   input: CourseChatQuestionAttemptInput,
 ): Promise<CourseChatQuestionAttemptResult | null> {
-  const question = input.question.trim().replace(/\s+/g, " ");
+  const question = stripMultipleChoiceOptionsFromQuestion(input.question)
+    .trim()
+    .replace(/\s+/g, " ");
   const answer = input.answer.trim();
   const score = Math.max(0, Math.min(10, Math.round(input.score)));
 
