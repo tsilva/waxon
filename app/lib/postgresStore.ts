@@ -366,17 +366,22 @@ async function assertDeckNameAvailable(input: {
   excludeDeckId?: string;
 }) {
   const nameKey = normalizedDeckName(input.name);
-  const rows = await db
-    .select({ id: decks.id, name: decks.name })
+  const [existing] = await db
+    .select({ id: decks.id })
     .from(decks)
-    .where(and(eq(decks.userId, input.userId), isNull(decks.archivedAt)));
-
-  if (
-    rows.some(
-      (row) =>
-        row.id !== input.excludeDeckId && normalizedDeckName(row.name) === nameKey,
+    .where(
+      and(
+        eq(decks.userId, input.userId),
+        isNull(decks.archivedAt),
+        sql`lower(regexp_replace(trim(${decks.name}), '\\s+', ' ', 'g')) = ${nameKey}`,
+        input.excludeDeckId
+          ? sql`${decks.id} <> ${input.excludeDeckId}`
+          : sql`true`,
+      ),
     )
-  ) {
+    .limit(1);
+
+  if (existing) {
     throw new Error("Deck name already exists.");
   }
 }
@@ -834,9 +839,17 @@ export async function updateDeck(input: {
   userId?: string;
 }): Promise<DeckSummary> {
   const context = await ensureSeedData(input);
-  const currentDeck = (await listDecks({ userId: context.userId })).find(
-    (deck) => deck.id === input.deckId,
-  );
+  const [currentDeck] = await db
+    .select({ id: decks.id })
+    .from(decks)
+    .where(
+      and(
+        eq(decks.id, input.deckId),
+        eq(decks.userId, context.userId),
+        isNull(decks.archivedAt),
+      ),
+    )
+    .limit(1);
 
   if (!currentDeck) {
     throw new Error("Deck not found.");
@@ -888,9 +901,17 @@ export async function deleteDeck(input: {
   userId?: string;
 }): Promise<void> {
   const context = await ensureSeedData(input);
-  const currentDeck = (await listDecks({ userId: context.userId })).find(
-    (deck) => deck.id === input.deckId,
-  );
+  const [currentDeck] = await db
+    .select({ id: decks.id })
+    .from(decks)
+    .where(
+      and(
+        eq(decks.id, input.deckId),
+        eq(decks.userId, context.userId),
+        isNull(decks.archivedAt),
+      ),
+    )
+    .limit(1);
 
   if (!currentDeck) {
     throw new Error("Deck not found.");

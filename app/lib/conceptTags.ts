@@ -235,7 +235,8 @@ async function loadRelevantConceptTags(input: {
         )
       ORDER BY
         CASE WHEN embedding IS NULL THEN 1 ELSE 0 END ASC,
-        embedding <=> $2::vector ASC,
+        embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
+          <=> $2::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS}) ASC,
         slug ASC
       LIMIT $3
     `,

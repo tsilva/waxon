@@ -162,6 +162,13 @@
       "when": 1781136200000,
       "tag": "0023_concept_tags",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1781481600000,
+      "tag": "0024_query_performance_indexes",
+      "breakpoints": true
     }
   ]
 }
