@@ -60,7 +60,7 @@ const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 const STREAM_DONE_SENTINEL = "[DONE]";
 const AFFORDABLE_MAX_TOKENS_PATTERN = /can only afford\s+(\d+)/iu;
-export const DEFAULT_OPENROUTER_CHAT_MODEL = "openai/gpt-5.5";
+export const DEFAULT_OPENROUTER_CHAT_MODEL = "google/gemini-3.5-flash";
 
 type OpenRouterChatConfig =
   | {

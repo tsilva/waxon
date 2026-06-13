@@ -17,8 +17,8 @@ import {
   AnswerComposer,
   ComposerMicButton,
 } from "@/app/AnswerComposer";
-import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
-import { PreviousAnswerScore } from "@/app/PreviousAnswerRow";
+import { MarkdownContent } from "@/app/MarkdownContent";
+import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isCourseChatTurnComplete } from "@/app/lib/courseChatTurn";
@@ -81,7 +81,7 @@ type LearnChatMessage = {
 
 type LearnQuestionEvaluationSnippet = {
   content: string;
-  question: string;
+  question: string | null;
   score: number;
 };
 
@@ -97,6 +97,8 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
 
 const QUESTION_EVALUATION_SNIPPET_PATTERN =
   /^<!--\s*waxon:evaluation-snippet score=(\d{1,2})\s*-->\s*/u;
+const QUESTION_EVALUATION_QUESTION_PATTERN =
+  /^<!--\s*waxon:evaluation-question\s+([A-Za-z0-9%._~-]+)\s*-->\s*/u;
 const QUESTION_EVALUATION_SCORE_LINE_PATTERN =
   /^(?:\*\*)?Score\s+\d{1,2}\s*\/\s*10(?:\*\*)?$/iu;
 
@@ -136,8 +138,22 @@ function parseQuestionEvaluationSnippet(
   }
 
   const normalizedScore = Math.max(0, Math.min(10, score));
-  const bodyBlocks = content
-    .replace(QUESTION_EVALUATION_SNIPPET_PATTERN, "")
+  const withoutScoreComment = content.replace(QUESTION_EVALUATION_SNIPPET_PATTERN, "");
+  const questionMatch = withoutScoreComment.match(
+    QUESTION_EVALUATION_QUESTION_PATTERN,
+  );
+  let metadataQuestion: string | null = null;
+
+  if (questionMatch?.[1]) {
+    try {
+      metadataQuestion = decodeURIComponent(questionMatch[1]).trim() || null;
+    } catch {
+      metadataQuestion = null;
+    }
+  }
+
+  const bodyBlocks = withoutScoreComment
+    .replace(QUESTION_EVALUATION_QUESTION_PATTERN, "")
     .trim()
     .split(/\n{2,}/u)
     .map((block) => block.trim())
@@ -151,7 +167,7 @@ function parseQuestionEvaluationSnippet(
     firstLine.length <= 80 &&
     remainingBlocks.length > 0 &&
     !/[.!?]\s*$/u.test(firstLine);
-  const question = firstLineIsTitle ? firstLine : `Score ${normalizedScore}/10`;
+  const question = metadataQuestion ?? (firstLineIsTitle ? firstLine : null);
   const body = bodyBlocks.join("\n\n").trim();
   const feedback = firstLineIsTitle ? remainingBlocks.join("\n\n").trim() : body;
 
@@ -164,33 +180,77 @@ function parseQuestionEvaluationSnippet(
 
 function LearnQuestionEvaluationCard({
   snippet,
+  fallbackQuestion,
 }: {
   snippet: LearnQuestionEvaluationSnippet;
+  fallbackQuestion: string | null;
 }) {
+  const question = snippet.question ?? fallbackQuestion ?? "Course question";
+
   return (
-    <article
-      className="learn-chat-evaluation-card"
-      aria-label={`Question evaluation: ${snippet.question}`}
+    <ol
+      className="learn-chat-evaluation-list"
+      aria-label={`Question evaluation: ${question}`}
     >
-      <div className="learn-chat-evaluation-copy">
-        <span className="learn-chat-evaluation-label">Evaluation</span>
-        <MarkdownInline
-          as="p"
-          className="learn-chat-evaluation-title"
-          enableMath
-          text={snippet.question}
-        />
-        <MarkdownContent
-          className="learn-chat-evaluation-feedback"
-          enableMath
-          text={snippet.content}
-        />
-      </div>
-      <div className="learn-chat-evaluation-score">
-        <PreviousAnswerScore score={snippet.score} />
-      </div>
-    </article>
+      <PreviousAnswerRow
+        id={`learn-evaluation-${snippet.score}-${question}`}
+        question={question}
+        status="resolved"
+        score={snippet.score}
+        feedback={snippet.content}
+        correctAnswer={null}
+        timeLabel="Evaluation"
+        className="learn-chat-evaluation-row"
+      />
+    </ol>
   );
+}
+
+function extractFinalLearnerQuestion(content: string): string | null {
+  const text = content.trim();
+  const questionEnd = text.lastIndexOf("?");
+
+  if (questionEnd === -1) {
+    return null;
+  }
+
+  const prefix = text.slice(0, questionEnd + 1);
+  const boundary = Math.max(
+    prefix.lastIndexOf("\n\n"),
+    prefix.lastIndexOf(". "),
+    prefix.lastIndexOf("! "),
+  );
+  const question = prefix
+    .slice(boundary === -1 ? 0 : boundary + 2)
+    .replace(/^#{1,6}\s+/u, "")
+    .replace(/^\*\*Checkpoint\*\*\s*/iu, "")
+    .trim();
+
+  return question || null;
+}
+
+function findPreviousLearnerQuestion(
+  messages: LearnChatMessage[],
+  messageIndex: number,
+): string | null {
+  for (let index = messageIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+
+    if (
+      message?.role !== "assistant" ||
+      QUESTION_EVALUATION_SNIPPET_PATTERN.test(message.content)
+    ) {
+      continue;
+    }
+
+    const question = extractFinalLearnerQuestion(message.content);
+
+    if (question) {
+      return question;
+    }
+  }
+
+  return null;
 }
 
 function storedMessageToLearnMessage(
@@ -1207,7 +1267,7 @@ export default function LearnPageClient({
                   }
                 >
                   <div className="learn-chat-thread" ref={chatThreadRef}>
-                    {chatMessages.map((message) => {
+                    {chatMessages.map((message, messageIndex) => {
                       const evaluationSnippet =
                         message.role === "assistant"
                           ? parseQuestionEvaluationSnippet(message.content)
@@ -1219,6 +1279,10 @@ export default function LearnPageClient({
                           <LearnQuestionEvaluationCard
                             key={message.id}
                             snippet={evaluationSnippet}
+                            fallbackQuestion={findPreviousLearnerQuestion(
+                              chatMessages,
+                              messageIndex,
+                            )}
                           />
                         );
                       }
@@ -1274,14 +1338,6 @@ export default function LearnPageClient({
                     })}
                     <div className="learn-chat-end" />
                   </div>
-                  {conversationCostLabel ? (
-                    <div
-                      className="learn-conversation-cost"
-                      aria-label={`Conversation cost ${conversationCostLabel}`}
-                    >
-                      {conversationCostLabel}
-                    </div>
-                  ) : null}
                   <AnswerComposer
                     id="learn-topic-input"
                     className={
@@ -1322,13 +1378,25 @@ export default function LearnPageClient({
                       ) : undefined
                     }
                     after={
-                      selectedCourse && speechMessage ? (
-                        <p
-                          className={`speech-status speech-status-${speechStatus}`}
-                          aria-live="polite"
-                        >
-                          {speechMessage}
-                        </p>
+                      selectedCourse && (speechMessage || conversationCostLabel) ? (
+                        <>
+                          {conversationCostLabel ? (
+                            <div
+                              className="learn-conversation-cost"
+                              aria-label={`Conversation cost ${conversationCostLabel}`}
+                            >
+                              {conversationCostLabel}
+                            </div>
+                          ) : null}
+                          {speechMessage ? (
+                            <p
+                              className={`speech-status speech-status-${speechStatus}`}
+                              aria-live="polite"
+                            >
+                              {speechMessage}
+                            </p>
+                          ) : null}
+                        </>
                       ) : null
                     }
                   />
