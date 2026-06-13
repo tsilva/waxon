@@ -21,6 +21,7 @@ import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerScore } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { isAdminEmail } from "@/app/lib/adminAccess";
+import { isCourseChatTurnComplete } from "@/app/lib/courseChatTurn";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import {
   getSpeechRecognitionConstructor,
@@ -75,6 +76,7 @@ type LearnChatMessage = {
   role: "assistant" | "user";
   content: string;
   status?: string;
+  interrupted?: boolean;
 };
 
 type LearnQuestionEvaluationSnippet = {
@@ -194,10 +196,18 @@ function LearnQuestionEvaluationCard({
 function storedMessageToLearnMessage(
   message: StoredCourseChatMessage,
 ): LearnChatMessage {
+  const isEvaluationSnippet =
+    message.role === "assistant" &&
+    QUESTION_EVALUATION_SNIPPET_PATTERN.test(message.content);
+
   return {
     id: message.id,
     role: message.role,
     content: message.content,
+    interrupted:
+      message.role === "assistant" &&
+      !isEvaluationSnippet &&
+      !isCourseChatTurnComplete(message.content),
   };
 }
 
@@ -1223,16 +1233,27 @@ export default function LearnPageClient({
                           key={message.id}
                         >
                           {messageContent ? (
-                            <MarkdownContent
-                              className={`learn-chat-message-content learn-chat-message-content-${messageKind}`}
-                              text={messageContent}
-                              enableCodeBlocks
-                              enableHeadings={
-                                message.role === "assistant" &&
-                                !evaluationSnippet
-                              }
-                              enableMath={message.role === "assistant"}
-                            />
+                            <div className="learn-chat-message-stack">
+                              <MarkdownContent
+                                className={`learn-chat-message-content learn-chat-message-content-${messageKind}`}
+                                text={messageContent}
+                                enableCodeBlocks
+                                enableHeadings={
+                                  message.role === "assistant" &&
+                                  !evaluationSnippet
+                                }
+                                enableMath={message.role === "assistant"}
+                              />
+                              {message.interrupted ? (
+                                <p
+                                  className="learn-chat-interrupted"
+                                  role="status"
+                                >
+                                  This tutor message was interrupted before the
+                                  final question finished.
+                                </p>
+                              ) : null}
+                            </div>
                           ) : (
                             <span
                               className="learn-chat-pending"

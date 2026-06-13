@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ensureCourseChatTurnHasLearnerQuestion } from "../app/lib/courseChatTurn.ts";
+import {
+  ensureCourseChatTurnHasLearnerQuestion,
+  isCourseChatTurnComplete,
+} from "../app/lib/courseChatTurn.ts";
 import { normalizePartialCourseToc } from "../app/lib/courseTocStream.ts";
 
 test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for empty output", () => {
@@ -41,6 +44,40 @@ test("ensureCourseChatTurnHasLearnerQuestion preserves a complete learner questi
     "Entropy keeps the policy from collapsing too early.\n\nWhy does that matter for PPO?",
   );
   assert.equal(result.appendedText, "");
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion repairs dangling learner prompt", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: "PPO constrains updates so the new policy stays close to the old one.\n\nIn your own",
+    pageTitle: "Why PPO Uses a Special Loss Function",
+    pageObjective: "Explain why PPO constrains policy changes.",
+  });
+
+  assert.match(result.text, /In your own\.\n\n\*\*Checkpoint\*\*/u);
+  assert.match(result.text, /What is the main idea/u);
+  assert.match(result.appendedText, /Checkpoint/u);
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion repairs mid-word truncation", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: "Advantage says whether that action was better or worse than expec",
+    pageTitle: "Policy Gradient Loss Refresher",
+    pageObjective: "Review how advantages shape policy updates.",
+  });
+
+  assert.match(result.text, /worse than expec\.\n\n\*\*Checkpoint\*\*/u);
+  assert.match(result.text, /What is the main idea/u);
+});
+
+test("isCourseChatTurnComplete accepts terminal questions and multiple choice", () => {
+  assert.equal(isCourseChatTurnComplete("Why does that matter for PPO?"), true);
+  assert.equal(
+    isCourseChatTurnComplete(
+      "Choose the best option.\n\nA) Increase the sampled action\nB) Decrease the sampled action",
+    ),
+    true,
+  );
+  assert.equal(isCourseChatTurnComplete("In your own"), false);
 });
 
 test("normalizePartialCourseToc extracts complete streamed TOC pages", () => {

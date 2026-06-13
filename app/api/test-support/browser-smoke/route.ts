@@ -2,7 +2,8 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/app/db/client";
 import { decks, questions, users } from "@/app/db/schema";
-import { isLocalTestAuthEnabled, localTestUser } from "@/app/lib/localTestAuth";
+import { getCurrentUser } from "@/app/lib/auth";
+import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { questionSlug } from "@/app/lib/questionSlug";
 import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 
@@ -42,6 +43,7 @@ export async function POST() {
   }
 
   const now = Date.now();
+  const currentUser = await getCurrentUser();
 
   await db.transaction(async (tx) => {
     await tx.delete(decks).where(eq(decks.id, TEST_DECK.id));
@@ -49,24 +51,26 @@ export async function POST() {
     await tx
       .insert(users)
       .values({
-        id: localTestUser.id,
-        displayName: localTestUser.displayName,
-        email: localTestUser.email,
+        id: currentUser.id,
+        displayName: currentUser.displayName,
+        email: currentUser.email,
+        avatarUrl: currentUser.avatarUrl,
         createdAt: now,
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: users.id,
         set: {
-          displayName: localTestUser.displayName,
-          email: localTestUser.email,
+          displayName: currentUser.displayName,
+          email: currentUser.email,
+          avatarUrl: currentUser.avatarUrl,
           updatedAt: now,
         },
       });
 
     await tx.insert(decks).values({
       id: TEST_DECK.id,
-      userId: localTestUser.id,
+      userId: currentUser.id,
       name: TEST_DECK.name,
       slug: TEST_DECK.slug,
       inReviewRotation: true,

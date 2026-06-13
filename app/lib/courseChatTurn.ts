@@ -7,8 +7,7 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
   appendedText: string;
 } {
   const generatedText = input.text.trim();
-  const hasLearnerQuestion =
-    generatedText.includes("?") || /\bA\)\s+\S[\s\S]*\bB\)/u.test(generatedText);
+  const hasLearnerQuestion = isCourseChatTurnComplete(generatedText);
 
   if (hasLearnerQuestion) {
     return {
@@ -43,4 +42,37 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     text: `${generatedText}${fallbackQuestion}`,
     appendedText: fallbackQuestion,
   };
+}
+
+export function isCourseChatTurnComplete(text: string): boolean {
+  const normalizedText = text.trim();
+
+  if (!normalizedText) {
+    return false;
+  }
+
+  if (/that completes the course\./iu.test(normalizedText)) {
+    return true;
+  }
+
+  if (/[?]\s*$/u.test(normalizedText)) {
+    return true;
+  }
+
+  const lastLines = normalizedText
+    .split(/\n+/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-6);
+  const multipleChoiceLabels = new Set<string>();
+
+  for (const line of lastLines) {
+    const match = /^([A-D])\)\s+\S/u.exec(line);
+
+    if (match?.[1]) {
+      multipleChoiceLabels.add(match[1]);
+    }
+  }
+
+  return multipleChoiceLabels.has("A") && multipleChoiceLabels.has("B");
 }
