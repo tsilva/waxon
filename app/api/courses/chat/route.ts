@@ -36,11 +36,13 @@ const MAX_TOPIC_CHARS = 800;
 
 function buildQuestionEvaluationSnippet(input: {
   question: string;
+  correctAnswer: string;
   score: number;
   justification: string;
 }): CourseChatMessage {
   const score = Math.max(0, Math.min(10, Math.round(input.score)));
   const question = input.question.trim();
+  const correctAnswer = input.correctAnswer.trim();
   const justification =
     input.justification.trim().replace(/\s+/g, " ") ||
     "Evaluation recorded.";
@@ -51,6 +53,9 @@ function buildQuestionEvaluationSnippet(input: {
       `<!-- waxon:evaluation-snippet score=${score} -->`,
       question
         ? `<!-- waxon:evaluation-question ${encodeURIComponent(question)} -->`
+        : "",
+      correctAnswer
+        ? `<!-- waxon:evaluation-correct-answer ${encodeURIComponent(correctAnswer)} -->`
         : "",
       `**Score ${score}/10**`,
       justification,
@@ -190,6 +195,7 @@ export async function POST(request: Request) {
             ) {
               questionEvaluationSnippet = buildQuestionEvaluationSnippet({
                 question: questionAttempt.question,
+                correctAnswer: questionAttempt.correctAnswer,
                 score: questionAttempt.score,
                 justification: questionAttempt.justification,
               });
