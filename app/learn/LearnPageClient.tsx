@@ -29,7 +29,7 @@ import {
   parseCourseMessageMetrics,
   type CourseMessageMetrics,
 } from "@/app/lib/courseMessageMetrics";
-import { isCourseChatTurnComplete } from "@/app/lib/courseChatTurn";
+import { shouldShowCourseChatInterruptedWarning } from "@/app/lib/courseChatTurn";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import {
   getSpeechRecognitionConstructor,
@@ -86,6 +86,7 @@ type LearnChatMessage = {
   content: string;
   metrics?: CourseMessageMetrics | null;
   status?: string;
+  pendingEvaluation?: boolean;
   interrupted?: boolean;
   createdAt?: number;
 };
@@ -183,6 +184,26 @@ function LearnQuestionEvaluationCard({
   );
 }
 
+function LearnPendingEvaluationCard({ id }: { id: string }) {
+  return (
+    <ol
+      className="learn-chat-evaluation-list"
+      aria-label="Question evaluation pending"
+    >
+      <PreviousAnswerRow
+        id={id}
+        question="Answer evaluation"
+        questionLabel="Evaluation"
+        status="grading"
+        score={null}
+        feedback={null}
+        timeLabel="Checking answer"
+        className="learn-chat-evaluation-row"
+      />
+    </ol>
+  );
+}
+
 function extractFinalLearnerQuestion(content: string): string | null {
   const text = content.trim();
   const questionEnd = text.lastIndexOf("?");
@@ -243,6 +264,7 @@ function courseChatFallbackId(message: StoredCourseChatMessage, index: number) {
 function storedMessageToLearnMessage(
   message: StoredCourseChatMessage,
   index: number,
+  messages: StoredCourseChatMessage[] = [message],
 ): LearnChatMessage {
   const parsedMetrics = parseCourseMessageMetrics(message.content);
   const isEvaluationSnippet =
@@ -259,10 +281,12 @@ function storedMessageToLearnMessage(
     content: message.content,
     metrics: parsedMetrics.metrics,
     createdAt: message.createdAt,
-    interrupted:
-      message.role === "assistant" &&
-      !isEvaluationSnippet &&
-      !isCourseChatTurnComplete(parsedMetrics.content),
+    interrupted: shouldShowCourseChatInterruptedWarning({
+      role: message.role,
+      content: parsedMetrics.content,
+      isEvaluationSnippet,
+      hasLaterStoredMessage: index < messages.length - 1,
+    }),
   };
 }
 
@@ -803,6 +827,47 @@ export default function LearnPageClient({
     });
   }
 
+  function insertPendingQuestionEvaluation(assistantMessageId: string) {
+    setChatMessages((messages) => {
+      const snippetMessageId = `${assistantMessageId}-evaluation`;
+
+      if (messages.some((message) => message.id === snippetMessageId)) {
+        return messages;
+      }
+
+      const snippetMessage: LearnChatMessage = {
+        id: snippetMessageId,
+        role: "assistant",
+        content: "",
+        pendingEvaluation: true,
+      };
+      const assistantIndex = messages.findIndex(
+        (message) => message.id === assistantMessageId,
+      );
+
+      if (assistantIndex === -1) {
+        return [...messages, snippetMessage];
+      }
+
+      return [
+        ...messages.slice(0, assistantIndex),
+        snippetMessage,
+        ...messages.slice(assistantIndex),
+      ];
+    });
+  }
+
+  function removePendingQuestionEvaluation(assistantMessageId: string) {
+    const snippetMessageId = `${assistantMessageId}-evaluation`;
+
+    setChatMessages((messages) =>
+      messages.filter(
+        (message) =>
+          message.id !== snippetMessageId || !message.pendingEvaluation,
+      ),
+    );
+  }
+
   async function selectCourse(courseId: string) {
     if (isStreaming || loadingCourseId) {
       return;
@@ -1066,16 +1131,19 @@ export default function LearnPageClient({
             if (typeof data.delta === "string") {
               appendAssistantDelta(assistantMessageId, data.delta);
             }
+          } else if (parsed?.event === "evaluation_pending") {
+            insertPendingQuestionEvaluation(assistantMessageId);
           } else if (parsed?.event === "evaluation") {
             const data = parsed.data as { content?: unknown };
 
             if (typeof data.content === "string") {
-              updateAssistantStatus(assistantMessageId, "Planning next step");
               insertQuestionEvaluationSnippet(
                 assistantMessageId,
                 data.content,
               );
             }
+          } else if (parsed?.event === "evaluation_skipped") {
+            removePendingQuestionEvaluation(assistantMessageId);
           } else if (parsed?.event === "error") {
             const data = parsed.data as { error?: unknown };
 
@@ -1182,9 +1250,9 @@ export default function LearnPageClient({
     !draftCourseToc &&
     courses.length > 0 &&
     !isStartingNewCourse;
-  const visibleCourseToc = selectedCourse?.toc ?? draftCourseToc;
+  const visibleCourseToc = draftCourseToc ?? selectedCourse?.toc;
   const visibleCourseTitle =
-    selectedCourse?.title ?? draftCourseToc?.title ?? "Generating TOC";
+    draftCourseToc?.title ?? selectedCourse?.title ?? "Generating TOC";
   const sortedCourses = useMemo(
     () =>
       [...courses].sort(
@@ -1385,6 +1453,15 @@ export default function LearnPageClient({
                 >
                   <div className="learn-chat-thread" ref={chatThreadRef}>
                     {chatMessages.map((message, messageIndex) => {
+                      if (message.pendingEvaluation) {
+                        return (
+                          <LearnPendingEvaluationCard
+                            key={message.id}
+                            id={message.id}
+                          />
+                        );
+                      }
+
                       const parsedMessage = parseCourseMessageMetrics(
                         message.content,
                       );
@@ -1492,11 +1569,7 @@ export default function LearnPageClient({
                   </div>
                   <AnswerComposer
                     id="learn-topic-input"
-                    className={
-                      selectedCourse
-                        ? "learn-course-answer-composer"
-                        : "learn-chat-composer"
-                    }
+                    className="learn-course-answer-composer"
                     value={selectedCourse ? displayedTopic : topic}
                     onValueChange={(nextTopic) => {
                       setSpeechPreview("");
@@ -1510,7 +1583,7 @@ export default function LearnPageClient({
                         : "Learn convolutional neural networks for vision"
                     }
                     ariaLabel={selectedCourse ? "Answer here" : "Learning goal"}
-                    rows={selectedCourse ? 4 : 1}
+                    rows={4}
                     disabled={isStreaming}
                     submitDisabled={!topic.trim() || isStreaming}
                     submitAriaLabel={isStreaming ? streamingStatus : "Send"}

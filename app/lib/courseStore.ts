@@ -417,6 +417,46 @@ export async function createCourse(input: {
   return detail;
 }
 
+export async function updateCourseToc(input: {
+  courseId: string;
+  toc: CourseToc;
+}): Promise<CourseDetail> {
+  const user = await getCurrentUser();
+  const toc = validateCourseToc(input.toc);
+  const now = Date.now();
+
+  const [course] = await db
+    .update(courses)
+    .set({
+      title: toc.title,
+      description: toc.description,
+      toc,
+      updatedAt: now,
+    })
+    .where(and(eq(courses.userId, user.id), eq(courses.id, input.courseId)))
+    .returning({ id: courses.id, deckId: courses.deckId });
+
+  if (!course) {
+    throw new Error("Course could not be updated.");
+  }
+
+  await db
+    .update(decks)
+    .set({
+      name: toc.title,
+      updatedAt: now,
+    })
+    .where(and(eq(decks.userId, user.id), eq(decks.id, course.deckId)));
+
+  const detail = await getCourse(course.id);
+
+  if (!detail) {
+    throw new Error("Updated course could not be loaded.");
+  }
+
+  return detail;
+}
+
 export async function replaceCourseChatMessages(input: {
   courseId: string;
   messages: Array<{

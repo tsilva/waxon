@@ -25,6 +25,7 @@ Waxon is a Next.js application for typed recall practice. It serves due question
 * Review queue state and pending evaluations are kept in memory for the current server process.
 * API routes run on the Node.js runtime and are forced dynamic according to the README notes.
 * Answer grading uses `OPENROUTER_API_KEY` or `LLM_API_KEY`; without either key, submitted answers are recorded with score `0` and a configuration message.
+* Learn course creation streams partial TOCs to the client. Once the first valid TOC page arrives, the first chat lesson can start from an in-memory draft course while the full TOC and durable course record continue finalizing in parallel.
 
 # Data Model Cues
 
