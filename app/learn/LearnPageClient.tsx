@@ -21,6 +21,11 @@ import { MarkdownContent } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { isAdminEmail } from "@/app/lib/adminAccess";
+import {
+  isQuestionEvaluationSnippet,
+  parseQuestionEvaluationSnippet,
+  type LearnQuestionEvaluationSnippet,
+} from "@/app/lib/courseEvaluationSnippet";
 import { isCourseChatTurnComplete } from "@/app/lib/courseChatTurn";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import {
@@ -81,13 +86,6 @@ type LearnChatMessage = {
   createdAt?: number;
 };
 
-type LearnQuestionEvaluationSnippet = {
-  content: string;
-  question: string | null;
-  correctAnswer: string | null;
-  score: number;
-};
-
 type LearnPageClientProps = {
   initialCourseId?: string;
 };
@@ -97,15 +95,6 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
   role: "assistant",
   content: "What do you want to learn?",
 };
-
-const QUESTION_EVALUATION_SNIPPET_PATTERN =
-  /^<!--\s*waxon:evaluation-snippet score=(\d{1,2})\s*-->\s*/u;
-const QUESTION_EVALUATION_QUESTION_PATTERN =
-  /^\s*<!--\s*waxon:evaluation-question\s+([^\s]+)\s*-->\s*/u;
-const QUESTION_EVALUATION_CORRECT_ANSWER_PATTERN =
-  /^\s*<!--\s*waxon:evaluation-correct-answer\s+([^\s]+)\s*-->\s*/u;
-const QUESTION_EVALUATION_SCORE_LINE_PATTERN =
-  /^(?:\*\*)?Score\s+\d{1,2}\s*\/\s*10(?:\*\*)?$/iu;
 
 const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -125,72 +114,6 @@ function chatMessageId() {
 
 function pendingStatus(message: LearnChatMessage): string {
   return message.status?.trim() || "Thinking...";
-}
-
-function decodeEvaluationMetadata(value: string | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    return decodeURIComponent(value).trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-function parseQuestionEvaluationSnippet(
-  content: string,
-): LearnQuestionEvaluationSnippet | null {
-  const match = content.match(QUESTION_EVALUATION_SNIPPET_PATTERN);
-
-  if (!match) {
-    return null;
-  }
-
-  const score = Number.parseInt(match[1] ?? "", 10);
-
-  if (!Number.isFinite(score)) {
-    return null;
-  }
-
-  const normalizedScore = Math.max(0, Math.min(10, score));
-  const withoutScoreComment = content.replace(QUESTION_EVALUATION_SNIPPET_PATTERN, "");
-  const questionMatch = withoutScoreComment.match(
-    QUESTION_EVALUATION_QUESTION_PATTERN,
-  );
-  const metadataQuestion = decodeEvaluationMetadata(questionMatch?.[1]);
-  const correctAnswerMatch = withoutScoreComment.match(
-    QUESTION_EVALUATION_CORRECT_ANSWER_PATTERN,
-  );
-  const metadataCorrectAnswer = decodeEvaluationMetadata(correctAnswerMatch?.[1]);
-
-  const bodyBlocks = withoutScoreComment
-    .replace(QUESTION_EVALUATION_QUESTION_PATTERN, "")
-    .replace(QUESTION_EVALUATION_CORRECT_ANSWER_PATTERN, "")
-    .trim()
-    .split(/\n{2,}/u)
-    .map((block) => block.trim())
-    .filter(
-      (block) => block && !QUESTION_EVALUATION_SCORE_LINE_PATTERN.test(block),
-    );
-  const [firstBlock = "", ...remainingBlocks] = bodyBlocks;
-  const firstLine = firstBlock.replace(/^#{1,6}\s+/u, "").trim();
-  const firstLineIsTitle =
-    firstLine.length > 0 &&
-    firstLine.length <= 80 &&
-    remainingBlocks.length > 0 &&
-    !/[.!?]\s*$/u.test(firstLine);
-  const question = metadataQuestion ?? (firstLineIsTitle ? firstLine : null);
-  const body = bodyBlocks.join("\n\n").trim();
-  const feedback = firstLineIsTitle ? remainingBlocks.join("\n\n").trim() : body;
-
-  return {
-    content: feedback || body || "Evaluation recorded.",
-    question,
-    correctAnswer: metadataCorrectAnswer,
-    score: normalizedScore,
-  };
 }
 
 function LearnQuestionEvaluationCard({
@@ -273,7 +196,7 @@ function findPreviousLearnerQuestion(
 
     if (
       message?.role !== "assistant" ||
-      QUESTION_EVALUATION_SNIPPET_PATTERN.test(message.content)
+      isQuestionEvaluationSnippet(message.content)
     ) {
       continue;
     }
@@ -304,7 +227,7 @@ function storedMessageToLearnMessage(
 ): LearnChatMessage {
   const isEvaluationSnippet =
     message.role === "assistant" &&
-    QUESTION_EVALUATION_SNIPPET_PATTERN.test(message.content);
+    isQuestionEvaluationSnippet(message.content);
   const id =
     typeof message.id === "string" && message.id.trim()
       ? message.id
