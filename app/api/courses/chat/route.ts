@@ -23,6 +23,11 @@ import {
   replaceCourseChatMessages,
   type CourseDetail,
 } from "@/app/lib/courseStore";
+import {
+  appendCourseMessageMetrics,
+  stripCourseMessageMetrics,
+  type CourseMessageMetrics,
+} from "@/app/lib/courseMessageMetrics";
 import { getOpenRouterChatConfig } from "@/app/lib/openRouter";
 
 export const runtime = "nodejs";
@@ -103,7 +108,12 @@ export async function POST(request: Request) {
       ? (parsed.value as Record<string, unknown>)
       : {};
   const storedMessages = normalizeStoredMessages(payload.messages);
-  const messages = storedMessages.slice(-MAX_CHAT_MESSAGES);
+  const messages = storedMessages
+    .map((message) => ({
+      ...message,
+      content: stripCourseMessageMetrics(message.content),
+    }))
+    .slice(-MAX_CHAT_MESSAGES);
   const courseId =
     typeof payload.courseId === "string" ? payload.courseId.trim() : "";
 
@@ -162,6 +172,9 @@ export async function POST(request: Request) {
         let progressDecision: CourseProgressDecision | null = null;
         let assistantContent = "";
         let turnCost = 0;
+        let intakeDecisionMetrics: CourseMessageMetrics | null = null;
+        let questionAttemptMetrics: CourseMessageMetrics | null = null;
+        let assistantTurnMetrics: CourseMessageMetrics | null = null;
         const addTurnCost = (cost: number) => {
           if (Number.isFinite(cost) && cost > 0) {
             turnCost += cost;
@@ -185,6 +198,9 @@ export async function POST(request: Request) {
               course,
               messages,
               onCost: addTurnCost,
+              onMetrics(metrics) {
+                questionAttemptMetrics = metrics;
+              },
             }).catch(() => ({
               toolCall: "skip_course_question_attempt" as const,
               reason: "Question attempt tool was unavailable.",
@@ -199,6 +215,13 @@ export async function POST(request: Request) {
                 score: questionAttempt.score,
                 justification: questionAttempt.justification,
               });
+              questionEvaluationSnippet = {
+                ...questionEvaluationSnippet,
+                content: appendCourseMessageMetrics(
+                  questionEvaluationSnippet.content,
+                  questionAttemptMetrics,
+                ),
+              };
               send("evaluation", {
                 score: questionAttempt.score,
                 justification: questionAttempt.justification,
@@ -249,6 +272,9 @@ export async function POST(request: Request) {
               userId: user.id,
               messages,
               onCost: addTurnCost,
+              onMetrics(metrics) {
+                intakeDecisionMetrics = metrics;
+              },
             }).catch(() => ({
               action: "create_course" as const,
               topic: topic.value,
@@ -258,7 +284,12 @@ export async function POST(request: Request) {
             if (intakeDecision.action === "clarify") {
               send("status", { status: "Writing response" });
               send("delta", { delta: intakeDecision.message });
-              send("done", { ok: true, course: null, turnCost });
+              send("done", {
+                ok: true,
+                course: null,
+                turnCost,
+                responseMetrics: intakeDecisionMetrics,
+              });
               return;
             }
 
@@ -294,6 +325,9 @@ export async function POST(request: Request) {
             messages,
             progressDecision,
             onCost: addTurnCost,
+            onMetrics(metrics) {
+              assistantTurnMetrics = metrics;
+            },
             onTextDelta(delta) {
               assistantContent += delta;
               send("delta", { delta });
@@ -305,7 +339,13 @@ export async function POST(request: Request) {
             messages: [
               ...storedMessages,
               ...(questionEvaluationSnippet ? [questionEvaluationSnippet] : []),
-              { role: "assistant", content: assistantContent },
+              {
+                role: "assistant",
+                content: appendCourseMessageMetrics(
+                  assistantContent,
+                  assistantTurnMetrics,
+                ),
+              },
             ],
           });
           await addCourseConversationCost({

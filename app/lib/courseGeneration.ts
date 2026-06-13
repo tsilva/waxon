@@ -12,6 +12,10 @@ import {
 } from "./courseContent";
 import { ensureCourseChatTurnHasLearnerQuestion } from "./courseChatTurn.ts";
 import {
+  metricsFromOpenRouterUsage,
+  type CourseMessageMetrics,
+} from "./courseMessageMetrics";
+import {
   parseCourseQuestionAttemptToolResult,
   type CourseQuestionAttemptToolResult,
 } from "./courseQuestionAttemptParsing";
@@ -29,6 +33,7 @@ const QUESTION_EVALUATION_SNIPPET_PATTERN =
 
 type CourseCostObserver = {
   onCost?: (cost: number) => void;
+  onMetrics?: (metrics: CourseMessageMetrics) => void;
 };
 
 export type CourseIntakeMessage = {
@@ -70,9 +75,10 @@ function normalizeIntakeText(value: unknown, maxLength: number): string {
     : "";
 }
 
-function reportResponseCost(
+function reportResponseMetrics(
   input: CourseCostObserver,
-  usage: { cost?: unknown } | undefined,
+  usage: { completion_tokens?: unknown; cost?: unknown } | undefined,
+  latencyMs: number,
 ) {
   const cost =
     typeof usage?.cost === "number"
@@ -83,6 +89,12 @@ function reportResponseCost(
 
   if (cost !== null && Number.isFinite(cost) && cost > 0) {
     input.onCost?.(cost);
+  }
+
+  const metrics = metricsFromOpenRouterUsage(usage, latencyMs);
+
+  if (metrics) {
+    input.onMetrics?.(metrics);
   }
 }
 
@@ -205,6 +217,7 @@ export async function generateCourseIntakeDecision(input: {
     role: message.role,
     content: message.content.slice(0, MAX_INTAKE_TOPIC_CHARS),
   }));
+  const startedAt = Date.now();
 
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
@@ -240,7 +253,7 @@ export async function generateCourseIntakeDecision(input: {
     throw new Error("Course intake failed.");
   }
 
-  reportResponseCost(input, body.usage);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt);
 
   return parseCourseIntakeDecision(extractChatCompletionText(body));
 }
@@ -253,6 +266,7 @@ export async function evaluateCourseChatProgress(input: {
   messages: CourseChatMessage[];
 } & CourseCostObserver): Promise<CourseProgressDecision> {
   const { page } = currentCourseMilestone(input.course);
+  const startedAt = Date.now();
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: false,
@@ -295,7 +309,7 @@ export async function evaluateCourseChatProgress(input: {
     throw new Error("Course progress evaluation failed.");
   }
 
-  reportResponseCost(input, body.usage);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt);
 
   return parseCourseProgressDecision(extractChatCompletionText(body));
 }
@@ -332,6 +346,7 @@ export async function generateCourseQuestionAttemptToolResult(input: {
   }
 
   const { page } = currentCourseMilestone(input.course);
+  const startedAt = Date.now();
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: false,
@@ -385,7 +400,7 @@ export async function generateCourseQuestionAttemptToolResult(input: {
     };
   }
 
-  reportResponseCost(input, body.usage);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt);
 
   return parseCourseQuestionAttemptToolResult(
     extractChatCompletionText(body),
@@ -412,6 +427,7 @@ export async function streamCourseChatTurn(input: {
   }
 
   const { page } = currentCourseMilestone(input.course);
+  const startedAt = Date.now();
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: true,
@@ -478,7 +494,7 @@ export async function streamCourseChatTurn(input: {
     throw new Error("Course chat generation failed.");
   }
 
-  reportResponseCost(input, body.usage);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt);
 
   const ensuredTurn = ensureCourseChatTurnHasLearnerQuestion({
     text: extractChatCompletionText(body),
@@ -517,6 +533,7 @@ export async function generateCourseToc(input: {
         }
       }
     : undefined;
+  const startedAt = Date.now();
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: true,
@@ -557,7 +574,7 @@ export async function generateCourseToc(input: {
     throw new Error("Course TOC generation failed.");
   }
 
-  reportResponseCost(input, body.usage);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt);
 
   return parseCourseTocJson(extractChatCompletionText(body));
 }
