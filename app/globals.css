@@ -7624,6 +7624,9 @@ textarea {
   }
 
   .reader-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 102px;
+    gap: 8px;
     height: 58px;
     padding: 0 18px;
   }
@@ -7632,13 +7635,27 @@ textarea {
     display: flex;
     gap: 18px;
     height: 100%;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .reader-brand {
+    position: relative;
     gap: 8px;
+    width: 30px;
+    overflow: hidden;
     font-size: 24px;
     letter-spacing: 0;
     text-transform: none;
+  }
+
+  .reader-brand span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
 
   .reader-brand-mark {
@@ -7647,8 +7664,17 @@ textarea {
   }
 
   .reader-tabs {
+    flex: 1 1 auto;
     gap: 10px;
     height: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .reader-tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .reader-tab {
@@ -7702,6 +7728,9 @@ textarea {
   .review-stage {
     grid-template-rows: auto auto auto auto;
     row-gap: 0;
+    width: 100%;
+    max-width: 100vw;
+    min-width: 0;
     min-height: auto;
     padding: 26px 22px 20px;
     overflow: visible;
@@ -7714,6 +7743,7 @@ textarea {
   .question-area {
     width: 100%;
     max-width: calc(100vw - 44px);
+    min-width: 0;
     margin-left: 0;
     min-height: 148px;
     padding: 0;
@@ -7797,8 +7827,21 @@ textarea {
   .composer {
     width: 100%;
     max-width: calc(100vw - 44px);
+    min-width: 0;
     margin-top: 26px;
     margin-left: 0;
+  }
+
+  .question-details-trigger,
+  .question-flag-trigger {
+    width: 30px;
+    height: 30px;
+  }
+
+  .question-details-trigger svg,
+  .question-flag-trigger svg {
+    width: 15px;
+    height: 15px;
   }
 
   .composer-row {
@@ -7819,7 +7862,9 @@ textarea {
   }
 
   .previous-panel {
+    width: 100%;
     max-width: calc(100vw - 44px);
+    min-width: 0;
     margin-top: 28px;
     overflow: visible;
     padding-top: 18px;
@@ -7925,6 +7970,8 @@ textarea {
 
   .queue-stage {
     width: 100%;
+    max-width: 100vw;
+    min-width: 0;
     gap: 14px;
     padding: 26px 22px 20px;
   }
@@ -7935,6 +7982,8 @@ textarea {
 
   .stats-stage {
     width: 100%;
+    max-width: 100vw;
+    min-width: 0;
     gap: 14px;
     padding: 28px 22px 22px;
   }
@@ -8031,7 +8080,19 @@ textarea {
   }
 
   .stats-page-chart-panel {
+    min-width: 0;
+    overflow: hidden;
     padding: 13px;
+  }
+
+  .stats-section-heading,
+  .stats-skeleton-chart {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .stats-skeleton-chart {
+    overflow: hidden;
   }
 
   .daily-stats-chart,
