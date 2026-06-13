@@ -4806,6 +4806,7 @@ export default function ReviewApp({
         <ReviewToolbar
           activeTab={activeTab === "queue" ? "tags" : "review"}
           dueCount={queueRemaining}
+          dueCountSource="review-queue"
           showAdmin={canViewAdmin}
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuDisplayName}

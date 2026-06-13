@@ -2,7 +2,7 @@
 
 import { useClerk, useUser } from "@clerk/nextjs";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
@@ -12,7 +12,9 @@ import {
 } from "@/app/ReviewToolbar";
 import {
   localSettingsEvent,
+  toolbarDueCountEvent,
   toolbarSnapshotEvent,
+  type ToolbarDueCountDetail,
   type ToolbarSnapshotDetail,
 } from "@/app/toolbarEvents";
 
@@ -115,6 +117,7 @@ export function PersistentReviewToolbarActions() {
     dueCount: 0,
     user: null,
   });
+  const hasLoadedToolbarDataRef = useRef(false);
 
   useEffect(() => {
     setToolbarData(readCachedToolbarData());
@@ -130,15 +133,8 @@ export function PersistentReviewToolbarActions() {
       }
 
       setToolbarData((current) => {
-        const snapshotDueCount = Number(snapshot.dueCount);
-        const shouldAcceptDueCount =
-          snapshot.activeTab === "review" ||
-          snapshotDueCount > 0 ||
-          current.dueCount === 0;
         const nextData = {
-          dueCount: shouldAcceptDueCount
-            ? snapshotDueCount
-            : current.dueCount,
+          dueCount: current.dueCount,
           user: {
             id: current.user?.id ?? "toolbar",
             displayName: snapshot.menuDisplayName,
@@ -160,48 +156,18 @@ export function PersistentReviewToolbarActions() {
   }, []);
 
   useEffect(() => {
-    if (!isToolbarRoute) {
-      return;
-    }
+    function handleToolbarDueCount(event: Event) {
+      const detail = (event as CustomEvent<ToolbarDueCountDetail>).detail;
+      const nextDueCount = Number(detail?.dueCount);
 
-    const controller = new AbortController();
-
-    async function loadToolbarData() {
-      const [queueResult, userResult] = await Promise.allSettled([
-        fetch("/api/queue-status?mode=review&includeReviewQueue=0", {
-          cache: "no-store",
-          signal: controller.signal,
-        }),
-        fetch("/api/user", {
-          cache: "no-store",
-          signal: controller.signal,
-        }),
-      ]);
-
-      if (controller.signal.aborted) {
+      if (!Number.isFinite(nextDueCount)) {
         return;
-      }
-
-      let loadedDueCount: number | null = null;
-      let loadedUser: UserProfileResponse | null = null;
-
-      if (queueResult.status === "fulfilled" && queueResult.value.ok) {
-        const queueData =
-          (await queueResult.value.json()) as QueueStatusResponse;
-
-        if (Number.isFinite(queueData.queueRemaining)) {
-          loadedDueCount = Number(queueData.queueRemaining);
-        }
-      }
-
-      if (userResult.status === "fulfilled" && userResult.value.ok) {
-        loadedUser = (await userResult.value.json()) as UserProfileResponse;
       }
 
       setToolbarData((current) => {
         const nextData = {
-          dueCount: loadedDueCount ?? current.dueCount,
-          user: loadedUser ?? current.user,
+          ...current,
+          dueCount: nextDueCount,
         };
 
         writeCachedToolbarData(nextData);
@@ -210,10 +176,68 @@ export function PersistentReviewToolbarActions() {
       });
     }
 
-    void loadToolbarData();
+    window.addEventListener(toolbarDueCountEvent, handleToolbarDueCount);
+
+    return () =>
+      window.removeEventListener(toolbarDueCountEvent, handleToolbarDueCount);
+  }, []);
+
+  const loadToolbarData = useCallback(async (signal: AbortSignal) => {
+    const [queueResult, userResult] = await Promise.allSettled([
+      fetch("/api/queue-status?mode=review&includeReviewQueue=0", {
+        cache: "no-store",
+        signal,
+      }),
+      fetch("/api/user", {
+        cache: "no-store",
+        signal,
+      }),
+    ]);
+
+    if (signal.aborted) {
+      return;
+    }
+
+    let loadedDueCount: number | null = null;
+    let loadedUser: UserProfileResponse | null = null;
+
+    if (queueResult.status === "fulfilled" && queueResult.value.ok) {
+      const queueData =
+        (await queueResult.value.json()) as QueueStatusResponse;
+
+      if (Number.isFinite(queueData.queueRemaining)) {
+        loadedDueCount = Number(queueData.queueRemaining);
+      }
+    }
+
+    if (userResult.status === "fulfilled" && userResult.value.ok) {
+      loadedUser = (await userResult.value.json()) as UserProfileResponse;
+    }
+
+    setToolbarData((current) => {
+      const nextData = {
+        dueCount: loadedDueCount ?? current.dueCount,
+        user: loadedUser ?? current.user,
+      };
+
+      writeCachedToolbarData(nextData);
+
+      return nextData;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isToolbarRoute || hasLoadedToolbarDataRef.current) {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    hasLoadedToolbarDataRef.current = true;
+    void loadToolbarData(controller.signal);
 
     return () => controller.abort();
-  }, [isToolbarRoute, pathname]);
+  }, [isToolbarRoute, loadToolbarData]);
 
   if (!hasHydrated || !isToolbarRoute) {
     return null;
