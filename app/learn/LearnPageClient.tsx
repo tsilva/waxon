@@ -17,7 +17,7 @@ import {
   AnswerComposer,
   ComposerMicButton,
 } from "@/app/AnswerComposer";
-import { MarkdownContent } from "@/app/MarkdownContent";
+import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { isAdminEmail } from "@/app/lib/adminAccess";
@@ -88,6 +88,14 @@ type LearnChatMessage = {
 
 type LearnPageClientProps = {
   initialCourseId?: string;
+};
+
+type LearnEvaluationDetails = {
+  question: string;
+  score: number;
+  feedback: string;
+  correctAnswer: string | null;
+  createdAt?: number;
 };
 
 const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
@@ -381,6 +389,8 @@ export default function LearnPageClient({
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [courseSettingsId, setCourseSettingsId] = useState<string | null>(null);
+  const [selectedEvaluationDetails, setSelectedEvaluationDetails] =
+    useState<LearnEvaluationDetails | null>(null);
   const [isDeletingCourse, setIsDeletingCourse] = useState(false);
   const [courseSettingsMessage, setCourseSettingsMessage] =
     useState<string | null>(null);
@@ -417,7 +427,7 @@ export default function LearnPageClient({
     [courseSettingsId, courses],
   );
 
-  usePageScrollLock(Boolean(courseSettingsCourse));
+  usePageScrollLock(Boolean(courseSettingsCourse || selectedEvaluationDetails));
 
   const syncCourse = useCallback((course: Course) => {
     setCourses((items) => {
@@ -812,10 +822,12 @@ export default function LearnPageClient({
     });
   }
 
-  function openLearnEvaluationDetails(question: string) {
-    const params = new URLSearchParams({ question });
+  function openLearnEvaluationDetails(details: LearnEvaluationDetails) {
+    setSelectedEvaluationDetails(details);
+  }
 
-    window.location.assign(`/review?${params.toString()}`);
+  function closeLearnEvaluationDetails() {
+    setSelectedEvaluationDetails(null);
   }
 
   async function submitChatPrompt(event: React.FormEvent<HTMLFormElement>) {
@@ -1298,7 +1310,13 @@ export default function LearnPageClient({
                               toggleLearnEvaluationDetails(message.id)
                             }
                             onDetailsClick={() =>
-                              openLearnEvaluationDetails(evaluationQuestion)
+                              openLearnEvaluationDetails({
+                                question: evaluationQuestion,
+                                score: evaluationSnippet.score,
+                                feedback: evaluationSnippet.content,
+                                correctAnswer: evaluationSnippet.correctAnswer,
+                                createdAt: message.createdAt,
+                              })
                             }
                           />
                         );
@@ -1500,6 +1518,87 @@ export default function LearnPageClient({
                 {courseSettingsMessage}
               </p>
             ) : null}
+          </section>
+        </div>
+      ) : null}
+
+      {selectedEvaluationDetails ? (
+        <div
+          className="stats-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeLearnEvaluationDetails();
+            }
+          }}
+        >
+          <section
+            className="stats-modal learn-evaluation-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="learn-evaluation-modal-title"
+          >
+            <div className="stats-modal-header">
+              <div>
+                <p className="stats-modal-kicker">Question details</p>
+                <div id="learn-evaluation-modal-title">
+                  <MarkdownInline
+                    as="h2"
+                    className="stats-modal-title"
+                    text={selectedEvaluationDetails.question}
+                  />
+                </div>
+              </div>
+              <button
+                className="stats-modal-close"
+                type="button"
+                aria-label="Close question details"
+                onClick={closeLearnEvaluationDetails}
+              />
+            </div>
+
+            <div className="stats-grid" aria-label="Evaluation summary">
+              <div className="stats-tile">
+                <span>Score</span>
+                <strong>{selectedEvaluationDetails.score}/10</strong>
+              </div>
+              <div className="stats-tile">
+                <span>Recorded</span>
+                <strong>
+                  {typeof selectedEvaluationDetails.createdAt === "number"
+                    ? formatCourseUpdatedAt(selectedEvaluationDetails.createdAt)
+                    : "Just now"}
+                </strong>
+              </div>
+            </div>
+
+            <div className="stats-history-panel">
+              <div className="stats-section-heading">
+                <h3>Feedback</h3>
+              </div>
+              <MarkdownContent
+                className="previous-question-feedback"
+                enableMath
+                text={selectedEvaluationDetails.feedback}
+              />
+            </div>
+
+            <div className="stats-history-panel">
+              <div className="stats-section-heading">
+                <h3>Correct answer</h3>
+              </div>
+              {selectedEvaluationDetails.correctAnswer ? (
+                <MarkdownContent
+                  className="previous-answer"
+                  enableMath
+                  text={selectedEvaluationDetails.correctAnswer}
+                />
+              ) : (
+                <p className="previous-answer previous-answer-empty">
+                  No correct answer recorded.
+                </p>
+              )}
+            </div>
           </section>
         </div>
       ) : null}
