@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
+import type { ReactNode } from "react";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
 
@@ -21,6 +22,10 @@ export type PreviousAnswerRowProps = {
   questionLabel?: string;
   detailsLabel?: string;
   className?: string;
+  leadingContent?: ReactNode;
+  supportingContent?: ReactNode;
+  detailsContent?: ReactNode;
+  metaContent?: ReactNode;
   onToggle?: () => void;
   onDetailsClick?: () => void;
 };
@@ -94,6 +99,10 @@ export function PreviousAnswerRow({
   questionLabel = "Question",
   detailsLabel = "More details",
   className,
+  leadingContent,
+  supportingContent,
+  detailsContent,
+  metaContent,
   onToggle,
   onDetailsClick,
 }: PreviousAnswerRowProps) {
@@ -126,6 +135,8 @@ export function PreviousAnswerRow({
             >
               Evaluating...
             </p>
+          ) : supportingContent !== undefined ? (
+            supportingContent
           ) : (
             <MarkdownContent
               className="previous-question-feedback"
@@ -140,44 +151,56 @@ export function PreviousAnswerRow({
           hidden={!isExpanded}
           id={detailId}
         >
-          <div className="previous-field">
-            <span className="previous-field-label">Correct answer</span>
-            {correctAnswer ? (
-              <MarkdownInline
-                as="p"
-                className="previous-answer"
-                enableMath
-                text={correctAnswer}
-              />
-            ) : (
-              <p className="previous-answer previous-answer-empty">
-                No correct answer recorded.
-              </p>
-            )}
-          </div>
+          {detailsContent !== undefined ? (
+            detailsContent
+          ) : (
+            <div className="previous-field">
+              <span className="previous-field-label">Correct answer</span>
+              {correctAnswer ? (
+                <MarkdownInline
+                  as="p"
+                  className="previous-answer"
+                  enableMath
+                  text={correctAnswer}
+                />
+              ) : (
+                <p className="previous-answer previous-answer-empty">
+                  No correct answer recorded.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       <span className="previous-row-meta">
-        <span className="previous-time-control">
-          <time
-            className="previous-time"
-            dateTime={timestamp ? new Date(timestamp).toISOString() : undefined}
-          >
-            {timeLabel}
-          </time>
-          {isInteractive ? (
-            <ChevronDown className="previous-collapse-icon" aria-hidden="true" />
-          ) : null}
-        </span>
-        {evaluationCostLabel ? (
-          <span
-            className="previous-cost-label"
-            aria-label={`Evaluation cost ${evaluationCostLabel}`}
-          >
-            eval {evaluationCostLabel}
-          </span>
-        ) : null}
+        {metaContent !== undefined ? (
+          metaContent
+        ) : (
+          <>
+            <span className="previous-time-control">
+              <time
+                className="previous-time"
+                dateTime={
+                  timestamp ? new Date(timestamp).toISOString() : undefined
+                }
+              >
+                {timeLabel}
+              </time>
+              {isInteractive ? (
+                <ChevronDown className="previous-collapse-icon" aria-hidden="true" />
+              ) : null}
+            </span>
+            {evaluationCostLabel ? (
+              <span
+                className="previous-cost-label"
+                aria-label={`Evaluation cost ${evaluationCostLabel}`}
+              >
+                eval {evaluationCostLabel}
+              </span>
+            ) : null}
+          </>
+        )}
       </span>
     </>
   );
@@ -185,7 +208,9 @@ export function PreviousAnswerRow({
   return (
     <li className={rowClassName} key={id}>
       <div className="previous-score-slot">
-        {isPending ? (
+        {leadingContent !== undefined ? (
+          leadingContent
+        ) : isPending ? (
           <span className="pending-spinner" aria-hidden="true" />
         ) : (
           <PreviousAnswerScore score={score} />

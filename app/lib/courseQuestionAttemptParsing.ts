@@ -28,10 +28,14 @@ function extractJsonObject(source: string): unknown | null {
   }
 }
 
-function normalizeIntakeText(value: unknown, maxLength: number): string {
-  return typeof value === "string"
-    ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
-    : "";
+function normalizeIntakeText(value: unknown, maxLength?: number): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value.trim().replace(/\s+/g, " ");
+
+  return maxLength === undefined ? normalized : normalized.slice(0, maxLength);
 }
 
 function normalizeMultilineText(value: unknown, maxLength: number): string {
@@ -42,6 +46,14 @@ function normalizeMultilineText(value: unknown, maxLength: number): string {
 
 const CHOICE_LINE_PATTERN =
   /^\s*(?:[-*]\s*)?(?:\*\*)?(?:[A-H]|\d{1,2})[\).:-](?:\*\*)?\s+\S/iu;
+const CHOICE_LINE_CAPTURE_PATTERN =
+  /^\s*(?:[-*]\s*)?(?:\*\*)?([A-H]|\d{1,2})[\).:-](?:\*\*)?\s+(.+)$/iu;
+const CHOICE_ANSWER_PREFIX_PATTERN =
+  /^(?:option|choice|answer)?\s*([A-H]|\d{1,2})\s*[\).:-]\s+(.+)$/iu;
+const CHOICE_ANSWER_ONLY_PATTERN =
+  /^(?:option|choice|answer)?\s*([A-H]|\d{1,2})\s*[\).:-]?$/iu;
+const CHOICE_ANSWER_SENTENCE_PATTERN =
+  /^(?:i\s+(?:choose|pick|picked|select|selected|would\s+choose)|choose|pick|picked|select|selected)\s+(?:option|choice|answer)?\s*([A-H]|\d{1,2})\b/iu;
 
 export function stripMultipleChoiceOptionsFromQuestion(question: string): string {
   const lines = question.replace(/\r\n?/g, "\n").split("\n");
@@ -54,6 +66,66 @@ export function stripMultipleChoiceOptionsFromQuestion(question: string): string
   }
 
   return lines.slice(0, firstChoiceLineIndex).join("\n").trim();
+}
+
+function normalizeChoiceKey(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function readMultipleChoiceOptions(question: string): Map<string, string> {
+  const choices = new Map<string, string>();
+
+  for (const line of question.replace(/\r\n?/g, "\n").split("\n")) {
+    const match = CHOICE_LINE_CAPTURE_PATTERN.exec(line);
+
+    if (match?.[1] && match[2]) {
+      choices.set(normalizeChoiceKey(match[1]), normalizeIntakeText(match[2]));
+    }
+  }
+
+  return choices;
+}
+
+function normalizeSubmittedAnswer(input: {
+  question: string;
+  choiceSource?: string;
+  recordAnswer: unknown;
+  fallbackAnswer: string;
+}): string {
+  const answer =
+    normalizeMultilineText(input.fallbackAnswer, 4_000) ||
+    normalizeMultilineText(input.recordAnswer, 4_000);
+  const choices = readMultipleChoiceOptions(
+    [input.question, input.choiceSource ?? ""].filter(Boolean).join("\n"),
+  );
+
+  if (!answer || choices.size === 0) {
+    return answer;
+  }
+
+  const answerText = answer.trim().replace(/\s+/g, " ");
+  const prefixedAnswer = CHOICE_ANSWER_PREFIX_PATTERN.exec(answerText);
+
+  if (prefixedAnswer?.[1]) {
+    return (
+      choices.get(normalizeChoiceKey(prefixedAnswer[1])) ??
+      normalizeIntakeText(prefixedAnswer[2])
+    );
+  }
+
+  const answerOnly = CHOICE_ANSWER_ONLY_PATTERN.exec(answerText);
+
+  if (answerOnly?.[1]) {
+    return choices.get(normalizeChoiceKey(answerOnly[1])) ?? answer;
+  }
+
+  const sentenceAnswer = CHOICE_ANSWER_SENTENCE_PATTERN.exec(answerText);
+
+  if (sentenceAnswer?.[1]) {
+    return choices.get(normalizeChoiceKey(sentenceAnswer[1])) ?? answer;
+  }
+
+  return answer;
 }
 
 function formatInlineMathTarget(value: string): string {
@@ -106,7 +178,7 @@ export function reformatMultipleChoiceQuestionForReview(question: string): strin
 function normalizeRecordText(
   record: Record<string, unknown>,
   keys: string[],
-  maxLength: number,
+  maxLength?: number,
 ): string {
   for (const key of keys) {
     const normalized = normalizeIntakeText(record[key], maxLength);
@@ -143,6 +215,7 @@ function correctAnswerFromJustification(justification: string): string {
 export function parseCourseQuestionAttemptToolResult(
   source: string,
   fallbackAnswer: string,
+  choiceSource = "",
 ): CourseQuestionAttemptToolResult {
   const value = extractJsonObject(source);
 
@@ -165,15 +238,17 @@ export function parseCourseQuestionAttemptToolResult(
     };
   }
 
+  const rawQuestion = normalizeMultilineText(record.question, 1_200);
   const question = normalizeMultilineText(
-    reformatMultipleChoiceQuestionForReview(
-      normalizeMultilineText(record.question, 1_200),
-    ),
+    reformatMultipleChoiceQuestionForReview(rawQuestion),
     1_200,
   );
-  const answer =
-    normalizeMultilineText(record.answer, 4_000) ||
-    normalizeMultilineText(fallbackAnswer, 4_000);
+  const answer = normalizeSubmittedAnswer({
+    question: rawQuestion,
+    choiceSource,
+    recordAnswer: record.answer,
+    fallbackAnswer,
+  });
   const score = parseScore(record.score);
 
   if (!question || !answer || score === null) {
@@ -184,7 +259,7 @@ export function parseCourseQuestionAttemptToolResult(
   }
 
   const justification =
-    normalizeRecordText(record, ["justification", "feedback"], 240) ||
+    normalizeRecordText(record, ["justification", "feedback"]) ||
     "Recorded from course chat.";
   const explicitConciseAnswer = normalizeRecordText(
     record,

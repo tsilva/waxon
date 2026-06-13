@@ -139,6 +139,28 @@ test("parseCourseQuestionAttemptToolResult accepts snake_case correct answer fie
   }
 });
 
+test("parseCourseQuestionAttemptToolResult stores the learner answer over model paraphrase", () => {
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question: "What happens when advantage is negative?",
+      answer: "Learner said the probability changes.",
+      answerSummary: "Learner said probability decreases.",
+      conciseAnswer: "The sampled action's probability decreases.",
+      correctAnswer: "The sampled action's probability decreases.",
+      justification: "Correct.",
+      score: 10,
+    }),
+    "It goes down.",
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.equal(result.answer, "It goes down.");
+  }
+});
+
 test("parseCourseQuestionAttemptToolResult reformats multiple-choice question for review", () => {
   const result = parseCourseQuestionAttemptToolResult(
     JSON.stringify({
@@ -171,6 +193,133 @@ test("parseCourseQuestionAttemptToolResult reformats multiple-choice question fo
       result.question,
       "What does a PPO ratio $r = 0.5$ mean?",
     );
+  }
+});
+
+test("parseCourseQuestionAttemptToolResult stores selected multiple-choice answer text", () => {
+  const selectedAnswer =
+    "The sampled action is now half as likely under the new policy";
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question: [
+        "Choose the best meaning of a PPO ratio r = 0.5:",
+        "",
+        "A) The sampled action is now twice as likely under the new policy",
+        `B) ${selectedAnswer}`,
+        "C) The advantage is negative",
+        "D) The policy loss is zero",
+      ].join("\n"),
+      answer: "The model inferred option B.",
+      answerSummary: "Learner selected B.",
+      conciseAnswer: selectedAnswer,
+      correctAnswer: selectedAnswer,
+      justification:
+        "A PPO ratio of 0.5 means the new policy probability is half of the old policy probability.",
+      score: 10,
+    }),
+    "B",
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.equal(result.answer, selectedAnswer);
+  }
+});
+
+test("parseCourseQuestionAttemptToolResult reads choices from tutor message context", () => {
+  const selectedAnswer =
+    "The sampled action is now half as likely under the new policy";
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question: "What does a PPO ratio r = 0.5 mean?",
+      answer: "The model inferred option B.",
+      answerSummary: "Learner selected B.",
+      conciseAnswer: selectedAnswer,
+      correctAnswer: selectedAnswer,
+      justification:
+        "A PPO ratio of 0.5 means the new policy probability is half of the old policy probability.",
+      score: 10,
+    }),
+    "B",
+    [
+      "Choose the best meaning of a PPO ratio r = 0.5:",
+      "",
+      "A) The sampled action is now twice as likely under the new policy",
+      `B) ${selectedAnswer}`,
+      "C) The advantage is negative",
+      "D) The policy loss is zero",
+    ].join("\n"),
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.equal(result.answer, selectedAnswer);
+  }
+});
+
+test("parseCourseQuestionAttemptToolResult strips multiple-choice label from answer text", () => {
+  const selectedAnswer =
+    "The sampled action is now half as likely under the new policy";
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question: [
+        "Choose the best meaning of a PPO ratio r = 0.5:",
+        "",
+        "A) The sampled action is now twice as likely under the new policy",
+        `B) ${selectedAnswer}`,
+      ].join("\n"),
+      answer: "B) The sampled action is now half as likely under the new policy",
+      answerSummary: "Learner selected B.",
+      conciseAnswer: selectedAnswer,
+      correctAnswer: selectedAnswer,
+      justification: "Correct.",
+      score: 10,
+    }),
+    "B) The sampled action is now half as likely under the new policy",
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.equal(result.answer, selectedAnswer);
+  }
+});
+
+test("parseCourseQuestionAttemptToolResult preserves full justification text", () => {
+  const justification = [
+    "The selected answer is incorrect.",
+    "Having exactly two actions with easy value comparisons is a setting where value-based methods can work naturally.",
+    "Policy-based methods are especially useful when actions are continuous or when stochastic policies must be optimized directly.",
+    "That distinction matters because policy gradients optimize the action distribution itself rather than first estimating action values.",
+  ].join(" ");
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question:
+        "What kind of reinforcement learning situation is especially well-suited for policy-based methods rather than value-based methods?",
+      answer: "Two actions with easy value comparisons.",
+      answerSummary: "Learner chose two discrete actions.",
+      conciseAnswer:
+        "Continuous actions or directly optimized stochastic policies.",
+      correctAnswer:
+        "Continuous actions or directly optimized stochastic policies.",
+      justification,
+      score: 2,
+    }),
+    "fallback answer",
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.ok(justification.length > 240);
+    assert.equal(result.justification, justification);
+    assert.match(result.justification, /action distribution itself/u);
   }
 });
 
