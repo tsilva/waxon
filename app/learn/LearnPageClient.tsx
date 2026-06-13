@@ -391,53 +391,42 @@ function isMilestoneComplete(
 function LearnLoadingPlaceholders() {
   return (
     <div
-      className="learn-chat-layout learn-loading-layout"
+      className="learn-chat-layout learn-chat-layout-course-list learn-loading-layout"
       role="status"
       aria-label="Loading Learn"
       aria-busy="true"
     >
-      <aside
-        className="learn-chat-toc learn-loading-toc"
-        aria-hidden="true"
-      >
-        <span className="admin-skeleton-line learn-loading-kicker" />
-        <nav className="learn-toc" aria-label="Loading course outline">
-          <ol>
-            {Array.from({ length: 5 }, (_, index) => (
-              <li className="learn-loading-toc-row" key={index}>
-                <span className="learn-toc-status">
-                  <span className="deck-skeleton-toggle learn-loading-check" />
-                </span>
-                <span className="admin-skeleton-line learn-loading-toc-line" />
-              </li>
-            ))}
-          </ol>
-        </nav>
-      </aside>
-
       <section
-        className="learn-chat-panel learn-loading-panel"
+        className="learn-course-picker learn-course-picker-full learn-loading-courses"
         aria-hidden="true"
       >
-        <div className="learn-chat-thread learn-loading-thread">
-          <div className="learn-chat-message learn-chat-message-assistant learn-loading-message">
-            <span className="admin-skeleton-line learn-loading-message-line learn-loading-message-line-long" />
-            <span className="admin-skeleton-line learn-loading-message-line" />
-            <span className="admin-skeleton-line learn-loading-message-line learn-loading-message-line-short" />
-          </div>
-          <div className="learn-chat-message learn-chat-message-user learn-loading-message learn-loading-message-user">
-            <span className="admin-skeleton-line learn-loading-message-line" />
-          </div>
-          <div className="learn-chat-message learn-chat-message-assistant learn-loading-message">
-            <span className="admin-skeleton-line learn-loading-message-line learn-loading-message-line-medium" />
-            <span className="admin-skeleton-line learn-loading-message-line learn-loading-message-line-short" />
-          </div>
+        <div className="learn-course-picker-heading">
+          <span className="admin-skeleton-line learn-loading-course-heading" />
         </div>
-        <div className="composer composer-loading learn-loading-composer">
-          <div className="composer-row composer-loading-row">
-            <div className="composer-loading-input" />
-            <div className="composer-loading-button composer-loading-button-accent" />
-          </div>
+        <div className="learn-course-list">
+          <article className="learn-course-item learn-course-new learn-loading-course-card">
+            <span className="admin-skeleton-pill learn-loading-course-pill" />
+            <strong className="admin-skeleton-line learn-loading-course-title" />
+            <small className="admin-skeleton-line learn-loading-course-copy" />
+            <span className="learn-course-new-rail" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+          </article>
+          {Array.from({ length: 5 }, (_, index) => (
+            <article
+              className="learn-course-item learn-course-card learn-loading-course-card"
+              key={index}
+            >
+              <div className="learn-course-open">
+                <span className="admin-skeleton-line learn-loading-course-meta" />
+                <strong className="admin-skeleton-line learn-loading-course-title" />
+                <small className="admin-skeleton-line learn-loading-course-copy" />
+              </div>
+              <span className="deck-skeleton-toggle learn-course-settings-trigger learn-loading-course-action" />
+            </article>
+          ))}
         </div>
       </section>
     </div>

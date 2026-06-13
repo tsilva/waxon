@@ -363,7 +363,7 @@ export default function LibraryPageClient({
           </div>
 
           <div className="library-filter-row" aria-label="Question bank filters">
-            <label>
+            <label className="library-status-filter-label">
               <span>Status</span>
               <select
                 value={status}
@@ -378,7 +378,7 @@ export default function LibraryPageClient({
                 ))}
               </select>
             </label>
-            <label>
+            <label className="library-tag-filter-label">
               <span>Tag</span>
               <select
                 value={tagSlug}
