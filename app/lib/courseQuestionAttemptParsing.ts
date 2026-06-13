@@ -40,6 +40,22 @@ function normalizeMultilineText(value: unknown, maxLength: number): string {
     : "";
 }
 
+const CHOICE_LINE_PATTERN =
+  /^\s*(?:[-*]\s*)?(?:\*\*)?(?:[A-H]|\d{1,2})[\).:-](?:\*\*)?\s+\S/iu;
+
+export function stripMultipleChoiceOptionsFromQuestion(question: string): string {
+  const lines = question.replace(/\r\n?/g, "\n").split("\n");
+  const firstChoiceLineIndex = lines.findIndex((line) =>
+    CHOICE_LINE_PATTERN.test(line),
+  );
+
+  if (firstChoiceLineIndex === -1) {
+    return question.trim();
+  }
+
+  return lines.slice(0, firstChoiceLineIndex).join("\n").trim();
+}
+
 function normalizeRecordText(
   record: Record<string, unknown>,
   keys: string[],
@@ -102,7 +118,12 @@ export function parseCourseQuestionAttemptToolResult(
     };
   }
 
-  const question = normalizeMultilineText(record.question, 1_200);
+  const question = normalizeMultilineText(
+    stripMultipleChoiceOptionsFromQuestion(
+      normalizeMultilineText(record.question, 1_200),
+    ),
+    1_200,
+  );
   const answer =
     normalizeMultilineText(record.answer, 4_000) ||
     normalizeMultilineText(fallbackAnswer, 4_000);

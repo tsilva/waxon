@@ -4,7 +4,10 @@ import {
   ensureCourseChatTurnHasLearnerQuestion,
   isCourseChatTurnComplete,
 } from "../app/lib/courseChatTurn.ts";
-import { parseCourseQuestionAttemptToolResult } from "../app/lib/courseQuestionAttemptParsing.ts";
+import {
+  parseCourseQuestionAttemptToolResult,
+  stripMultipleChoiceOptionsFromQuestion,
+} from "../app/lib/courseQuestionAttemptParsing.ts";
 import { normalizePartialCourseToc } from "../app/lib/courseTocStream.ts";
 
 test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for empty output", () => {
@@ -133,6 +136,56 @@ test("parseCourseQuestionAttemptToolResult accepts snake_case correct answer fie
     );
     assert.equal(result.conciseAnswer, "Probability decreases.");
   }
+});
+
+test("parseCourseQuestionAttemptToolResult strips multiple-choice options from saved question", () => {
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question: [
+        "What does a PPO ratio r = 0.5 mean?",
+        "",
+        "A) The sampled action is now twice as likely under the new policy",
+        "B) The sampled action is now half as likely under the new policy",
+        "C) The advantage is negative",
+        "D) The policy loss is zero",
+      ].join("\n"),
+      answer: "this is test",
+      answerSummary: "Learner did not identify a valid option.",
+      conciseAnswer:
+        "The sampled action is now half as likely under the new policy.",
+      correctAnswer:
+        "The sampled action is now half as likely under the new policy.",
+      justification:
+        "A PPO ratio of 0.5 means the new policy probability is half of the old policy probability.",
+      score: 0,
+    }),
+    "fallback answer",
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.equal(
+      result.question,
+      "What does a PPO ratio r = 0.5 mean?",
+    );
+  }
+});
+
+test("stripMultipleChoiceOptionsFromQuestion keeps non-choice question text", () => {
+  assert.equal(
+    stripMultipleChoiceOptionsFromQuestion(
+      "Why can ratio clipping stabilize PPO updates?",
+    ),
+    "Why can ratio clipping stabilize PPO updates?",
+  );
+  assert.equal(
+    stripMultipleChoiceOptionsFromQuestion(
+      "Choose the best option.\n\n- **A)** Larger updates\n- **B)** Smaller bounded updates",
+    ),
+    "Choose the best option.",
+  );
 });
 
 test("parseCourseQuestionAttemptToolResult falls back to useful correct feedback", () => {
