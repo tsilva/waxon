@@ -41,7 +41,7 @@ For answer grading, create `.env.local` with an OpenRouter-compatible API key:
 
 ```bash
 OPENROUTER_API_KEY=your-api-key
-LLM_MODEL=openai/gpt-5.5
+LLM_MODEL=google/gemini-3.5-flash
 ```
 
 `LLM_MODEL` is optional. The app also accepts `LLM_API_KEY` if `OPENROUTER_API_KEY` is not set.

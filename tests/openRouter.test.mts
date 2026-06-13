@@ -32,7 +32,7 @@ test("openRouterChatCompletion sends user and deck trace identifiers", async () 
         traceId: "trace-789",
       },
       body: {
-        model: "test-model",
+        model: "google/gemini-3.5-flash",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -149,7 +149,7 @@ test("openRouterChatCompletion mirrors body user into trace metadata", async () 
         operation: "test_operation",
       },
       body: {
-        model: "test-model",
+        model: "google/gemini-3.5-flash",
         user: "body-user",
         messages: [{ role: "user", content: "hello" }],
       },
@@ -196,7 +196,7 @@ test("openRouterChatCompletion records actual request and response payloads", as
         traceId,
       },
       body: {
-        model: "test-model",
+        model: "google/gemini-3.5-flash",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -245,7 +245,7 @@ test("listLlmTraceInteractions falls back to local traces when db read is unavai
         traceId,
       },
       body: {
-        model: "test-model",
+        model: "google/gemini-3.5-flash",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -276,7 +276,7 @@ test("recordFailedLlmTrace records an error trace for configuration failures", a
   await recordFailedLlmTrace({
     traceId,
     operation: "evaluate_answer",
-    model: "test-model",
+    model: "google/gemini-3.5-flash",
     question: "What should admin show for missing LLM configuration?",
     requestBody: {
       question: "What should admin show for missing LLM configuration?",
@@ -354,7 +354,7 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
         operation: "test_streaming",
       },
       body: {
-        model: "test-model",
+        model: "google/gemini-3.5-flash",
         messages: [{ role: "user", content: "hello" }],
       },
     });
