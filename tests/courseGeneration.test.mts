@@ -6,6 +6,7 @@ import {
 } from "../app/lib/courseChatTurn.ts";
 import {
   parseCourseQuestionAttemptToolResult,
+  reformatMultipleChoiceQuestionForReview,
   stripMultipleChoiceOptionsFromQuestion,
 } from "../app/lib/courseQuestionAttemptParsing.ts";
 import { normalizePartialCourseToc } from "../app/lib/courseTocStream.ts";
@@ -138,12 +139,12 @@ test("parseCourseQuestionAttemptToolResult accepts snake_case correct answer fie
   }
 });
 
-test("parseCourseQuestionAttemptToolResult strips multiple-choice options from saved question", () => {
+test("parseCourseQuestionAttemptToolResult reformats multiple-choice question for review", () => {
   const result = parseCourseQuestionAttemptToolResult(
     JSON.stringify({
       toolCall: "record_course_question_attempt",
       question: [
-        "What does a PPO ratio r = 0.5 mean?",
+        "Choose the best meaning of a PPO ratio r = 0.5:",
         "",
         "A) The sampled action is now twice as likely under the new policy",
         "B) The sampled action is now half as likely under the new policy",
@@ -168,12 +169,12 @@ test("parseCourseQuestionAttemptToolResult strips multiple-choice options from s
   if (result.toolCall === "record_course_question_attempt") {
     assert.equal(
       result.question,
-      "What does a PPO ratio r = 0.5 mean?",
+      "What does a PPO ratio $r = 0.5$ mean?",
     );
   }
 });
 
-test("stripMultipleChoiceOptionsFromQuestion keeps non-choice question text", () => {
+test("multiple-choice question cleanup keeps non-choice question text", () => {
   assert.equal(
     stripMultipleChoiceOptionsFromQuestion(
       "Why can ratio clipping stabilize PPO updates?",
@@ -185,6 +186,12 @@ test("stripMultipleChoiceOptionsFromQuestion keeps non-choice question text", ()
       "Choose the best option.\n\n- **A)** Larger updates\n- **B)** Smaller bounded updates",
     ),
     "Choose the best option.",
+  );
+  assert.equal(
+    reformatMultipleChoiceQuestionForReview(
+      "Choose the best meaning of r = 0.5:\n\nA) Twice as likely\nB) Half as likely",
+    ),
+    "What does $r = 0.5$ mean?",
   );
 });
 
