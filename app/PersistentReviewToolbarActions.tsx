@@ -184,10 +184,13 @@ export function PersistentReviewToolbarActions() {
 
   const loadToolbarData = useCallback(async (signal: AbortSignal) => {
     const [queueResult, userResult] = await Promise.allSettled([
-      fetch("/api/queue-status?mode=review&includeReviewQueue=0", {
-        cache: "no-store",
-        signal,
-      }),
+      fetch(
+        "/api/queue-status?mode=review&includeReviewQueue=0&includeRecentAttempts=0&includeQuestionAttempts=0&includeDeckEmbeddingPlot=0&includeQueueCounts=1",
+        {
+          cache: "no-store",
+          signal,
+        },
+      ),
       fetch("/api/user", {
         cache: "no-store",
         signal,

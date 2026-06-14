@@ -39,7 +39,7 @@ import {
 } from "@/app/lib/speechRecognition";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 
-type CourseToc = {
+export type CourseToc = {
   title: string;
   description: string;
   pages: Array<{
@@ -48,7 +48,7 @@ type CourseToc = {
   }>;
 };
 
-type Course = {
+export type Course = {
   id: string;
   deckName: string;
   topicPrompt: string;
@@ -74,7 +74,7 @@ type StoredCourseChatMessage = {
   createdAt?: number;
 };
 
-type UserProfile = {
+export type UserProfile = {
   displayName: string;
   email: string;
   avatarUrl: string | null;
@@ -93,6 +93,11 @@ type LearnChatMessage = {
 
 type LearnPageClientProps = {
   initialCourseId?: string;
+  initialCoursesArePartial?: boolean;
+  initialCourses?: Course[] | null;
+  initialCurrentUser?: UserProfile | null;
+  initialDueCount?: number;
+  initialSelectedCourse?: Course | null;
 };
 
 type LearnEvaluationDetails = {
@@ -111,16 +116,18 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
 
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
 
-const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat(undefined, {
+const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
   hour: "numeric",
   minute: "2-digit",
+  timeZone: "UTC",
 });
 
-const COURSE_UPDATED_TITLE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+const COURSE_UPDATED_TITLE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
   timeStyle: "short",
+  timeZone: "UTC",
 });
 
 function chatMessageId() {
@@ -542,6 +549,11 @@ function updateLearnHistory(pathname: string, mode: "push" | "replace") {
 
 export default function LearnPageClient({
   initialCourseId,
+  initialCoursesArePartial = false,
+  initialCourses,
+  initialCurrentUser,
+  initialDueCount,
+  initialSelectedCourse,
 }: LearnPageClientProps = {}) {
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
@@ -551,20 +563,26 @@ export default function LearnPageClient({
     [],
   );
   const [topic, setTopic] = useState("");
-  const [chatMessages, setChatMessages] = useState<LearnChatMessage[]>([
-    INITIAL_CHAT_MESSAGE,
-  ]);
+  const [chatMessages, setChatMessages] = useState<LearnChatMessage[]>(() =>
+    initialSelectedCourse?.chatMessages?.length
+      ? initialSelectedCourse.chatMessages.map(storedMessageToLearnMessage)
+      : [INITIAL_CHAT_MESSAGE],
+  );
   const [expandedLearnEvaluationIds, setExpandedLearnEvaluationIds] = useState<
     Set<string>
   >(() => new Set());
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [courses, setCourses] = useState<Course[]>(() => initialCourses ?? []);
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(
+    initialSelectedCourse ?? null,
+  );
   const [draftCourseToc, setDraftCourseToc] = useState<CourseToc | null>(null);
   const [isStartingNewCourse, setIsStartingNewCourse] = useState(false);
   const [draftConversationCost, setDraftConversationCost] = useState(0);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [dueCount, setDueCount] = useState(0);
-  const [isBooting, setIsBooting] = useState(true);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(
+    initialCurrentUser ?? null,
+  );
+  const [dueCount, setDueCount] = useState(initialDueCount ?? 0);
+  const [isBooting, setIsBooting] = useState(!initialCourses);
   const [loadingCourseId, setLoadingCourseId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -644,31 +662,40 @@ export default function LearnPageClient({
   }, [syncCourse]);
 
   useEffect(() => {
+    if (initialCourses) {
+      setIsBooting(false);
+    }
+
     let isCancelled = false;
 
     async function boot() {
       try {
-        const courseResponsePromise = initialCourseId
+        const shouldFetchCourses = !initialCourses || initialCoursesArePartial;
+        const courseResponsePromise = initialCourseId && !initialSelectedCourse
           ? fetch(`/api/courses/${encodeURIComponent(initialCourseId)}`, {
               cache: "no-store",
             })
           : Promise.resolve(null);
+        const coursesResponsePromise = shouldFetchCourses
+          ? fetch("/api/courses", { cache: "no-store" })
+          : Promise.resolve(null);
         const [userResponse, queueResponse, coursesResponse, courseResponse] =
           await Promise.all([
             fetch("/api/user", { cache: "no-store" }),
-            fetch("/api/queue-status?mode=review&includeReviewQueue=0", {
-              cache: "no-store",
-            }),
-            fetch("/api/courses", { cache: "no-store" }),
+            fetch(
+              "/api/queue-status?mode=review&includeReviewQueue=0&includeRecentAttempts=0&includeQuestionAttempts=0&includeDeckEmbeddingPlot=0&includeQueueCounts=1",
+              { cache: "no-store" },
+            ),
+            coursesResponsePromise,
             courseResponsePromise,
           ]);
         const userData = await readApiJson<UserProfile>(userResponse);
         const queueData = (await readApiJson<{ queueRemaining?: number }>(
           queueResponse,
         )) as { queueRemaining?: number };
-        const coursesData = await readApiJson<{ courses?: Course[] }>(
-          coursesResponse,
-        );
+        const coursesData = coursesResponse
+          ? await readApiJson<{ courses?: Course[] }>(coursesResponse)
+          : null;
         const courseData = courseResponse
           ? await readApiJson<{ course: Course }>(courseResponse)
           : null;
@@ -679,7 +706,9 @@ export default function LearnPageClient({
 
         setCurrentUser(userData);
         setDueCount(queueData.queueRemaining ?? 0);
-        setCourses(coursesData.courses ?? []);
+        if (coursesData) {
+          setCourses(coursesData.courses ?? []);
+        }
         if (courseData) {
           applySelectedCourse(courseData.course);
         }
@@ -703,7 +732,14 @@ export default function LearnPageClient({
     return () => {
       isCancelled = true;
     };
-  }, [applySelectedCourse, initialCourseId]);
+  }, [
+    applySelectedCourse,
+    initialCourseId,
+    initialCourses,
+    initialCoursesArePartial,
+    initialCurrentUser,
+    initialSelectedCourse,
+  ]);
 
   useEffect(() => {
     const thread = chatThreadRef.current;

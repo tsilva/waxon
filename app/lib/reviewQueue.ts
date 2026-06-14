@@ -100,6 +100,7 @@ type QueueStatusInput = {
   includeReviewQueue?: boolean;
   includeQuestionAttempts?: boolean;
   includeRecentAttempts?: boolean;
+  recentAttemptsLimit?: number;
   includeDeckEmbeddingPlot?: boolean;
   includeQueueCounts?: boolean;
 };
@@ -746,7 +747,7 @@ export async function loadInitialReviewPageData(): Promise<{
   const [dueQuestions, previousAnswerStatus] = await Promise.all([
     getDueQuestions(now, {
       userId: user.id,
-      limit: REVIEW_SESSION_QUEUE_LIMIT,
+      limit: 1,
     }),
     queueStatusForUser(user.id, {
       limit: 0,
@@ -754,8 +755,9 @@ export async function loadInitialReviewPageData(): Promise<{
       includeReviewQueue: false,
       includeQuestionAttempts: false,
       includeRecentAttempts: true,
+      recentAttemptsLimit: 6,
       includeDeckEmbeddingPlot: false,
-      includeQueueCounts: false,
+      includeQueueCounts: true,
     }),
   ]);
 
@@ -1488,7 +1490,7 @@ export async function queueStatusForUser(
         userId,
         deckScope: input.deckId ? undefined : "rotation",
         deckId: input.deckId,
-        limit: 24,
+        limit: Math.max(0, Math.floor(input.recentAttemptsLimit ?? 24)),
       })
     : Promise.resolve([]);
   const persistedEvaluationsPromise = getVisibleAnswerEvaluations({

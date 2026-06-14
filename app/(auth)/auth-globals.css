@@ -5,7 +5,8 @@
   padding: 72px 16px 32px;
 }
 
-.auth-fallback {
+.auth-fallback,
+.auth-static-shell {
   display: grid;
   justify-items: start;
   width: min(440px, 100%);
@@ -32,7 +33,8 @@
   text-transform: uppercase;
 }
 
-.auth-fallback h1 {
+.auth-fallback h1,
+.auth-static-shell h1 {
   margin: 0;
   color: var(--ink);
   font-size: 30px;
@@ -41,7 +43,8 @@
   line-height: 1.08;
 }
 
-.auth-fallback p:not(.auth-fallback-kicker) {
+.auth-fallback p:not(.auth-fallback-kicker),
+.auth-static-shell p:not(.auth-fallback-kicker) {
   margin: 14px 0 24px;
   color: var(--ink-soft);
   font-size: 17px;
@@ -56,12 +59,27 @@
   padding: 0 16px;
   border: 1px solid rgb(166 124 82 / 30%);
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--accent-hover);
   color: #fff;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0;
   text-decoration: none;
+}
+
+button.auth-fallback-action {
+  cursor: pointer;
+}
+
+.auth-fallback-action[aria-busy="true"] {
+  cursor: wait;
+  opacity: 0.78;
+}
+
+.auth-clerk-frame {
+  display: grid;
+  justify-items: center;
+  width: min(440px, 100%);
 }
 
 .auth-fallback-action svg {
@@ -71,7 +89,7 @@
 
 .auth-fallback-action:hover,
 .auth-fallback-action:focus-visible {
-  background: var(--accent-hover);
+  background: var(--ink);
   color: #fff;
   outline: 3px solid rgb(166 124 82 / 12%);
   outline-offset: 3px;
