@@ -345,6 +345,60 @@ test("parseCourseQuestionAttemptToolResult reads choices from tutor message cont
   }
 });
 
+test("parseCourseQuestionAttemptToolResult preserves inline markdown from tutor question", () => {
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question:
+        "Which probability distribution has higher entropy: a certain two-outcome distribution [1, 0] or an equally likely two-outcome distribution [0.5, 0.5]?",
+      answer: "The model inferred option B.",
+      answerSummary: "Learner selected B.",
+      conciseAnswer: "The equally likely distribution has higher entropy.",
+      correctAnswer: "The equally likely distribution has higher entropy.",
+      justification:
+        "[0.5, 0.5] has higher entropy because the outcome is uncertain.",
+      score: 10,
+    }),
+    "B",
+    "Which distribution has higher entropy, A) `[1, 0]` or B) `[0.5, 0.5]`?",
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.equal(
+      result.question,
+      "Which probability distribution has higher entropy: a certain two-outcome distribution `[1, 0]` or an equally likely two-outcome distribution `[0.5, 0.5]`?",
+    );
+  }
+});
+
+test("parseCourseQuestionAttemptToolResult preserves inline math from tutor question", () => {
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question: "What does r = 0.5 mean for the sampled action?",
+      answer: "It is half as likely.",
+      answerSummary: "Learner said half as likely.",
+      conciseAnswer: "The sampled action is half as likely.",
+      correctAnswer: "The sampled action is half as likely.",
+      justification: "Correct.",
+      score: 10,
+    }),
+    "It is half as likely.",
+    "What does $r = 0.5$ mean for the sampled action?",
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.equal(
+      result.question,
+      "What does $r = 0.5$ mean for the sampled action?",
+    );
+  }
+});
+
 test("parseCourseQuestionAttemptToolResult strips multiple-choice label from answer text", () => {
   const selectedAnswer =
     "The sampled action is now half as likely under the new policy";

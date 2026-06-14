@@ -146,6 +146,79 @@ function formatInlineMathTarget(value: string): string {
     : normalized;
 }
 
+function readInlineFormattedSpans(source: string): Array<{
+  formatted: string;
+  plain: string;
+}> {
+  const spans: Array<{ formatted: string; plain: string }> = [];
+  const patterns = [
+    /`([^`\n]+)`/gu,
+    /\$([^$\n]+)\$/gu,
+    /\\\(([^]+?)\\\)/gu,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const formatted = match[0];
+      const plain = match[1]?.trim();
+
+      if (!formatted || !plain) {
+        continue;
+      }
+
+      spans.push({ formatted, plain });
+    }
+  }
+
+  return spans;
+}
+
+function hasFormattingBoundary(value: string, startIndex: number, length: number) {
+  const before = value[startIndex - 1];
+  const after = value[startIndex + length];
+
+  return before === "`" || before === "$" || after === "`" || after === "$";
+}
+
+function applyInlineFormattingFromSource(question: string, source: string): string {
+  if (!question || !source) {
+    return question;
+  }
+
+  let formattedQuestion = question;
+
+  for (const span of readInlineFormattedSpans(source)) {
+    if (
+      span.formatted === span.plain ||
+      formattedQuestion.includes(span.formatted)
+    ) {
+      continue;
+    }
+
+    let searchIndex = 0;
+
+    while (searchIndex < formattedQuestion.length) {
+      const matchIndex = formattedQuestion.indexOf(span.plain, searchIndex);
+
+      if (matchIndex === -1) {
+        break;
+      }
+
+      if (!hasFormattingBoundary(formattedQuestion, matchIndex, span.plain.length)) {
+        formattedQuestion =
+          `${formattedQuestion.slice(0, matchIndex)}${span.formatted}` +
+          formattedQuestion.slice(matchIndex + span.plain.length);
+        searchIndex = matchIndex + span.formatted.length;
+        continue;
+      }
+
+      searchIndex = matchIndex + span.plain.length;
+    }
+  }
+
+  return formattedQuestion;
+}
+
 export function reformatMultipleChoiceQuestionForReview(question: string): string {
   const stem = stripMultipleChoiceOptionsFromQuestion(question)
     .trim()
@@ -240,7 +313,9 @@ export function parseCourseQuestionAttemptToolResult(
 
   const rawQuestion = normalizeMultilineText(record.question, 1_200);
   const question = normalizeMultilineText(
-    reformatMultipleChoiceQuestionForReview(rawQuestion),
+    reformatMultipleChoiceQuestionForReview(
+      applyInlineFormattingFromSource(rawQuestion, choiceSource),
+    ),
     1_200,
   );
   const answer = normalizeSubmittedAnswer({

@@ -27,6 +27,7 @@ Waxon is a Next.js application for typed recall practice. It serves due question
 * Answer grading uses `OPENROUTER_API_KEY` or `LLM_API_KEY`; without either key, submitted answers are recorded with score `0` and a configuration message.
 * Learn course creation streams partial TOCs to the client. Once the first valid TOC page arrives, the first chat lesson can start from an in-memory draft course while the full TOC and durable course record continue finalizing in parallel.
 * Learn chat milestone advancement is intentionally conservative: the progress tool can propose advancing, but the route only advances after a recorded high-scoring answer evaluation demonstrates mastery.
+* Learn extracted review questions preserve inline code/math markdown by transferring matching formatting spans from the original tutor question into the server-side extracted question record.
 
 # Data Model Cues
 
