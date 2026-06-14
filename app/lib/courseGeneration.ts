@@ -34,6 +34,16 @@ const MAX_INTAKE_MESSAGE_CHARS = 500;
 const MAX_INTAKE_TOPIC_CHARS = 800;
 const QUESTION_EVALUATION_SNIPPET_PATTERN =
   /^<!--\s*waxon:evaluation-snippet score=\d{1,2}\s*-->\s*/u;
+const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
+const MODEL_CONTEXT_WINDOW_TOKENS: Array<{
+  pattern: RegExp;
+  tokens: number;
+}> = [
+  { pattern: /gemini-(?:1\.5|2(?:\.[05])?|3(?:\.[05])?)-flash/iu, tokens: 1_000_000 },
+  { pattern: /gemini-(?:1\.5|2(?:\.[05])?|3(?:\.[05])?)-pro/iu, tokens: 1_000_000 },
+  { pattern: /gpt-4\.1|gpt-5/iu, tokens: 1_000_000 },
+  { pattern: /claude-(?:3\.5|3\.7|4|4\.5)/iu, tokens: 200_000 },
+];
 
 type CourseCostObserver = {
   onCost?: (cost: number) => void;
@@ -71,8 +81,16 @@ function normalizeIntakeText(value: unknown, maxLength: number): string {
 
 function reportResponseMetrics(
   input: CourseCostObserver,
-  usage: { completion_tokens?: unknown; cost?: unknown } | undefined,
+  usage:
+    | {
+        prompt_tokens?: unknown;
+        completion_tokens?: unknown;
+        total_tokens?: unknown;
+        cost?: unknown;
+      }
+    | undefined,
   latencyMs: number,
+  model: string | undefined,
 ) {
   const cost =
     typeof usage?.cost === "number"
@@ -85,11 +103,34 @@ function reportResponseMetrics(
     input.onCost?.(cost);
   }
 
-  const metrics = metricsFromOpenRouterUsage(usage, latencyMs);
+  const metrics = metricsFromOpenRouterUsage(
+    usage,
+    latencyMs,
+    resolveContextWindowTokens(model),
+  );
 
   if (metrics) {
     input.onMetrics?.(metrics);
   }
+}
+
+function resolveContextWindowTokens(model: string | undefined): number | null {
+  const configuredLimit = process.env.LLM_CONTEXT_WINDOW_TOKENS?.trim();
+
+  if (configuredLimit) {
+    const parsedLimit = Number.parseInt(configuredLimit, 10);
+
+    if (Number.isFinite(parsedLimit) && parsedLimit > 0) {
+      return parsedLimit;
+    }
+  }
+
+  const modelName = (model ?? DEFAULT_OPENROUTER_CHAT_MODEL).trim();
+  const matchedContextWindow = MODEL_CONTEXT_WINDOW_TOKENS.find(({ pattern }) =>
+    pattern.test(modelName),
+  );
+
+  return matchedContextWindow?.tokens ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
 }
 
 function parseCourseIntakeDecision(source: string): CourseIntakeDecision {
@@ -248,7 +289,7 @@ export async function generateCourseIntakeDecision(input: {
     throw new Error("Course intake failed.");
   }
 
-  reportResponseMetrics(input, body.usage, Date.now() - startedAt);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
 
   return parseCourseIntakeDecision(extractChatCompletionText(body));
 }
@@ -306,7 +347,7 @@ export async function evaluateCourseChatProgress(input: {
     throw new Error("Course progress evaluation failed.");
   }
 
-  reportResponseMetrics(input, body.usage, Date.now() - startedAt);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
 
   return parseCourseProgressDecision(extractChatCompletionText(body));
 }
@@ -397,7 +438,7 @@ export async function generateCourseQuestionAttemptToolResult(input: {
     };
   }
 
-  reportResponseMetrics(input, body.usage, Date.now() - startedAt);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
 
   return parseCourseQuestionAttemptToolResult(
     extractChatCompletionText(body),
@@ -491,7 +532,7 @@ export async function streamCourseChatTurn(input: {
     throw new Error("Course chat generation failed.");
   }
 
-  reportResponseMetrics(input, body.usage, Date.now() - startedAt);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
 
   const ensuredTurn = ensureCourseChatTurnHasLearnerQuestion({
     text: extractChatCompletionText(body),
@@ -571,7 +612,7 @@ export async function generateCourseToc(input: {
     throw new Error("Course TOC generation failed.");
   }
 
-  reportResponseMetrics(input, body.usage, Date.now() - startedAt);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
 
   return parseCourseTocJson(extractChatCompletionText(body));
 }

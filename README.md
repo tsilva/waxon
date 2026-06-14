@@ -42,6 +42,8 @@ For answer grading, create `.env.local` with an OpenRouter-compatible API key:
 ```bash
 OPENROUTER_API_KEY=your-api-key
 LLM_MODEL=google/gemini-3.5-flash
+# Optional: override the model context window used for Learn context %.
+LLM_CONTEXT_WINDOW_TOKENS=1000000
 ```
 
 `LLM_MODEL` is optional. The app also accepts `LLM_API_KEY` if `OPENROUTER_API_KEY` is not set.

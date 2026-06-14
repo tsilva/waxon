@@ -109,6 +109,8 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
   content: "What do you want to learn?",
 };
 
+const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
+
 const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat(undefined, {
   month: "short",
   day: "numeric",
@@ -123,6 +125,13 @@ const COURSE_UPDATED_TITLE_FORMATTER = new Intl.DateTimeFormat(undefined, {
 
 function chatMessageId() {
   return `learn-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isChatThreadNearBottom(thread: HTMLDivElement): boolean {
+  const distanceFromBottom =
+    thread.scrollHeight - thread.scrollTop - thread.clientHeight;
+
+  return distanceFromBottom <= CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD;
 }
 
 function pendingStatus(message: LearnChatMessage): string {
@@ -339,6 +348,45 @@ function formatTokensPerSecond(
   return `${tokensPerSecond.toFixed(tokensPerSecond < 10 ? 1 : 0)} tok/s`;
 }
 
+function formatContextPercent(
+  contextPercent: number | null | undefined,
+): string | null {
+  if (
+    contextPercent === null ||
+    contextPercent === undefined ||
+    !Number.isFinite(contextPercent) ||
+    contextPercent < 0
+  ) {
+    return null;
+  }
+
+  if (contextPercent > 0 && contextPercent < 1) {
+    return "<1% ctx";
+  }
+
+  return `${Math.min(100, Math.round(contextPercent))}% ctx`;
+}
+
+function latestCourseContextPercent(
+  messages: LearnChatMessage[],
+): number | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const metrics =
+      message?.metrics ?? parseCourseMessageMetrics(message?.content ?? "").metrics;
+
+    if (
+      metrics?.contextPercent !== null &&
+      metrics?.contextPercent !== undefined &&
+      Number.isFinite(metrics.contextPercent)
+    ) {
+      return metrics.contextPercent;
+    }
+  }
+
+  return null;
+}
+
 function LearnChatMessageMetrics({
   metrics,
 }: {
@@ -530,6 +578,8 @@ export default function LearnPageClient({
   const [speechStatus, setSpeechStatus] = useState<SpeechStatus>("idle");
   const [speechMessage, setSpeechMessage] = useState<string | null>(null);
   const chatThreadRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollChatRef = useRef(true);
+  const touchScrollStartYRef = useRef<number | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const keepListeningRef = useRef(false);
   const canViewAdmin = isAdminEmail(currentUser?.email);
@@ -554,6 +604,13 @@ export default function LearnPageClient({
   const conversationCostLabel = formatConversationCost(
     selectedCourse?.conversationCost ?? draftConversationCost,
   );
+  const conversationContextLabel = formatContextPercent(
+    latestCourseContextPercent(chatMessages),
+  );
+  const conversationMetricItems = [
+    conversationCostLabel,
+    conversationContextLabel,
+  ].filter((item): item is string => Boolean(item));
   const courseSettingsCourse = useMemo(
     () => courses.find((course) => course.id === courseSettingsId) ?? null,
     [courseSettingsId, courses],
@@ -572,6 +629,7 @@ export default function LearnPageClient({
   }, []);
 
   const applySelectedCourse = useCallback((course: Course) => {
+    shouldAutoScrollChatRef.current = true;
     setSelectedCourse(course);
     setDraftCourseToc(null);
     setIsStartingNewCourse(false);
@@ -651,6 +709,69 @@ export default function LearnPageClient({
     const thread = chatThreadRef.current;
 
     if (!thread) {
+      return;
+    }
+
+    const chatThread = thread;
+
+    function updateAutoScrollFromPosition() {
+      shouldAutoScrollChatRef.current = isChatThreadNearBottom(chatThread);
+    }
+
+    function handleWheel(event: WheelEvent) {
+      if (event.deltaY < 0) {
+        shouldAutoScrollChatRef.current = false;
+      }
+    }
+
+    function handleTouchStart(event: TouchEvent) {
+      touchScrollStartYRef.current = event.touches[0]?.clientY ?? null;
+    }
+
+    function handleTouchMove(event: TouchEvent) {
+      const startY = touchScrollStartYRef.current;
+      const currentY = event.touches[0]?.clientY;
+
+      if (
+        typeof startY === "number" &&
+        typeof currentY === "number" &&
+        currentY > startY
+      ) {
+        shouldAutoScrollChatRef.current = false;
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (
+        event.key === "ArrowUp" ||
+        event.key === "PageUp" ||
+        event.key === "Home"
+      ) {
+        shouldAutoScrollChatRef.current = false;
+      }
+    }
+
+    chatThread.addEventListener("scroll", updateAutoScrollFromPosition, {
+      passive: true,
+    });
+    chatThread.addEventListener("wheel", handleWheel, { passive: true });
+    chatThread.addEventListener("touchstart", handleTouchStart, { passive: true });
+    chatThread.addEventListener("touchmove", handleTouchMove, { passive: true });
+    chatThread.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      chatThread.removeEventListener("scroll", updateAutoScrollFromPosition);
+      chatThread.removeEventListener("wheel", handleWheel);
+      chatThread.removeEventListener("touchstart", handleTouchStart);
+      chatThread.removeEventListener("touchmove", handleTouchMove);
+      chatThread.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedCourse?.id, draftCourseToc, isStartingNewCourse]);
+
+  useEffect(() => {
+    const thread = chatThreadRef.current;
+
+    if (!thread || !shouldAutoScrollChatRef.current) {
       return;
     }
 
@@ -899,6 +1020,7 @@ export default function LearnPageClient({
       return;
     }
 
+    shouldAutoScrollChatRef.current = true;
     stopSpeech();
     setSelectedCourse(null);
     setDraftCourseToc(null);
@@ -956,6 +1078,7 @@ export default function LearnPageClient({
       setCourses((items) => items.filter((item) => item.id !== course.id));
 
       if (selectedCourse?.id === course.id) {
+        shouldAutoScrollChatRef.current = true;
         setSelectedCourse(null);
         setDraftCourseToc(null);
         setChatMessages([INITIAL_CHAT_MESSAGE]);
@@ -1025,6 +1148,7 @@ export default function LearnPageClient({
     };
     const nextMessages = [...chatMessages, userMessage];
 
+    shouldAutoScrollChatRef.current = true;
     setTopic("");
     stopSpeech();
     setError(null);
@@ -1601,14 +1725,15 @@ export default function LearnPageClient({
                       ) : undefined
                     }
                     after={
-                      selectedCourse && (speechMessage || conversationCostLabel) ? (
+                      selectedCourse &&
+                      (speechMessage || conversationMetricItems.length > 0) ? (
                         <>
-                          {conversationCostLabel ? (
+                          {conversationMetricItems.length > 0 ? (
                             <div
                               className="learn-conversation-cost"
-                              aria-label={`Conversation cost ${conversationCostLabel}`}
+                              aria-label={`Conversation metrics: ${conversationMetricItems.join(", ")}`}
                             >
-                              {conversationCostLabel}
+                              {conversationMetricItems.join(" / ")}
                             </div>
                           ) : null}
                           {speechMessage ? (
