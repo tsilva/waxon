@@ -81,12 +81,6 @@ export function ReviewToolbar({
   const router = useRouter();
 
   useEffect(() => {
-    if (showAdmin) {
-      router.prefetch("/admin");
-    }
-  }, [router, showAdmin]);
-
-  useEffect(() => {
     if (actions !== "placeholder") {
       return;
     }
@@ -120,7 +114,7 @@ export function ReviewToolbar({
   return (
     <header className="reader-header">
       <div className="reader-heading">
-        <Link className="reader-brand admin-brand-link" href="/">
+        <Link className="reader-brand admin-brand-link" href="/" prefetch={false}>
           <Image
             className="reader-brand-mark"
             src="/brand/icon/header-mark.svg"
@@ -135,6 +129,7 @@ export function ReviewToolbar({
           <Link
             className={tabClass(activeTab === "review")}
             href="/review"
+            prefetch={false}
             role="tab"
             id="review-tab"
             aria-selected={activeTab === "review"}
@@ -146,6 +141,7 @@ export function ReviewToolbar({
           <Link
             className={tabClass(activeTab === "learn")}
             href="/learn"
+            prefetch={false}
             role="tab"
             id="learn-tab"
             aria-selected={activeTab === "learn"}
@@ -157,6 +153,7 @@ export function ReviewToolbar({
           <Link
             className={tabClass(activeTab === "library")}
             href="/library"
+            prefetch={false}
             role="tab"
             aria-selected={activeTab === "library"}
           >
@@ -165,6 +162,7 @@ export function ReviewToolbar({
           <Link
             className={tabClass(activeTab === "tags")}
             href="/tags"
+            prefetch={false}
             role="tab"
             aria-selected={activeTab === "tags"}
             onClick={onTagsClick}
@@ -175,6 +173,7 @@ export function ReviewToolbar({
             <Link
               className={tabClass(activeTab === "admin")}
               href="/admin"
+              prefetch={false}
               role="tab"
               aria-selected={activeTab === "admin"}
               onClick={onAdminClick}
@@ -260,6 +259,7 @@ export function ReviewToolbarActions({
           activeTab === "stats" ? "queue-summary-active" : ""
         }`}
         href="/stats"
+        prefetch={false}
         aria-current={activeTab === "stats" ? "page" : undefined}
         onClick={onStatsClick}
         title="Review stats"

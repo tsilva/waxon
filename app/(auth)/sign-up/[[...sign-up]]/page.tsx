@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { AuthClerkHydrator } from "../../AuthClerkHydrator";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
-import { SignUpWithFallback } from "./SignUpWithFallback";
 
 export const metadata: Metadata = {
   title: "Sign up - waxon",
@@ -15,7 +15,7 @@ export default function SignUpPage() {
 
   return (
     <main className="auth-page">
-      <SignUpWithFallback />
+      <AuthClerkHydrator mode="sign-up" />
     </main>
   );
 }

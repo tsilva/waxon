@@ -6570,6 +6570,22 @@ textarea {
   content-visibility: auto;
 }
 
+[data-admin-static] .admin-stage {
+  display: block;
+  padding: 24px 22px;
+}
+
+[data-admin-static] {
+  --font-ui:
+    "SFMono-Regular", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", monospace;
+  --font-question: Georgia, "Times New Roman", serif;
+}
+
+[data-admin-static] .admin-loading-stage {
+  display: none;
+}
+
 .admin-skeleton-brand-mark,
 .admin-skeleton-avatar,
 .admin-skeleton-control,

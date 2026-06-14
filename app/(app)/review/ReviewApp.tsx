@@ -1403,6 +1403,7 @@ export default function ReviewApp({
   const [queueRemaining, setQueueRemaining] = useState(
     () =>
       cachedSessionRef.current?.queueRemaining ??
+      initialPreviousAnswerStatus?.queueRemaining ??
       initialReviewSessionRemainingQueue.length,
   );
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>(

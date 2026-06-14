@@ -1,5 +1,6 @@
-import { AdminPageClient } from "../../AdminPageClient";
+import { AdminHydrator } from "../../AdminHydrator";
 import { getAdminPageShellProps } from "../../adminPageShell";
+import { AdminStaticView } from "../../AdminStaticView";
 
 export const dynamic = "force-dynamic";
 
@@ -12,12 +13,13 @@ export default async function AdminTracePage({
   const { currentUser, initialViewState } = await getAdminPageShellProps();
 
   return (
-    <AdminPageClient
-      currentUser={currentUser}
-      initialInteractions={[]}
-      initialDueCount={0}
-      initialViewState={initialViewState}
-      selectedTraceId={traceId}
-    />
+    <>
+      <AdminStaticView />
+      <AdminHydrator
+        currentUser={currentUser}
+        initialViewState={initialViewState}
+        selectedTraceId={traceId}
+      />
+    </>
   );
 }

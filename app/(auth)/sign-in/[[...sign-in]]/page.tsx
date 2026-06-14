@@ -1,6 +1,6 @@
-import { SignIn } from "@clerk/nextjs";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { AuthClerkHydrator } from "../../AuthClerkHydrator";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 
 export const metadata: Metadata = {
@@ -15,7 +15,7 @@ export default function SignInPage() {
 
   return (
     <main className="auth-page">
-      <SignIn />
+      <AuthClerkHydrator mode="sign-in" />
     </main>
   );
 }

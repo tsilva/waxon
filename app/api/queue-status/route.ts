@@ -16,6 +16,10 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
   const offset = Number.parseInt(url.searchParams.get("offset") ?? "", 10);
+  const recentAttemptsLimit = Number.parseInt(
+    url.searchParams.get("recentAttemptsLimit") ?? "",
+    10,
+  );
   const sort = url.searchParams.get("sort");
   const deckId = url.searchParams.get("deckId")?.trim();
   const mode = url.searchParams.get("mode");
@@ -40,6 +44,9 @@ export async function GET(request: Request) {
         url.searchParams.get("includeRecentAttempts"),
         true,
       ),
+      recentAttemptsLimit: Number.isFinite(recentAttemptsLimit)
+        ? recentAttemptsLimit
+        : undefined,
       includeDeckEmbeddingPlot: isEnabled(
         url.searchParams.get("includeDeckEmbeddingPlot"),
         false,

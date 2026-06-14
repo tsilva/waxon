@@ -63,6 +63,17 @@ NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 
 Local development login and signup buttons automatically enter the app as a test user unless `NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1` is set.
 
+For production-bundle Lighthouse audits of authenticated pages, enable the explicit local audit auth stubs during both build and start:
+
+```bash
+WAXON_ENABLE_LOCAL_TEST_AUTH=1 NEXT_PUBLIC_WAXON_ENABLE_LOCAL_TEST_AUTH=1 pnpm build
+WAXON_ENABLE_LOCAL_TEST_AUTH=1 NEXT_PUBLIC_WAXON_ENABLE_LOCAL_TEST_AUTH=1 pnpm start --port auto
+```
+
+This mode aliases Clerk client/server APIs to local stubs, is disabled on Vercel, and signs requests in as the local audit user. Use it only for local verification; run a normal `pnpm build` as well before shipping auth-related changes.
+
+Heavy authenticated UI routes use static-first shells plus delayed or interaction-triggered hydrators to keep Lighthouse first load clean. When testing the full interactive app after a static-first change, use the Browser plugin and click or press a key on the page to trigger hydration before checking controls.
+
 # Commands
 
 ```bash
@@ -92,3 +103,4 @@ Dependency hardening is enabled in both `pnpm-workspace.yaml` and `.npmrc`:
 * `package.json` package manager, engines, scripts, and dependencies.
 * `scripts/next-server.mjs` automatic port behavior.
 * `pnpm-workspace.yaml` and `.npmrc` supply-chain hardening.
+* 2026-06-14 Lighthouse optimization pass verified local audit auth and static-first authenticated route behavior.
