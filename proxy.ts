@@ -15,23 +15,45 @@ const isProtectedRoute = createRouteMatcher([
   "/stats(.*)",
 ]);
 
-export default clerkMiddleware(async (auth, request) => {
+const isPublicStaticPage = createRouteMatcher([
+  "/",
+  "/privacy-policy",
+  "/robots.txt",
+  "/sitemap.xml",
+  "/terms-and-conditions",
+]);
+
+const handleClerkMiddleware = clerkMiddleware(async (auth, request) => {
+  if (isProtectedRoute(request) && !isLocalTestAuthEnabled()) {
+    await auth.protect();
+  }
+});
+
+export default function proxy(
+  ...args: Parameters<typeof handleClerkMiddleware>
+) {
+  const [request] = args;
+
   if (request.nextUrl.pathname === "/") {
     if (isLocalTestAuthEnabled()) {
       return NextResponse.redirect(new URL("/review", request.url));
     }
 
-    const { userId } = await auth();
-
-    if (userId) {
+    if (request.cookies.has("__session")) {
       return NextResponse.redirect(new URL("/review", request.url));
     }
   }
 
-  if (isProtectedRoute(request) && !isLocalTestAuthEnabled()) {
-    await auth.protect();
+  if (isPublicStaticPage(request)) {
+    return NextResponse.next();
   }
-});
+
+  if (isLocalTestAuthEnabled() && isProtectedRoute(request)) {
+    return NextResponse.next();
+  }
+
+  return handleClerkMiddleware(...args);
+}
 
 export const config = {
   matcher: [

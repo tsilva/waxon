@@ -1060,10 +1060,9 @@ function AdminLoadingPlaceholders() {
         <div className="admin-table-scroll">
           <div
             className="admin-trace-table admin-skeleton-table"
-            role="table"
             aria-label="Loading trace groups"
           >
-            <div className="admin-trace-header" role="row">
+            <div className="admin-trace-header">
               <span role="columnheader">Interaction</span>
               <span role="columnheader">Started</span>
               <span role="columnheader">Calls</span>
@@ -1074,8 +1073,8 @@ function AdminLoadingPlaceholders() {
             </div>
 
             {adminSkeletonTableRows.map((row) => (
-              <div className="admin-trace-group" key={row} role="rowgroup">
-                <div className="admin-trace-row" role="row">
+              <div className="admin-trace-group" key={row}>
+                <div className="admin-trace-row">
                   <span className="admin-skeleton-stack">
                     <span className="admin-skeleton-line admin-skeleton-title" />
                     <span className="admin-skeleton-line admin-skeleton-meta" />
@@ -1647,9 +1646,9 @@ export function AdminPageClient({
                 </div>
 
                 <div className="admin-table-scroll">
-                  <div className="admin-trace-table" role="table" aria-label="Trace groups">
-                    <div className="admin-trace-header" role="row">
-                      <span role="columnheader">Interaction</span>
+                  <div className="admin-trace-table" aria-label="Trace groups">
+                    <div className="admin-trace-header">
+                      <span>Interaction</span>
                       {[
                         ["startedAt", "Started"],
                         ["calls", "Calls"],
@@ -1661,7 +1660,6 @@ export function AdminPageClient({
                         <button
                           key={key}
                           type="button"
-                          role="columnheader"
                           onClick={() => updateSort(key as SortKey)}
                         >
                           {label}
@@ -1680,7 +1678,6 @@ export function AdminPageClient({
                             isExpanded ? "admin-trace-group-expanded" : ""
                           }`}
                           key={interaction.id}
-                          role="rowgroup"
                         >
                           <button
                             className="admin-trace-row admin-trace-group-row"

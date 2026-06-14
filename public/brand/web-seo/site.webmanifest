@@ -1,6 +1,10 @@
 {
+  "id": "/",
   "name": "waxon",
   "short_name": "waxon",
+  "description": "Fast free-text flashcard review",
+  "start_url": "/",
+  "scope": "/",
   "icons": [
     {
       "src": "android-chrome-192.png",
@@ -15,7 +19,7 @@
       "purpose": "any maskable"
     }
   ],
-  "theme_color": "#ffffff",
-  "background_color": "#ffffff",
+  "theme_color": "#fef9ed",
+  "background_color": "#fef9ed",
   "display": "standalone"
 }

@@ -1,12 +1,11 @@
-import Link from "next/link";
-
 export default function PrivacyPolicyPage() {
   return (
     <main className="legal-page">
       <article className="legal-document">
-        <Link className="legal-brand" href="/">
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+        <a className="legal-brand" href="/">
           waxon
-        </Link>
+        </a>
         <p className="legal-kicker">Privacy policy</p>
         <h1>Privacy policy</h1>
         <p>

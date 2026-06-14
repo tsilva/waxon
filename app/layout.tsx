@@ -1,14 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import "./globals.css";
-import { Providers } from "./Providers";
+
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+const googleAnalyticsId = process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_ID;
 
 export const metadata: Metadata = {
-  metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000",
-  ),
+  metadataBase: new URL(siteUrl),
   title: "waxon",
   description: "Fast free-text flashcard review",
+  alternates: {
+    canonical: "/",
+  },
   manifest: "/brand/web-seo/site.webmanifest",
   icons: {
     icon: [
@@ -44,6 +47,8 @@ export const metadata: Metadata = {
   openGraph: {
     title: "waxon",
     description: "Fast free-text flashcard review",
+    url: "/",
+    siteName: "waxon",
     images: [
       {
         url: "/brand/web-seo/og-image-1200x630.png",
@@ -53,14 +58,18 @@ export const metadata: Metadata = {
       },
     ],
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "waxon",
+    description: "Fast free-text flashcard review",
+    images: ["/brand/web-seo/og-image-1200x630.png"],
+  },
 };
 
 export const viewport: Viewport = {
   colorScheme: "light",
   themeColor: "#fef9ed",
 };
-
-const googleAnalyticsId = "G-25GH510YWE";
 
 export default function RootLayout({
   children,
@@ -69,23 +78,24 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://microsoft.ai" crossOrigin="" />
-      </head>
       <body>
-        <Providers>{children}</Providers>
-        <Script
-          src={`https://www.googletagmanager.com/gtag/js?id=${googleAnalyticsId}`}
-          strategy="lazyOnload"
-        />
-        <Script id="google-analytics" strategy="lazyOnload">
-          {`
+        {children}
+        {googleAnalyticsId ? (
+          <>
+            <Script
+              src={`https://www.googletagmanager.com/gtag/js?id=${googleAnalyticsId}`}
+              strategy="lazyOnload"
+            />
+            <Script id="google-analytics" strategy="lazyOnload">
+              {`
               window.dataLayer = window.dataLayer || [];
               function gtag(){dataLayer.push(arguments);}
               gtag('js', new Date());
               gtag('config', '${googleAnalyticsId}');
             `}
-        </Script>
+            </Script>
+          </>
+        ) : null}
       </body>
     </html>
   );

@@ -22,6 +22,7 @@ Waxon is a Next.js application for typed recall practice. It serves due question
 * The app uses Next.js with React and API routes under `app/api/`.
 * Database storage uses Neon Postgres through Drizzle. The schema lives in `app/db/schema.ts`, and generated migrations live in `drizzle/`.
 * Login and signup use Clerk in deployed environments. Local development can use a test-user flow so app routes are testable without a Clerk browser session.
+* Public static pages (`/`, `/privacy-policy`, `/terms-and-conditions`) intentionally bypass the authenticated client provider shell and Clerk middleware fast path to avoid loading auth/third-party scripts before the user enters the app. They use the trimmed root global stylesheet; auth pages use a minimal auth-only stylesheet; authenticated pages keep the fuller app stylesheet in the route-group layout. Shared fonts are local CSS `@font-face` assets rather than root-level preloads.
 * Review queue state and pending evaluations are kept in memory for the current server process.
 * API routes run on the Node.js runtime and are forced dynamic according to the README notes.
 * Answer grading uses `OPENROUTER_API_KEY` or `LLM_API_KEY`; without either key, submitted answers are recorded with score `0` and a configuration message.
@@ -42,6 +43,8 @@ The README identifies these important tables and relationships:
 # Relevant Paths
 
 * `app/review/` and `app/api/review-queue/` contain review experience surfaces.
+* Authenticated app pages live under the route group `app/(app)/`, which preserves their public URL paths while keeping the root public layout free of the authenticated provider shell. Clerk sign-in and sign-up live under `app/(auth)/` so they keep Clerk context and `app/(auth)/auth-globals.css` without loading the authenticated app toolbar shell or full app stylesheet.
+* Internal app routes are accessible in `pnpm dev --port auto` through local test auth as `eng.tiago.silva@gmail.com`. Lighthouse audits for protected pages should include `/review`, `/learn`, a representative `/learn/courses/[courseId]`, `/library`, `/tags`, `/stats`, `/admin`, and a representative `/admin/traces/[traceId]`. `/decks`, `/decks/[deckSlug]`, and `/queue` intentionally redirect to `/library`.
 * `app/PreviousAnswerRow.tsx` is the shared question-row widget used by Review, Learn evaluation rows, and Library question rows.
 * `app/api/submit-answer/` and answer evaluation libraries are part of grading.
 * `app/lib/scheduler.ts` contains scheduling behavior.
