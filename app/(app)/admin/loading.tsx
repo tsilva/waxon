@@ -121,10 +121,9 @@ export default function AdminLoading() {
               <div className="admin-table-scroll">
                 <div
                   className="admin-trace-table admin-skeleton-table"
-                  role="table"
                   aria-label="Loading trace groups"
                 >
-                  <div className="admin-trace-header" role="row">
+                  <div className="admin-trace-header">
                     <span role="columnheader">Interaction</span>
                     <span role="columnheader">Started</span>
                     <span role="columnheader">Calls</span>
@@ -135,8 +134,8 @@ export default function AdminLoading() {
                   </div>
 
                   {adminSkeletonTableRows.map((row) => (
-                    <div className="admin-trace-group" key={row} role="rowgroup">
-                      <div className="admin-trace-row" role="row">
+                    <div className="admin-trace-group" key={row}>
+                      <div className="admin-trace-row">
                         <span className="admin-skeleton-stack">
                           <span className="admin-skeleton-line admin-skeleton-title" />
                           <span className="admin-skeleton-line admin-skeleton-meta" />

@@ -86,7 +86,7 @@ export default function LandingPage() {
             Wax on, wax off.
           </p>
           <div className="landing-hero-actions">
-            <Link className="landing-primary" href="/review">
+            <Link className="landing-primary" href="/review" prefetch={false}>
               Get started
             </Link>
             <span>Free to start. No card limits.</span>

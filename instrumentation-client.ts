@@ -1,15 +1,23 @@
 import * as Sentry from "@sentry/nextjs";
 
-Sentry.init({
-  dsn: "https://edadd0eec2d226fbf85747941c24a155@o4511061698478080.ingest.de.sentry.io/4511508028522576",
+const sentryDsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
-  integrations: [Sentry.replayIntegration()],
+if (sentryDsn) {
+  Sentry.init({
+    dsn: sentryDsn,
 
-  tracesSampleRate: 1,
-  enableLogs: true,
-  replaysSessionSampleRate: 0.1,
-  replaysOnErrorSampleRate: 1.0,
-  sendDefaultPii: true,
-});
+    tracesSampleRate: Number(
+      process.env.NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE ?? 0,
+    ),
+    enableLogs: process.env.NEXT_PUBLIC_SENTRY_ENABLE_LOGS === "1",
+    replaysSessionSampleRate: Number(
+      process.env.NEXT_PUBLIC_SENTRY_REPLAY_SAMPLE_RATE ?? 0,
+    ),
+    replaysOnErrorSampleRate: Number(
+      process.env.NEXT_PUBLIC_SENTRY_REPLAY_ON_ERROR_SAMPLE_RATE ?? 0,
+    ),
+    sendDefaultPii: process.env.NEXT_PUBLIC_SENTRY_SEND_DEFAULT_PII === "1",
+  });
+}
 
 export const onRouterTransitionStart = Sentry.captureRouterTransitionStart;
