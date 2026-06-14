@@ -51,7 +51,9 @@ const mathSymbolMap: Record<string, string> = {
   cdot: "·",
   le: "≤",
   ge: "≥",
+  log: "log",
   neq: "≠",
+  sum: "∑",
   times: "×",
   theta: "θ",
 };
@@ -212,7 +214,9 @@ function renderInlineMarkdown(
 ): ReactNode[] {
   const nodes: ReactNode[] = [];
   let index = 0;
-  const specialPattern = options.enableMath ? /(\*\*|`|\$|\*)/ : /(\*\*|`|\*)/;
+  const specialPattern = options.enableMath
+    ? /(\*\*|`|\$|\\\(|\*)/
+    : /(\*\*|`|\*)/;
 
   while (index < text.length) {
     if (text.startsWith("**", index)) {
@@ -271,6 +275,21 @@ function renderInlineMarkdown(
       }
     }
 
+    if (options.enableMath && text.startsWith("\\(", index)) {
+      const closeIndex = findClosingDelimiter(text, "\\)", index + 2);
+
+      if (closeIndex > index) {
+        nodes.push(
+          <MathExpression
+            expression={text.slice(index + 2, closeIndex)}
+            key={`latex-math-${index}`}
+          />,
+        );
+        index = closeIndex + 2;
+        continue;
+      }
+    }
+
     if (
       text[index] === "*" &&
       text[index + 1] !== "*" &&
@@ -320,6 +339,137 @@ export function MarkdownInline({
   );
 }
 
+type MarkdownListKind = "ordered" | "unordered";
+
+type MarkdownListLine = {
+  marker?: number;
+  text: string;
+};
+
+function readListLine(line: string): {
+  kind: MarkdownListKind;
+  line: MarkdownListLine;
+} | null {
+  const trimmedLine = line.trim();
+  const unorderedMatch = trimmedLine.match(/^[-*]\s+(.+)$/u);
+
+  if (unorderedMatch?.[1]) {
+    return {
+      kind: "unordered",
+      line: { text: unorderedMatch[1] },
+    };
+  }
+
+  const orderedMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/u);
+
+  if (orderedMatch?.[1] && orderedMatch[2]) {
+    return {
+      kind: "ordered",
+      line: {
+        marker: Number.parseInt(orderedMatch[1], 10),
+        text: orderedMatch[2],
+      },
+    };
+  }
+
+  return null;
+}
+
+function renderListRun(
+  kind: MarkdownListKind,
+  listLines: MarkdownListLine[],
+  key: string,
+  options: MarkdownBlockOptions,
+): ReactNode {
+  const start =
+    kind === "ordered" && listLines[0]?.marker && listLines[0].marker !== 1
+      ? listLines[0].marker
+      : undefined;
+  const items = listLines.map((line, lineIndex) => (
+    <li key={`${line.text}-${lineIndex}`}>
+      {renderInlineMarkdown(line.text, {
+        enableMath: options.enableMath,
+      })}
+    </li>
+  ));
+
+  return kind === "ordered" ? (
+    <ol className="markdown-list" key={`ol-${key}`} start={start}>
+      {items}
+    </ol>
+  ) : (
+    <ul className="markdown-list" key={`ul-${key}`}>
+      {items}
+    </ul>
+  );
+}
+
+function renderParagraphRun(
+  lines: string[],
+  key: string,
+  options: MarkdownBlockOptions,
+): ReactNode {
+  return (
+    <p className="markdown-paragraph" key={`p-${key}`}>
+      {lines.map((line, lineIndex) => (
+        <Fragment key={`${line}-${lineIndex}`}>
+          {lineIndex > 0 ? <br /> : null}
+          {renderInlineMarkdown(line, { enableMath: options.enableMath })}
+        </Fragment>
+      ))}
+    </p>
+  );
+}
+
+function renderMarkdownLineRuns(
+  lines: string[],
+  key: string,
+  options: MarkdownBlockOptions,
+): ReactNode {
+  const nodes: ReactNode[] = [];
+  let lineIndex = 0;
+
+  while (lineIndex < lines.length) {
+    const listLine = readListLine(lines[lineIndex] ?? "");
+
+    if (listLine) {
+      const listLines: MarkdownListLine[] = [listLine.line];
+      const listKind = listLine.kind;
+      lineIndex += 1;
+
+      while (lineIndex < lines.length) {
+        const nextListLine = readListLine(lines[lineIndex] ?? "");
+
+        if (!nextListLine || nextListLine.kind !== listKind) {
+          break;
+        }
+
+        listLines.push(nextListLine.line);
+        lineIndex += 1;
+      }
+
+      nodes.push(
+        renderListRun(listKind, listLines, `${key}-${nodes.length}`, options),
+      );
+      continue;
+    }
+
+    const paragraphLines = [lines[lineIndex] ?? ""];
+    lineIndex += 1;
+
+    while (lineIndex < lines.length && !readListLine(lines[lineIndex] ?? "")) {
+      paragraphLines.push(lines[lineIndex] ?? "");
+      lineIndex += 1;
+    }
+
+    nodes.push(
+      renderParagraphRun(paragraphLines, `${key}-${nodes.length}`, options),
+    );
+  }
+
+  return <Fragment key={`lines-${key}`}>{nodes}</Fragment>;
+}
+
 function renderMarkdownBlock(
   block: string,
   key: string,
@@ -355,6 +505,18 @@ function renderMarkdownBlock(
     );
   }
 
+  if (
+    options.enableMath &&
+    trimmedBlock.startsWith("\\[") &&
+    trimmedBlock.endsWith("\\]")
+  ) {
+    return (
+      <p className="markdown-paragraph" key={`display-latex-${key}`}>
+        <MathExpression display expression={trimmedBlock.slice(2, -2)} />
+      </p>
+    );
+  }
+
   if (options.enableHeadings && /^#{1,3}\s+/.test(firstLine)) {
     const rest = lines.slice(1).join("\n").trim();
 
@@ -370,44 +532,7 @@ function renderMarkdownBlock(
     );
   }
 
-  if (lines.every((line) => /^[-*]\s+/.test(line.trim()))) {
-    return (
-      <ul className="markdown-list" key={`ul-${key}`}>
-        {lines.map((line, lineIndex) => (
-          <li key={`${line}-${lineIndex}`}>
-            {renderInlineMarkdown(line.trim().slice(2), {
-              enableMath: options.enableMath,
-            })}
-          </li>
-        ))}
-      </ul>
-    );
-  }
-
-  if (lines.every((line) => /^\d+\.\s+/.test(line.trim()))) {
-    return (
-      <ol className="markdown-list" key={`ol-${key}`}>
-        {lines.map((line, lineIndex) => (
-          <li key={`${line}-${lineIndex}`}>
-            {renderInlineMarkdown(line.trim().replace(/^\d+\.\s+/, ""), {
-              enableMath: options.enableMath,
-            })}
-          </li>
-        ))}
-      </ol>
-    );
-  }
-
-  return (
-    <p className="markdown-paragraph" key={`p-${key}`}>
-      {lines.map((line, lineIndex) => (
-        <Fragment key={`${line}-${lineIndex}`}>
-          {lineIndex > 0 ? <br /> : null}
-          {renderInlineMarkdown(line, { enableMath: options.enableMath })}
-        </Fragment>
-      ))}
-    </p>
-  );
+  return renderMarkdownLineRuns(lines, key, options);
 }
 
 export function MarkdownContent({
