@@ -15,7 +15,11 @@ export default async function ReviewPage() {
         initialPreviousAnswerStatus={initialData.previousAnswerStatus}
         initialReviewSessionQueue={initialData.reviewSessionQueue.items}
       />
-      <ReviewHydrator />
+      <ReviewHydrator
+        initialCurrentUser={initialData.currentUser}
+        initialPreviousAnswerStatus={initialData.previousAnswerStatus}
+        initialReviewSessionQueue={initialData.reviewSessionQueue.items}
+      />
     </>
   );
 }

@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { ChevronDown, Search } from "lucide-react";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import type { QuestionBankPage } from "@/app/lib/questionBank";
 
@@ -50,8 +51,8 @@ export function LibraryStaticView({
     : `${items.length} questions`;
 
   return (
-    <main className="page page-library-active" data-library-static>
-      <section className="review-shell tags-shell library-shell" aria-label="Question library">
+    <main className="page page-review page-library" data-library-static>
+      <section className="review-shell library-shell" aria-label="Question bank">
         <header className="reader-header">
           <div className="reader-heading">
             <Link className="reader-brand admin-brand-link" href="/" prefetch={false}>
@@ -88,21 +89,57 @@ export function LibraryStaticView({
           <div className="reader-actions reader-actions-placeholder" />
         </header>
 
-        <section className="tags-stage library-stage" id="library-panel" role="tabpanel">
-          <div className="tags-header library-header">
+        <section
+          className="queue-stage library-stage"
+          id="library-panel"
+          role="tabpanel"
+        >
+          <div className="queue-toolbar library-toolbar">
             <div>
-              <p className="learn-kicker">Library</p>
-              <h1>Question bank</h1>
+              <p className="stats-page-kicker">Question bank</p>
+              <h1 id="library-title" className="tags-title">
+                Library
+              </h1>
             </div>
           </div>
 
-          <div className="deck-search-shell library-token-search-shell">
-            <input
-              className="deck-search-input library-token-search-input"
-              disabled
-              placeholder="Search questions or type #tag"
-              aria-label="Search question bank"
-            />
+          <div className="library-filter-row" aria-label="Question bank filters">
+            <label className="library-status-filter-label">
+              <span>Status</span>
+              <select disabled defaultValue="all" aria-label="Status">
+                <option value="all">All</option>
+                <option value="due">Due</option>
+                <option value="flagged">Flagged</option>
+                <option value="untagged">Untagged</option>
+              </select>
+            </label>
+            <label className="library-sort-filter-label">
+              <span>Sort</span>
+              <select disabled defaultValue="due" aria-label="Sort">
+                <option value="due">Due date</option>
+                <option value="created-desc">Created newest</option>
+                <option value="created-asc">Created oldest</option>
+                <option value="updated-desc">Updated newest</option>
+                <option value="updated-asc">Updated oldest</option>
+              </select>
+            </label>
+            <div className="deck-search-label library-search-label">
+              <label className="sr-only" htmlFor="library-static-search">
+                Search question bank
+              </label>
+              <span className="deck-search-shell library-token-search-shell">
+                <Search aria-hidden="true" />
+                <span className="library-search-token-row">
+                  <input
+                    id="library-static-search"
+                    className="deck-search-input library-token-search-input"
+                    disabled
+                    placeholder="Search questions or type #tag"
+                    type="search"
+                  />
+                </span>
+              </span>
+            </div>
           </div>
 
           <div className="tags-summary-strip library-summary-strip">
@@ -123,14 +160,19 @@ export function LibraryStaticView({
                     className="previous-row previous-row-resolved previous-row-collapsed library-previous-row"
                     key={item.questionId}
                   >
-                    <span className="previous-score-shell" aria-label="No score">
-                      <span className="previous-score score-neutral">-</span>
-                    </span>
-                    <button className="previous-row-main-button" type="button" disabled>
+                    <div className="previous-score-slot">
+                      <span className="previous-score-shell" aria-label="No score">
+                        <span className="previous-score score-neutral">-</span>
+                      </span>
+                    </div>
+                    <div className="previous-row-main-button previous-row-main-static">
                       <div className="previous-copy">
                         <div className="previous-field previous-question-field">
                           <span className="previous-label-row">
                             <span className="previous-field-label">
+                              Question
+                            </span>
+                            <span className="previous-label-content">
                               <span className="library-chip-row">
                                 {item.conceptSlugs.length === 0 ? (
                                   <span className="library-chip library-chip-muted">
@@ -159,9 +201,13 @@ export function LibraryStaticView({
                           <span className="previous-time">
                             {formatDate(item.nextDue)}
                           </span>
+                          <ChevronDown
+                            className="previous-collapse-icon"
+                            aria-hidden="true"
+                          />
                         </span>
                       </span>
-                    </button>
+                    </div>
                   </li>
                 );
               })}
