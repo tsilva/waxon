@@ -20,37 +20,15 @@ type AuthenticatedProvidersComponent = (props: {
   children: React.ReactNode;
 }) => React.ReactElement;
 
-async function loadTagsHydrationProps(): Promise<TagsPageClientProps> {
-  const [tagsResult, userResult] = await Promise.allSettled([
-    fetch("/api/concept-tags", { cache: "no-store" }),
-    fetch("/api/user", { cache: "no-store" }),
-  ]);
-  const tagsData =
-    tagsResult.status === "fulfilled" && tagsResult.value.ok
-      ? ((await tagsResult.value.json()) as { conceptTags?: ConceptTagSummary[] })
-      : null;
-  const initialUser =
-    userResult.status === "fulfilled" && userResult.value.ok
-      ? ((await userResult.value.json()) as UserProfile)
-      : null;
-
-  return {
-    initialConceptTags: tagsData?.conceptTags ?? null,
-    initialUser,
-  };
-}
-
 export function TagsHydrator() {
   const [TagsPageClient, setTagsPageClient] =
     useState<TagsPageClientComponent | null>(null);
   const [AuthenticatedProviders, setAuthenticatedProviders] =
     useState<AuthenticatedProvidersComponent | null>(null);
-  const [hydrationProps, setHydrationProps] =
-    useState<TagsPageClientProps | null>(null);
+  const [hydrationProps] = useState<TagsPageClientProps>({});
 
   useEffect(() => {
     let isCancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const loadTagsApp = () => {
       if (isCancelled || TagsPageClient) {
@@ -60,10 +38,8 @@ export function TagsHydrator() {
       void Promise.all([
         import("./TagsPageClient"),
         import("@/app/AuthenticatedProviders"),
-        loadTagsHydrationProps(),
-      ]).then(([tagsModule, providerModule, nextProps]) => {
+      ]).then(([tagsModule, providerModule]) => {
         if (!isCancelled) {
-          setHydrationProps(nextProps);
           setAuthenticatedProviders(
             () =>
               providerModule.AuthenticatedProviders as AuthenticatedProvidersComponent,
@@ -73,20 +49,10 @@ export function TagsHydrator() {
       });
     };
 
-    const loadOnInteraction = () => loadTagsApp();
-
-    window.addEventListener("pointerdown", loadOnInteraction, { once: true });
-    window.addEventListener("keydown", loadOnInteraction, { once: true });
-    timeoutId = globalThis.setTimeout(loadTagsApp, 9000);
+    loadTagsApp();
 
     return () => {
       isCancelled = true;
-      window.removeEventListener("pointerdown", loadOnInteraction);
-      window.removeEventListener("keydown", loadOnInteraction);
-
-      if (timeoutId !== null) {
-        globalThis.clearTimeout(timeoutId);
-      }
     };
   }, [TagsPageClient]);
 

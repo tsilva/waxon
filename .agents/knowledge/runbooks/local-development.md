@@ -72,7 +72,7 @@ WAXON_ENABLE_LOCAL_TEST_AUTH=1 NEXT_PUBLIC_WAXON_ENABLE_LOCAL_TEST_AUTH=1 pnpm s
 
 This mode aliases Clerk client/server APIs to local stubs, is disabled on Vercel, and signs requests in as the local audit user. Use it only for local verification; run a normal `pnpm build` as well before shipping auth-related changes.
 
-Heavy authenticated UI routes use static-first shells plus delayed or interaction-triggered hydrators to keep Lighthouse first load clean. When testing the full interactive app after a static-first change, use the Browser plugin and click or press a key on the page to trigger hydration before checking controls.
+Heavy authenticated UI routes use static-first shells for first paint, then start loading their client hydrators immediately. When testing the full interactive app after a static-first change, use the Browser plugin and verify that the static shell is replaced by the hydrated client UI without waiting for a multi-second timeout or user interaction.
 
 # Commands
 

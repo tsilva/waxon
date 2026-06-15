@@ -49,15 +49,10 @@ export function AdminHydrator({
       });
     };
 
-    const loadOnInteraction = () => loadAdminApp();
-
-    window.addEventListener("pointerdown", loadOnInteraction, { once: true });
-    window.addEventListener("keydown", loadOnInteraction, { once: true });
+    loadAdminApp();
 
     return () => {
       isCancelled = true;
-      window.removeEventListener("pointerdown", loadOnInteraction);
-      window.removeEventListener("keydown", loadOnInteraction);
     };
   }, [LoadedAdminPageClient]);
 

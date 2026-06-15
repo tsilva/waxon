@@ -22,47 +22,16 @@ type AuthenticatedProvidersComponent = (props: {
   children: React.ReactNode;
 }) => React.ReactElement;
 
-async function loadLibraryHydrationProps(): Promise<LibraryPageClientProps> {
-  const [questionBankResult, conceptTagsResult, userResult] =
-    await Promise.allSettled([
-      fetch("/api/question-bank?limit=50&offset=0", { cache: "no-store" }),
-      fetch("/api/concept-tags", { cache: "no-store" }),
-      fetch("/api/user", { cache: "no-store" }),
-    ]);
-
-  const initialQuestionBank =
-    questionBankResult.status === "fulfilled" && questionBankResult.value.ok
-      ? ((await questionBankResult.value.json()) as QuestionBankPage)
-      : null;
-  const conceptTagData =
-    conceptTagsResult.status === "fulfilled" && conceptTagsResult.value.ok
-      ? ((await conceptTagsResult.value.json()) as {
-          conceptTags?: ConceptTagSummary[];
-        })
-      : null;
-  const initialUser =
-    userResult.status === "fulfilled" && userResult.value.ok
-      ? ((await userResult.value.json()) as UserProfile)
-      : null;
-
-  return {
-    initialQuestionBank,
-    initialConceptTags: conceptTagData?.conceptTags ?? null,
-    initialUser,
-  };
-}
-
-export function LibraryHydrator() {
+export function LibraryHydrator(initialProps: LibraryPageClientProps) {
   const [LibraryPageClient, setLibraryPageClient] =
     useState<LibraryPageClientComponent | null>(null);
   const [AuthenticatedProviders, setAuthenticatedProviders] =
     useState<AuthenticatedProvidersComponent | null>(null);
-  const [hydrationProps, setHydrationProps] =
-    useState<LibraryPageClientProps | null>(null);
+  const [hydrationProps] =
+    useState<LibraryPageClientProps | null>(initialProps);
 
   useEffect(() => {
     let isCancelled = false;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const loadLibraryApp = () => {
       if (isCancelled || LibraryPageClient) {
@@ -72,10 +41,8 @@ export function LibraryHydrator() {
       void Promise.all([
         import("./LibraryPageClient"),
         import("@/app/AuthenticatedProviders"),
-        loadLibraryHydrationProps(),
-      ]).then(([libraryModule, providerModule, nextProps]) => {
+      ]).then(([libraryModule, providerModule]) => {
         if (!isCancelled) {
-          setHydrationProps(nextProps);
           setAuthenticatedProviders(
             () =>
               providerModule.AuthenticatedProviders as AuthenticatedProvidersComponent,
@@ -87,20 +54,10 @@ export function LibraryHydrator() {
       });
     };
 
-    const loadOnInteraction = () => loadLibraryApp();
-
-    window.addEventListener("pointerdown", loadOnInteraction, { once: true });
-    window.addEventListener("keydown", loadOnInteraction, { once: true });
-    timeoutId = globalThis.setTimeout(loadLibraryApp, 4500);
+    loadLibraryApp();
 
     return () => {
       isCancelled = true;
-      window.removeEventListener("pointerdown", loadOnInteraction);
-      window.removeEventListener("keydown", loadOnInteraction);
-
-      if (timeoutId !== null) {
-        globalThis.clearTimeout(timeoutId);
-      }
     };
   }, [LibraryPageClient]);
 

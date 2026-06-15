@@ -19,7 +19,14 @@ export default async function LibraryPage() {
         initialQuestionBank={initialQuestionBank}
         userEmail={user.email}
       />
-      <LibraryHydrator />
+      <LibraryHydrator
+        initialQuestionBank={initialQuestionBank}
+        initialUser={{
+          displayName: user.displayName,
+          email: user.email,
+          avatarUrl: user.avatarUrl,
+        }}
+      />
     </>
   );
 }

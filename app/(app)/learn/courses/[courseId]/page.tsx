@@ -20,7 +20,11 @@ export default async function LearnCoursePage({
   return (
     <>
       <LearnStaticView initialCourses={courses.slice(0, 6)} />
-      <LearnHydrator initialCourseId={courseId} />
+      <LearnHydrator
+        initialCourseId={courseId}
+        initialCourses={courses.slice(0, 6)}
+        initialCoursesArePartial={courses.length > 6}
+      />
     </>
   );
 }
