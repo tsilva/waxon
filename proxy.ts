@@ -8,11 +8,6 @@ import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 const isProtectedRoute = createRouteMatcher([
   "/admin(.*)",
   "/api(.*)",
-  "/decks(.*)",
-  "/learn(.*)",
-  "/library(.*)",
-  "/review(.*)",
-  "/stats(.*)",
 ]);
 
 const isPublicStaticPage = createRouteMatcher([
@@ -21,6 +16,16 @@ const isPublicStaticPage = createRouteMatcher([
   "/robots.txt",
   "/sitemap.xml",
   "/terms-and-conditions",
+]);
+
+const isPublicAppShellRoute = createRouteMatcher([
+  "/decks(.*)",
+  "/learn(.*)",
+  "/library(.*)",
+  "/queue(.*)",
+  "/review(.*)",
+  "/stats(.*)",
+  "/tags(.*)",
 ]);
 
 const handleClerkMiddleware = clerkMiddleware(async (auth, request) => {
@@ -44,7 +49,7 @@ export default function proxy(
     }
   }
 
-  if (isPublicStaticPage(request)) {
+  if (isPublicStaticPage(request) || isPublicAppShellRoute(request)) {
     return NextResponse.next();
   }
 
