@@ -31,7 +31,7 @@
 
 @font-face {
   font-family: "Bradford LL";
-  src: url("/fonts/BradfordLLWeb-Regular-ascii.woff2") format("woff2");
+  src: url("/fonts/BradfordLLWeb-Regular-ascii.1dc84235055c.woff2") format("woff2");
   font-display: swap;
   font-weight: 450;
   unicode-range: U+0020-007E;
@@ -39,7 +39,7 @@
 
 @font-face {
   font-family: "Bradford LL";
-  src: url("/fonts/BradfordLLWeb-Regular.woff2") format("woff2");
+  src: url("/fonts/BradfordLLWeb-Regular.d788a05b64fd.woff2") format("woff2");
   font-display: swap;
   font-weight: 450;
   unicode-range: U+0100-10FFFF;
@@ -47,7 +47,7 @@
 
 @font-face {
   font-family: "Bradford LL";
-  src: url("/fonts/BradfordLLWeb-Bold-ascii.woff2") format("woff2");
+  src: url("/fonts/BradfordLLWeb-Bold-ascii.838c74e1327d.woff2") format("woff2");
   font-display: swap;
   font-weight: 600;
   unicode-range: U+0020-007E;
@@ -55,7 +55,7 @@
 
 @font-face {
   font-family: "Bradford LL";
-  src: url("/fonts/BradfordLLWeb-Bold.woff2") format("woff2");
+  src: url("/fonts/BradfordLLWeb-Bold.53914eebdc66.woff2") format("woff2");
   font-display: swap;
   font-weight: 600;
   unicode-range: U+0100-10FFFF;
@@ -63,7 +63,7 @@
 
 @font-face {
   font-family: "Red Hat Mono";
-  src: url("/fonts/RedHatMono-Regular-ascii.woff2") format("woff2");
+  src: url("/fonts/RedHatMono-Regular-ascii.384829216e7b.woff2") format("woff2");
   font-display: swap;
   font-weight: 400;
   unicode-range: U+0020-007E;
@@ -71,7 +71,7 @@
 
 @font-face {
   font-family: "Red Hat Mono";
-  src: url("/fonts/RedHatMono-Regular.woff2") format("woff2");
+  src: url("/fonts/RedHatMono-Regular.ab4ab5915df9.woff2") format("woff2");
   font-display: swap;
   font-weight: 400;
   unicode-range: U+0100-10FFFF;
@@ -79,7 +79,7 @@
 
 @font-face {
   font-family: "Red Hat Mono";
-  src: url("/fonts/RedHatMono-Medium-ascii.woff2") format("woff2");
+  src: url("/fonts/RedHatMono-Medium-ascii.7a3fdaedb977.woff2") format("woff2");
   font-display: swap;
   font-weight: 500;
   unicode-range: U+0020-007E;
@@ -87,7 +87,7 @@
 
 @font-face {
   font-family: "Red Hat Mono";
-  src: url("/fonts/RedHatMono-Medium.woff2") format("woff2");
+  src: url("/fonts/RedHatMono-Medium.40f8364468e7.woff2") format("woff2");
   font-display: swap;
   font-weight: 500;
   unicode-range: U+0100-10FFFF;
