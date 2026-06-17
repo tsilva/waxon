@@ -1710,13 +1710,13 @@ export default function LearnPageClient({
                               role="status"
                               aria-live="polite"
                             >
-                              <span className="progress-dot-prefix" aria-hidden="true">
-                                <span />
-                                <span />
-                                <span />
-                              </span>
                               <span className="learn-chat-pending-status">
                                 {pendingStatus(message)}
+                              </span>
+                              <span className="progress-dot-suffix" aria-hidden="true">
+                                <span />
+                                <span />
+                                <span />
                               </span>
                             </span>
                           )}
