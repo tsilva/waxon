@@ -5,7 +5,7 @@ import { isAdminEmail } from "@/app/lib/adminAccess";
 import type { QuestionBankPage } from "@/app/lib/questionBank";
 
 type LibraryStaticViewProps = {
-  initialQuestionBank: QuestionBankPage;
+  initialQuestionBank?: QuestionBankPage | null;
   userEmail?: string | null;
 };
 
@@ -45,8 +45,14 @@ export function LibraryStaticView({
   userEmail,
 }: LibraryStaticViewProps) {
   const showAdmin = isAdminEmail(userEmail);
-  const items = initialQuestionBank.items;
-  const questionCountLabel = initialQuestionBank.hasMore
+  const questionBank = initialQuestionBank ?? {
+    items: [],
+    total: 0,
+    hasMore: false,
+    nextOffset: null,
+  };
+  const items = questionBank.items;
+  const questionCountLabel = questionBank.hasMore
     ? `${items.length}+ questions`
     : `${items.length} questions`;
 
