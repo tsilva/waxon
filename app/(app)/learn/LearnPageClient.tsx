@@ -1533,9 +1533,6 @@ export default function LearnPageClient({
                   className="learn-course-picker learn-course-picker-full"
                   aria-label="Courses"
                 >
-                  <div className="learn-course-picker-heading">
-                    <p className="learn-kicker">Courses</p>
-                  </div>
                   <div className="learn-course-list">
                     <button
                       className="learn-course-item learn-course-new"

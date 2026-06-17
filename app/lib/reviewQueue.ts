@@ -1079,8 +1079,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
     }
 
     if (persisted) {
-      const evaluationNextDue =
-        result.score < SCHEDULED_SCORE_THRESHOLD ? null : persisted.nextDue;
+      const evaluationNextDue = persisted.nextDue;
 
       await persistEvaluationResolution({
         evaluationId: submission.evaluationId,

@@ -99,16 +99,8 @@ export function LibraryStaticView({
           className="queue-stage library-stage"
           id="library-panel"
           role="tabpanel"
+          aria-label="Library"
         >
-          <div className="queue-toolbar library-toolbar">
-            <div>
-              <p className="stats-page-kicker">Question bank</p>
-              <h1 id="library-title" className="tags-title">
-                Library
-              </h1>
-            </div>
-          </div>
-
           <div className="library-filter-row" aria-label="Question bank filters">
             <label className="library-status-filter-label">
               <span>Status</span>

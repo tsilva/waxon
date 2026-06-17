@@ -3279,6 +3279,11 @@ export default function ReviewApp({
     const submittedDeckName = currentDeckName;
     const submittedSessionItem = currentSessionItemRef.current;
     const submittedAnswer = (answerOverride ?? answerRef.current).trim();
+
+    if (!submittedAnswer) {
+      return false;
+    }
+
     const submittedAt = Date.now();
     const optimisticEvaluationId = `pending-${submittedAt}-${Math.random()
       .toString(36)
@@ -3642,6 +3647,7 @@ export default function ReviewApp({
   const displayedAnswer = speechPreview
     ? mergeTranscriptText(answer, speechPreview)
     : answer;
+  const isAnswerBlank = displayedAnswer.trim().length === 0;
   const isSpeechActive =
     speechStatus === "starting" ||
     speechStatus === "listening";
@@ -4563,6 +4569,8 @@ export default function ReviewApp({
       (a, b) => a.ts - b.ts,
     );
     const scores = reviewHistory.map((entry) => entry.score);
+    const lastScore = scores.at(-1) ?? queueItem?.lastScore ?? null;
+    const lastReviewedAt = reviewHistory.at(-1)?.ts ?? null;
     const pendingCount = evaluations.filter(
       (evaluation) =>
         matchesSelectedQuestion(evaluation) &&
@@ -4578,17 +4586,21 @@ export default function ReviewApp({
     const latestAnswerMessageWithNextDue = selectedAnswerMessages.findLast(
       (message) => message.nextDue !== null,
     );
-    const nextDue =
+    const directNextDue =
       queueItem?.nextDue ??
       latestResolvedEvaluationWithNextDue?.nextDue ??
       latestAnswerMessageWithNextDue?.nextDue ??
       null;
+    const nextDue =
+      directNextDue ??
+      (lastScore !== null && lastScore < SCHEDULED_SCORE_THRESHOLD
+        ? (lastReviewedAt ?? currentTime)
+        : null);
     const msUntilDue =
       queueItem?.msUntilDue ?? (nextDue === null ? null : nextDue - currentTime);
     const dueStatus =
       queueItem?.status ??
       (msUntilDue === null ? "unknown" : msUntilDue <= 0 ? "now" : "scheduled");
-    const lastScore = scores.at(-1) ?? queueItem?.lastScore ?? null;
     const persistedAnswerHistory: AnswerHistoryEntry[] =
       persistedAttempts.map((attempt) => ({
         id: `attempt-${attempt.id}`,
@@ -4689,7 +4701,7 @@ export default function ReviewApp({
           : null,
       bestScore: scores.length > 0 ? Math.max(...scores) : null,
       lastScore,
-      lastReviewedAt: reviewHistory.at(-1)?.ts ?? null,
+      lastReviewedAt,
       nextDue,
       msUntilDue,
       dueStatus,
@@ -5013,7 +5025,7 @@ export default function ReviewApp({
               rows={4}
               autoFocus
               disabled={isSubmitting || isFlaggingQuestion}
-              submitDisabled={isSubmitting || isFlaggingQuestion}
+              submitDisabled={isSubmitting || isFlaggingQuestion || isAnswerBlank}
               submitAriaLabel="Submit answer"
               submitTooltipLabel="Submit answer"
               secondaryAction={
