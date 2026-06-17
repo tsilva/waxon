@@ -1214,6 +1214,18 @@ textarea {
   content: "";
 }
 
+.reader-tab-loading {
+  color: var(--ink);
+}
+
+.reader-tab-loading::after {
+  background:
+    linear-gradient(90deg, transparent, var(--accent), transparent)
+      0 0 / 45% 100% no-repeat,
+    rgb(167 119 76 / 18%);
+  animation: reader-tab-loading 980ms ease-in-out infinite;
+}
+
 .reader-tab-active {
   color: var(--ink);
 }
@@ -1232,6 +1244,56 @@ textarea {
   background: var(--accent);
 }
 
+.reader-tabs-route-loading {
+  position: relative;
+}
+
+.reader-tabs-route-loading::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, transparent, var(--accent), transparent)
+      0 0 / 28% 100% no-repeat,
+    rgb(167 119 76 / 12%);
+  content: "";
+  animation: reader-route-loading 1.15s ease-in-out infinite;
+}
+
+.route-loading-stage {
+  min-height: min(540px, calc(100vh - 74px));
+}
+
+@keyframes reader-tab-loading {
+  0% {
+    background-position: -50% 0, 0 0;
+  }
+
+  100% {
+    background-position: 150% 0, 0 0;
+  }
+}
+
+@keyframes reader-route-loading {
+  0% {
+    background-position: -34% 0, 0 0;
+  }
+
+  100% {
+    background-position: 134% 0, 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-tab-loading::after,
+  .reader-tabs-route-loading::after {
+    animation: none;
+  }
+}
+
 .reader-actions {
   display: flex;
   align-items: center;
@@ -1245,7 +1307,7 @@ textarea {
 }
 
 .persistent-toolbar-actions {
-  position: fixed;
+  position: absolute;
   top: calc(clamp(16px, 1.6vw, 24px) + 15px);
   right: max(
     calc((100vw - 1200px) / 2 + clamp(26px, 3.8vw, 62px)),
@@ -1272,6 +1334,13 @@ textarea {
   border-top-color: var(--accent);
   border-radius: 999px;
   content: "";
+}
+
+.queue-summary-placeholder {
+  display: inline-flex;
+  height: 22px;
+  width: 84px;
+  flex: 0 0 auto;
 }
 
 .queue-summary:hover,
@@ -2303,8 +2372,9 @@ textarea {
 }
 
 .previous-row-main-button {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 20px;
   width: 100%;
@@ -2553,10 +2623,11 @@ textarea {
   font-size: 17px;
   font-weight: 560;
   line-height: 1.35;
+  padding-right: 128px;
 }
 
 .previous-question-feedback {
-  max-width: 78ch;
+  width: 100%;
   margin: 2px 0 0;
   color: var(--ink-soft);
   font-size: 13px;
@@ -2594,6 +2665,9 @@ textarea {
 }
 
 .previous-row-meta {
+  position: absolute;
+  top: 0;
+  right: 0;
   display: flex;
   align-items: flex-end;
   align-self: stretch;
@@ -8168,6 +8242,7 @@ textarea {
 
   .previous-question {
     font-size: 15px;
+    padding-right: 0;
   }
 
   .previous-answer {
@@ -8179,6 +8254,7 @@ textarea {
   }
 
   .previous-row-meta {
+    position: static;
     flex-direction: row;
     justify-content: flex-end;
     min-height: 24px;

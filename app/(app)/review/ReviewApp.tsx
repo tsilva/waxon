@@ -1406,6 +1406,14 @@ export default function ReviewApp({
       initialPreviousAnswerStatus?.queueRemaining ??
       initialReviewSessionRemainingQueue.length,
   );
+  const [toolbarDueCount, setToolbarDueCount] = useState<number | null>(
+    () =>
+      cachedHasLoadedQuestion
+        ? cachedSessionRef.current?.queueRemaining ?? null
+        : canUseInitialReviewSession
+          ? initialReviewSessionRemainingQueue.length
+          : null,
+  );
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>(
     () =>
       cachedSessionRef.current?.evaluations ??
@@ -1771,6 +1779,9 @@ export default function ReviewApp({
   useEffect(() => {
     sessionQueueRef.current = sessionQueue;
     setQueueRemaining(sessionQueue.length);
+    if (hasLoadedQuestionRef.current) {
+      setToolbarDueCount(sessionQueue.length);
+    }
   }, [sessionQueue]);
 
   useEffect(() => {
@@ -2120,6 +2131,7 @@ export default function ReviewApp({
     setAnswer("");
     setSpeechPreview("");
     setQueueRemaining(0);
+    setToolbarDueCount(null);
     setError(null);
     setReviewQueueVersion((currentVersion) => currentVersion + 1);
   }, []);
@@ -2613,6 +2625,7 @@ export default function ReviewApp({
     setCurrentDeckId(data.deckId);
     setCurrentDeckName(data.deckName);
     setQueueRemaining(data.queueRemaining);
+    setToolbarDueCount(data.queueRemaining);
 
     if (data.question && options?.appendToMessages !== false) {
       appendQuestion(data.question);
@@ -4806,7 +4819,7 @@ export default function ReviewApp({
       <section className="review-shell" aria-label="Flashcard learning">
         <ReviewToolbar
           activeTab={activeTab === "queue" ? "tags" : "review"}
-          dueCount={queueRemaining}
+          dueCount={toolbarDueCount}
           dueCountSource="review-queue"
           showAdmin={canViewAdmin}
           menuAvatarUrl={menuAvatarUrl}
