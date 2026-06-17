@@ -19,6 +19,7 @@ import type {
   QuestionBankSort,
   QuestionBankStatusFilter,
 } from "@/app/lib/questionBank";
+import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
@@ -730,7 +731,7 @@ export default function LibraryPageClient({
                               as="p"
                               className="previous-answer"
                               enableMath
-                              text={item.conciseAnswer}
+                              text={formatFormulaMarkdown(item.conciseAnswer)}
                             />
                           </div>
                         ) : null}
@@ -861,7 +862,9 @@ export default function LibraryPageClient({
                   as="p"
                   className="previous-answer"
                   enableMath
-                  text={selectedQuestionDetails.conciseAnswer}
+                  text={formatFormulaMarkdown(
+                    selectedQuestionDetails.conciseAnswer,
+                  )}
                 />
               ) : (
                 <p className="stats-empty">No answer recorded.</p>

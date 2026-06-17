@@ -162,6 +162,7 @@ type ChatMessage =
 
 type PreviousAnswerItem = {
   id: string;
+  questionId: string | null;
   question: string;
   answer: string | null;
   status: "grading" | "resolved";
@@ -3991,6 +3992,7 @@ export default function ReviewApp({
 
       return {
         id: message.id,
+        questionId: message.questionId,
         question: message.question,
         answer: message.answer,
         status: message.status,
@@ -4032,6 +4034,7 @@ export default function ReviewApp({
 
       return {
         id: `evaluation-${evaluation.id}`,
+        questionId: evaluation.questionId,
         question: evaluation.question,
         answer: evaluation.answer || "(blank)",
         status: evaluation.status,
@@ -4101,6 +4104,7 @@ export default function ReviewApp({
     })
     .map((attempt) => ({
       id: `attempt-${attempt.id}`,
+      questionId: attempt.questionId,
       question: attempt.question,
       answer: attempt.rawAnswer || "(blank)",
       status: "resolved",
@@ -4152,7 +4156,8 @@ export default function ReviewApp({
       const timestamp = reviewQueueItemPreviousTimestamp(item);
 
       return {
-        id: `history-${item.question}`,
+        id: `history-${item.questionId}`,
+        questionId: item.questionId,
         question: item.question,
         answer: item.lastAnswer,
         status: "resolved",
@@ -4218,14 +4223,6 @@ export default function ReviewApp({
         aria-hidden={isExiting ? true : undefined}
       >
         <div className="question-source">
-          {layer.deckName ? (
-            <>
-              <Layers aria-hidden="true" />
-              <span className="question-source-label">
-                {layer.deckName}
-              </span>
-            </>
-          ) : null}
           {!isExiting ? (
             <>
               <IconTooltip label="Question details">
@@ -4525,6 +4522,9 @@ export default function ReviewApp({
     }
 
     const persistedAttempts = Array.from(persistedAttemptsById.values());
+    const persistedQuestionId =
+      persistedAttempts.find((attempt) => attempt.questionId)?.questionId ??
+      null;
     const resolvedEvaluations = evaluations.filter(
       (evaluation) =>
         matchesSelectedQuestion(evaluation) &&
@@ -4678,7 +4678,7 @@ export default function ReviewApp({
     ].sort((a, b) => b.submittedAt - a.submittedAt);
 
     return {
-      questionId: queueItem?.questionId ?? selectedQuestionId,
+      questionId: queueItem?.questionId ?? selectedQuestionId ?? persistedQuestionId,
       question: selectedQuestion,
       reviewHistory,
       answerHistory,
@@ -5079,7 +5079,9 @@ export default function ReviewApp({
                     timeLabel={item.timeLabel}
                     isExpanded={isDetailsExpanded}
                     detailId={detailId}
-                    onDetailsClick={() => selectQuestion(item.question)}
+                    onDetailsClick={() =>
+                      selectQuestion(item.question, item.questionId)
+                    }
                     onToggle={() => togglePreviousAnswerDetails(item.id)}
                   />
                 );

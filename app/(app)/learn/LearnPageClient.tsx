@@ -30,6 +30,7 @@ import {
   type CourseMessageMetrics,
 } from "@/app/lib/courseMessageMetrics";
 import { shouldShowCourseChatInterruptedWarning } from "@/app/lib/courseChatTurn";
+import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import {
   getSpeechRecognitionConstructor,
@@ -1940,7 +1941,9 @@ export default function LearnPageClient({
                 <MarkdownContent
                   className="previous-answer"
                   enableMath
-                  text={selectedEvaluationDetails.correctAnswer}
+                  text={formatFormulaMarkdown(
+                    selectedEvaluationDetails.correctAnswer,
+                  )}
                 />
               ) : (
                 <p className="previous-answer previous-answer-empty">

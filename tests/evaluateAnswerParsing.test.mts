@@ -126,6 +126,28 @@ test("parseEvaluation reads correctAnswer without replacing answerSummary", () =
   });
 });
 
+test("parseEvaluation formats formulas in correctAnswer as markdown", () => {
+  const result = parseEvaluation(
+    JSON.stringify({
+      score: 6,
+      justification: "Key idea present.",
+      answerSummary: "Compared shifted logit sum.",
+      correctAnswer:
+        "Since exp(-1)<1, exp(0)+exp(-1)<2; ln is increasing, so ln(sum)<ln(2).",
+    }),
+    "fallback answer",
+  );
+
+  assert.deepEqual(result, {
+    status: "graded",
+    score: 6,
+    justification: "Key idea present.",
+    answerSummary: "Compared shifted logit sum.",
+    correctAnswer:
+      "Since `exp(-1)<1`, `exp(0)+exp(-1)<2`; ln is increasing, so `ln(sum)<ln(2)`.",
+  });
+});
+
 test("parseEvaluation truncates verbose justification and answer summary", () => {
   const result = parseEvaluation(
     JSON.stringify({
