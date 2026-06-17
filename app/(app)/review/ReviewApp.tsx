@@ -4927,7 +4927,11 @@ export default function ReviewApp({
                   </dl>
 
                   <div className="learn-generation-stream">
-                    <span className="pending-spinner" aria-hidden="true" />
+                    <span className="progress-dot-prefix" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
                     <MarkdownInline
                       as="p"
                       className="learn-generation-stream-text"
