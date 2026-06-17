@@ -415,7 +415,8 @@ function LearnChatMessageMetrics({
       className="learn-chat-message-metrics"
       aria-label={`Response metrics: ${items.join(", ")}`}
     >
-      {items.join(" / ")}
+      {price ? <span>{price}</span> : null}
+      {tokensPerSecond ? <span>{tokensPerSecond}</span> : null}
     </p>
   );
 }
@@ -1709,10 +1710,11 @@ export default function LearnPageClient({
                               role="status"
                               aria-live="polite"
                             >
-                              <span
-                                className="pending-spinner"
-                                aria-hidden="true"
-                              />
+                              <span className="progress-dot-prefix" aria-hidden="true">
+                                <span />
+                                <span />
+                                <span />
+                              </span>
                               <span className="learn-chat-pending-status">
                                 {pendingStatus(message)}
                               </span>
