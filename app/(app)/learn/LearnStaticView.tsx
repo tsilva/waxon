@@ -88,9 +88,6 @@ export function LearnStaticView({ initialCourses }: LearnStaticViewProps) {
         <section className="learn-stage" id="learn-panel" role="tabpanel" aria-labelledby="learn-tab">
           <div className="learn-chat-layout learn-chat-layout-course-list">
             <section className="learn-course-picker learn-course-picker-full" aria-label="Courses">
-              <div className="learn-course-picker-heading">
-                <p className="learn-kicker">Courses</p>
-              </div>
               <div className="learn-course-list">
                 <button className="learn-course-item learn-course-new" aria-label="New course" disabled type="button">
                   <span className="learn-course-new-kicker">Create</span>

@@ -515,15 +515,9 @@ export default function TagsPageClient({
           onSignOut={() => void clerk.signOut({ redirectUrl: "/" })}
         />
 
-        <section className="queue-stage tags-stage" aria-labelledby="tags-title">
-          <div className="queue-toolbar">
-            <div>
-              <p className="stats-page-kicker">Concept tags</p>
-              <h1 id="tags-title" className="tags-title">
-                Review controls
-              </h1>
-            </div>
-            <label className="deck-search-label tags-search-label">
+        <section className="queue-stage tags-stage" aria-label="Concept tags">
+          <div className="library-filter-row tags-filter-row" aria-label="Concept tag filters">
+            <label className="deck-search-label library-search-label tags-search-label">
               <span className="sr-only">Search concept tags</span>
               <span className="deck-search-shell">
                 <Search aria-hidden="true" />
@@ -539,7 +533,7 @@ export default function TagsPageClient({
 
           {message ? <p className="deck-editor-status">{message}</p> : null}
 
-          <div className="tags-summary-strip">
+          <div className="tags-summary-strip library-summary-strip">
             <span>{conceptTags.length} tags</span>
             <span>{activeTags.length} active</span>
             <span>{mutedTags.length} muted</span>

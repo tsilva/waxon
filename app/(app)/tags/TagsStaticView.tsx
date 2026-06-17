@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { Search } from "lucide-react";
 
 export function TagsStaticView() {
   return (
@@ -36,17 +37,12 @@ export function TagsStaticView() {
           <div className="reader-actions reader-actions-placeholder" />
         </header>
 
-        <section className="queue-stage tags-stage" aria-labelledby="tags-title">
-          <div className="queue-toolbar">
-            <div>
-              <p className="stats-page-kicker">Concept tags</p>
-              <h1 id="tags-title" className="tags-title">
-                Review controls
-              </h1>
-            </div>
-            <label className="deck-search-label tags-search-label">
+        <section className="queue-stage tags-stage" aria-label="Concept tags">
+          <div className="library-filter-row tags-filter-row" aria-label="Concept tag filters">
+            <label className="deck-search-label library-search-label tags-search-label">
               <span className="sr-only">Search concept tags</span>
               <span className="deck-search-shell">
+                <Search aria-hidden="true" />
                 <input
                   className="deck-search-input"
                   disabled
@@ -56,7 +52,7 @@ export function TagsStaticView() {
             </label>
           </div>
 
-          <div className="tags-summary-strip">
+          <div className="tags-summary-strip library-summary-strip">
             <span>0 tags</span>
             <span>0 active</span>
             <span>0 muted</span>

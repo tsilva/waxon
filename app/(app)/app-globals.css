@@ -5200,6 +5200,12 @@ textarea {
   min-width: min(320px, 100%);
 }
 
+.tags-filter-row .tags-search-label {
+  flex: 1 1 100% !important;
+  max-width: none !important;
+  margin-left: 0;
+}
+
 .tags-summary-strip {
   display: flex;
   flex-wrap: wrap;

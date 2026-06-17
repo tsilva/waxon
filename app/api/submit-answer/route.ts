@@ -57,7 +57,7 @@ export async function POST(request: Request) {
   const answer = normalizeBoundedText(payload?.answer, {
     field: "answer",
     maxLength: MAX_ANSWER_CHARS,
-    required: false,
+    required: true,
   });
 
   if (!answer.ok) {

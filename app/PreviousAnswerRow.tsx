@@ -113,7 +113,7 @@ export function PreviousAnswerRow({
 }: PreviousAnswerRowProps) {
   const isPending = status === "grading";
   const isInteractive = Boolean(onToggle);
-  const evaluationCostLabel = formatEvaluationCost(cost);
+  const evaluationCostLabel = isPending ? null : formatEvaluationCost(cost);
   const rowClassName = [
     "previous-row",
     isPending ? "previous-row-pending" : "previous-row-resolved",
