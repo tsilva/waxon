@@ -25,12 +25,8 @@ type UserProfileResponse = {
   avatarUrl: string | null;
 };
 
-type QueueStatusResponse = {
-  queueRemaining?: number;
-};
-
 type CachedToolbarData = {
-  dueCount: number;
+  dueCount: number | null;
   user: UserProfileResponse | null;
 };
 
@@ -46,30 +42,33 @@ const cacheKey = "waxon-toolbar-actions";
 
 function readCachedToolbarData(): CachedToolbarData {
   if (typeof window === "undefined") {
-    return { dueCount: 0, user: null };
+    return { dueCount: null, user: null };
   }
 
   try {
     const cached = window.sessionStorage.getItem(cacheKey);
 
     if (!cached) {
-      return { dueCount: 0, user: null };
+      return { dueCount: null, user: null };
     }
 
     const parsed = JSON.parse(cached) as Partial<CachedToolbarData>;
 
     return {
-      dueCount: Number.isFinite(parsed.dueCount) ? Number(parsed.dueCount) : 0,
+      dueCount: null,
       user: parsed.user ?? null,
     };
   } catch {
-    return { dueCount: 0, user: null };
+    return { dueCount: null, user: null };
   }
 }
 
 function writeCachedToolbarData(data: CachedToolbarData) {
   try {
-    window.sessionStorage.setItem(cacheKey, JSON.stringify(data));
+    window.sessionStorage.setItem(
+      cacheKey,
+      JSON.stringify({ user: data.user }),
+    );
   } catch {
     // The cache only prevents a route-change flash; failure is harmless.
   }
@@ -114,7 +113,7 @@ export function PersistentReviewToolbarActions() {
   );
   const [hasHydrated, setHasHydrated] = useState(false);
   const [toolbarData, setToolbarData] = useState<CachedToolbarData>({
-    dueCount: 0,
+    dueCount: null,
     user: null,
   });
   const hasLoadedToolbarDataRef = useRef(false);
@@ -183,14 +182,7 @@ export function PersistentReviewToolbarActions() {
   }, []);
 
   const loadToolbarData = useCallback(async (signal: AbortSignal) => {
-    const [queueResult, userResult] = await Promise.allSettled([
-      fetch(
-        "/api/queue-status?mode=review&includeReviewQueue=0&includeRecentAttempts=0&includeQuestionAttempts=0&includeDeckEmbeddingPlot=0&includeQueueCounts=1",
-        {
-          cache: "no-store",
-          signal,
-        },
-      ),
+    const [userResult] = await Promise.allSettled([
       fetch("/api/user", {
         cache: "no-store",
         signal,
@@ -201,17 +193,7 @@ export function PersistentReviewToolbarActions() {
       return;
     }
 
-    let loadedDueCount: number | null = null;
     let loadedUser: UserProfileResponse | null = null;
-
-    if (queueResult.status === "fulfilled" && queueResult.value.ok) {
-      const queueData =
-        (await queueResult.value.json()) as QueueStatusResponse;
-
-      if (Number.isFinite(queueData.queueRemaining)) {
-        loadedDueCount = Number(queueData.queueRemaining);
-      }
-    }
 
     if (userResult.status === "fulfilled" && userResult.value.ok) {
       loadedUser = (await userResult.value.json()) as UserProfileResponse;
@@ -219,7 +201,7 @@ export function PersistentReviewToolbarActions() {
 
     setToolbarData((current) => {
       const nextData = {
-        dueCount: loadedDueCount ?? current.dueCount,
+        dueCount: current.dueCount,
         user: loadedUser ?? current.user,
       };
 

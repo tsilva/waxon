@@ -28,7 +28,7 @@ export type ReviewToolbarTab =
 type ReviewToolbarProps = {
   activeTab: ReviewToolbarTab;
   actions?: "inline" | "placeholder";
-  dueCount: number;
+  dueCount: number | null;
   dueCountSource?: "local" | "review-queue";
   showAdmin: boolean;
   menuAvatarUrl: string | null;
@@ -57,8 +57,14 @@ type ReviewToolbarActionsProps = Pick<
   className?: string;
 };
 
-function tabClass(isActive: boolean): string {
-  return `reader-tab ${isActive ? "reader-tab-active" : ""}`;
+function tabClass(isActive: boolean, isPending: boolean): string {
+  return [
+    "reader-tab",
+    isActive ? "reader-tab-active" : "",
+    isPending ? "reader-tab-loading" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function ReviewToolbar({
@@ -79,6 +85,36 @@ export function ReviewToolbar({
   onSignOut,
 }: ReviewToolbarProps) {
   const router = useRouter();
+  const [pendingTab, setPendingTab] = useState<ReviewToolbarTab | null>(null);
+
+  useEffect(() => {
+    setPendingTab(null);
+  }, [activeTab]);
+
+  function handleTabClick(
+    tab: ReviewToolbarTab,
+    customHandler?: (event: ReactMouseEvent<HTMLAnchorElement>) => void,
+  ) {
+    return (event: ReactMouseEvent<HTMLAnchorElement>) => {
+      customHandler?.(event);
+
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.currentTarget.target
+      ) {
+        return;
+      }
+
+      if (tab !== activeTab) {
+        setPendingTab(tab);
+      }
+    };
+  }
 
   useEffect(() => {
     if (actions !== "placeholder") {
@@ -106,6 +142,10 @@ export function ReviewToolbar({
       return;
     }
 
+    if (dueCount === null) {
+      return;
+    }
+
     const detail: ToolbarDueCountDetail = { dueCount };
 
     window.dispatchEvent(new CustomEvent(toolbarDueCountEvent, { detail }));
@@ -127,56 +167,66 @@ export function ReviewToolbar({
         </Link>
         <div className="reader-tabs" role="tablist" aria-label="Waxon views">
           <Link
-            className={tabClass(activeTab === "review")}
+            className={tabClass(
+              activeTab === "review",
+              pendingTab === "review",
+            )}
             href="/review"
             prefetch={false}
             role="tab"
             id="review-tab"
             aria-selected={activeTab === "review"}
             aria-controls="review-panel"
-            onClick={onReviewClick}
+            onClick={handleTabClick("review", onReviewClick)}
           >
             Review
           </Link>
           <Link
-            className={tabClass(activeTab === "learn")}
+            className={tabClass(activeTab === "learn", pendingTab === "learn")}
             href="/learn"
             prefetch={false}
             role="tab"
             id="learn-tab"
             aria-selected={activeTab === "learn"}
             aria-controls="learn-panel"
-            onClick={onLearnClick}
+            onClick={handleTabClick("learn", onLearnClick)}
           >
             Learn
           </Link>
           <Link
-            className={tabClass(activeTab === "library")}
+            className={tabClass(
+              activeTab === "library",
+              pendingTab === "library",
+            )}
             href="/library"
             prefetch={false}
             role="tab"
             aria-selected={activeTab === "library"}
+            onClick={handleTabClick("library")}
           >
             Library
           </Link>
           <Link
-            className={tabClass(activeTab === "tags")}
+            className={tabClass(activeTab === "tags", pendingTab === "tags")}
             href="/tags"
             prefetch={false}
             role="tab"
             aria-selected={activeTab === "tags"}
-            onClick={onTagsClick}
+            onClick={handleTabClick("tags", onTagsClick)}
           >
             Tags
           </Link>
           {showAdmin ? (
             <Link
-              className={tabClass(activeTab === "admin")}
+              className={tabClass(
+                activeTab === "admin",
+                pendingTab === "admin",
+              )}
               href="/admin"
               prefetch={false}
               role="tab"
               aria-selected={activeTab === "admin"}
-              onClick={onAdminClick}
+              onClick={handleTabClick("admin", onAdminClick)}
               onFocus={() => router.prefetch("/admin")}
               onPointerEnter={() => router.prefetch("/admin")}
             >
@@ -252,20 +302,26 @@ export function ReviewToolbarActions({
     };
   }, [isUserMenuOpen]);
 
+  const queueSummaryClassName = `queue-summary ${
+    activeTab === "stats" ? "queue-summary-active" : ""
+  }`;
+
   return (
     <div className={`reader-actions ${className}`.trim()}>
-      <Link
-        className={`queue-summary ${
-          activeTab === "stats" ? "queue-summary-active" : ""
-        }`}
-        href="/stats"
-        prefetch={false}
-        aria-current={activeTab === "stats" ? "page" : undefined}
-        onClick={onStatsClick}
-        title="Review stats"
-      >
-        {dueCount} due
-      </Link>
+      {dueCount === null ? (
+        <span className="queue-summary-placeholder" aria-hidden="true" />
+      ) : (
+        <Link
+          className={queueSummaryClassName}
+          href="/stats"
+          prefetch={false}
+          aria-current={activeTab === "stats" ? "page" : undefined}
+          onClick={onStatsClick}
+          title="Review stats"
+        >
+          {dueCount} due
+        </Link>
+      )}
       <div className="user-menu" ref={userMenuRef}>
         <button
           className={`user-menu-trigger ${
