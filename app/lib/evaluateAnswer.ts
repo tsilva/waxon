@@ -131,6 +131,9 @@ math symbols or formulas.
 
 Also emit correctAnswer: the concise correct answer you expected for this
 question, not the user's answer. Keep it direct and 24 words maximum.
+Use Markdown inline code for literal formulas, symbols, vectors, and code-like
+expressions in correctAnswer, for example \`exp(-1) < 1\` and
+\`ln(sum) < ln(2)\`.
 
 Keep justification very concise: one sentence, 12 words maximum.
 

@@ -1,3 +1,5 @@
+import { formatFormulaMarkdown } from "./markdownFormulaFormatting.ts";
+
 export type GradedEvaluationResult = {
   status: "graded";
   score: number;
@@ -143,8 +145,10 @@ function conciseCorrectAnswer(
   const words = source.trim().replace(/\s+/g, " ").split(" ");
 
   if (words.length <= MAX_CORRECT_ANSWER_WORDS) {
-    return words.join(" ");
+    return formatFormulaMarkdown(words.join(" "));
   }
 
-  return `${words.slice(0, MAX_CORRECT_ANSWER_WORDS).join(" ")}...`;
+  return formatFormulaMarkdown(
+    `${words.slice(0, MAX_CORRECT_ANSWER_WORDS).join(" ")}...`,
+  );
 }

@@ -3,6 +3,7 @@
 import { ChevronDown } from "lucide-react";
 import type { ReactNode } from "react";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
+import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import { SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
 
 export type PreviousAnswerRowStatus = "grading" | "resolved";
@@ -172,7 +173,7 @@ export function PreviousAnswerRow({
                   as="p"
                   className="previous-answer"
                   enableMath
-                  text={correctAnswer}
+                  text={formatFormulaMarkdown(correctAnswer)}
                 />
               ) : (
                 <p className="previous-answer previous-answer-empty">
@@ -209,7 +210,7 @@ export function PreviousAnswerRow({
                     className="previous-cost-label"
                     aria-label={`Evaluation cost ${evaluationCostLabel}`}
                   >
-                    eval {evaluationCostLabel}
+                    {evaluationCostLabel}
                   </span>
                 ) : null}
                 {secondaryMetaContent}
