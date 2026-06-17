@@ -4927,16 +4927,16 @@ export default function ReviewApp({
                   </dl>
 
                   <div className="learn-generation-stream">
-                    <span className="progress-dot-prefix" aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
                     <MarkdownInline
                       as="p"
                       className="learn-generation-stream-text"
                       text={activeLearnGenerationStreamText}
                     />
+                    <span className="progress-dot-suffix" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                    </span>
                   </div>
                 </div>
               ) : (
