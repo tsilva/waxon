@@ -19,3 +19,10 @@ test("formatFormulaMarkdown leaves existing markdown spans untouched", () => {
     "Since `exp(-1)<1`, and $ln(sum)<ln(2)$ follows.",
   );
 });
+
+test("formatFormulaMarkdown treats @ as a formula operator", () => {
+  assert.equal(
+    formatFormulaMarkdown("Q = x @ W_Q, K = x @ W_K, and V = x @ W_V."),
+    "`Q = x @ W_Q`, `K = x @ W_K`, and `V = x @ W_V`.",
+  );
+});

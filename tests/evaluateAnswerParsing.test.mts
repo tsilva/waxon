@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildSystemPrompt,
+} from "../app/lib/evaluateAnswerPrompt.ts";
+import {
   parseEvaluation,
   parseScore,
 } from "../app/lib/evaluateAnswerParsing.ts";
@@ -146,6 +149,14 @@ test("parseEvaluation formats formulas in correctAnswer as markdown", () => {
     correctAnswer:
       "Since `exp(-1)<1`, `exp(0)+exp(-1)<2`; ln is increasing, so `ln(sum)<ln(2)`.",
   });
+});
+
+test("evaluateAnswer prompt prefers explicit matrix product notation", () => {
+  const prompt = buildSystemPrompt();
+
+  assert.match(prompt, /Q = x @ W_q/u);
+  assert.match(prompt, /implicit multiplication/u);
+  assert.match(prompt, /Q = XW_Q/u);
 });
 
 test("parseEvaluation truncates verbose justification and answer summary", () => {
