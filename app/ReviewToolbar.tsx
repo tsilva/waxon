@@ -165,7 +165,12 @@ export function ReviewToolbar({
           />
           <span>waxon</span>
         </Link>
-        <div className="reader-tabs" role="tablist" aria-label="Waxon views">
+        <div
+          className={`reader-tabs ${pendingTab ? "reader-tabs-loading" : ""}`}
+          role="tablist"
+          aria-label="Waxon views"
+          aria-busy={pendingTab ? true : undefined}
+        >
           <Link
             className={tabClass(
               activeTab === "review",
