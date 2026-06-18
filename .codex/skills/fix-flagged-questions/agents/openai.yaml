@@ -1,0 +1,4 @@
+interface:
+  display_name: "Fix Flagged Questions"
+  short_description: "Audit, patch, and unflag Waxon cards"
+  default_prompt: "Use $fix-flagged-questions to audit flagged Waxon questions, propose fixes, and apply approved updates."
