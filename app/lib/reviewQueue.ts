@@ -712,16 +712,25 @@ function toReviewQueueItem(
 
 export async function loadReviewSessionQueue(input: {
   deckId?: string | null;
+  excludeQuestionIds?: string[];
+  limit?: number;
+  offset?: number;
 } = {}): Promise<{
   items: ReviewQueueItem[];
 }> {
   const user = await getCurrentUser();
   const state = getQueueStateForUser(user.id);
   const now = Date.now();
+  const limit = Math.min(
+    REVIEW_SESSION_QUEUE_LIMIT,
+    Math.max(0, Math.floor(input.limit ?? REVIEW_SESSION_QUEUE_LIMIT)),
+  );
   const dueQuestions = await getDueQuestions(now, {
     userId: user.id,
     deckId: input.deckId || undefined,
-    limit: REVIEW_SESSION_QUEUE_LIMIT,
+    excludeQuestionIds: input.excludeQuestionIds,
+    limit,
+    offset: input.offset,
   });
 
   return {

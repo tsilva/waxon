@@ -216,13 +216,17 @@ export function PersistentReviewToolbarActions() {
       return;
     }
 
+    if (pathname.startsWith("/review")) {
+      return;
+    }
+
     const controller = new AbortController();
 
     hasLoadedToolbarDataRef.current = true;
     void loadToolbarData(controller.signal);
 
     return () => controller.abort();
-  }, [isToolbarRoute, loadToolbarData]);
+  }, [isToolbarRoute, loadToolbarData, pathname]);
 
   if (!hasHydrated || !isToolbarRoute) {
     return null;
