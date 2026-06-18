@@ -59,8 +59,56 @@ export function AppStaticLoadingView({
           <div className="reader-actions reader-actions-placeholder" />
         </header>
 
-        <div className="route-loading-stage" aria-hidden="true" />
+        {staticView === "review" ? (
+          <ReviewRouteLoadingStage />
+        ) : (
+          <div className="route-loading-stage" aria-hidden="true" />
+        )}
       </section>
     </main>
+  );
+}
+
+function ReviewRouteLoadingStage() {
+  return (
+    <div
+      className="review-stage route-loading-review-stage"
+      aria-hidden="true"
+    >
+      <section className="question-area">
+        <div className="question-copy">
+          <h2 className="question-title">Loading next question...</h2>
+        </div>
+      </section>
+
+      <div className="composer composer-loading">
+        <div className="composer-row composer-loading-row">
+          <div className="composer-loading-input" />
+          <div className="composer-loading-button" />
+          <div className="composer-loading-button composer-loading-button-accent" />
+        </div>
+      </div>
+
+      <section className="previous-panel">
+        <div className="previous-header">
+          <h2>Previous answers</h2>
+        </div>
+
+        <ol className="previous-list">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <li
+              className="previous-row previous-row-placeholder"
+              key={`route-loading-previous-placeholder-${index}`}
+            >
+              <div className="previous-placeholder-score" />
+              <div className="previous-placeholder-copy">
+                <span />
+                <span />
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+    </div>
   );
 }
