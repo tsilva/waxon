@@ -627,12 +627,27 @@ type PendingSpeechCommand = {
 
 async function fetchReviewSessionQueue(input: {
   deckId?: string | null;
+  excludeQuestionId?: string | null;
+  limit?: number;
+  offset?: number;
   signal?: AbortSignal;
 } = {}): Promise<ReviewQueueItem[]> {
   const params = new URLSearchParams();
 
   if (input.deckId) {
     params.set("deckId", input.deckId);
+  }
+
+  if (input.excludeQuestionId) {
+    params.append("excludeQuestionId", input.excludeQuestionId);
+  }
+
+  if (input.limit !== undefined) {
+    params.set("limit", String(Math.max(0, Math.floor(input.limit))));
+  }
+
+  if (input.offset !== undefined) {
+    params.set("offset", String(Math.max(0, Math.floor(input.offset))));
   }
 
   const response = await fetch(
@@ -693,6 +708,8 @@ const QUEUE_PAGE_SIZE = 48;
 const QUEUE_PAGE_GROWTH_FACTOR = 1.75;
 const QUEUE_ROW_ESTIMATED_HEIGHT = 132;
 const QUEUE_ROW_OVERSCAN = 14;
+const REVIEW_SESSION_FIRST_ITEM_LIMIT = 1;
+const REVIEW_SESSION_BACKGROUND_LIMIT = 199;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 const STALE_EVALUATION_GRADING_MS = 120_000;
 const EVALUATION_STATUS_POLL_MS = 750;
@@ -1611,6 +1628,7 @@ export default function ReviewApp({
   const currentSessionItemRef = useRef(currentSessionItem);
   const sessionQueueRef = useRef(sessionQueue);
   const reviewSessionReloadGenerationRef = useRef(0);
+  const isReviewSessionBackgroundLoadingRef = useRef(false);
   const isFlaggingQuestionRef = useRef(isFlaggingQuestion);
   const pendingRetryItemsRef = useRef(new Map<string, ReviewQueueItem>());
   const processedEvaluationIdsRef = useRef(new Set<string>());
@@ -2497,6 +2515,10 @@ export default function ReviewApp({
       return;
     }
 
+    if (activeTab === "review" && !hasLoadedQuestionRef.current) {
+      return;
+    }
+
     let isActive = true;
 
     async function loadUserProfile() {
@@ -2526,7 +2548,7 @@ export default function ReviewApp({
     return () => {
       isActive = false;
     };
-  }, [initialCurrentUser]);
+  }, [activeTab, initialCurrentUser, question]);
 
   useEffect(() => {
     if (!isSettingsOpen) {
@@ -2669,6 +2691,58 @@ export default function ReviewApp({
     }
   }, [appendQuestion]);
 
+  const loadReviewSessionRemainder = useCallback((firstItem: ReviewQueueItem) => {
+    if (isReviewSessionBackgroundLoadingRef.current) {
+      return;
+    }
+
+    const reloadGeneration = reviewSessionReloadGenerationRef.current;
+
+    isReviewSessionBackgroundLoadingRef.current = true;
+
+    void fetchReviewSessionQueue({
+      excludeQuestionId: firstItem.questionId,
+      limit: REVIEW_SESSION_BACKGROUND_LIMIT,
+    })
+      .then((items) => {
+        if (reviewSessionReloadGenerationRef.current !== reloadGeneration) {
+          return;
+        }
+
+        const currentItem = currentSessionItemRef.current;
+        const seenKeys = new Set<string>();
+        const nextQueue: ReviewQueueItem[] = [];
+
+        for (const item of [...sessionQueueRef.current, ...items]) {
+          if (
+            currentItem &&
+            ((item.questionId && item.questionId === currentItem.questionId) ||
+              item.question === currentItem.question)
+          ) {
+            continue;
+          }
+
+          const itemKey = item.questionId ?? `question:${item.question}`;
+
+          if (seenKeys.has(itemKey)) {
+            continue;
+          }
+
+          seenKeys.add(itemKey);
+          nextQueue.push(item);
+        }
+
+        sessionQueueRef.current = nextQueue;
+        setSessionQueue(nextQueue);
+      })
+      .catch(() => {
+        // The critical review card is already usable; later advances can refetch.
+      })
+      .finally(() => {
+        isReviewSessionBackgroundLoadingRef.current = false;
+      });
+  }, []);
+
   const advanceReviewSessionQueue = useCallback(async (options?: {
     surfaceError?: boolean;
     appendToMessages?: boolean;
@@ -2680,9 +2754,13 @@ export default function ReviewApp({
 
     try {
       let queue = sessionQueueRef.current;
+      let fetchedSingleItem = false;
 
       if (queue.length === 0) {
-        queue = await fetchReviewSessionQueue();
+        queue = await fetchReviewSessionQueue({
+          limit: REVIEW_SESSION_FIRST_ITEM_LIMIT,
+        });
+        fetchedSingleItem = true;
       }
 
       if (reviewSessionReloadGenerationRef.current !== reloadGeneration) {
@@ -2697,6 +2775,11 @@ export default function ReviewApp({
       applyReviewQueueItem(nextItem ?? null, {
         appendToMessages: options?.appendToMessages,
       });
+
+      if (nextItem && fetchedSingleItem) {
+        loadReviewSessionRemainder(nextItem);
+      }
+
       return nextItem ?? null;
     } catch (loadError) {
       if (surfaceError) {
@@ -2710,7 +2793,7 @@ export default function ReviewApp({
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [applyReviewQueueItem]);
+  }, [applyReviewQueueItem, loadReviewSessionRemainder]);
 
   const loadNextQuestion = useCallback(async (options?: {
     surfaceError?: boolean;
@@ -2937,10 +3020,6 @@ export default function ReviewApp({
       return;
     }
 
-    if (!hasLoadedPreviousAnswerStatusRef.current) {
-      void loadPreviousAnswerStatus();
-    }
-
     if (hasLoadedQuestionRef.current) {
       return;
     }
@@ -2949,7 +3028,21 @@ export default function ReviewApp({
   }, [
     activeTab,
     loadNextQuestion,
+    reviewQueueVersion,
+  ]);
+
+  useEffect(() => {
+    if (activeTab !== "review" || !hasLoadedQuestionRef.current) {
+      return;
+    }
+
+    if (!hasLoadedPreviousAnswerStatusRef.current) {
+      void loadPreviousAnswerStatus();
+    }
+  }, [
+    activeTab,
     loadPreviousAnswerStatus,
+    question,
     reviewQueueVersion,
   ]);
 
