@@ -74,7 +74,7 @@ const LIBRARY_TAG_SUGGESTION_LIMIT = 8;
 
 function formatDate(value: number): string {
   if (!Number.isFinite(value) || value <= 0) {
-    return "unscheduled";
+    return "unknown";
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -82,6 +82,18 @@ function formatDate(value: number): string {
     day: "numeric",
     year: "numeric",
   }).format(new Date(value));
+}
+
+function formatNextDue(value: number, now: number): string {
+  if (!Number.isFinite(value)) {
+    return "unknown";
+  }
+
+  if (value <= now) {
+    return "due now";
+  }
+
+  return formatDate(value);
 }
 
 function questionStatus(item: QuestionBankItem, now: number): string {
@@ -643,7 +655,6 @@ export default function LibraryPageClient({
 
           <div className="tags-summary-strip library-summary-strip">
             <span>{questionCountLabel}</span>
-            <span>{questionBank.items.length} shown</span>
             <span>
               {isLoading || isMetadataLoading || isLoadingMore
                 ? "loading"
@@ -757,7 +768,7 @@ export default function LibraryPageClient({
                         </span>
                         <span className="previous-time-control">
                           <span className="previous-time">
-                            {formatDate(item.nextDue)}
+                            {formatNextDue(item.nextDue, now)}
                           </span>
                           <ChevronDown
                             className="previous-collapse-icon"
@@ -832,7 +843,9 @@ export default function LibraryPageClient({
               </div>
               <div className="stats-tile">
                 <span>Next due</span>
-                <strong>{formatDate(selectedQuestionDetails.nextDue)}</strong>
+                <strong>
+                  {formatNextDue(selectedQuestionDetails.nextDue, now)}
+                </strong>
               </div>
               <div className="stats-tile">
                 <span>Created</span>

@@ -5,7 +5,7 @@ const MATH_ATOM_PATTERN =
   String.raw`(?:\\?[A-Za-z]+|[A-Za-z]+)\([^()\n]*(?:\([^()\n]*\)[^()\n]*)*\)|\[[^\]\n]{1,80}\]|[A-Za-z0-9]+(?:_[A-Za-z0-9]+|\^[A-Za-z0-9]+)?`;
 
 const MATH_FORMULA_PATTERN = new RegExp(
-  String.raw`(?:${MATH_ATOM_PATTERN})(?:\s*(?:[+\-*/^=<>≤≥≈])\s*(?:${MATH_ATOM_PATTERN}))+`,
+  String.raw`(?:${MATH_ATOM_PATTERN})(?:\s*(?:[+\-*/^=<>≤≥≈@])\s*(?:${MATH_ATOM_PATTERN}))+`,
   "gu",
 );
 
