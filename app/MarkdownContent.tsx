@@ -130,11 +130,43 @@ function isFormulaInlineCode(value: string): boolean {
   );
 }
 
+function decodeLatexText(value: string): string {
+  return value.replace(/\\([_$%&#{}])/gu, "$1").replace(/\\textbackslash\b/gu, "\\");
+}
+
 function renderMathNodes(expression: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   let index = 0;
 
   while (index < expression.length) {
+    if (expression.startsWith("\\operatorname", index)) {
+      const operator = readMathGroup(expression, index + "\\operatorname".length);
+
+      if (operator) {
+        nodes.push(
+          <span className="math-operator" key={`operator-${index}`}>
+            {decodeLatexText(operator.content)}
+          </span>,
+        );
+        index = operator.nextIndex;
+        continue;
+      }
+    }
+
+    if (expression.startsWith("\\text", index)) {
+      const text = readMathGroup(expression, index + "\\text".length);
+
+      if (text) {
+        nodes.push(
+          <span className="math-text" key={`text-${index}`}>
+            {decodeLatexText(text.content)}
+          </span>,
+        );
+        index = text.nextIndex;
+        continue;
+      }
+    }
+
     if (expression.startsWith("\\frac", index)) {
       const numerator = readMathGroup(expression, index + "\\frac".length);
 
