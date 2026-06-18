@@ -3185,15 +3185,16 @@ export default function ReviewApp({
       processedEvaluationIdsRef.current.add(evaluation.id);
       pendingRetryItemsRef.current.delete(evaluation.id);
 
-      if (
-        evaluation.score === null ||
-        evaluation.score >= SCHEDULED_SCORE_THRESHOLD
-      ) {
+      if (evaluation.score === null) {
         continue;
       }
 
       const resolvedAt = evaluation.resolvedAt ?? Date.now();
       const nextDue = evaluation.nextDue ?? resolvedAt;
+      if (nextDue > Date.now()) {
+        continue;
+      }
+
       const updatedRetryItem: ReviewQueueItem = {
         ...retryItem,
         nextDue,

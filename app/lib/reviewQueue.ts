@@ -31,7 +31,7 @@ import {
   type EvaluationResult,
 } from "./evaluateAnswer";
 import { recordPendingLlmTrace } from "./llmTraceStore";
-import { parseReviews, SCHEDULED_SCORE_THRESHOLD } from "./scheduler";
+import { parseReviews } from "./scheduler";
 import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
@@ -1089,7 +1089,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       });
       savedEvaluationNextDue = evaluationNextDue;
 
-      if (result.score < SCHEDULED_SCORE_THRESHOLD) {
+      if (evaluationNextDue <= resolvedAt) {
         prependRetryQuestion(state, persisted);
       }
     } else {
