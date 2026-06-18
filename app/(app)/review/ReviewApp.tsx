@@ -175,6 +175,7 @@ type PreviousAnswerItem = {
   cost: number | null;
   timestamp: number | null;
   timeLabel: string;
+  nextDue: number | null;
 };
 
 type QuestionSwapLayer = {
@@ -908,6 +909,22 @@ function formatNextDue(stats: QuestionStats): string {
   }
 
   return `In ${formatDurationBadge(stats.msUntilDue)}`;
+}
+
+function formatPreviousAnswerScheduleLabel(
+  nextDue: number | null,
+  now: number,
+): string | null {
+  if (nextDue === null) {
+    return null;
+  }
+
+  const msUntilDue = nextDue - now;
+  if (msUntilDue <= 0) {
+    return "Due now";
+  }
+
+  return `Due in ${formatDurationBadge(msUntilDue)}`;
 }
 
 function extractTerminalSpeechCommand(
@@ -4011,6 +4028,7 @@ export default function ReviewApp({
         traceId: message.traceId,
         cost: evaluation?.cost ?? message.cost ?? null,
         timestamp,
+        nextDue: message.nextDue,
         timeLabel:
           message.status === "grading"
             ? "Just now"
@@ -4053,6 +4071,7 @@ export default function ReviewApp({
         traceId: evaluation.traceId,
         cost: evaluation.cost,
         timestamp,
+        nextDue: evaluation.nextDue,
         timeLabel:
           evaluation.status === "grading"
             ? "Just now"
@@ -4123,6 +4142,7 @@ export default function ReviewApp({
       traceId: null,
       cost: null,
       timestamp: attempt.resolvedAt || attempt.submittedAt,
+      nextDue: null,
       timeLabel: formatRelativeTime(
         attempt.resolvedAt || attempt.submittedAt,
         currentTime,
@@ -4178,6 +4198,7 @@ export default function ReviewApp({
         traceId: null,
         cost: null,
         timestamp,
+        nextDue: item.nextDue,
         timeLabel: formatRelativeTime(timestamp, currentTime),
       };
     });
@@ -5081,6 +5102,10 @@ export default function ReviewApp({
                   /[^A-Za-z0-9_-]/g,
                   "-",
                 )}`;
+                const scheduleLabel = formatPreviousAnswerScheduleLabel(
+                  item.nextDue,
+                  currentTime,
+                );
 
                 return (
                   <PreviousAnswerRow
@@ -5094,6 +5119,13 @@ export default function ReviewApp({
                     cost={item.cost}
                     timestamp={item.timestamp}
                     timeLabel={item.timeLabel}
+                    secondaryMetaContent={
+                      scheduleLabel ? (
+                        <span className="previous-schedule-label">
+                          {scheduleLabel}
+                        </span>
+                      ) : null
+                    }
                     isExpanded={isDetailsExpanded}
                     detailId={detailId}
                     onDetailsClick={() =>

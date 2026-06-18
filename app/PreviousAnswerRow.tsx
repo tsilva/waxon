@@ -205,6 +205,7 @@ export function PreviousAnswerRow({
             </span>
             {evaluationCostLabel || secondaryMetaContent ? (
               <span className="previous-secondary-meta">
+                {secondaryMetaContent}
                 {evaluationCostLabel ? (
                   <span
                     className="previous-cost-label"
@@ -213,7 +214,6 @@ export function PreviousAnswerRow({
                     {evaluationCostLabel}
                   </span>
                 ) : null}
-                {secondaryMetaContent}
               </span>
             ) : null}
           </>
