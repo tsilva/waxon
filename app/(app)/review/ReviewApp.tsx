@@ -850,14 +850,14 @@ function formatReviewDate(timestamp: number | null): string {
 
 function formatRelativeTime(timestamp: number | null, now: number): string {
   if (!timestamp) {
-    return "Just now";
+    return "just now";
   }
 
   const elapsedMs = Math.max(0, now - timestamp);
   const elapsedSeconds = Math.floor(elapsedMs / 1000);
 
   if (elapsedSeconds < 60) {
-    return "Just now";
+    return "just now";
   }
 
   const elapsedMinutes = Math.floor(elapsedSeconds / 60);
@@ -921,10 +921,10 @@ function formatPreviousAnswerScheduleLabel(
 
   const msUntilDue = nextDue - now;
   if (msUntilDue <= 0) {
-    return "Due now";
+    return "due now";
   }
 
-  return `Due in ${formatDurationBadge(msUntilDue)}`;
+  return `due in ${formatDurationBadge(msUntilDue).toLowerCase()}`;
 }
 
 function extractTerminalSpeechCommand(
@@ -4031,7 +4031,7 @@ export default function ReviewApp({
         nextDue: message.nextDue,
         timeLabel:
           message.status === "grading"
-            ? "Just now"
+            ? "just now"
             : formatRelativeTime(timestamp, currentTime),
       };
     });
@@ -4074,7 +4074,7 @@ export default function ReviewApp({
         nextDue: evaluation.nextDue,
         timeLabel:
           evaluation.status === "grading"
-            ? "Just now"
+            ? "just now"
             : formatRelativeTime(timestamp, currentTime),
       };
     });
