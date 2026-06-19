@@ -26,3 +26,24 @@ test("formatFormulaMarkdown treats @ as a formula operator", () => {
     "`Q = x @ W_Q`, `K = x @ W_K`, and `V = x @ W_V`.",
   );
 });
+
+test("formatFormulaMarkdown can render math-style correct answers", () => {
+  assert.equal(
+    formatFormulaMarkdown("x^{-7} (or 1/x^7)", { style: "math" }),
+    "$x^{-7}$ (or $1/x^7$)",
+  );
+});
+
+test("formatFormulaMarkdown converts math-like code spans in math style", () => {
+  assert.equal(
+    formatFormulaMarkdown("`x^{-7}` (or `1/x^7`)", { style: "math" }),
+    "$x^{-7}$ (or $1/x^7$)",
+  );
+});
+
+test("formatFormulaMarkdown preserves code-like matrix products in math style", () => {
+  assert.equal(
+    formatFormulaMarkdown("`Q = x @ W_q`", { style: "math" }),
+    "`Q = x @ W_q`",
+  );
+});

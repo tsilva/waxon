@@ -4,6 +4,7 @@ import {
   Fragment,
   type ReactNode,
 } from "react";
+import { renderLatexCommandText } from "@/app/lib/latexMath";
 
 type MathParseResult = {
   content: string;
@@ -35,28 +36,6 @@ type MarkdownBlockOptions = Required<
     "codeBlockClassName" | "enableCodeBlocks" | "enableHeadings" | "enableMath" | "headingClassName"
   >
 >;
-
-const mathSymbolMap: Record<string, string> = {
-  alpha: "α",
-  beta: "β",
-  delta: "δ",
-  Delta: "Δ",
-  epsilon: "ε",
-  eta: "η",
-  gamma: "γ",
-  lambda: "λ",
-  mu: "μ",
-  nabla: "∇",
-  partial: "∂",
-  cdot: "·",
-  le: "≤",
-  ge: "≥",
-  log: "log",
-  neq: "≠",
-  sum: "∑",
-  times: "×",
-  theta: "θ",
-};
 
 function findClosingDelimiter(
   source: string,
@@ -209,9 +188,16 @@ function renderMathNodes(expression: string): ReactNode[] {
       const command = expression.slice(index + 1).match(/^[A-Za-z]+/);
 
       if (command) {
+        const commandText = renderLatexCommandText(command[0]);
+
+        if (commandText === null) {
+          index += command[0].length + 1;
+          continue;
+        }
+
         nodes.push(
           <span className="math-command" key={`command-${index}`}>
-            {mathSymbolMap[command[0]] ?? command[0]}
+            {commandText}
           </span>,
         );
         index += command[0].length + 1;
