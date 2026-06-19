@@ -121,7 +121,6 @@ export function AuthClerkHydrator({ mode }: { mode: AuthMode }) {
         <div className="auth-clerk-frame">
           <LoadedClerkProvider
             afterSignOutUrl="/"
-            prefetchUI={false}
             signInUrl="/sign-in"
             signUpUrl="/sign-up"
           >
