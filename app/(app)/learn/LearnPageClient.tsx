@@ -5,6 +5,7 @@ import {
   BookOpen,
   Loader2,
   PlusCircle,
+  Search,
   Settings,
   Square,
   SquareCheck,
@@ -481,26 +482,24 @@ function LearnLoadingPlaceholders() {
         <div className="learn-course-picker-heading">
           <span className="admin-skeleton-line learn-loading-course-heading" />
         </div>
+        <div className="learn-course-toolbar">
+          <span className="learn-course-search-shell">
+            <span className="admin-skeleton-line learn-loading-course-search" />
+          </span>
+          <span className="learn-course-create-button learn-loading-course-create" />
+        </div>
         <div className="learn-course-list">
-          <article className="learn-course-item learn-course-new learn-loading-course-card">
-            <span className="admin-skeleton-pill learn-loading-course-pill" />
-            <strong className="admin-skeleton-line learn-loading-course-title" />
-            <small className="admin-skeleton-line learn-loading-course-copy" />
-            <span className="learn-course-new-rail" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
-          </article>
           {Array.from({ length: 5 }, (_, index) => (
             <article
               className="learn-course-item learn-course-card learn-loading-course-card"
               key={index}
             >
               <div className="learn-course-open">
-                <span className="admin-skeleton-line learn-loading-course-meta" />
                 <strong className="admin-skeleton-line learn-loading-course-title" />
-                <small className="admin-skeleton-line learn-loading-course-copy" />
+                <span className="learn-course-state-panel">
+                  <span className="admin-skeleton-line learn-loading-course-meta" />
+                  <small className="admin-skeleton-line learn-loading-course-copy" />
+                </span>
               </div>
               <span className="kb-skeleton-toggle learn-course-settings-trigger learn-loading-course-action" />
             </article>
@@ -573,6 +572,7 @@ export default function LearnPageClient({
     Set<string>
   >(() => new Set());
   const [courses, setCourses] = useState<Course[]>(() => initialCourses ?? []);
+  const [courseSearchQuery, setCourseSearchQuery] = useState("");
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(
     initialSelectedCourse ?? null,
   );
@@ -1421,6 +1421,25 @@ export default function LearnPageClient({
       ),
     [courses],
   );
+  const filteredCourses = useMemo(() => {
+    const normalizedQuery = courseSearchQuery.trim().toLowerCase();
+
+    if (!normalizedQuery) {
+      return sortedCourses;
+    }
+
+    return sortedCourses.filter((course) =>
+      [
+        course.title,
+        course.description,
+        course.topicPrompt,
+        course.toc.title,
+        course.toc.description,
+      ]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(normalizedQuery)),
+    );
+  }, [courseSearchQuery, sortedCourses]);
 
   return (
     <main className="page page-learn-active">
@@ -1533,27 +1552,35 @@ export default function LearnPageClient({
                   className="learn-course-picker learn-course-picker-full"
                   aria-label="Courses"
                 >
-                  <div className="learn-course-list">
+                  <div className="learn-course-toolbar">
+                    <label className="learn-course-search-shell">
+                      <Search aria-hidden="true" />
+                      <span className="sr-only">Search courses</span>
+                      <input
+                        className="learn-course-search-input"
+                        type="search"
+                        value={courseSearchQuery}
+                        onChange={(event) =>
+                          setCourseSearchQuery(event.target.value)
+                        }
+                        placeholder="Search courses"
+                      />
+                    </label>
                     <button
-                      className="learn-course-item learn-course-new"
-                      aria-label="New course"
+                      className="learn-course-create-button"
                       disabled={Boolean(loadingCourseId)}
                       type="button"
                       onClick={startNewCourse}
                     >
-                      <span className="learn-course-new-kicker">
-                        <PlusCircle aria-hidden="true" />
-                        Create
-                      </span>
-                      <strong>New course</strong>
-                      <small>Ready for a learning goal</small>
-                      <span className="learn-course-new-rail" aria-hidden="true">
-                        <i />
-                        <i />
-                        <i />
-                      </span>
+                      <PlusCircle aria-hidden="true" />
+                      Create
                     </button>
-                    {sortedCourses.map((course) => (
+                  </div>
+                  <div className="learn-course-list">
+                    {filteredCourses.length === 0 ? (
+                      <p className="learn-course-empty">No matching courses.</p>
+                    ) : null}
+                    {filteredCourses.map((course) => (
                       <article
                         className="learn-course-item learn-course-card"
                         key={course.id}
@@ -1566,24 +1593,26 @@ export default function LearnPageClient({
                             void selectCourse(course.id);
                           }}
                         >
-                          <span>
-                            <BookOpen aria-hidden="true" />
-                            {courseProgressLabel(course)}
-                          </span>
                           <strong>{course.title}</strong>
-                          <small className="learn-course-meta">
-                            {loadingCourseId === course.id
-                              ? "Loading"
-                              : `${course.generatedPages}/${course.totalPages} generated`}
-                            {" / "}
-                            <time
-                              className="learn-course-updated"
-                              dateTime={new Date(course.updatedAt).toISOString()}
-                              title={formatCourseUpdatedTitle(course.updatedAt)}
-                            >
-                              Updated {formatCourseUpdatedAt(course.updatedAt)}
-                            </time>
-                          </small>
+                          <span className="learn-course-state-panel">
+                            <span className="learn-course-progress">
+                              <BookOpen aria-hidden="true" />
+                              {courseProgressLabel(course)}
+                            </span>
+                            <small className="learn-course-meta">
+                              {loadingCourseId === course.id
+                                ? "Loading"
+                                : `${course.generatedPages}/${course.totalPages} generated`}
+                              {" / "}
+                              <time
+                                className="learn-course-updated"
+                                dateTime={new Date(course.updatedAt).toISOString()}
+                                title={formatCourseUpdatedTitle(course.updatedAt)}
+                              >
+                                Updated {formatCourseUpdatedAt(course.updatedAt)}
+                              </time>
+                            </small>
+                          </span>
                         </button>
                         <button
                           className="learn-course-settings-trigger"

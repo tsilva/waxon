@@ -54,6 +54,7 @@ The README identifies these important tables and relationships:
 * Authenticated app pages live under the route group `app/(app)/`, which preserves their public URL paths while keeping the root public layout free of the authenticated provider shell. Clerk sign-in and sign-up live under `app/(auth)/` so they keep Clerk context and `app/(auth)/auth-globals.css` without loading the authenticated app toolbar shell or full app stylesheet.
 * Internal app routes are accessible in `pnpm dev --port auto` through local test auth as `eng.tiago.silva@gmail.com`. Lighthouse audits for protected pages should include `/review`, `/learn`, a representative `/learn/courses/[courseId]`, `/library`, `/tags`, `/stats`, `/admin`, and a representative `/admin/traces/[traceId]`. `/queue` intentionally redirects to `/library`.
 * `app/PreviousAnswerRow.tsx` is the shared question-row widget used by Review, Learn evaluation rows, and Library question rows.
+* Library tag filters are deep-linkable with `?tag=<slug>` and hydrate into visible `#slug` search tokens. Tag chips in Review, Library, and Tags should link to that Library URL rather than using free-text `q` search.
 * `app/api/submit-answer/` and answer evaluation libraries are part of grading.
 * `app/lib/scheduler.ts` contains scheduling behavior.
 * `app/lib/reviewQueue.ts` contains queue behavior.

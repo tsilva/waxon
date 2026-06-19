@@ -10,6 +10,7 @@ import {
 import { useAppError } from "@/app/AppErrorModal";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
 import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
 import { SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
 import {
@@ -4040,9 +4041,13 @@ export default function ReviewApp({
               aria-label="Question tags"
             >
               {layer.conceptSlugs.map((slug) => (
-                <span className="library-chip" key={slug}>
+                <Link
+                  className="library-chip library-chip-link"
+                  href={libraryTagHref(slug)}
+                  key={slug}
+                >
                   #{slug}
-                </span>
+                </Link>
               ))}
             </div>
           ) : null}
@@ -5662,9 +5667,14 @@ export default function ReviewApp({
                   <span>Concepts</span>
                   <div className="stats-concept-list">
                     {selectedQuestionStats.conceptSlugs.map((slug) => (
-                      <span className="stats-concept-chip" key={slug}>
+                      <Link
+                        className="stats-concept-chip stats-concept-chip-link"
+                        href={libraryTagHref(slug)}
+                        key={slug}
+                        onClick={() => selectQuestion(null)}
+                      >
                         #{slug}
-                      </span>
+                      </Link>
                     ))}
                   </div>
                 </div>

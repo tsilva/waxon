@@ -4283,6 +4283,20 @@ textarea {
   font-weight: 700;
 }
 
+.stats-concept-chip-link {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.stats-concept-chip-link:hover,
+.stats-concept-chip-link:focus-visible {
+  border-color: rgb(166 124 82 / 42%);
+  background: #ffffff;
+  color: var(--accent-hover);
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 2px;
+}
+
 .tags-stage {
   width: min(1080px, 100%);
 }
@@ -4443,6 +4457,20 @@ textarea {
   font-size: 14px;
   font-weight: 750;
   overflow-wrap: anywhere;
+}
+
+.tags-slug-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.tags-slug-link:hover,
+.tags-slug-link:focus-visible {
+  color: var(--accent-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 3px;
 }
 
 .tags-row-meta {
@@ -4853,6 +4881,20 @@ textarea {
   font-family: var(--font-ui);
   font-size: 11px;
   font-weight: 750;
+}
+
+.library-chip-link {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.library-chip-link:hover,
+.library-chip-link:focus-visible {
+  border-color: rgb(166 124 82 / 42%);
+  background: #ffffff;
+  color: var(--accent-hover);
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 2px;
 }
 
 .previous-label-content .library-chip {
@@ -5940,6 +5982,8 @@ textarea {
 .learn-kicker,
 .learn-course-item span,
 .learn-course-item small,
+.learn-course-search-input,
+.learn-course-create-button,
 .learn-chat-message,
 .learn-chat-composer .composer-input {
   font-family: var(--font-ui);
@@ -5976,6 +6020,105 @@ textarea {
   width: 100%;
 }
 
+.learn-course-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.learn-course-search-shell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid rgb(227 218 196 / 78%);
+  border-radius: 8px;
+  background: rgb(251 248 240 / 82%);
+  color: var(--muted);
+}
+
+.learn-course-search-shell svg {
+  position: absolute;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: var(--muted-strong);
+  pointer-events: none;
+  stroke-width: 2.2;
+}
+
+.learn-course-search-shell:hover,
+.learn-course-search-shell:focus-within {
+  border-color: rgb(166 124 82 / 42%);
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 2px;
+}
+
+.learn-course-search-input {
+  width: 100%;
+  min-height: 36px;
+  border: 0;
+  padding: 0 12px 0 38px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.learn-course-search-input::placeholder {
+  color: var(--muted);
+}
+
+.learn-course-search-input:focus {
+  outline: 0;
+}
+
+.learn-course-create-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  border: 1px solid rgb(166 124 82 / 28%);
+  border-radius: 999px;
+  padding: 0 13px;
+  background: rgb(255 252 245 / 86%);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 820;
+  cursor: pointer;
+}
+
+.learn-course-create-button svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.4;
+}
+
+.learn-course-create-button:hover,
+.learn-course-create-button:focus-visible {
+  border-color: rgb(166 124 82 / 46%);
+  background: #ffffff;
+  color: var(--accent-hover);
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 2px;
+}
+
+.learn-course-create-button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.learn-course-empty {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .learn-course-picker-full .learn-course-list {
   grid-template-columns: minmax(0, 1fr);
   gap: 8px;
@@ -6006,7 +6149,7 @@ textarea {
 
 .learn-course-open {
   display: grid;
-  grid-template-columns: minmax(132px, 0.28fr) minmax(0, 1fr) minmax(210px, auto);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, auto);
   align-items: center;
   gap: 16px;
   min-width: 0;
@@ -6067,9 +6210,9 @@ textarea {
 
 .learn-course-new {
   position: relative;
-  grid-template-columns: minmax(118px, auto) minmax(0, 1fr) minmax(180px, auto) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, auto);
   align-items: center;
-  justify-items: start;
+  justify-items: stretch;
   gap: 14px;
   min-height: 72px;
   overflow: hidden;
@@ -6089,6 +6232,17 @@ textarea {
   opacity: 0.78;
 }
 
+.learn-course-new-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-self: end;
+  justify-content: flex-end;
+  gap: 10px 14px;
+  min-width: 0;
+  color: rgb(117 103 84 / 76%);
+}
+
 .learn-course-new .learn-course-new-kicker {
   justify-content: center;
   width: fit-content;
@@ -6106,7 +6260,6 @@ textarea {
 
 .learn-course-new .learn-course-new-rail {
   position: static;
-  justify-self: end;
   gap: 5px;
   color: var(--accent);
   opacity: 0.64;
@@ -6154,10 +6307,26 @@ textarea {
   color: var(--accent);
 }
 
-.learn-course-meta {
+.learn-course-state-panel {
+  display: inline-flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-self: end;
   justify-content: flex-end;
+  gap: 6px 12px;
+  min-width: 0;
+  text-align: right;
+}
+
+.learn-course-progress {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.learn-course-meta {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
   row-gap: 2px;
   text-align: right;
 }
@@ -6171,6 +6340,7 @@ textarea {
   min-width: 0;
   font-size: 16px;
   line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .course-settings-modal {
@@ -6677,6 +6847,17 @@ textarea {
 .learn-loading-course-pill {
   width: 82px;
   height: 25px;
+}
+
+.learn-loading-course-search {
+  width: min(260px, 62%);
+  height: 11px;
+  margin-left: 38px;
+}
+
+.learn-loading-course-create {
+  width: 86px;
+  pointer-events: none;
 }
 
 .learn-loading-course-meta {
@@ -7683,6 +7864,14 @@ textarea {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .learn-course-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .learn-course-create-button {
+    justify-self: start;
+  }
+
   .learn-course-card {
     grid-template-columns: minmax(0, 1fr) 42px;
   }
@@ -7705,23 +7894,27 @@ textarea {
     min-height: 88px;
   }
 
-  .learn-course-new .learn-course-new-kicker,
   .learn-course-item.learn-course-new strong {
     grid-column: 1;
   }
 
-  .learn-course-item.learn-course-new small {
+  .learn-course-new-actions {
     grid-column: 1 / -1;
+    justify-self: start;
+    justify-content: flex-start;
   }
 
   .learn-course-new .learn-course-new-rail {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    align-self: end;
+    margin-left: auto;
+  }
+
+  .learn-course-state-panel {
+    justify-self: start;
+    justify-content: flex-start;
+    text-align: left;
   }
 
   .learn-course-meta {
-    justify-self: start;
     justify-content: flex-start;
     text-align: left;
   }
