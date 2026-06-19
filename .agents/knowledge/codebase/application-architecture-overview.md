@@ -44,6 +44,7 @@ The README identifies these important tables and relationships:
 * `questions` stores per-card state directly under `user_id`.
 * `question_attempts` stores each resolved user attempt with raw answer, concise LLM answer summary, score, justification, and timestamps.
 * Waxon maps Clerk accounts through `auth_accounts`.
+* The deployed database was migrated from older deck-scoped question data to this user-scoped model in `drizzle/0025_user_scoped_question_data.sql`. That migration backfills `user_id` onto `questions`, `question_attempts`, and `question_embeddings`, adds the user-scoped indexes expected by `app/db/schema.ts`, and leaves legacy `deck_id` columns nullable for data preservation and compatibility with current inserts.
 
 # Relevant Paths
 
