@@ -1,3 +1,8 @@
+import {
+  parseCourseQuestionWidgets,
+  serializeCourseQuestionWidget,
+} from "./courseQuestionWidget.ts";
+
 export function ensureCourseChatTurnHasLearnerQuestion(input: {
   text: string;
   pageTitle: string;
@@ -8,6 +13,12 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
 } {
   const generatedText = input.text.trim();
   const hasLearnerQuestion = isCourseChatTurnComplete(generatedText);
+  const fallbackWidget = serializeCourseQuestionWidget({
+    type: "free_text",
+    id: "fallback-milestone-check",
+    question: "What is the main idea of this milestone in your own words?",
+    placeholder: "Explain the idea in your own words...",
+  });
 
   if (hasLearnerQuestion) {
     return {
@@ -21,8 +32,7 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
       `## ${input.pageTitle}`,
       `Start with this milestone: ${input.pageObjective}`,
       "A good answer should name the core idea, explain why it matters, and connect it to a small example.",
-      "**Checkpoint**",
-      "What is the main idea of this milestone in your own words?",
+      fallbackWidget,
     ].join("\n\n");
 
     return {
@@ -33,9 +43,9 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
 
   const separator = /[.!?)]\s*$/u.test(generatedText) ? "\n\n" : ".\n\n";
   const fallbackQuestion = [
-    `${separator}**Checkpoint**`,
+    separator.trimEnd(),
     `Focus on this milestone: ${input.pageObjective}`,
-    "What is the main idea of this milestone in your own words?",
+    fallbackWidget,
   ].join("\n\n");
 
   return {
@@ -74,6 +84,10 @@ export function isCourseChatTurnComplete(text: string): boolean {
   }
 
   if (/that completes the course\./iu.test(normalizedText)) {
+    return true;
+  }
+
+  if (parseCourseQuestionWidgets(normalizedText).widgets.length > 0) {
     return true;
   }
 
