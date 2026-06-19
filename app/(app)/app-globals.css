@@ -6554,7 +6554,10 @@ textarea {
 
 .learn-chat-message + .learn-chat-evaluation-list,
 .learn-chat-evaluation-list + .learn-chat-message,
-.learn-chat-evaluation-list + .learn-chat-evaluation-list {
+.learn-chat-evaluation-list + .learn-chat-evaluation-list,
+.learn-chat-message + .learn-question-widget-stack,
+.learn-question-widget-stack + .learn-chat-message,
+.learn-question-widget-stack + .learn-chat-evaluation-list {
   margin-top: 12px;
 }
 
@@ -6702,7 +6705,9 @@ textarea {
 
 .learn-question-widget-stack {
   display: grid;
+  align-self: flex-start;
   gap: 10px;
+  width: min(780px, 100%);
   min-width: 0;
 }
 

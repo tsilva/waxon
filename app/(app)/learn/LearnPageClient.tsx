@@ -12,7 +12,14 @@ import {
   SquareCheck,
   Trash2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import {
   AnswerComposer,
@@ -1853,13 +1860,12 @@ export default function LearnPageClient({
                         !evaluationSnippet;
 
                       return (
-                        <div
-                          className={`learn-chat-message learn-chat-message-${message.role} learn-chat-message-${messageKind}`}
-                          key={message.id}
-                        >
-                          {messageContent || shouldShowQuestionWidgets ? (
-                            <div className="learn-chat-message-stack">
-                              {messageContent ? (
+                        <Fragment key={message.id}>
+                          {messageContent ? (
+                            <div
+                              className={`learn-chat-message learn-chat-message-${message.role} learn-chat-message-${messageKind}`}
+                            >
+                              <div className="learn-chat-message-stack">
                                 <MarkdownContent
                                   className={`learn-chat-message-content learn-chat-message-content-${messageKind}`}
                                   text={messageContent}
@@ -1870,35 +1876,23 @@ export default function LearnPageClient({
                                   }
                                   enableMath={message.role === "assistant"}
                                 />
-                              ) : null}
-                              {message.interrupted ? (
-                                <p
-                                  className="learn-chat-interrupted"
-                                  role="status"
-                                >
-                                  This tutor message was interrupted before the
-                                  final question finished.
-                                </p>
-                              ) : null}
-                              <LearnChatMessageMetrics
-                                metrics={messageMetrics}
-                              />
-                              {shouldShowQuestionWidgets ? (
-                                <div className="learn-question-widget-stack">
-                                  {parsedWidgets.widgets.map((widget) => (
-                                    <LearnQuestionWidgetCard
-                                      key={`${message.id}-${widget.id}`}
-                                      widget={widget}
-                                      disabled={isStreaming}
-                                      onSubmit={submitQuestionWidget}
-                                    />
-                                  ))}
-                                </div>
-                              ) : null}
+                                {message.interrupted ? (
+                                  <p
+                                    className="learn-chat-interrupted"
+                                    role="status"
+                                  >
+                                    This tutor message was interrupted before the
+                                    final question finished.
+                                  </p>
+                                ) : null}
+                                <LearnChatMessageMetrics
+                                  metrics={messageMetrics}
+                                />
+                              </div>
                             </div>
-                          ) : (
+                          ) : !shouldShowQuestionWidgets ? (
                             <span
-                              className="learn-chat-pending"
+                              className={`learn-chat-message learn-chat-message-${message.role} learn-chat-message-${messageKind} learn-chat-pending`}
                               role="status"
                               aria-live="polite"
                             >
@@ -1911,8 +1905,20 @@ export default function LearnPageClient({
                                 <span />
                               </span>
                             </span>
-                          )}
-                        </div>
+                          ) : null}
+                          {shouldShowQuestionWidgets ? (
+                            <div className="learn-question-widget-stack">
+                              {parsedWidgets.widgets.map((widget) => (
+                                <LearnQuestionWidgetCard
+                                  key={`${message.id}-${widget.id}`}
+                                  widget={widget}
+                                  disabled={isStreaming}
+                                  onSubmit={submitQuestionWidget}
+                                />
+                              ))}
+                            </div>
+                          ) : null}
+                        </Fragment>
                       );
                     })}
                     <div className="learn-chat-end" />
