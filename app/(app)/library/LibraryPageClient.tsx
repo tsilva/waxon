@@ -2,6 +2,8 @@
 
 import { useClerk, useUser } from "@clerk/nextjs";
 import { ChevronDown, Search, X } from "lucide-react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -13,6 +15,7 @@ import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import type { ConceptTagSummary } from "@/app/lib/conceptTags";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
 import type {
   QuestionBankItem,
   QuestionBankPage,
@@ -175,12 +178,30 @@ function tagSearchInputValue(query: string, tagDraft: string | null): string {
   return `${query.trimEnd()}${query.trim() ? " " : ""}#${tagDraft}`;
 }
 
+function uniqueTagSlugs(slugs: string[]): string[] {
+  return Array.from(
+    new Set(
+      slugs
+        .map((slug) => slug.trim().replace(/^#+/u, ""))
+        .filter(Boolean),
+    ),
+  );
+}
+
+function stringArraysEqual(left: string[], right: string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
 export default function LibraryPageClient({
   initialQuestionBank = null,
   initialConceptTags = null,
   initialUser,
   showAdmin = false,
 }: LibraryPageClientProps) {
+  const searchParams = useSearchParams();
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
   const [questionBank, setQuestionBank] = useState(
@@ -188,9 +209,11 @@ export default function LibraryPageClient({
   );
   const [conceptTags, setConceptTags] = useState(initialConceptTags ?? []);
   const [currentUser, setCurrentUser] = useState(initialUser ?? null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => searchParams.get("q")?.trim() ?? "");
   const [status, setStatus] = useState<QuestionBankStatusFilter>("all");
-  const [selectedTagSlugs, setSelectedTagSlugs] = useState<string[]>([]);
+  const [selectedTagSlugs, setSelectedTagSlugs] = useState<string[]>(() =>
+    uniqueTagSlugs(searchParams.getAll("tag")),
+  );
   const [tagDraft, setTagDraft] = useState<string | null>(null);
   const [activeTagOptionIndex, setActiveTagOptionIndex] = useState(0);
   const [sort, setSort] = useState<QuestionBankSort>("due");
@@ -247,6 +270,18 @@ export default function LibraryPageClient({
       : Math.min(activeTagOptionIndex, matchingTagOptions.length - 1);
   const isTagPickerOpen = tagDraft !== null;
   const searchInputValue = tagSearchInputValue(query, tagDraft);
+
+  useEffect(() => {
+    const nextQuery = searchParams.get("q")?.trim() ?? "";
+    const nextTagSlugs = uniqueTagSlugs(searchParams.getAll("tag"));
+
+    setQuery((current) => (current === nextQuery ? current : nextQuery));
+    setSelectedTagSlugs((current) =>
+      stringArraysEqual(current, nextTagSlugs) ? current : nextTagSlugs,
+    );
+    setTagDraft(null);
+    setActiveTagOptionIndex(0);
+  }, [searchParams]);
 
   const addSelectedTag = useCallback((slug: string) => {
     setSelectedTagSlugs((current) =>
@@ -716,9 +751,14 @@ export default function LibraryPageClient({
                           </span>
                         ) : (
                           item.conceptSlugs.map((slug) => (
-                            <span className="library-chip" key={slug}>
+                            <Link
+                              className="library-chip library-chip-link"
+                              href={libraryTagHref(slug)}
+                              key={slug}
+                              onClick={(event) => event.stopPropagation()}
+                            >
                               #{slug}
-                            </span>
+                            </Link>
                           ))
                         )}
                       </div>
@@ -898,9 +938,14 @@ export default function LibraryPageClient({
               ) : (
                 <div className="stats-concept-list">
                   {selectedQuestionDetails.conceptSlugs.map((slug) => (
-                    <span className="stats-concept-chip" key={slug}>
+                    <Link
+                      className="stats-concept-chip stats-concept-chip-link"
+                      href={libraryTagHref(slug)}
+                      key={slug}
+                      onClick={() => setSelectedQuestionDetails(null)}
+                    >
                       #{slug}
-                    </span>
+                    </Link>
                   ))}
                 </div>
               )}

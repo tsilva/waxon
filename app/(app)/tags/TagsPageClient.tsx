@@ -9,6 +9,7 @@ import {
   ToggleLeft,
   ToggleRight,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
@@ -17,6 +18,7 @@ import type {
   ConceptTagSummary,
 } from "@/app/lib/conceptTags";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
@@ -384,7 +386,14 @@ export default function TagsPageClient({
                     </button>
                   </form>
                 ) : (
-                  <p className="tags-slug">#{tag.slug}</p>
+                  <p className="tags-slug">
+                    <Link
+                      className="tags-slug-link"
+                      href={libraryTagHref(tag.slug)}
+                    >
+                      #{tag.slug}
+                    </Link>
+                  </p>
                 )}
 
                 {isMerging ? (

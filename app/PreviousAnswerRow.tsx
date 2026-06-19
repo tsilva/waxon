@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown } from "lucide-react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import { SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
@@ -221,6 +221,16 @@ export function PreviousAnswerRow({
       </span>
     </>
   );
+  const handleMainKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!onToggle || event.target !== event.currentTarget) {
+      return;
+    }
+
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onToggle();
+    }
+  };
 
   return (
     <li className={rowClassName} key={id}>
@@ -235,15 +245,17 @@ export function PreviousAnswerRow({
       </div>
 
       {onToggle ? (
-        <button
+        <div
           className="previous-row-main-button"
-          type="button"
+          role="button"
+          tabIndex={0}
           onClick={onToggle}
+          onKeyDown={handleMainKeyDown}
           aria-expanded={isExpanded}
           aria-controls={detailId}
         >
           {mainContent}
-        </button>
+        </div>
       ) : (
         <div className="previous-row-main-button previous-row-main-static">
           {mainContent}
