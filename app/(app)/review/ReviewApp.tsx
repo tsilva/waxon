@@ -7,6 +7,7 @@ import {
   AnswerComposer,
   ComposerMicButton,
 } from "@/app/AnswerComposer";
+import { useAppError } from "@/app/AppErrorModal";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
@@ -1305,6 +1306,7 @@ export default function ReviewApp({
   const [learnGenerationProgress, setLearnGenerationProgress] =
     useState<LearnGenerationProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { showError } = useAppError();
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [reviewQueueVersion, setReviewQueueVersion] = useState(0);
   const answerRef = useRef(answer);
@@ -1341,6 +1343,17 @@ export default function ReviewApp({
   const keepListeningRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const pendingSpeechCommandRef = useRef<PendingSpeechCommand | null>(null);
+  const surfaceReviewError = useCallback(
+    (message: string, details?: string | null) => {
+      setError(message);
+      showError({
+        title: "Review error",
+        message,
+        details,
+      });
+    },
+    [showError],
+  );
   const pendingSpeechCommandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -2427,17 +2440,18 @@ export default function ReviewApp({
       return nextItem ?? null;
     } catch (loadError) {
       if (surfaceError) {
-        setError(
+        surfaceReviewError(
           loadError instanceof Error
             ? loadError.message
             : "Failed to load the next question.",
+          loadError instanceof Error ? loadError.stack : null,
         );
       }
       return null;
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [applyReviewQueueItem, loadReviewSessionRemainder]);
+  }, [applyReviewQueueItem, loadReviewSessionRemainder, surfaceReviewError]);
 
   const loadNextQuestion = useCallback(async (options?: {
     surfaceError?: boolean;
@@ -3132,10 +3146,20 @@ export default function ReviewApp({
       setCurrentKnowledgeBaseName(submittedKnowledgeBaseName);
       setAnswer(submittedAnswer);
       answerRef.current = submittedAnswer;
-      setError(
+      surfaceReviewError(
         submitError instanceof Error
           ? submitError.message
           : "Failed to submit the answer.",
+        [
+          `Question ID: ${submittedQuestionId ?? "unknown"}`,
+          `Question: ${submittedQuestion}`,
+          `Answer: ${submittedAnswer}`,
+          submitError instanceof Error && submitError.stack
+            ? `Stack:\n${submitError.stack}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
       );
       return false;
     } finally {
@@ -3148,6 +3172,7 @@ export default function ReviewApp({
     currentKnowledgeBaseId,
     currentKnowledgeBaseName,
     rememberLearnTargetKnowledgeBase,
+    surfaceReviewError,
   ]);
 
   const flagCurrentQuestion = useCallback(async () => {
@@ -3205,10 +3230,19 @@ export default function ReviewApp({
 
       return true;
     } catch (flagError) {
-      setError(
+      surfaceReviewError(
         flagError instanceof Error
           ? flagError.message
           : "Failed to flag the question.",
+        [
+          `Question ID: ${activeQuestionId}`,
+          `Question: ${activeQuestion}`,
+          flagError instanceof Error && flagError.stack
+            ? `Stack:\n${flagError.stack}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
       );
       return false;
     } finally {
@@ -3218,6 +3252,7 @@ export default function ReviewApp({
     advanceReviewSessionQueue,
     applyNextQuestion,
     clearPendingSpeechCommand,
+    surfaceReviewError,
   ]);
 
   const handleSpeechText = useCallback(
@@ -4006,7 +4041,7 @@ export default function ReviewApp({
             >
               {layer.conceptSlugs.map((slug) => (
                 <span className="library-chip" key={slug}>
-                  {slug}
+                  #{slug}
                 </span>
               ))}
             </div>
@@ -5628,7 +5663,7 @@ export default function ReviewApp({
                   <div className="stats-concept-list">
                     {selectedQuestionStats.conceptSlugs.map((slug) => (
                       <span className="stats-concept-chip" key={slug}>
-                        {slug}
+                        #{slug}
                       </span>
                     ))}
                   </div>

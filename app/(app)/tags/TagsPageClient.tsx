@@ -384,7 +384,7 @@ export default function TagsPageClient({
                     </button>
                   </form>
                 ) : (
-                  <p className="tags-slug">{tag.slug}</p>
+                  <p className="tags-slug">#{tag.slug}</p>
                 )}
 
                 {isMerging ? (
