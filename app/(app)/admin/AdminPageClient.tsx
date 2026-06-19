@@ -29,14 +29,13 @@ import {
   ADMIN_VIEW_STATE_COOKIE,
   type AdminCachedViewState,
 } from "./adminViewStateCookie";
-
-export type CallType =
-  | "answer_eval"
-  | "question_generation"
-  | "embedding"
-  | "summarization";
-
-export type TraceStatus = "ok" | "pending" | "error";
+import type {
+  CallType,
+  DatePreset,
+  SortDirection,
+  SortKey,
+  TraceStatus,
+} from "./adminTypes";
 
 type LlmCall = {
   id: string;
@@ -61,7 +60,7 @@ type TraceInteraction = {
     | "Question generation"
     | "Reference answer"
     | "Embedding"
-    | "Deck memory"
+    | "Knowledge memory"
     | "Quality gate"
     | "Summarization"
     | "Other";
@@ -69,16 +68,6 @@ type TraceInteraction = {
   status: TraceStatus;
   calls: LlmCall[];
 };
-
-export type SortKey =
-  | "startedAt"
-  | "calls"
-  | "tokens"
-  | "cost"
-  | "latency"
-  | "status";
-export type SortDirection = "asc" | "desc";
-export type DatePreset = "7d" | "30d" | "custom";
 
 type AdminPageClientProps = {
   currentUser: Pick<AuthenticatedUser, "displayName" | "email" | "avatarUrl">;
@@ -310,7 +299,7 @@ function StatusPill({ status }: { status: TraceStatus }) {
 
 function operationPrompt(call: LlmCall, interaction: TraceInteraction): string {
   if (call.operation.includes("embedding")) {
-    return `Embed the source text for "${interaction.title}" so it can be compared with existing deck material.`;
+    return `Embed the source text for "${interaction.title}" so it can be compared with existing knowledge-base material.`;
   }
 
   if (call.operation.includes("generate_questions")) {

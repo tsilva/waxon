@@ -6,10 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
-import {
-  ReviewToolbarActions,
-  type ReviewToolbarTab,
-} from "@/app/ReviewToolbar";
+import { ReviewToolbarActions } from "@/app/ReviewToolbar";
 import {
   localSettingsEvent,
   toolbarDueCountEvent,
@@ -17,6 +14,7 @@ import {
   type ToolbarDueCountDetail,
   type ToolbarSnapshotDetail,
 } from "@/app/toolbarEvents";
+import type { ReviewToolbarTab } from "@/app/toolbarTypes";
 
 type UserProfileResponse = {
   id: string;

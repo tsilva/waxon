@@ -49,7 +49,7 @@ const detailItems = [
   {
     icon: BarChart3,
     title: "Track progress over time",
-    copy: "Scores and answer history make improvement visible across the deck.",
+    copy: "Scores and answer history make improvement visible across the knowledge base.",
   },
 ];
 

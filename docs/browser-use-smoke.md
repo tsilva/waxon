@@ -9,11 +9,10 @@ Exercise the real local UI with the installed Codex Browser plugin:
 - local test-user auth
 - review queue answering
 - correct and incorrect evaluation states
-- deck queue question details
+- library question details
 - admin trace visibility
 
-The suite uses a disposable `Browser Smoke` deck and deterministic local scoring.
-It does not mutate the `Deep Learning` deck.
+The suite seeds disposable smoke questions into the local user's knowledge base and uses deterministic local scoring.
 
 ## Local Server
 
@@ -46,14 +45,6 @@ Setup endpoint:
 POST /api/test-support/browser-smoke
 ```
 
-Deck:
-
-```text
-id: browser-smoke
-name: Browser Smoke
-slug: browser-smoke
-```
-
 Questions:
 
 ```text
@@ -76,10 +67,8 @@ incorrect: 2
 
 ## Lessons Learned
 
-- Wait for content-specific text such as `Deep Learning` or `Browser Smoke`, not
-  the generic deck shell; the shell can render before `/api/decks` finishes.
-- The deck detail page uses the queue panel, so `.review-stage` is hidden on
-  `/decks/:slug`; wait on queue/deck text instead.
+- Wait for content-specific smoke question text, not generic layout chrome.
+- The library page owns question detail verification for seeded smoke cards.
 - Browser runtime supports `domcontentloaded` reliably here; avoid `networkidle`.
 - Use local deterministic scoring for browser smoke tests. OpenRouter-backed
   grading is useful for product behavior but is too slow, costly, and model-

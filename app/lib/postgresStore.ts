@@ -18,7 +18,6 @@ import {
 import { db, pool } from "@/app/db/client";
 import {
   answerEvaluations,
-  decks,
   llmTraceInteractions,
   questionAttempts,
   questionEmbeddings,
@@ -27,7 +26,6 @@ import {
 } from "@/app/db/schema";
 import {
   getCurrentUser,
-  getDeckIdForUser,
   type AuthenticatedUser,
 } from "./auth";
 import { scheduleNextReview, serializeReviews } from "./scheduler";
@@ -46,16 +44,13 @@ import type {
 } from "./reviewTypes";
 import { vectorLiteral } from "./vectorLiteral";
 import {
-  activeConceptEligibilityClause,
   assignConceptSlugsForQuestions,
-  ensureFallbackConceptTagForDeck,
+  ensureFallbackConceptTagForUser,
   getQuestionConceptSlugs,
 } from "./conceptTags";
 
 export type QuestionRow = {
   question_id: string;
-  deck_id: string;
-  deck_name: string;
   user_id: string;
   question: string;
   reviews: string;
@@ -73,8 +68,6 @@ export type QuestionRow = {
 
 export type DueQuestion = {
   questionId: string;
-  deckId: string;
-  deckName: string;
   userId: string;
   question: string;
   reviews: string;
@@ -114,24 +107,7 @@ export type QuestionEmbeddingProjection = {
   projectionY: number | null;
 };
 
-export type PersistedEvaluation = {
-  questionId: string;
-  deckId: string;
-  deckName: string;
-  userId: string;
-  question: string;
-  reviews: string;
-  nextDue: number;
-  generatedFromQuestion: string | null;
-  questionProvenance: string | null;
-  lastAnswer: string | null;
-  lastAnswerSummary: string | null;
-  conciseAnswer: string | null;
-  referenceAnswer: string | null;
-  flaggedAt: number | null;
-  createdAt: number;
-  conceptSlugs: string[];
-} | null;
+export type PersistedEvaluation = DueQuestion | null;
 
 const EVALUATION_PHASES = new Set<EvaluationPhase>([
   "queued",
@@ -147,47 +123,23 @@ export type QueuedQuestionsPage = {
   total: number;
 };
 
+type UserContextInput = {
+  user?: AuthenticatedUser;
+  userId?: string;
+};
+
 export type DueQuestionsInput = UserContextInput & {
   excludeQuestionIds?: string[];
   limit?: number;
   offset?: number;
 };
 
-export type DeckSummary = {
-  id: string;
-  name: string;
-  slug: string;
-  coverage: string;
-  memory: string;
-  inReviewRotation: boolean;
-  archivedAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-  cardCount: number;
-  dueCount: number;
-  lastReviewedAt: number | null;
-};
-
 const LEGACY_QUESTIONS_FILE = path.join(process.cwd(), "data", "questions.csv");
-const DEFAULT_DECK = {
-  id: "deep-learning",
-  name: "Deep Learning",
-  slug: "deep-learning",
-};
-
 const seededUserIds = new Set<string>();
-
-type UserContextInput = {
-  user?: AuthenticatedUser;
-  userId?: string;
-  deckId?: string;
-  deckScope?: "default" | "rotation" | "all";
-};
 
 type UserContext = {
   user: AuthenticatedUser | null;
   userId: string;
-  deckId: string;
 };
 
 function parseCsvRows(source: string): string[][] {
@@ -276,18 +228,12 @@ async function resolveUserContext(input: UserContextInput = {}): Promise<UserCon
     throw new Error("User id is required.");
   }
 
-  return {
-    user,
-    userId,
-    deckId: getDeckIdForUser(userId),
-  };
+  return { user, userId };
 }
 
 function toDueQuestion(row: QuestionRow): DueQuestion {
   return {
     questionId: row.question_id,
-    deckId: row.deck_id,
-    deckName: row.deck_name,
     userId: row.user_id,
     question: row.question,
     reviews: row.reviews,
@@ -319,73 +265,6 @@ async function enrichDueQuestionsWithConceptSlugs(
   }));
 }
 
-function deckSlug(input: string): string {
-  const slug = input
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-
-  return slug || "untitled-deck";
-}
-
-function deckIdForSlug(userId: string, slug: string): string {
-  return `${userId}:${slug}`;
-}
-
-function normalizedDeckName(input: string): string {
-  return input.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-async function uniqueDeckSlug(userId: string, preferredSlug: string): Promise<string> {
-  const rows = await db
-    .select({ slug: decks.slug })
-    .from(decks)
-    .where(eq(decks.userId, userId));
-  const existingSlugs = new Set(rows.map((row) => row.slug));
-
-  if (!existingSlugs.has(preferredSlug)) {
-    return preferredSlug;
-  }
-
-  for (let suffix = 2; suffix < 10_000; suffix += 1) {
-    const candidate = `${preferredSlug}-${suffix}`;
-
-    if (!existingSlugs.has(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new Error("Could not create a unique deck slug.");
-}
-
-async function assertDeckNameAvailable(input: {
-  userId: string;
-  name: string;
-  excludeDeckId?: string;
-}) {
-  const nameKey = normalizedDeckName(input.name);
-  const [existing] = await db
-    .select({ id: decks.id })
-    .from(decks)
-    .where(
-      and(
-        eq(decks.userId, input.userId),
-        isNull(decks.archivedAt),
-        sql`lower(regexp_replace(trim(${decks.name}), '\\s+', ' ', 'g')) = ${nameKey}`,
-        input.excludeDeckId
-          ? sql`${decks.id} <> ${input.excludeDeckId}`
-          : sql`true`,
-      ),
-    )
-    .limit(1);
-
-  if (existing) {
-    throw new Error("Deck name already exists.");
-  }
-}
-
 function normalizeEmbeddingModel(embeddingModel: string): string {
   return embeddingModel.trim();
 }
@@ -413,128 +292,33 @@ function toQuestionEmbedding(row: {
   createdAt: number;
   updatedAt: number;
 }): QuestionEmbedding {
-  return {
-    question: row.question,
-    embeddingModel: row.embeddingModel,
-    embeddingKind: row.embeddingKind,
-    sourceVersion: row.sourceVersion,
-    sourceHash: row.sourceHash,
-    isCurrent: row.isCurrent,
-    embedding: row.embedding,
-    projectionX: row.projectionX,
-    projectionY: row.projectionY,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
+  return row;
 }
 
-async function seedCurrentUserAndDeck(context: UserContext): Promise<void> {
+async function seedCurrentUser(context: UserContext): Promise<void> {
   const now = Date.now();
 
-  if (context.user) {
-    await db
-      .insert(users)
-      .values({
-        id: context.user.id,
-        displayName: context.user.displayName,
-        email: context.user.email,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: users.id,
-        set: {
-          displayName: context.user.displayName,
-          email: context.user.email,
-          updatedAt: now,
-        },
-      });
+  if (!context.user) {
+    return;
   }
 
   await db
-    .insert(decks)
+    .insert(users)
     .values({
-      id: context.deckId,
-      userId: context.userId,
-      name: DEFAULT_DECK.name,
-      slug: DEFAULT_DECK.slug,
-      inReviewRotation: true,
+      id: context.user.id,
+      displayName: context.user.displayName,
+      email: context.user.email,
       createdAt: now,
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: decks.id,
+      target: users.id,
       set: {
-        userId: context.userId,
-        name: DEFAULT_DECK.name,
-        slug: DEFAULT_DECK.slug,
+        displayName: context.user.displayName,
+        email: context.user.email,
         updatedAt: now,
       },
     });
-}
-
-async function copyDefaultDeckEmbeddingsToUserDeck(
-  context: UserContext,
-  now = Math.round(Date.now()),
-): Promise<void> {
-  if (context.deckId === DEFAULT_DECK.id) {
-    return;
-  }
-
-  await db.execute(sql`
-    INSERT INTO question_embeddings (
-      deck_id,
-      question_id,
-      question,
-      embedding_model,
-      embedding_kind,
-      source_version,
-      source_hash,
-      is_current,
-      embedding,
-      projection_x,
-      projection_y,
-      created_at,
-      updated_at
-    )
-    SELECT
-      ${context.deckId},
-      target_question.id,
-      target_question.question,
-      source_embedding.embedding_model,
-      source_embedding.embedding_kind,
-      source_embedding.source_version,
-      source_embedding.source_hash,
-      source_embedding.is_current,
-      source_embedding.embedding,
-      source_embedding.projection_x,
-      source_embedding.projection_y,
-      source_embedding.created_at,
-      ${now}
-    FROM question_embeddings source_embedding
-    INNER JOIN questions source_question
-      ON source_question.id = source_embedding.question_id
-      AND source_question.deck_id = source_embedding.deck_id
-    INNER JOIN questions target_question
-      ON target_question.deck_id = ${context.deckId}
-      AND target_question.question = source_question.question
-    WHERE source_embedding.deck_id = ${DEFAULT_DECK.id}
-    ON CONFLICT (
-      deck_id,
-      question_id,
-      embedding_model,
-      embedding_kind,
-      source_version
-    )
-    DO UPDATE SET
-      question = excluded.question,
-      source_hash = excluded.source_hash,
-      is_current = excluded.is_current,
-      embedding = excluded.embedding,
-      projection_x = excluded.projection_x,
-      projection_y = excluded.projection_y,
-      updated_at = excluded.updated_at
-  `);
 }
 
 async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext> {
@@ -544,20 +328,14 @@ async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext
     return context;
   }
 
-  await seedCurrentUserAndDeck(context);
+  await seedCurrentUser(context);
 
   const [{ value: questionCount = 0 } = { value: 0 }] = await db
     .select({ value: count() })
     .from(questions)
-    .where(eq(questions.deckId, context.deckId));
+    .where(eq(questions.userId, context.userId));
 
   if (questionCount > 0) {
-    await copyDefaultDeckEmbeddingsToUserDeck(context);
-    await ensureFallbackConceptTagForDeck({
-      userId: context.userId,
-      deckId: context.deckId,
-      slug: DEFAULT_DECK.slug,
-    });
     seededUserIds.add(context.userId);
     return context;
   }
@@ -573,7 +351,7 @@ async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext
     .insert(questions)
     .values(
       seedRows.map((row) => ({
-        deckId: context.deckId,
+        userId: context.userId,
         question: row.question,
         questionSlug: questionSlug(row.question),
         reviews: row.reviews,
@@ -582,31 +360,13 @@ async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext
     )
     .onConflictDoNothing();
 
-  await copyDefaultDeckEmbeddingsToUserDeck(context);
-  await ensureFallbackConceptTagForDeck({
+  await ensureFallbackConceptTagForUser({
     userId: context.userId,
-    deckId: context.deckId,
-    slug: DEFAULT_DECK.slug,
+    slug: "deep-learning",
   });
 
   seededUserIds.add(context.userId);
   return context;
-}
-
-function questionDeckWhereClause(context: UserContext, input: UserContextInput) {
-  if (input.deckId) {
-    return eq(questions.deckId, input.deckId);
-  }
-
-  if (input.deckScope === "all") {
-    return sql`true`;
-  }
-
-  if (input.deckScope === "rotation") {
-    return and(eq(decks.inReviewRotation, true), isNull(decks.archivedAt));
-  }
-
-  return eq(questions.deckId, context.deckId);
 }
 
 async function selectQuestionRows(
@@ -614,14 +374,11 @@ async function selectQuestionRows(
   input: UserContextInput = {},
 ): Promise<QuestionRow[]> {
   const context = await ensureSeedData(input);
-  const deckWhereClause = questionDeckWhereClause(context, input);
 
-  const rows = await db
+  return db
     .select({
       question_id: questions.id,
-      deck_id: questions.deckId,
-      deck_name: decks.name,
-      user_id: decks.userId,
+      user_id: questions.userId,
       question: questions.question,
       reviews: questions.reviews,
       next_due: questions.nextDue,
@@ -635,295 +392,12 @@ async function selectQuestionRows(
       created_at: questions.createdAt,
     })
     .from(questions)
-    .innerJoin(decks, eq(decks.id, questions.deckId))
-    .where(
-      and(
-        eq(decks.userId, context.userId),
-        deckWhereClause,
-        whereClause,
-      ),
-    )
+    .where(and(eq(questions.userId, context.userId), whereClause))
     .orderBy(asc(questions.nextDue), asc(questions.createdAt), asc(questions.question));
-
-  return rows;
 }
 
 export async function ensureQuestionsDatabase(): Promise<void> {
   await ensureSeedData();
-}
-
-async function resolveTargetDeckId(
-  context: UserContext,
-  deckId?: string,
-): Promise<string> {
-  const requestedDeckId = deckId?.trim();
-
-  if (!requestedDeckId || requestedDeckId === context.deckId) {
-    return context.deckId;
-  }
-
-  const [row] = await db
-    .select({ id: decks.id })
-    .from(decks)
-    .where(
-      and(
-        eq(decks.id, requestedDeckId),
-        eq(decks.userId, context.userId),
-        isNull(decks.archivedAt),
-      ),
-    )
-    .limit(1);
-
-  if (!row) {
-    throw new Error("Deck not found.");
-  }
-
-  return row.id;
-}
-
-export async function resolveOwnedDeckId(
-  input: UserContextInput = {},
-): Promise<string> {
-  const context = await ensureSeedData(input);
-
-  return resolveTargetDeckId(context, input.deckId);
-}
-
-function toDeckSummary(row: {
-  id: string;
-  name: string;
-  slug: string;
-  coverage: string;
-  memory: string;
-  inReviewRotation: boolean;
-  archivedAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-  cardCount: number;
-  dueCount: number;
-  lastReviewedAt: number | null;
-}): DeckSummary {
-  return {
-    id: row.id,
-    name: row.name,
-    slug: row.slug,
-    coverage: row.coverage,
-    memory: row.memory,
-    inReviewRotation: row.inReviewRotation,
-    archivedAt: row.archivedAt,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    cardCount: Number(row.cardCount) || 0,
-    dueCount: Number(row.dueCount) || 0,
-    lastReviewedAt: row.lastReviewedAt,
-  };
-}
-
-export async function listDecks(
-  input: UserContextInput = {},
-): Promise<DeckSummary[]> {
-  const context = await ensureSeedData(input);
-  const now = Math.round(Date.now());
-  const rows = await db.execute(sql`
-    WITH user_decks AS (
-      SELECT *
-      FROM ${decks}
-      WHERE ${decks.userId} = ${context.userId}
-        AND ${decks.archivedAt} IS NULL
-    ),
-    question_counts AS (
-      SELECT
-        ${questions.deckId} AS deck_id,
-        count(*)::int AS card_count,
-        count(*) FILTER (WHERE ${questions.nextDue} <= ${now})::int AS due_count
-      FROM ${questions}
-      INNER JOIN user_decks ON user_decks.id = ${questions.deckId}
-      WHERE ${questions.flaggedAt} IS NULL
-      GROUP BY ${questions.deckId}
-    ),
-    attempt_counts AS (
-      SELECT
-        ${questionAttempts.deckId} AS deck_id,
-        max(${questionAttempts.resolvedAt}) AS last_reviewed_at
-      FROM ${questionAttempts}
-      INNER JOIN user_decks ON user_decks.id = ${questionAttempts.deckId}
-      GROUP BY ${questionAttempts.deckId}
-    )
-    SELECT
-      user_decks.id AS id,
-      user_decks.name AS name,
-      user_decks.slug AS slug,
-      user_decks.coverage AS coverage,
-      user_decks.memory AS memory,
-      user_decks.in_review_rotation AS "inReviewRotation",
-      user_decks.archived_at AS "archivedAt",
-      user_decks.created_at AS "createdAt",
-      user_decks.updated_at AS "updatedAt",
-      coalesce(question_counts.card_count, 0)::int AS "cardCount",
-      coalesce(question_counts.due_count, 0)::int AS "dueCount",
-      attempt_counts.last_reviewed_at AS "lastReviewedAt"
-    FROM user_decks
-    LEFT JOIN question_counts ON question_counts.deck_id = user_decks.id
-    LEFT JOIN attempt_counts ON attempt_counts.deck_id = user_decks.id
-    ORDER BY user_decks.updated_at DESC, user_decks.name ASC
-  `);
-
-  return rows.rows.map((row) =>
-    toDeckSummary({
-      id: String(row.id),
-      name: String(row.name),
-      slug: String(row.slug),
-      coverage: String(row.coverage),
-      memory: String(row.memory),
-      inReviewRotation: Boolean(row.inReviewRotation),
-      archivedAt: row.archivedAt === null ? null : Number(row.archivedAt),
-      createdAt: Number(row.createdAt),
-      updatedAt: Number(row.updatedAt),
-      cardCount: Number(row.cardCount),
-      dueCount: Number(row.dueCount),
-      lastReviewedAt:
-        row.lastReviewedAt === null ? null : Number(row.lastReviewedAt),
-    }),
-  );
-}
-
-export async function createDeck(input: {
-  name: string;
-  coverage?: string;
-  inReviewRotation?: boolean;
-  userId?: string;
-}): Promise<DeckSummary> {
-  const context = await ensureSeedData(input);
-  const name = input.name.trim();
-  const coverage = input.coverage?.trim() ?? "";
-
-  if (!name) {
-    throw new Error("Deck name is required.");
-  }
-
-  await assertDeckNameAvailable({ userId: context.userId, name });
-
-  const slug = await uniqueDeckSlug(context.userId, deckSlug(name));
-  const now = Math.round(Date.now());
-  const deckId = deckIdForSlug(context.userId, slug);
-
-  await db.insert(decks).values({
-    id: deckId,
-    userId: context.userId,
-    name,
-    slug,
-    coverage,
-    memory: "",
-    inReviewRotation: input.inReviewRotation ?? false,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  const deck = (await listDecks({ userId: context.userId })).find(
-    (item) => item.id === deckId,
-  );
-
-  if (!deck) {
-    throw new Error("Created deck could not be loaded.");
-  }
-
-  return deck;
-}
-
-export async function updateDeck(input: {
-  deckId: string;
-  name?: string;
-  coverage?: string;
-  memory?: string;
-  inReviewRotation?: boolean;
-  userId?: string;
-}): Promise<DeckSummary> {
-  const context = await ensureSeedData(input);
-  const [currentDeck] = await db
-    .select({ id: decks.id })
-    .from(decks)
-    .where(
-      and(
-        eq(decks.id, input.deckId),
-        eq(decks.userId, context.userId),
-        isNull(decks.archivedAt),
-      ),
-    )
-    .limit(1);
-
-  if (!currentDeck) {
-    throw new Error("Deck not found.");
-  }
-
-  const hasNameUpdate = input.name !== undefined;
-  const nextName = input.name?.trim();
-
-  if (hasNameUpdate && !nextName) {
-    throw new Error("Deck name is required.");
-  }
-
-  if (nextName) {
-    await assertDeckNameAvailable({
-      userId: context.userId,
-      name: nextName,
-      excludeDeckId: input.deckId,
-    });
-  }
-
-  const now = Math.round(Date.now());
-
-  await db
-    .update(decks)
-    .set({
-      ...(nextName ? { name: nextName } : {}),
-      ...(input.coverage === undefined ? {} : { coverage: input.coverage.trim() }),
-      ...(input.memory === undefined ? {} : { memory: input.memory.trim() }),
-      ...(input.inReviewRotation === undefined
-        ? {}
-        : { inReviewRotation: input.inReviewRotation }),
-      updatedAt: now,
-    })
-    .where(and(eq(decks.id, input.deckId), eq(decks.userId, context.userId)));
-
-  const deck = (await listDecks({ userId: context.userId })).find(
-    (item) => item.id === input.deckId,
-  );
-
-  if (!deck) {
-    throw new Error("Updated deck could not be loaded.");
-  }
-
-  return deck;
-}
-
-export async function deleteDeck(input: {
-  deckId: string;
-  userId?: string;
-}): Promise<void> {
-  const context = await ensureSeedData(input);
-  const [currentDeck] = await db
-    .select({ id: decks.id })
-    .from(decks)
-    .where(
-      and(
-        eq(decks.id, input.deckId),
-        eq(decks.userId, context.userId),
-        isNull(decks.archivedAt),
-      ),
-    )
-    .limit(1);
-
-  if (!currentDeck) {
-    throw new Error("Deck not found.");
-  }
-
-  if (currentDeck.id === context.deckId) {
-    throw new Error("The current Deep Learning deck cannot be deleted.");
-  }
-
-  await db
-    .delete(decks)
-    .where(and(eq(decks.id, input.deckId), eq(decks.userId, context.userId)));
 }
 
 export async function readQuestions(
@@ -933,7 +407,6 @@ export async function readQuestions(
 }
 
 export async function readQuestionEmbeddingProjections(input: {
-  deckId?: string;
   embeddingModel?: string;
   embeddingKind?: string;
   currentOnly?: boolean;
@@ -943,7 +416,6 @@ export async function readQuestionEmbeddingProjections(input: {
   userId?: string;
 } = {}): Promise<QuestionEmbeddingProjection[]> {
   const context = await ensureSeedData(input);
-  const targetDeckId = input.deckId?.trim() || context.deckId;
   const questionFilter =
     input.questions === undefined
       ? null
@@ -978,12 +450,11 @@ export async function readQuestionEmbeddingProjections(input: {
       projection_y: questionEmbeddings.projectionY,
     })
     .from(questions)
-    .innerJoin(decks, eq(decks.id, questions.deckId))
     .leftJoin(
       questionEmbeddings,
       and(
         eq(questionEmbeddings.questionId, questions.id),
-        eq(questionEmbeddings.deckId, questions.deckId),
+        eq(questionEmbeddings.userId, questions.userId),
         model === null
           ? sql`true`
           : eq(questionEmbeddings.embeddingModel, model),
@@ -995,9 +466,8 @@ export async function readQuestionEmbeddingProjections(input: {
     )
     .where(
       and(
-        eq(questions.deckId, targetDeckId),
+        eq(questions.userId, context.userId),
         isNull(questions.flaggedAt),
-        eq(decks.userId, context.userId),
         questionFilter === null
           ? sql`true`
           : inArray(questions.question, questionFilter),
@@ -1031,12 +501,10 @@ export async function upsertQuestionEmbeddings(input: {
     sourceHash?: string;
     embedding: number[];
   }>;
-  deckId?: string;
   now?: number;
   userId?: string;
 }): Promise<QuestionEmbedding[]> {
   const context = await ensureSeedData(input);
-  const targetDeckId = await resolveTargetDeckId(context, input.deckId);
 
   if (input.embeddings.length === 0) {
     return [];
@@ -1046,7 +514,7 @@ export async function upsertQuestionEmbeddings(input: {
   const valuesByKey = new Map<
     string,
     {
-      deckId: string;
+      userId: string;
       questionId: string;
       question: string;
       embeddingModel: string;
@@ -1081,7 +549,7 @@ export async function upsertQuestionEmbeddings(input: {
     valuesByKey.set(
       `${item.question}\0${model}\0${embeddingKind}\0${sourceVersion}`,
       {
-        deckId: targetDeckId,
+        userId: context.userId,
         questionId: "",
         question: item.question,
         embeddingModel: model,
@@ -1099,13 +567,12 @@ export async function upsertQuestionEmbeddings(input: {
   }
 
   const values = Array.from(valuesByKey.values());
-
   const ownedQuestions = await selectQuestionRows(
     inArray(
       questions.question,
       Array.from(new Set(values.map((item) => item.question))),
     ),
-    { userId: context.userId, deckId: targetDeckId },
+    { userId: context.userId },
   );
   const ownedQuestionByText = new Map(
     ownedQuestions.map((row) => [row.question, row.question_id]),
@@ -1128,7 +595,7 @@ export async function upsertQuestionEmbeddings(input: {
     )
     .onConflictDoUpdate({
       target: [
-        questionEmbeddings.deckId,
+        questionEmbeddings.userId,
         questionEmbeddings.questionId,
         questionEmbeddings.embeddingModel,
         questionEmbeddings.embeddingKind,
@@ -1171,22 +638,10 @@ export async function getDueQuestions(
   const limit =
     input.limit === undefined ? null : Math.max(0, Math.floor(input.limit));
   const offset = Math.max(0, Math.floor(input.offset ?? 0));
-  const whereClause = and(
-    eq(decks.userId, context.userId),
-    input.deckId ? eq(questions.deckId, input.deckId) : activeConceptEligibilityClause(context.userId),
-    isNull(decks.archivedAt),
-    isNull(questions.flaggedAt),
-    lte(questions.nextDue, Math.round(now)),
-    excludeQuestionIds.length > 0
-      ? notInArray(questions.id, excludeQuestionIds)
-      : sql`true`,
-  );
   const rows = await db
     .select({
       question_id: questions.id,
-      deck_id: questions.deckId,
-      deck_name: decks.name,
-      user_id: decks.userId,
+      user_id: questions.userId,
       question: questions.question,
       reviews: questions.reviews,
       next_due: questions.nextDue,
@@ -1200,8 +655,16 @@ export async function getDueQuestions(
       created_at: questions.createdAt,
     })
     .from(questions)
-    .innerJoin(decks, eq(decks.id, questions.deckId))
-    .where(whereClause)
+    .where(
+      and(
+        eq(questions.userId, context.userId),
+        isNull(questions.flaggedAt),
+        lte(questions.nextDue, Math.round(now)),
+        excludeQuestionIds.length > 0
+          ? notInArray(questions.id, excludeQuestionIds)
+          : sql`true`,
+      ),
+    )
     .orderBy(asc(questions.nextDue), asc(questions.createdAt), asc(questions.question))
     .limit(limit ?? 2_147_483_647)
     .offset(offset);
@@ -1210,13 +673,7 @@ export async function getDueQuestions(
     context.userId,
     rows
       .map(toDueQuestion)
-      .filter((row) => Number.isFinite(row.nextDue) && row.nextDue <= now)
-      .sort(
-        (a, b) =>
-          a.nextDue - b.nextDue ||
-          a.createdAt - b.createdAt ||
-          a.question.localeCompare(b.question),
-      ),
+      .filter((row) => Number.isFinite(row.nextDue) && row.nextDue <= now),
   );
 }
 
@@ -1228,14 +685,9 @@ export async function countDueQuestions(
   const [{ value = 0 } = { value: 0 }] = await db
     .select({ value: count() })
     .from(questions)
-    .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(
       and(
-        eq(decks.userId, context.userId),
-        input.deckId
-          ? eq(questions.deckId, input.deckId)
-          : activeConceptEligibilityClause(context.userId),
-        isNull(decks.archivedAt),
+        eq(questions.userId, context.userId),
         isNull(questions.flaggedAt),
         lte(questions.nextDue, Math.round(now)),
       ),
@@ -1255,14 +707,9 @@ export async function getNextScheduledQuestionDue(
   const [row] = await db
     .select({ nextDue: questions.nextDue })
     .from(questions)
-    .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(
       and(
-        eq(decks.userId, context.userId),
-        input.deckId
-          ? eq(questions.deckId, input.deckId)
-          : activeConceptEligibilityClause(context.userId),
-        isNull(decks.archivedAt),
+        eq(questions.userId, context.userId),
         isNull(questions.flaggedAt),
         gt(questions.nextDue, Math.round(now)),
         excludeQuestionIds.length > 0
@@ -1289,11 +736,8 @@ export async function getQueuedQuestionsPage(
     new Set(input.excludeQuestionIds ?? []),
   ).filter(Boolean);
   const whereClause = and(
-    eq(decks.userId, context.userId),
-    input.deckId ? sql`true` : activeConceptEligibilityClause(context.userId),
-    input.deckId ? eq(questions.deckId, input.deckId) : sql`true`,
+    eq(questions.userId, context.userId),
     isNull(questions.flaggedAt),
-    isNull(decks.archivedAt),
     excludeQuestionIds.length > 0
       ? notInArray(questions.id, excludeQuestionIds)
       : sql`true`,
@@ -1305,15 +749,12 @@ export async function getQueuedQuestionsPage(
   const [{ value: total = 0 } = { value: 0 }] = await db
     .select({ value: count() })
     .from(questions)
-    .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(whereClause);
 
   const rows = await db
     .select({
       question_id: questions.id,
-      deck_id: questions.deckId,
-      deck_name: decks.name,
-      user_id: decks.userId,
+      user_id: questions.userId,
       question: questions.question,
       reviews: questions.reviews,
       next_due: questions.nextDue,
@@ -1327,7 +768,6 @@ export async function getQueuedQuestionsPage(
       created_at: questions.createdAt,
     })
     .from(questions)
-    .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(whereClause)
     .orderBy(...orderBy)
     .limit(Math.max(0, Math.floor(input.limit)))
@@ -1344,8 +784,6 @@ export async function getQueuedQuestionsPage(
 
 function rawQuestionRowToDueQuestion(row: {
   question_id: string;
-  deck_id: string;
-  deck_name: string;
   user_id: string;
   question: string;
   reviews: string;
@@ -1380,9 +818,6 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
   },
 ): Promise<QueuedQuestionsPage> {
   const context = await ensureSeedData(input);
-  const targetDeckId = input.deckId
-    ? await resolveTargetDeckId(context, input.deckId)
-    : null;
   const queryEmbedding = normalizeEmbedding(input.queryEmbedding);
 
   if (queryEmbedding.length !== DEDUPE_EMBEDDING_DIMENSIONS) {
@@ -1400,97 +835,53 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
   const maxResults = Math.max(0, Math.floor(input.maxResults));
   const offset = Math.max(0, Math.floor(input.offset));
   const requestedLimit = Math.max(0, Math.floor(input.limit));
-  const buildWhereClause = (input: {
-    userIndex: number;
-    modelIndex: number;
-    kindIndex: number;
-    versionIndex: number;
-    startIndex: number;
-  }) => {
-    const params: unknown[] = [];
-    const clauses = [
-      `d.user_id = $${input.userIndex}`,
-      `d.archived_at IS NULL`,
-      `q.flagged_at IS NULL`,
-      `qe.embedding_model = $${input.modelIndex}`,
-      `qe.embedding_kind = $${input.kindIndex}`,
-      `qe.source_version = $${input.versionIndex}`,
-      `qe.is_current = true`,
-    ];
-    let paramIndex = input.startIndex;
+  const params: unknown[] = [
+    context.userId,
+    model,
+    embeddingKind,
+    sourceVersion,
+  ];
+  const clauses = [
+    "q.user_id = $1",
+    "q.flagged_at IS NULL",
+    "qe.user_id = q.user_id",
+    "qe.embedding_model = $2",
+    "qe.embedding_kind = $3",
+    "qe.source_version = $4",
+    "qe.is_current = true",
+  ];
 
-    if (!targetDeckId) {
-      clauses.push(`exists (
-          select 1
-          from question_concept_tags qct
-          join concept_tags ct on ct.id = qct.concept_tag_id
-          where qct.question_id = q.id
-            and ct.user_id = $${input.userIndex}
-            and ct.active = true
-        )`);
-    }
+  if (excludeQuestionIds.length > 0) {
+    clauses.push(
+      `q.id NOT IN (${excludeQuestionIds
+        .map((_, index) => `$${params.length + index + 1}`)
+        .join(", ")})`,
+    );
+    params.push(...excludeQuestionIds);
+  }
 
-    if (targetDeckId) {
-      clauses.push(`q.deck_id = $${paramIndex}`);
-      params.push(targetDeckId);
-      paramIndex += 1;
-    }
-
-    if (excludeQuestionIds.length > 0) {
-      clauses.push(
-        `q.id NOT IN (${excludeQuestionIds
-          .map(() => `$${paramIndex++}`)
-          .join(", ")})`,
-      );
-      params.push(...excludeQuestionIds);
-    }
-
-    return {
-      sql: clauses.join("\n        AND "),
-      params,
-    };
-  };
-  const countWhere = buildWhereClause({
-    userIndex: 1,
-    modelIndex: 2,
-    kindIndex: 3,
-    versionIndex: 4,
-    startIndex: 5,
-  });
+  const whereSql = clauses.join("\n        AND ");
   const countResult = await pool.query(
     `
       SELECT count(*) AS value
       FROM question_embeddings qe
-      JOIN questions q ON q.id = qe.question_id AND q.deck_id = qe.deck_id
-      JOIN decks d ON d.id = q.deck_id
-      WHERE ${countWhere.sql}
+      JOIN questions q ON q.id = qe.question_id AND q.user_id = qe.user_id
+      WHERE ${whereSql}
     `,
-    [context.userId, model, embeddingKind, sourceVersion, ...countWhere.params],
+    params,
   );
-  const total = Math.min(
-    maxResults,
-    Number(countResult.rows[0]?.value ?? 0),
-  );
+  const total = Math.min(maxResults, Number(countResult.rows[0]?.value ?? 0));
   const limit = Math.min(requestedLimit, Math.max(0, maxResults - offset));
 
   if (limit === 0 || offset >= maxResults) {
     return { items: [], total };
   }
 
-  const rowWhere = buildWhereClause({
-    userIndex: 1,
-    modelIndex: 3,
-    kindIndex: 4,
-    versionIndex: 5,
-    startIndex: 6,
-  });
   const rowsResult = await pool.query(
     `
       SELECT
         q.id AS question_id,
-        q.deck_id,
-        d.name AS deck_name,
-        d.user_id,
+        q.user_id,
         q.question,
         q.reviews,
         q.next_due,
@@ -1503,25 +894,15 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
         q.flagged_at,
         q.created_at,
         qe.embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
-          <=> $2::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS}) AS distance
+          <=> $${params.length + 1}::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS}) AS distance
       FROM question_embeddings qe
-      JOIN questions q ON q.id = qe.question_id AND q.deck_id = qe.deck_id
-      JOIN decks d ON d.id = q.deck_id
-      WHERE ${rowWhere.sql}
+      JOIN questions q ON q.id = qe.question_id AND q.user_id = qe.user_id
+      WHERE ${whereSql}
       ORDER BY distance ASC, q.question ASC
-      LIMIT $${6 + rowWhere.params.length}
-      OFFSET $${7 + rowWhere.params.length}
+      LIMIT $${params.length + 2}
+      OFFSET $${params.length + 3}
     `,
-    [
-      context.userId,
-      vectorLiteral(queryEmbedding),
-      model,
-      embeddingKind,
-      sourceVersion,
-      ...rowWhere.params,
-      limit,
-      offset,
-    ],
+    [...params, vectorLiteral(queryEmbedding), limit, offset],
   );
 
   return {
@@ -1539,8 +920,7 @@ export async function getQuestionSnapshot(
 ): Promise<DueQuestion | null> {
   const context = await ensureSeedData(input);
   const [row] = await selectQuestionRows(eq(questions.question, question), {
-    ...input,
-    deckScope: "all",
+    userId: context.userId,
   });
 
   return row
@@ -1554,8 +934,7 @@ export async function getQuestionSnapshotById(
 ): Promise<DueQuestion | null> {
   const context = await ensureSeedData(input);
   const [row] = await selectQuestionRows(eq(questions.id, questionId), {
-    ...input,
-    deckScope: "all",
+    userId: context.userId,
   });
 
   return row
@@ -1598,7 +977,7 @@ export async function flagQuestionForReview(input: {
       flaggedAt: snapshot.flaggedAt ?? now,
       updatedAt: now,
     })
-    .where(and(eq(questions.deckId, snapshot.deckId), eq(questions.id, questionId)));
+    .where(and(eq(questions.userId, snapshot.userId), eq(questions.id, questionId)));
 
   return {
     ...snapshot,
@@ -1620,7 +999,6 @@ export async function getQuestionAttemptsByQuestionIds(
     .select({
       id: questionAttempts.id,
       questionId: questionAttempts.questionId,
-      deckId: questionAttempts.deckId,
       question: questionAttempts.question,
       rawAnswer: questionAttempts.rawAnswer,
       answerSummary: questionAttempts.answerSummary,
@@ -1631,22 +1009,11 @@ export async function getQuestionAttemptsByQuestionIds(
       resolvedAt: questionAttempts.resolvedAt,
     })
     .from(questionAttempts)
-    .innerJoin(
-      questions,
-      and(
-        eq(questions.deckId, questionAttempts.deckId),
-        eq(questions.id, questionAttempts.questionId),
-      ),
-    )
+    .innerJoin(questions, eq(questions.id, questionAttempts.questionId))
     .where(
       and(
-        inArray(
-          questionAttempts.deckId,
-          db
-            .select({ id: decks.id })
-            .from(decks)
-            .where(eq(decks.userId, context.userId)),
-        ),
+        eq(questionAttempts.userId, context.userId),
+        eq(questions.userId, context.userId),
         inArray(questionAttempts.questionId, questionIds),
       ),
     )
@@ -1688,23 +1055,11 @@ export async function getRecentQuestionAttempts(
   const excludeQuestions = Array.from(
     new Set(input.excludeQuestions ?? []),
   ).filter(Boolean);
-  const deckWhereClause = input.deckId
-    ? eq(decks.id, input.deckId)
-    : input.deckScope === "rotation"
-      ? isNull(decks.archivedAt)
-      : input.deckScope === "all"
-        ? sql`true`
-        : eq(decks.id, context.deckId);
-  const questionWhereClause =
-    input.deckId || input.deckScope !== "rotation"
-      ? sql`true`
-      : activeConceptEligibilityClause(context.userId);
 
   const rows = await db
     .select({
       id: questionAttempts.id,
       questionId: questionAttempts.questionId,
-      deckId: questionAttempts.deckId,
       question: questionAttempts.question,
       rawAnswer: questionAttempts.rawAnswer,
       answerSummary: questionAttempts.answerSummary,
@@ -1715,26 +1070,14 @@ export async function getRecentQuestionAttempts(
       resolvedAt: questionAttempts.resolvedAt,
     })
     .from(questionAttempts)
-    .innerJoin(
-      questions,
-      and(
-        eq(questions.deckId, questionAttempts.deckId),
-        eq(questions.id, questionAttempts.questionId),
-      ),
-    )
+    .innerJoin(questions, eq(questions.id, questionAttempts.questionId))
     .where(
       and(
-        inArray(
-          questionAttempts.deckId,
-          db
-            .select({ id: decks.id })
-            .from(decks)
-            .where(and(eq(decks.userId, context.userId), deckWhereClause)),
-        ),
+        eq(questionAttempts.userId, context.userId),
+        eq(questions.userId, context.userId),
         excludeQuestions.length > 0
           ? notInArray(questionAttempts.question, excludeQuestions)
           : sql`true`,
-        questionWhereClause,
       ),
     )
     .orderBy(desc(questionAttempts.submittedAt), desc(questionAttempts.id))
@@ -1753,47 +1096,6 @@ function toEvaluationPhase(value: string | null): EvaluationPhase | null {
   return value && EVALUATION_PHASES.has(value as EvaluationPhase)
     ? (value as EvaluationPhase)
     : null;
-}
-
-function toEvaluationQueueItem(row: {
-  id: string;
-  traceId: string;
-  deckId: string;
-  question: string;
-  answer: string;
-  status: string;
-  phase: string | null;
-  lastActivityAt: number;
-  submittedAt: number;
-  score: number | null;
-  justification: string | null;
-  answerSummary: string | null;
-  correctAnswer: string | null;
-  nextDue: number | null;
-  resolvedAt: number | null;
-  traceCalls: string | null;
-}): EvaluationQueueItem {
-  const status = row.status === "resolved" ? "resolved" : "grading";
-
-  return {
-    id: row.id,
-    traceId: row.traceId,
-    questionId: null,
-    deckId: row.deckId,
-    question: row.question,
-    answer: row.answer,
-    status,
-    phase: status === "grading" ? toEvaluationPhase(row.phase) : null,
-    lastActivityAt: row.lastActivityAt,
-    submittedAt: row.submittedAt,
-    score: row.score,
-    justification: row.justification,
-    answerSummary: row.answerSummary,
-    correctAnswer: row.correctAnswer || null,
-    resolvedAt: row.resolvedAt,
-    nextDue: row.nextDue,
-    cost: totalTraceCost(row.traceCalls),
-  };
 }
 
 function totalTraceCost(callsJson: string | null): number | null {
@@ -1838,11 +1140,49 @@ function totalTraceCost(callsJson: string | null): number | null {
   return hasCost ? total : null;
 }
 
+function toEvaluationQueueItem(row: {
+  id: string;
+  traceId: string;
+  question: string;
+  answer: string;
+  status: string;
+  phase: string | null;
+  lastActivityAt: number;
+  submittedAt: number;
+  score: number | null;
+  justification: string | null;
+  answerSummary: string | null;
+  correctAnswer: string | null;
+  nextDue: number | null;
+  resolvedAt: number | null;
+  traceCalls: string | null;
+}): EvaluationQueueItem {
+  const status = row.status === "resolved" ? "resolved" : "grading";
+
+  return {
+    id: row.id,
+    traceId: row.traceId,
+    questionId: null,
+    question: row.question,
+    answer: row.answer,
+    status,
+    phase: status === "grading" ? toEvaluationPhase(row.phase) : null,
+    lastActivityAt: row.lastActivityAt,
+    submittedAt: row.submittedAt,
+    score: row.score,
+    justification: row.justification,
+    answerSummary: row.answerSummary,
+    correctAnswer: row.correctAnswer || null,
+    resolvedAt: row.resolvedAt,
+    nextDue: row.nextDue,
+    cost: totalTraceCost(row.traceCalls),
+  };
+}
+
 export async function createAnswerEvaluationRecord(input: {
   id: string;
   traceId: string;
   userId: string;
-  deckId: string;
   question: string;
   answer: string;
   submittedAt: number;
@@ -1854,7 +1194,6 @@ export async function createAnswerEvaluationRecord(input: {
     id: input.id,
     traceId: input.traceId,
     userId: input.userId,
-    deckId: input.deckId,
     question: input.question,
     rawAnswer: input.answer,
     status: "grading",
@@ -1920,9 +1259,6 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
   limit: number;
 }): Promise<EvaluationQueueItem[]> {
   const context = await ensureSeedData(input);
-  const deckWhereClause = input.deckId
-    ? eq(decks.id, input.deckId)
-    : and(isNull(decks.archivedAt), activeConceptEligibilityClause(context.userId));
   const activeSince = Math.round(input.activeSince);
   const resolvedSince = Math.round(input.resolvedSince);
 
@@ -1930,7 +1266,6 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
     .select({
       id: answerEvaluations.id,
       traceId: answerEvaluations.traceId,
-      deckId: answerEvaluations.deckId,
       question: answerEvaluations.question,
       answer: answerEvaluations.rawAnswer,
       status: answerEvaluations.status,
@@ -1946,22 +1281,20 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
       traceCalls: llmTraceInteractions.calls,
     })
     .from(answerEvaluations)
-    .innerJoin(decks, eq(decks.id, answerEvaluations.deckId))
     .leftJoin(
       llmTraceInteractions,
       eq(llmTraceInteractions.id, answerEvaluations.traceId),
     )
-    .innerJoin(
+    .leftJoin(
       questions,
       and(
-        eq(questions.deckId, answerEvaluations.deckId),
+        eq(questions.userId, answerEvaluations.userId),
         eq(questions.question, answerEvaluations.question),
       ),
     )
     .where(
       and(
         eq(answerEvaluations.userId, context.userId),
-        deckWhereClause,
         or(
           and(
             eq(answerEvaluations.status, "grading"),
@@ -2000,7 +1333,6 @@ export async function getAnswerEvaluationsByIds(input: UserContextInput & {
     .select({
       id: answerEvaluations.id,
       traceId: answerEvaluations.traceId,
-      deckId: answerEvaluations.deckId,
       question: answerEvaluations.question,
       answer: answerEvaluations.rawAnswer,
       status: answerEvaluations.status,
@@ -2020,10 +1352,10 @@ export async function getAnswerEvaluationsByIds(input: UserContextInput & {
       llmTraceInteractions,
       eq(llmTraceInteractions.id, answerEvaluations.traceId),
     )
-    .innerJoin(
+    .leftJoin(
       questions,
       and(
-        eq(questions.deckId, answerEvaluations.deckId),
+        eq(questions.userId, answerEvaluations.userId),
         eq(questions.question, answerEvaluations.question),
       ),
     )
@@ -2061,13 +1393,7 @@ export async function saveReferenceAnswer(input: {
     })
     .where(
       and(
-        inArray(
-          questions.deckId,
-          db
-            .select({ id: decks.id })
-            .from(decks)
-            .where(eq(decks.userId, context.userId)),
-        ),
+        eq(questions.userId, context.userId),
         eq(questions.id, input.questionId),
         eq(questions.question, input.question),
       ),
@@ -2126,12 +1452,9 @@ export async function upsertDueQuestions(input: {
   questions: Array<string | QuestionInput>;
   sourceQuestion: string | null;
   now: number;
-  deckId?: string;
   userId?: string;
 }): Promise<DueQuestion[]> {
   const context = await ensureSeedData(input);
-  const targetDeckId = await resolveTargetDeckId(context, input.deckId);
-
   const generatedQuestions = normalizeGeneratedQuestions(input.questions);
 
   if (generatedQuestions.length === 0) {
@@ -2144,7 +1467,7 @@ export async function upsertDueQuestions(input: {
     .insert(questions)
     .values(
       generatedQuestions.map((question, index) => ({
-        deckId: targetDeckId,
+        userId: context.userId,
         question: question.question,
         questionSlug: questionSlug(question.question),
         nextDue: now + index,
@@ -2156,7 +1479,7 @@ export async function upsertDueQuestions(input: {
       })),
     )
     .onConflictDoUpdate({
-      target: [questions.deckId, questions.questionSlug],
+      target: [questions.userId, questions.questionSlug],
       set: {
         nextDue: sql`excluded.next_due`,
         generatedFromQuestion: sql`coalesce(
@@ -2174,9 +1497,8 @@ export async function upsertDueQuestions(input: {
       questions.questionSlug,
       generatedQuestions.map((question) => questionSlug(question.question)),
     ),
-    { userId: context.userId, deckId: targetDeckId },
+    { userId: context.userId },
   );
-
   const dueQuestions = rows.map(toDueQuestion);
 
   try {
@@ -2202,15 +1524,7 @@ export async function upsertDueQuestions(input: {
     console.warn("[waxon] concept tag assignment failed", error);
   }
 
-  const conceptSlugsByQuestionId = await getQuestionConceptSlugs({
-    userId: context.userId,
-    questionIds: dueQuestions.map((question) => question.questionId),
-  });
-
-  return dueQuestions.map((question) => ({
-    ...question,
-    conceptSlugs: conceptSlugsByQuestionId.get(question.questionId) ?? [],
-  }));
+  return enrichDueQuestionsWithConceptSlugs(context.userId, dueQuestions);
 }
 
 export async function applyEvaluationToPostgres(input: {
@@ -2231,9 +1545,7 @@ export async function applyEvaluationToPostgres(input: {
     const [row] = await tx
       .select({
         question_id: questions.id,
-        deck_id: questions.deckId,
-        deck_name: decks.name,
-        user_id: decks.userId,
+        user_id: questions.userId,
         question: questions.question,
         reviews: questions.reviews,
         next_due: questions.nextDue,
@@ -2247,14 +1559,9 @@ export async function applyEvaluationToPostgres(input: {
         created_at: questions.createdAt,
       })
       .from(questions)
-      .innerJoin(decks, eq(decks.id, questions.deckId))
       .where(
         and(
-          eq(decks.userId, context.userId),
-          isNull(decks.archivedAt),
-          input.questionId
-            ? sql`true`
-            : activeConceptEligibilityClause(context.userId),
+          eq(questions.userId, context.userId),
           input.questionId
             ? eq(questions.id, input.questionId)
             : eq(questions.question, input.question),
@@ -2316,7 +1623,7 @@ export async function applyEvaluationToPostgres(input: {
       })
       .where(
         and(
-          eq(questions.deckId, row.deck_id),
+          eq(questions.userId, row.user_id),
           eq(questions.id, row.question_id),
         ),
       );
@@ -2324,7 +1631,7 @@ export async function applyEvaluationToPostgres(input: {
     const [attempt] = await tx
       .insert(questionAttempts)
       .values({
-        deckId: row.deck_id,
+        userId: row.user_id,
         questionId: row.question_id,
         question: row.question,
         rawAnswer: input.answer,
@@ -2342,8 +1649,6 @@ export async function applyEvaluationToPostgres(input: {
 
     return {
       questionId: row.question_id,
-      deckId: row.deck_id,
-      deckName: row.deck_name,
       userId: row.user_id,
       question: row.question,
       reviews,
@@ -2353,10 +1658,14 @@ export async function applyEvaluationToPostgres(input: {
       lastAnswer: input.answer || null,
       lastAnswerSummary: input.answerSummary || null,
       referenceAnswer: row.reference_answer || null,
-      conciseAnswer: conciseAnswer || null,
+      conciseAnswer,
       flaggedAt: row.flagged_at,
       createdAt: row.created_at,
-      conceptSlugs: [],
+      conceptSlugs:
+        (await getQuestionConceptSlugs({
+          userId: row.user_id,
+          questionIds: [row.question_id],
+        })).get(row.question_id) ?? [],
     };
   });
 }

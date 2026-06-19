@@ -51,7 +51,6 @@ export type CourseToc = {
 
 export type Course = {
   id: string;
-  deckName: string;
   topicPrompt: string;
   title: string;
   description: string;
@@ -503,7 +502,7 @@ function LearnLoadingPlaceholders() {
                 <strong className="admin-skeleton-line learn-loading-course-title" />
                 <small className="admin-skeleton-line learn-loading-course-copy" />
               </div>
-              <span className="deck-skeleton-toggle learn-course-settings-trigger learn-loading-course-action" />
+              <span className="kb-skeleton-toggle learn-course-settings-trigger learn-loading-course-action" />
             </article>
           ))}
         </div>
@@ -685,7 +684,7 @@ export default function LearnPageClient({
           await Promise.all([
             fetch("/api/user", { cache: "no-store" }),
             fetch(
-              "/api/queue-status?mode=review&includeReviewQueue=0&includeRecentAttempts=0&includeQuestionAttempts=0&includeDeckEmbeddingPlot=0&includeQueueCounts=1",
+              "/api/queue-status?mode=review&includeReviewQueue=0&includeRecentAttempts=0&includeQuestionAttempts=0&includeKnowledgeEmbeddingPlot=0&includeQueueCounts=1",
               { cache: "no-store" },
             ),
             coursesResponsePromise,
@@ -1863,7 +1862,7 @@ export default function LearnPageClient({
             </div>
 
             {courseSettingsMessage ? (
-              <p className="deck-editor-status" role="alert">
+              <p className="kb-editor-status" role="alert">
                 {courseSettingsMessage}
               </p>
             ) : null}

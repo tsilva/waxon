@@ -4,11 +4,13 @@ import {
   extractChatCompletionText,
   openRouterChatCompletion,
 } from "./openRouter";
-import { memorySectionBody } from "./deckMemory";
+import {
+  memorySectionBody,
+  type KnowledgeSummary,
+} from "./knowledgeMemory";
 import {
   getRecentQuestionAttempts,
   readQuestions,
-  type DeckSummary,
   type QuestionInput,
 } from "./postgresStore";
 import { getQuestionQualityReference } from "./questionQualityReference";
@@ -165,7 +167,7 @@ export async function generateBulkQuestionsFromMemory(input: {
   apiKey: string;
   model: string;
   userId: string;
-  deck: DeckSummary;
+  knowledgeBase: KnowledgeSummary;
   memory: string;
   count: number;
   onPartialQuestions?: (questions: GeneratedQuestionPayload[]) => void;
@@ -173,13 +175,9 @@ export async function generateBulkQuestionsFromMemory(input: {
   model: string;
   questions: QuestionInput[];
 }> {
-  const existingQuestions = await readQuestions({
-    userId: input.userId,
-    deckId: input.deck.id,
-  });
+  const existingQuestions = await readQuestions({ userId: input.userId });
   const recentAttempts = await getRecentQuestionAttempts({
     userId: input.userId,
-    deckId: input.deck.id,
     limit: MAX_RECENT_ATTEMPTS,
   });
   const questionQualityReference = getQuestionQualityReference();
@@ -205,7 +203,6 @@ export async function generateBulkQuestionsFromMemory(input: {
   const trace = {
     operation: "bulk_generate_questions_from_memory",
     userId: input.userId,
-    deckId: input.deck.id,
   };
   const requestBody = {
     model: input.model,
@@ -221,12 +218,12 @@ export async function generateBulkQuestionsFromMemory(input: {
         role: "user" as const,
         content: [
           `Generate up to ${input.count} new questions.`,
-          "Deck:",
+          "Knowledge base:",
           JSON.stringify({
-            name: input.deck.name,
-            goal: input.deck.coverage || input.deck.name,
-            cardCount: input.deck.cardCount,
-            dueCount: input.deck.dueCount,
+            name: input.knowledgeBase.name,
+            goal: input.knowledgeBase.goal,
+            cardCount: input.knowledgeBase.cardCount,
+            dueCount: input.knowledgeBase.dueCount,
           }),
           "Memory excerpts:",
           buildGenerationMemoryContext(input.memory),

@@ -106,24 +106,6 @@ export async function listQuestionBankItems(input: {
         FROM concept_tags ct
         WHERE ct.user_id = $1
           AND ct.slug NOT LIKE 'course-%'
-          AND NOT EXISTS (
-            SELECT 1
-            FROM decks legacy_decks
-            WHERE legacy_decks.user_id = ct.user_id
-              AND coalesce(nullif(lower(
-                regexp_replace(
-                  regexp_replace(
-                    regexp_replace(unaccent(legacy_decks.name), '[^A-Za-z0-9]+', '-', 'g'),
-                    '(^-+|-+$)',
-                    '',
-                    'g'
-                  ),
-                '-+',
-                '-',
-                'g'
-              )
-            ), ''), 'untitled-deck') = ct.slug
-          )
       ),
       filtered_questions AS (
         SELECT
@@ -136,9 +118,7 @@ export async function listQuestionBankItems(input: {
           q.updated_at,
           q.flagged_at
         FROM questions q
-        INNER JOIN decks d ON d.id = q.deck_id
-        WHERE d.user_id = $1
-          AND d.archived_at IS NULL
+        WHERE q.user_id = $1
           AND ($2::text = ''
             OR q.question ILIKE '%' || $2::text || '%'
             OR q.concise_answer ILIKE '%' || $2::text || '%'

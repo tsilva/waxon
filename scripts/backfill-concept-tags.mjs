@@ -164,7 +164,7 @@ function uniqueUsefulSlugs(value) {
 }
 
 function isLegacySlugForQuestion(row, slug) {
-  return isScaffoldingConceptSlug(slug) || slug === row.deckSlug;
+  return isScaffoldingConceptSlug(slug);
 }
 
 function hasRealConcept(row) {
@@ -188,34 +188,8 @@ async function assertConceptSchemaExists(pool) {
   }
 }
 
-async function loadLegacySlugsByUser(pool, userId) {
-  const result = await pool.query(
-    `
-      SELECT user_id, name
-      FROM decks
-      WHERE archived_at IS NULL
-        AND ($1::text = '' OR user_id = $1::text)
-      ORDER BY user_id, name
-    `,
-    [userId],
-  );
-  const slugsByUser = new Map();
-
-  for (const row of result.rows) {
-    const user = String(row.user_id);
-    const slug = normalizeConceptSlug(row.name);
-
-    if (!slug) {
-      continue;
-    }
-
-    const slugs = slugsByUser.get(user) ?? new Set();
-
-    slugs.add(slug);
-    slugsByUser.set(user, slugs);
-  }
-
-  return slugsByUser;
+async function loadLegacySlugsByUser() {
+  return new Map();
 }
 
 async function loadCandidateSlugsByUser(pool, legacySlugsByUser, userId) {
@@ -260,26 +234,20 @@ async function loadQuestions(pool, userId) {
         q.question,
         q.concise_answer,
         q.question_provenance,
-        d.user_id,
-        d.name AS deck_name,
-        d.coverage AS deck_coverage,
+        q.user_id,
         coalesce(array_remove(array_agg(ct.slug ORDER BY ct.slug), NULL), '{}') AS concept_slugs
       FROM questions q
-      INNER JOIN decks d ON d.id = q.deck_id
       LEFT JOIN question_concept_tags qct ON qct.question_id = q.id
       LEFT JOIN concept_tags ct ON ct.id = qct.concept_tag_id
-      WHERE d.archived_at IS NULL
-        AND q.flagged_at IS NULL
-        AND ($1::text = '' OR d.user_id = $1::text)
+      WHERE q.flagged_at IS NULL
+        AND ($1::text = '' OR q.user_id = $1::text)
       GROUP BY
         q.id,
         q.question,
         q.concise_answer,
         q.question_provenance,
-        d.user_id,
-        d.name,
-        d.coverage
-      ORDER BY d.user_id ASC, q.created_at ASC, q.id ASC
+        q.user_id
+      ORDER BY q.user_id ASC, q.created_at ASC, q.id ASC
     `,
     [userId],
   );
@@ -290,9 +258,6 @@ async function loadQuestions(pool, userId) {
     conciseAnswer: String(row.concise_answer ?? ""),
     questionProvenance: String(row.question_provenance ?? ""),
     userId: String(row.user_id),
-    deckName: String(row.deck_name ?? ""),
-    deckSlug: normalizeConceptSlug(String(row.deck_name ?? "")),
-    deckCoverage: String(row.deck_coverage ?? ""),
     conceptSlugs: Array.isArray(row.concept_slugs)
       ? row.concept_slugs.map(String).filter(Boolean)
       : [],
@@ -306,7 +271,7 @@ function buildPrompt(batch, candidateSlugsByUser) {
     "Each slug must be a full, self-disambiguating concept phrase.",
     "Prefer candidateExistingSlugs when one accurately describes the tested concept.",
     "Create a new slug only when no candidate fits.",
-    "Never return deck names, course titles, lesson titles, source labels, or broad container labels.",
+    "Never return course titles, lesson titles, source labels, or broad container labels.",
     "Do not use acronym-only slugs such as ppo, rl, cnn, or kl unless globally unambiguous.",
     "Return strict JSON only: {\"assignments\":[{\"questionId\":\"...\",\"conceptSlugs\":[\"...\"]}]}",
     JSON.stringify({
@@ -315,8 +280,6 @@ function buildPrompt(batch, candidateSlugsByUser) {
         question: row.question,
         conciseAnswer: row.conciseAnswer,
         provenance: row.questionProvenance,
-        legacyContainer: row.deckName,
-        sourceContext: row.deckCoverage.slice(0, 800),
         currentSlugs: row.conceptSlugs,
         candidateExistingSlugs: (candidateSlugsByUser.get(row.userId) ?? []).slice(
           0,
@@ -596,7 +559,7 @@ async function deactivateLegacyTagsIfSafe(pool, options, legacySlugsByUser) {
     deactivated += result.rowCount ?? 0;
   }
 
-  console.log(`Deactivated ${deactivated} legacy deck/course tags.`);
+  console.log(`Deactivated ${deactivated} legacy course tags.`);
 }
 
 async function main() {

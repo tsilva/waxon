@@ -19,7 +19,6 @@ const isPublicStaticPage = createRouteMatcher([
 ]);
 
 const isPublicAppShellRoute = createRouteMatcher([
-  "/decks(.*)",
   "/learn(.*)",
   "/library(.*)",
   "/queue(.*)",

@@ -305,7 +305,7 @@ export default function TagsPageClient({
         >
           {Array.from({ length: 5 }, (_, index) => (
             <li className="tags-row" key={index}>
-              <span className="tags-active-toggle deck-skeleton-toggle" />
+              <span className="tags-active-toggle kb-skeleton-toggle" />
               <div className="tags-row-main">
                 <span className="admin-skeleton-line tags-skeleton-title" />
                 <span className="admin-skeleton-line tags-skeleton-copy" />
@@ -315,9 +315,9 @@ export default function TagsPageClient({
                 <span className="admin-skeleton-pill" />
               </div>
               <div className="tags-row-actions">
-                <span className="deck-icon-button deck-skeleton-toggle" />
-                <span className="deck-icon-button deck-skeleton-toggle" />
-                <span className="deck-icon-button deck-skeleton-toggle" />
+                <span className="kb-icon-button kb-skeleton-toggle" />
+                <span className="kb-icon-button kb-skeleton-toggle" />
+                <span className="kb-icon-button kb-skeleton-toggle" />
               </div>
             </li>
           ))}
@@ -421,7 +421,7 @@ export default function TagsPageClient({
 
               <div className="tags-row-actions">
                 <button
-                  className="deck-icon-button"
+                  className="kb-icon-button"
                   type="button"
                   title={`View questions tagged ${tag.slug}`}
                   aria-label={`View questions tagged ${tag.slug}`}
@@ -431,7 +431,7 @@ export default function TagsPageClient({
                   <FileText aria-hidden="true" />
                 </button>
                 <button
-                  className="deck-icon-button"
+                  className="kb-icon-button"
                   type="button"
                   title={`Rename ${tag.slug}`}
                   aria-label={`Rename ${tag.slug}`}
@@ -445,7 +445,7 @@ export default function TagsPageClient({
                   <Pencil aria-hidden="true" />
                 </button>
                 <button
-                  className="deck-icon-button"
+                  className="kb-icon-button"
                   type="button"
                   title={`Merge ${tag.slug}`}
                   aria-label={`Merge ${tag.slug}`}
@@ -517,12 +517,12 @@ export default function TagsPageClient({
 
         <section className="queue-stage tags-stage" aria-label="Concept tags">
           <div className="library-filter-row tags-filter-row" aria-label="Concept tag filters">
-            <label className="deck-search-label library-search-label tags-search-label">
+            <label className="kb-search-label library-search-label tags-search-label">
               <span className="sr-only">Search concept tags</span>
-              <span className="deck-search-shell">
+              <span className="kb-search-shell">
                 <Search aria-hidden="true" />
                 <input
-                  className="deck-search-input"
+                  className="kb-search-input"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search tags"
@@ -531,7 +531,7 @@ export default function TagsPageClient({
             </label>
           </div>
 
-          {message ? <p className="deck-editor-status">{message}</p> : null}
+          {message ? <p className="kb-editor-status">{message}</p> : null}
 
           <div className="tags-summary-strip library-summary-strip">
             <span>{conceptTags.length} tags</span>

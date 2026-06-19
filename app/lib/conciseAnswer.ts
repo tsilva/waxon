@@ -61,7 +61,6 @@ export async function generateConciseAnswers(
       trace: {
         operation: trace.operation ?? "concise_answer",
         userId: trace.userId,
-        deckId: trace.deckId,
         question: trace.question ?? (input.length === 1 ? input[0]?.question : null),
       },
       body: {

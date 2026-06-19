@@ -11,7 +11,7 @@ import {
   recordFailedLlmTrace,
 } from "../app/lib/llmTraceStore.ts";
 
-test("openRouterChatCompletion sends user and deck trace identifiers", async () => {
+test("openRouterChatCompletion sends user trace identifiers", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];
 
@@ -27,7 +27,6 @@ test("openRouterChatCompletion sends user and deck trace identifiers", async () 
       trace: {
         operation: "test_operation",
         userId: "user-123",
-        deckId: "deck-456",
         question: "What should traces include?",
         traceId: "trace-789",
       },
@@ -43,20 +42,19 @@ test("openRouterChatCompletion sends user and deck trace identifiers", async () 
   const requestBody = requestBodies[0];
   assert.ok(requestBody);
   assert.equal(requestBody.user, "user-123");
-  assert.equal(requestBody.session_id, "deck-456");
+  assert.equal(requestBody.session_id, "user-123");
 
   const trace = requestBody.trace as Record<string, unknown> | undefined;
   assert.equal(trace?.trace_id, "trace-789");
   assert.equal(trace?.span_name, "test_operation");
   assert.equal(trace?.user_id, "user-123");
-  assert.equal(trace?.deck_id, "deck-456");
   assert.equal(trace?.question_preview, "What should traces include?");
 });
 
 test("classifyLlmInteractionKind uses explicit non-answer trace kinds", () => {
   assert.equal(classifyLlmInteractionKind("evaluate_answer"), "Answer evaluation");
   assert.equal(classifyLlmInteractionKind("add_questions_gate"), "Quality gate");
-  assert.equal(classifyLlmInteractionKind("refresh_deck_memory"), "Deck memory");
+  assert.equal(classifyLlmInteractionKind("refresh_knowledge_memory"), "Knowledge memory");
   assert.equal(classifyLlmInteractionKind("question_embedding"), "Embedding");
   assert.equal(classifyLlmInteractionKind("test_operation"), "Other");
 });
@@ -93,7 +91,7 @@ test("extractAffordableOpenRouterMaxTokens ignores unrelated errors", () => {
   );
 });
 
-test("openRouterEmbeddings sends user and deck trace identifiers", async () => {
+test("openRouterEmbeddings sends user trace identifiers", async () => {
   const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];
 
@@ -108,7 +106,6 @@ test("openRouterEmbeddings sends user and deck trace identifiers", async () => {
       trace: {
         operation: "test_embedding",
         userId: "user-abc",
-        deckId: "deck-def",
         traceId: "trace-ghi",
       },
       body: {
@@ -123,13 +120,12 @@ test("openRouterEmbeddings sends user and deck trace identifiers", async () => {
   const requestBody = requestBodies[0];
   assert.ok(requestBody);
   assert.equal(requestBody.user, "user-abc");
-  assert.equal(requestBody.session_id, "deck-def");
+  assert.equal(requestBody.session_id, "user-abc");
 
   const trace = requestBody.trace as Record<string, unknown> | undefined;
   assert.equal(trace?.trace_id, "trace-ghi");
   assert.equal(trace?.span_name, "test_embedding");
   assert.equal(trace?.user_id, "user-abc");
-  assert.equal(trace?.deck_id, "deck-def");
 });
 
 test("openRouterChatCompletion mirrors body user into trace metadata", async () => {
@@ -191,7 +187,6 @@ test("openRouterChatCompletion records actual request and response payloads", as
       trace: {
         operation: "evaluate_answer",
         userId: "user-recording",
-        deckId: "deck-recording",
         question: "What payload should be visible?",
         traceId,
       },

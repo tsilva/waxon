@@ -140,7 +140,6 @@ async function fetchEmbeddings(
     trace: {
       operation: trace.operation ?? "semantic_dedupe_embedding",
       userId: trace.userId,
-      deckId: trace.deckId,
       question: trace.question,
     },
     body: {
@@ -195,7 +194,6 @@ async function ensureConciseAnswers(
     {
       operation: trace.operation ?? "semantic_dedupe_concise_answer",
       userId: trace.userId,
-      deckId: trace.deckId,
       question: trace.question,
     },
   );
@@ -219,7 +217,6 @@ async function buildCandidateEmbeddings(
   const embeddings = await fetchEmbeddings(sources, {
     operation: trace.operation ?? "semantic_dedupe_embedding",
     userId: trace.userId,
-    deckId: trace.deckId,
     question: trace.question,
   });
 
@@ -240,10 +237,10 @@ async function loadExternalNeighbors(
     return new Map();
   }
 
-  const deckId = trace.deckId?.trim();
+  const userId = trace.userId?.trim();
 
-  if (!deckId) {
-    throw new Error("deckId is required for semantic dedupe.");
+  if (!userId) {
+    throw new Error("userId is required for semantic dedupe.");
   }
 
   const valuesSql = candidates
@@ -256,14 +253,14 @@ async function loadExternalNeighbors(
   }
 
   params.push(
-    deckId,
+    userId,
     process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
     DEDUPE_EMBEDDING_KIND,
     DEDUPE_SOURCE_VERSION,
     NEIGHBOR_COUNT,
   );
 
-  const deckParam = params.length - 4;
+  const userParam = params.length - 4;
   const modelParam = params.length - 3;
   const kindParam = params.length - 2;
   const versionParam = params.length - 1;
@@ -284,7 +281,7 @@ async function loadExternalNeighbors(
       CROSS JOIN LATERAL (
         SELECT qe.question_id, qe.question, qe.embedding
         FROM question_embeddings qe
-        WHERE qe.deck_id = $${deckParam}
+        WHERE qe.user_id = $${userParam}
           AND qe.embedding_model = $${modelParam}
           AND qe.embedding_kind = $${kindParam}
           AND qe.source_version = $${versionParam}
@@ -294,7 +291,7 @@ async function loadExternalNeighbors(
           <=> c.embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
         LIMIT $${limitParam}
       ) qe
-      JOIN questions q ON q.id = qe.question_id
+      JOIN questions q ON q.id = qe.question_id AND q.user_id = $${userParam}
       ORDER BY c.candidate_id ASC, distance ASC
     `,
     params,
@@ -329,7 +326,7 @@ async function loadExternalNeighbors(
 
 async function loadExistingQuestionsBySlug(
   candidates: NovelQuestionCandidate[],
-  deckId: string,
+  userId: string,
 ): Promise<Map<string, string>> {
   const slugs = Array.from(
     new Set(candidates.map((candidate) => questionSlug(candidate.question))),
@@ -341,12 +338,12 @@ async function loadExistingQuestionsBySlug(
 
   const result = await pool.query(
     `
-      SELECT question_slug, question
-      FROM questions
-      WHERE deck_id = $1
-        AND question_slug = ANY($2::text[])
+      SELECT q.question_slug, q.question
+      FROM questions q
+      WHERE q.user_id = $1
+        AND q.question_slug = ANY($2::text[])
     `,
-    [deckId, slugs],
+    [userId, slugs],
   );
 
   return new Map(
@@ -437,7 +434,6 @@ async function judgeDuplicateBatch(
       trace: {
         operation: trace.operation ?? "semantic_dedupe_judge",
         userId: trace.userId,
-        deckId: trace.deckId,
         question: trace.question,
       },
       body: {
@@ -518,16 +514,16 @@ export async function gateNovelQuestions(
   input: Array<string | QuestionInput>,
   trace: Partial<OpenRouterTraceContext> = {},
 ): Promise<NovelQuestionGateResult> {
-  const deckId = trace.deckId?.trim();
+  const userId = trace.userId?.trim();
 
-  if (!deckId) {
-    throw new Error("deckId is required for semantic dedupe.");
+  if (!userId) {
+    throw new Error("userId is required for semantic dedupe.");
   }
 
-  const traceWithDeck = { ...trace, deckId };
+  const traceWithUser = { ...trace, userId };
   const normalized = await ensureConciseAnswers(
     normalizeQuestionInput(input),
-    traceWithDeck,
+    traceWithUser,
   );
   const candidatesWithAnswers = normalized.filter(
     (candidate) => candidate.conciseAnswer.trim().length > 0,
@@ -546,7 +542,7 @@ export async function gateNovelQuestions(
 
   const existingBySlug = await loadExistingQuestionsBySlug(
     candidatesWithAnswers,
-    deckId,
+    userId,
   );
   const candidatesToCheck = candidatesWithAnswers.filter((candidate) => {
     const duplicate = existingBySlug.get(questionSlug(candidate.question));
@@ -568,7 +564,7 @@ export async function gateNovelQuestions(
   try {
     embeddedCandidates = await buildCandidateEmbeddings(
       candidatesToCheck,
-      traceWithDeck,
+      traceWithUser,
     );
   } catch (error) {
     console.info("[waxon] semantic dedupe embedding unavailable; using exact dedupe only", {
@@ -587,7 +583,7 @@ export async function gateNovelQuestions(
 
   const externalNeighbors = await loadExternalNeighbors(
     embeddedCandidates,
-    traceWithDeck,
+    traceWithUser,
   );
   const candidatesForJudgment = addBatchNeighbors(
     embeddedCandidates.map((candidate) => ({
@@ -598,7 +594,7 @@ export async function gateNovelQuestions(
   let decisions: Map<string, { duplicateOf: string | null; rationale: string }>;
 
   try {
-    decisions = await judgeDuplicateBatch(candidatesForJudgment, traceWithDeck);
+    decisions = await judgeDuplicateBatch(candidatesForJudgment, traceWithUser);
   } catch (error) {
     console.info("[waxon] semantic dedupe judge unavailable; accepting embedded candidates", {
       error: error instanceof Error ? error.message : "unknown error",

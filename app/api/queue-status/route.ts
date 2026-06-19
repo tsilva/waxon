@@ -21,7 +21,6 @@ export async function GET(request: Request) {
     10,
   );
   const sort = url.searchParams.get("sort");
-  const deckId = url.searchParams.get("deckId")?.trim();
   const mode = url.searchParams.get("mode");
   const query = url.searchParams.get("query")?.trim();
 
@@ -30,7 +29,6 @@ export async function GET(request: Request) {
       limit: Number.isFinite(limit) ? limit : undefined,
       offset: Number.isFinite(offset) ? offset : undefined,
       sortKey: sort === "creation-date" ? "creation-date" : "review-date",
-      deckId: deckId || undefined,
       query: query || undefined,
       includeReviewQueue:
         mode === "review"
@@ -47,8 +45,8 @@ export async function GET(request: Request) {
       recentAttemptsLimit: Number.isFinite(recentAttemptsLimit)
         ? recentAttemptsLimit
         : undefined,
-      includeDeckEmbeddingPlot: isEnabled(
-        url.searchParams.get("includeDeckEmbeddingPlot"),
+      includeKnowledgeEmbeddingPlot: isEnabled(
+        url.searchParams.get("includeKnowledgeEmbeddingPlot"),
         false,
       ),
       includeQueueCounts: isEnabled(

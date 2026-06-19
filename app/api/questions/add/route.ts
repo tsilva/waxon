@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addQuestionsToDeck } from "@/app/lib/reviewQueue";
+import { addQuestionsToKnowledgeBase } from "@/app/lib/reviewQueue";
 import {
   consumeUserRateLimit,
   normalizeBoundedText,
@@ -13,7 +13,6 @@ export const dynamic = "force-dynamic";
 
 const MAX_ADD_QUESTIONS_BODY_BYTES = 64 * 1024;
 const MAX_ADD_QUESTION_COUNT = 80;
-const MAX_DECK_ID_CHARS = 180;
 const MAX_QUESTION_CHARS = 1_200;
 const MAX_CONCISE_ANSWER_CHARS = 800;
 const MAX_PROVENANCE_CHARS = 360;
@@ -34,7 +33,6 @@ export async function POST(request: Request) {
   const body = parsed.value;
   const payload = body as Partial<{
     questions: unknown;
-    deckId: unknown;
   }>;
 
   if (
@@ -61,16 +59,6 @@ export async function POST(request: Request) {
       },
       { status: 400 },
     );
-  }
-
-  const deckId = normalizeBoundedText(payload.deckId, {
-    field: "deckId",
-    maxLength: MAX_DECK_ID_CHARS,
-    required: false,
-  });
-
-  if (!deckId.ok) {
-    return deckId.response;
   }
 
   const questions: Array<string | QuestionInput> = [];
@@ -173,10 +161,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await addQuestionsToDeck({
-      questions,
-      deckId: deckId.value || undefined,
-    });
+    const result = await addQuestionsToKnowledgeBase({ questions });
 
     return NextResponse.json({
       ok: true,
@@ -188,7 +173,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       { ok: false, error: message },
-      { status: message === "Deck not found." ? 404 : 500 },
+      { status: 500 },
     );
   }
 }

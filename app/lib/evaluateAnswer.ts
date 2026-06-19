@@ -29,7 +29,6 @@ export type EvaluateAnswerInput = {
   previousReviews: string;
   expectedAnswer?: string | null;
   userId?: string | null;
-  deckId?: string | null;
   traceId?: string | null;
   onActivity?: () => void;
 };
@@ -212,7 +211,6 @@ export async function evaluateAnswer(
       trace: {
         operation: "evaluate_answer",
         userId: input.userId,
-        deckId: input.deckId,
         question: input.question,
         traceId: input.traceId,
       },

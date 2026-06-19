@@ -1,7 +1,7 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/app/db/client";
-import { decks, questions, users } from "@/app/db/schema";
+import { questions, users } from "@/app/db/schema";
 import { getCurrentUser } from "@/app/lib/auth";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { questionSlug } from "@/app/lib/questionSlug";
@@ -9,12 +9,6 @@ import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const TEST_DECK = {
-  id: "browser-smoke",
-  name: "Browser Smoke",
-  slug: "browser-smoke",
-} as const;
 
 const TEST_QUESTIONS = [
   {
@@ -46,8 +40,6 @@ export async function POST() {
   const currentUser = await getCurrentUser();
 
   await db.transaction(async (tx) => {
-    await tx.delete(decks).where(eq(decks.id, TEST_DECK.id));
-
     await tx
       .insert(users)
       .values({
@@ -68,19 +60,20 @@ export async function POST() {
         },
       });
 
-    await tx.insert(decks).values({
-      id: TEST_DECK.id,
-      userId: currentUser.id,
-      name: TEST_DECK.name,
-      slug: TEST_DECK.slug,
-      inReviewRotation: true,
-      createdAt: now,
-      updatedAt: now,
-    });
+    for (const item of TEST_QUESTIONS) {
+      await tx
+        .delete(questions)
+        .where(
+          and(
+            eq(questions.userId, currentUser.id),
+            eq(questions.questionSlug, questionSlug(item.question)),
+          ),
+        );
+    }
 
     await tx.insert(questions).values(
       TEST_QUESTIONS.map((item) => ({
-        deckId: TEST_DECK.id,
+        userId: currentUser.id,
         question: item.question,
         questionSlug: questionSlug(item.question),
         nextDue: 0,
@@ -95,7 +88,6 @@ export async function POST() {
 
   return NextResponse.json({
     ok: true,
-    deck: TEST_DECK,
     questions: TEST_QUESTIONS,
   });
 }
@@ -108,6 +100,7 @@ export async function GET() {
     );
   }
 
+  const currentUser = await getCurrentUser();
   const rows = await db
     .select({
       question: questions.question,
@@ -117,17 +110,18 @@ export async function GET() {
       lastAnswerSummary: questions.lastAnswerSummary,
     })
     .from(questions)
-    .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(
       and(
-        eq(questions.deckId, TEST_DECK.id),
-        eq(decks.id, TEST_DECK.id),
+        eq(questions.userId, currentUser.id),
+        inArray(
+          questions.questionSlug,
+          TEST_QUESTIONS.map((item) => questionSlug(item.question)),
+        ),
       ),
     );
 
   return NextResponse.json({
     ok: true,
-    deck: TEST_DECK,
     questions: rows,
   });
 }

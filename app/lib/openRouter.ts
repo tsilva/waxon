@@ -6,7 +6,6 @@ import {
 export type OpenRouterTraceContext = {
   operation: string;
   userId?: string | null;
-  deckId?: string | null;
   question?: string | null;
   traceId?: string | null;
 };
@@ -391,7 +390,7 @@ export async function openRouterChatCompletion(input: {
       input.body.stream_options ??
       (shouldStream ? { include_usage: true } : undefined),
     user: input.body.user ?? trace.userId ?? undefined,
-    session_id: trace.deckId ?? undefined,
+    session_id: trace.userId ?? undefined,
     trace: buildTraceMetadata(trace, traceId),
   };
   const pendingTrace = beginLlmTrace({
@@ -452,7 +451,7 @@ export async function openRouterEmbeddings(input: {
   const body = {
     ...input.body,
     user: input.body.user ?? trace.userId ?? undefined,
-    session_id: trace.deckId ?? undefined,
+    session_id: trace.userId ?? undefined,
     trace: buildTraceMetadata(trace, traceId),
   };
   const pendingTrace = beginLlmTrace({
@@ -514,10 +513,6 @@ function buildTraceMetadata(
 
   if (trace.userId) {
     metadata.user_id = trace.userId;
-  }
-
-  if (trace.deckId) {
-    metadata.deck_id = trace.deckId;
   }
 
   if (trace.question) {
