@@ -173,6 +173,7 @@ type QuestionSwapLayer = {
   key: string;
   questionId: string | null;
   question: string;
+  conceptSlugs: string[];
   phase: "current" | "entering" | "exiting";
 };
 
@@ -1080,6 +1081,10 @@ export default function ReviewApp({
               initialReviewSessionItem?.questionId ??
               null,
             question: cachedQuestion,
+            conceptSlugs:
+              cachedSessionRef.current?.currentSessionItem?.conceptSlugs ??
+              initialReviewSessionItem?.conceptSlugs ??
+              [],
             phase: "current",
           },
         ]
@@ -1447,6 +1452,7 @@ export default function ReviewApp({
       key: questionSwapLayerKey(currentQuestionId, question),
       questionId: currentQuestionId,
       question,
+      conceptSlugs: currentSessionItem?.conceptSlugs ?? [],
       phase: "entering",
     };
 
@@ -1482,7 +1488,13 @@ export default function ReviewApp({
       );
       questionSwapTimerRef.current = null;
     }, QUESTION_SWAP_ANIMATION_MS);
-  }, [currentKnowledgeBaseName, currentQuestionId, isLoadingQuestion, question]);
+  }, [
+    currentKnowledgeBaseName,
+    currentQuestionId,
+    currentSessionItem,
+    isLoadingQuestion,
+    question,
+  ]);
 
   useEffect(() => {
     questionIdRef.current = currentQuestionId;
@@ -3986,6 +3998,18 @@ export default function ReviewApp({
                 )}
               </IconTooltip>
             </>
+          ) : null}
+          {layer.conceptSlugs.length > 0 ? (
+            <div
+              className="question-concept-list library-chip-row"
+              aria-label="Question tags"
+            >
+              {layer.conceptSlugs.map((slug) => (
+                <span className="library-chip" key={slug}>
+                  {slug}
+                </span>
+              ))}
+            </div>
           ) : null}
         </div>
         <MarkdownInline
