@@ -159,8 +159,6 @@ function buildDraftCourseDetail(input: {
   return {
     id: "draft-course",
     userId: input.userId,
-    deckId: "draft-course",
-    deckName: input.toc.title,
     topicPrompt: input.topic,
     title: input.toc.title,
     description: input.toc.description,

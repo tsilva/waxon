@@ -6,7 +6,6 @@ export type ReviewHistoryEntry = {
 export type QuestionAttempt = {
   id: number;
   questionId: string;
-  deckId: string;
   question: string;
   rawAnswer: string;
   answerSummary: string;
@@ -27,7 +26,6 @@ export type EvaluationQueueItem = {
   id: string;
   traceId: string;
   questionId: string | null;
-  deckId: string | null;
   question: string;
   answer: string | null;
   status: "grading" | "resolved";
@@ -45,8 +43,6 @@ export type EvaluationQueueItem = {
 
 export type ReviewQueueItem = {
   questionId: string;
-  deckId: string;
-  deckName: string;
   question: string;
   nextDue: number;
   createdAt: number;
@@ -65,18 +61,18 @@ export type ReviewQueueItem = {
   conceptSlugs: string[];
 };
 
-export type DeckEmbeddingPlotPoint = {
+export type KnowledgeEmbeddingPlotPoint = {
   question: string;
   lastScore: number | null;
   x: number;
   y: number;
 };
 
-export type DeckEmbeddingPlot = {
+export type KnowledgeEmbeddingPlot = {
   model: string | null;
   totalQuestions: number;
   embeddedQuestions: number;
-  points: DeckEmbeddingPlotPoint[];
+  points: KnowledgeEmbeddingPlotPoint[];
 };
 
 export type QueueStatusSnapshot = {
@@ -90,5 +86,5 @@ export type QueueStatusSnapshot = {
   reviewQueueOffset: number;
   reviewQueueLimit: number;
   reviewQueueHasMore: boolean;
-  deckEmbeddingPlot: DeckEmbeddingPlot;
+  knowledgeEmbeddingPlot: KnowledgeEmbeddingPlot;
 };

@@ -37,7 +37,7 @@ Treat the markdown file as the source of truth for scope, preconditions, destruc
 
 ## Browser Use Notes
 
-- Capture screenshots under `/private/tmp` with names that include the suite or state, for example `/private/tmp/waxon-signed-in-decks.png`.
+- Capture screenshots under `/private/tmp` with names that include the suite or state, for example `/private/tmp/waxon-signed-in-library.png`.
 - If `fill("")` does not clear an input in Browser Use, click the input, press `ControlOrMeta+A`, then press `Backspace`.
 - If exact locators fail because rendered markdown splits text across inline elements, take a fresh DOM snapshot and use the accessible name shown there.
 - For Next.js local apps, use `domcontentloaded` waits and content-specific text waits. Avoid relying on `networkidle`.
@@ -46,7 +46,7 @@ Treat the markdown file as the source of truth for scope, preconditions, destruc
 ## Waxon-Specific Checks
 
 - Local auth should show `Tiago Silva` and `eng.tiago.silva@gmail.com`.
-- The Deep Learning deck should be visible locally for the test user.
+- The library should be visible locally for the test user.
 - Do not click destructive controls such as `Archive`, `Delete`, or `Remove` unless the suite explicitly requires it.
 - For generation tests without an LLM key, a clear unavailable/configuration error is acceptable.
 - If a route first renders stale cached state, verify whether a normal remount or reload recovers it. If stale loaded flags cause persistent incorrect UI, fix the cache/load guards and retest direct route and refresh persistence.

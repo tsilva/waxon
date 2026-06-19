@@ -2,7 +2,6 @@ import { and, count, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import { db, pool } from "@/app/db/client";
 import {
   conceptTags,
-  decks,
   questionConceptTags,
   questions,
 } from "@/app/db/schema";
@@ -63,7 +62,6 @@ export type ConceptTagSummary = {
 export type ConceptTaggedQuestionSummary = {
   questionId: string;
   question: string;
-  deckName: string;
   nextDue: number;
 };
 
@@ -104,24 +102,6 @@ function deterministicFallbackSlug(input: ConceptTaggedQuestion): string {
 function visibleConceptTagClause() {
   return sql`
     ${conceptTags.slug} NOT LIKE 'course-%'
-    AND NOT EXISTS (
-      SELECT 1
-      FROM decks legacy_decks
-      WHERE legacy_decks.user_id = ${conceptTags.userId}
-        AND coalesce(nullif(lower(
-          regexp_replace(
-            regexp_replace(
-              regexp_replace(unaccent(legacy_decks.name), '[^A-Za-z0-9]+', '-', 'g'),
-              '(^-+|-+$)',
-              '',
-              'g'
-            ),
-            '-+',
-            '-',
-            'g'
-          )
-        ), ''), 'untitled-deck') = ${conceptTags.slug}
-    )
   `;
 }
 
@@ -215,24 +195,6 @@ async function loadRelevantConceptTags(input: {
       FROM concept_tags
       WHERE user_id = $1
         AND slug NOT LIKE 'course-%'
-        AND NOT EXISTS (
-          SELECT 1
-          FROM decks legacy_decks
-          WHERE legacy_decks.user_id = concept_tags.user_id
-            AND coalesce(nullif(lower(
-              regexp_replace(
-                regexp_replace(
-                  regexp_replace(unaccent(legacy_decks.name), '[^A-Za-z0-9]+', '-', 'g'),
-                  '(^-+|-+$)',
-                  '',
-                  'g'
-                ),
-                '-+',
-                '-',
-                'g'
-              )
-            ), ''), 'untitled-deck') = concept_tags.slug
-        )
       ORDER BY
         CASE WHEN embedding IS NULL THEN 1 ELSE 0 END ASC,
         embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
@@ -262,7 +224,7 @@ function buildConceptTaggingPrompt(input: {
     "Create a new slug only when no existing slug fits.",
     "Slugs must be full, self-disambiguating concept phrases.",
     "Do not use acronym-only slugs such as ppo, rl, cnn, or kl unless the acronym is globally unambiguous.",
-    "Do not use source, deck, course, lesson, or container labels as concept slugs.",
+    "Do not use source, course, lesson, or container labels as concept slugs.",
     "Return strict JSON only: {\"assignments\":[{\"questionId\":\"...\",\"conceptSlugs\":[\"...\"]}]}",
     JSON.stringify({
       questions: input.questions.map((question) => ({
@@ -620,18 +582,16 @@ export async function listQuestionsForConceptTag(input: {
     .select({
       questionId: questions.id,
       question: questions.question,
-      deckName: decks.name,
       nextDue: questions.nextDue,
     })
     .from(questionConceptTags)
     .innerJoin(conceptTags, eq(conceptTags.id, questionConceptTags.conceptTagId))
     .innerJoin(questions, eq(questions.id, questionConceptTags.questionId))
-    .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(
       and(
         eq(conceptTags.userId, input.userId),
         eq(conceptTags.slug, slug),
-        eq(decks.userId, input.userId),
+        eq(questions.userId, input.userId),
         isNull(questions.flaggedAt),
       ),
     )
@@ -776,11 +736,10 @@ export async function getQuestionConceptSlugs(input: {
     .from(questionConceptTags)
     .innerJoin(conceptTags, eq(conceptTags.id, questionConceptTags.conceptTagId))
     .innerJoin(questions, eq(questions.id, questionConceptTags.questionId))
-    .innerJoin(decks, eq(decks.id, questions.deckId))
     .where(
       and(
         eq(conceptTags.userId, input.userId),
-        eq(decks.userId, input.userId),
+        eq(questions.userId, input.userId),
         inArray(questionConceptTags.questionId, questionIds),
         visibleConceptTagClause(),
       ),
@@ -836,15 +795,13 @@ export async function countUntaggedQuestions(input: {
   const [{ value = 0 } = { value: 0 }] = await db
     .select({ value: count() })
     .from(questions)
-    .innerJoin(decks, eq(decks.id, questions.deckId))
     .leftJoin(
       questionConceptTags,
       eq(questionConceptTags.questionId, questions.id),
     )
     .where(
       and(
-        eq(decks.userId, input.userId),
-        isNull(decks.archivedAt),
+        eq(questions.userId, input.userId),
         isNull(questions.flaggedAt),
         isNull(questionConceptTags.questionId),
         lte(questions.nextDue, Math.round(Date.now())),
@@ -854,9 +811,8 @@ export async function countUntaggedQuestions(input: {
   return Number(value) || 0;
 }
 
-export async function ensureFallbackConceptTagForDeck(input: {
+export async function ensureFallbackConceptTagForUser(input: {
   userId: string;
-  deckId: string;
   slug: string;
 }): Promise<void> {
   const slug = normalizeConceptSlug(input.slug);
@@ -897,8 +853,7 @@ export async function ensureFallbackConceptTagForDeck(input: {
           createdAt: questions.createdAt,
         })
         .from(questions)
-        .innerJoin(decks, eq(decks.id, questions.deckId))
-        .where(and(eq(decks.userId, input.userId), eq(questions.deckId, input.deckId))),
+        .where(eq(questions.userId, input.userId)),
     )
     .onConflictDoNothing();
 }

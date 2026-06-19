@@ -1,4 +1,0 @@
-interface:
-  display_name: "Deck Cleanup Questions"
-  short_description: "Clean up deck question wording/Markdown and refresh embeddings"
-  default_prompt: "Use $deck-cleanup-questions to run /deck-cleanup-questions for equivalent shorter or Markdown-cleaned deck questions."

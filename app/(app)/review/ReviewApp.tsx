@@ -29,8 +29,8 @@ import {
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { localSettingsEvent } from "@/app/toolbarEvents";
 import type {
-  DeckEmbeddingPlot as DeckEmbeddingPlotResponse,
-  DeckEmbeddingPlotPoint,
+  KnowledgeEmbeddingPlot as KnowledgeEmbeddingPlotResponse,
+  KnowledgeEmbeddingPlotPoint,
   EvaluationPhase,
   EvaluationQueueItem,
   QuestionAttempt,
@@ -73,8 +73,6 @@ import {
 type NextQuestionResponse = {
   questionId: string | null;
   question: string | null;
-  deckId: string | null;
-  deckName: string | null;
   queueRemaining: number;
 };
 
@@ -100,7 +98,7 @@ type QueueStatusResponse = {
   reviewQueueOffset?: number;
   reviewQueueLimit?: number;
   reviewQueueHasMore?: boolean;
-  deckEmbeddingPlot: DeckEmbeddingPlotResponse;
+  knowledgeEmbeddingPlot: KnowledgeEmbeddingPlotResponse;
 };
 
 type ReviewSessionQueueResponse = {
@@ -122,7 +120,7 @@ type UserProfileResponse = {
   avatarUrl: string | null;
 };
 
-type HoveredEmbeddingPoint = DeckEmbeddingPlotPoint & {
+type HoveredEmbeddingPoint = KnowledgeEmbeddingPlotPoint & {
   arrowLeftPx: number;
   tooltipLeftPx: number;
   tooltipTopPx: number;
@@ -141,7 +139,6 @@ type ChatMessage =
       id: string;
       kind: "answer";
       questionId: string | null;
-      deckId: string | null;
       question: string;
       answer: string;
       evaluationId: string;
@@ -182,7 +179,6 @@ type QuestionSwapLayer = {
   key: string;
   questionId: string | null;
   question: string;
-  deckName: string | null;
   phase: "current" | "entering" | "exiting";
 };
 
@@ -190,8 +186,8 @@ type ActiveTab = "review" | "queue";
 
 type ReviewAppProps = {
   initialActiveTab?: ActiveTab;
-  initialDeckSlug?: string | null;
-  initialDecks?: DeckManagementItem[];
+  initialKnowledgeBaseSlug?: string | null;
+  initialKnowledgeBases?: KnowledgeBaseManagementItem[];
   initialCurrentUser?: UserProfileResponse | null;
   initialPreviousAnswerStatus?: QueueStatusResponse | null;
   initialReviewSessionQueue?: ReviewQueueItem[] | null;
@@ -202,8 +198,8 @@ type ReviewSessionSnapshot = {
   question: string | null;
   currentSessionItem: ReviewQueueItem | null;
   sessionQueue: ReviewQueueItem[];
-  currentDeckId: string | null;
-  currentDeckName: string | null;
+  currentKnowledgeBaseId: string | null;
+  currentKnowledgeBaseName: string | null;
   answer: string;
   speechPreview: string;
   queueRemaining: number;
@@ -218,16 +214,16 @@ type ReviewSessionSnapshot = {
   queueSortKey: QueueSortKey;
   queueSearchInput: string;
   queueSearchQuery: string;
-  decks: DeckManagementItem[];
-  selectedDeckId: string;
-  deckSearchQuery: string;
-  deckSortKey: DeckSortKey;
-  selectedDeckDetailId: string | null;
-  isCreatingDeck: boolean;
-  editingDeckId: string | null;
-  deckDraftName: string;
-  deckDraftCoverage: string;
-  deckEmbeddingPlot: DeckEmbeddingPlotResponse;
+  knowledgeBases: KnowledgeBaseManagementItem[];
+  selectedKnowledgeBaseId: string;
+  knowledgeBaseSearchQuery: string;
+  knowledgeBaseSortKey: KnowledgeBaseSortKey;
+  selectedKnowledgeBaseDetailId: string | null;
+  isCreatingKnowledgeBase: boolean;
+  editingKnowledgeBaseId: string | null;
+  knowledgeBaseDraftName: string;
+  knowledgeBaseDraftCoverage: string;
+  knowledgeEmbeddingPlot: KnowledgeEmbeddingPlotResponse;
   messages: ChatMessage[];
   isPreviousExpanded: boolean;
   expandedPreviousAnswerIds: Set<string>;
@@ -241,7 +237,7 @@ type ReviewSessionSnapshot = {
   generatorMessage: string | null;
   hasLoadedQuestion: boolean;
   hasLoadedQueueStatus: boolean;
-  hasLoadedDecks: boolean;
+  hasLoadedKnowledgeBases: boolean;
   loadedQueueSortKey: QueueSortKey | null;
   loadedQueueSearchQuery: string | null;
   queueLoadedLimit: number;
@@ -253,34 +249,34 @@ const REVIEW_TAB_PATHS: Record<ActiveTab, string> = {
   review: "/review",
   queue: "/library",
 };
-const LEARN_TARGET_DECK_STORAGE_KEY = "waxon:learn-target-deck-id";
+const LEARN_TARGET_KNOWLEDGE_BASE_STORAGE_KEY = "waxon:learn-target-knowledgeBase-id";
 
 type ReviewRouteState = {
   activeTab: ActiveTab;
-  deckSlug: string | null;
+  knowledgeBaseSlug: string | null;
 };
 
-function deckPath(): string {
+function knowledgeBasePath(): string {
   return REVIEW_TAB_PATHS.queue;
 }
 
-function getStoredLearnTargetDeckId() {
+function getStoredLearnTargetKnowledgeBaseId() {
   if (typeof window === "undefined") {
     return null;
   }
 
-  return window.sessionStorage.getItem(LEARN_TARGET_DECK_STORAGE_KEY);
+  return window.sessionStorage.getItem(LEARN_TARGET_KNOWLEDGE_BASE_STORAGE_KEY);
 }
 
-function storeLearnTargetDeckId(deckId: string | null) {
+function storeLearnTargetKnowledgeBaseId(knowledgeBaseId: string | null) {
   if (typeof window === "undefined") {
     return;
   }
 
-  if (deckId) {
-    window.sessionStorage.setItem(LEARN_TARGET_DECK_STORAGE_KEY, deckId);
+  if (knowledgeBaseId) {
+    window.sessionStorage.setItem(LEARN_TARGET_KNOWLEDGE_BASE_STORAGE_KEY, knowledgeBaseId);
   } else {
-    window.sessionStorage.removeItem(LEARN_TARGET_DECK_STORAGE_KEY);
+    window.sessionStorage.removeItem(LEARN_TARGET_KNOWLEDGE_BASE_STORAGE_KEY);
   }
 }
 
@@ -399,8 +395,8 @@ async function parseTopUpResponse(
       completed = {
         ok: true,
         model: payload.model ?? "",
-        deckId: payload.deckId ?? "",
-        deckName: payload.deckName ?? "deck",
+        knowledgeBaseId: payload.knowledgeBaseId ?? "",
+        knowledgeBaseName: payload.knowledgeBaseName ?? "knowledgeBase",
         memoryUpdated: Boolean(payload.memoryUpdated),
         generated: Math.max(0, Math.round(payload.generated ?? 0)),
         added: Math.max(0, Math.round(payload.added ?? 0)),
@@ -448,23 +444,23 @@ function getReviewRouteStateFromPathname(pathname: string): ReviewRouteState | n
   if (pathname === REVIEW_TAB_PATHS.review) {
     return {
       activeTab: "review",
-      deckSlug: null,
+      knowledgeBaseSlug: null,
     };
   }
 
   if (pathname === REVIEW_TAB_PATHS.queue) {
     return {
       activeTab: "queue",
-      deckSlug: null,
+      knowledgeBaseSlug: null,
     };
   }
 
   if (pathname.startsWith(`${REVIEW_TAB_PATHS.queue}/`)) {
-    const deckSlug = pathname.slice(REVIEW_TAB_PATHS.queue.length + 1);
+    const knowledgeBaseSlug = pathname.slice(REVIEW_TAB_PATHS.queue.length + 1);
 
     return {
       activeTab: "queue",
-      deckSlug: deckSlug ? decodeURIComponent(deckSlug) : null,
+      knowledgeBaseSlug: knowledgeBaseSlug ? decodeURIComponent(knowledgeBaseSlug) : null,
     };
   }
 
@@ -473,9 +469,9 @@ function getReviewRouteStateFromPathname(pathname: string): ReviewRouteState | n
 
 type QueueSortKey = "review-date" | "creation-date";
 
-type DeckSortKey = "updated" | "due" | "name";
+type KnowledgeBaseSortKey = "updated" | "due" | "name";
 
-type DeckManagementItem = {
+type KnowledgeBaseManagementItem = {
   id: string;
   name: string;
   slug: string;
@@ -486,32 +482,32 @@ type DeckManagementItem = {
   inReviewRotation: boolean;
 };
 
-const deckLoadingRows = Array.from({ length: 4 }, (_, index) => index);
+const knowledgeBaseLoadingRows = Array.from({ length: 4 }, (_, index) => index);
 
-function DeckListLoadingPlaceholders() {
+function KnowledgeBaseListLoadingPlaceholders() {
   return (
     <>
       <span className="sr-only" role="status">
-        Loading decks
+        Loading knowledgeBases
       </span>
-      <ol className="queue-list deck-list deck-skeleton-list" aria-hidden="true">
-        {deckLoadingRows.map((row) => (
-          <li className="queue-row deck-row deck-skeleton-row" key={row}>
-            <div className="queue-row-card deck-row-card deck-skeleton-card">
-              <div className="deck-row-main">
-                <div className="deck-row-copy deck-skeleton-copy">
-                  <span className="admin-skeleton-line deck-skeleton-name" />
-                  <span className="admin-skeleton-line deck-skeleton-slug" />
+      <ol className="queue-list knowledgeBase-list knowledgeBase-skeleton-list" aria-hidden="true">
+        {knowledgeBaseLoadingRows.map((row) => (
+          <li className="queue-row knowledgeBase-row knowledgeBase-skeleton-row" key={row}>
+            <div className="queue-row-card knowledgeBase-row-card knowledgeBase-skeleton-card">
+              <div className="knowledgeBase-row-main">
+                <div className="knowledgeBase-row-copy knowledgeBase-skeleton-copy">
+                  <span className="admin-skeleton-line knowledgeBase-skeleton-name" />
+                  <span className="admin-skeleton-line knowledgeBase-skeleton-slug" />
                 </div>
-                <div className="deck-row-meta deck-skeleton-meta">
-                  <span className="admin-skeleton-pill deck-skeleton-due" />
-                  <span className="admin-skeleton-line deck-skeleton-count" />
-                  <span className="admin-skeleton-line deck-skeleton-date" />
+                <div className="knowledgeBase-row-meta knowledgeBase-skeleton-meta">
+                  <span className="admin-skeleton-pill knowledgeBase-skeleton-due" />
+                  <span className="admin-skeleton-line knowledgeBase-skeleton-count" />
+                  <span className="admin-skeleton-line knowledgeBase-skeleton-date" />
                 </div>
               </div>
-              <div className="deck-row-actions">
-                <span className="deck-skeleton-toggle" />
-                <span className="admin-skeleton-refresh deck-skeleton-button" />
+              <div className="knowledgeBase-row-actions">
+                <span className="knowledgeBase-skeleton-toggle" />
+                <span className="admin-skeleton-refresh knowledgeBase-skeleton-button" />
               </div>
             </div>
           </li>
@@ -521,13 +517,13 @@ function DeckListLoadingPlaceholders() {
   );
 }
 
-type DecksResponse = {
-  decks: DeckManagementItem[];
+type KnowledgeBasesResponse = {
+  knowledgeBases: KnowledgeBaseManagementItem[];
 };
 
-type DeckMutationResponse = {
+type KnowledgeBaseMutationResponse = {
   ok: boolean;
-  deck?: DeckManagementItem;
+  knowledgeBase?: KnowledgeBaseManagementItem;
   error?: string;
 };
 
@@ -571,8 +567,8 @@ type TopUpQuestionsResponse =
   | {
       ok: true;
       model: string;
-      deckId: string;
-      deckName: string;
+      knowledgeBaseId: string;
+      knowledgeBaseName: string;
       memoryUpdated: boolean;
       generated: number;
       added: number;
@@ -608,8 +604,8 @@ type TopUpStreamPayload =
       total?: number;
       latestQuestion?: string | null;
       model?: string;
-      deckId?: string;
-      deckName?: string;
+      knowledgeBaseId?: string;
+      knowledgeBaseName?: string;
       memoryUpdated?: boolean;
       added?: number;
       rejected?: number;
@@ -626,7 +622,7 @@ type PendingSpeechCommand = {
 };
 
 async function fetchReviewSessionQueue(input: {
-  deckId?: string | null;
+  knowledgeBaseId?: string | null;
   excludeQuestionId?: string | null;
   limit?: number;
   offset?: number;
@@ -634,8 +630,8 @@ async function fetchReviewSessionQueue(input: {
 } = {}): Promise<ReviewQueueItem[]> {
   const params = new URLSearchParams();
 
-  if (input.deckId) {
-    params.set("deckId", input.deckId);
+  if (input.knowledgeBaseId) {
+    params.set("knowledgeBaseId", input.knowledgeBaseId);
   }
 
   if (input.excludeQuestionId) {
@@ -716,7 +712,7 @@ const EVALUATION_STATUS_POLL_MS = 750;
 const LEARN_TOP_UP_COOLDOWN_MS = 20_000;
 const QUESTION_SWAP_ANIMATION_MS = 140;
 
-function createEmptyDeckEmbeddingPlot(): DeckEmbeddingPlotResponse {
+function createEmptyKnowledgeEmbeddingPlot(): KnowledgeEmbeddingPlotResponse {
   return {
     model: null,
     totalQuestions: 0,
@@ -777,7 +773,7 @@ function formatDurationBadge(msUntilDue: number): string {
   return `${days}d ${remainingHours}h`;
 }
 
-function normalizeDeckNameForComparison(input: string): string {
+function normalizeKnowledgeBaseNameForComparison(input: string): string {
   return input.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
@@ -1112,11 +1108,11 @@ function ScoreChart({ entries }: { entries: ReviewHistoryEntry[] }) {
   );
 }
 
-function DeckEmbeddingPlot({
+function KnowledgeEmbeddingPlot({
   plot,
   reviewQueue,
 }: {
-  plot: DeckEmbeddingPlotResponse;
+  plot: KnowledgeEmbeddingPlotResponse;
   reviewQueue: ReviewQueueItem[];
 }) {
   const [hoveredPoint, setHoveredPoint] =
@@ -1131,7 +1127,7 @@ function DeckEmbeddingPlot({
   );
 
   function getPointMetadata(
-    point: DeckEmbeddingPlotPoint,
+    point: KnowledgeEmbeddingPlotPoint,
   ): Pick<HoveredEmbeddingPoint, "statusLabel" | "scoreLabel"> {
     const queueItem = statusByQuestion.get(point.question);
 
@@ -1148,7 +1144,7 @@ function DeckEmbeddingPlot({
     };
   }
 
-  function showPoint(point: DeckEmbeddingPlotPoint) {
+  function showPoint(point: KnowledgeEmbeddingPlotPoint) {
     const x = padding + point.x * (width - padding * 2);
     const y = padding + (1 - point.y) * (height - padding * 2);
     const canvasRect = plotCanvasRef.current?.getBoundingClientRect();
@@ -1188,7 +1184,7 @@ function DeckEmbeddingPlot({
   }
 
   return (
-    <section className="embedding-plot-panel" aria-label="Deck embedding map">
+    <section className="embedding-plot-panel" aria-label="KnowledgeBase embedding map">
       <div className="embedding-plot-header">
         <div>
           <h2>Embedding map</h2>
@@ -1212,7 +1208,7 @@ function DeckEmbeddingPlot({
           <svg
             className="embedding-plot"
             role="img"
-            aria-label="Deck questions plotted by embedding similarity"
+            aria-label="KnowledgeBase questions plotted by embedding similarity"
             viewBox={`0 0 ${width} ${height}`}
           >
             <line
@@ -1299,8 +1295,8 @@ function DeckEmbeddingPlot({
 
 export default function ReviewApp({
   initialActiveTab = "review",
-  initialDeckSlug = null,
-  initialDecks = [],
+  initialKnowledgeBaseSlug = null,
+  initialKnowledgeBases = [],
   initialCurrentUser = null,
   initialPreviousAnswerStatus = null,
   initialReviewSessionQueue = null,
@@ -1313,17 +1309,17 @@ export default function ReviewApp({
     [],
   );
   const cachedSessionRef = useRef(reviewSessionSnapshot);
-  const initialRoutedDeckId =
-    initialActiveTab === "queue" && initialDeckSlug
-      ? initialDecks.find((deck) => deck.slug === initialDeckSlug)?.id ??
-        cachedSessionRef.current?.decks.find(
-          (deck) => deck.slug === initialDeckSlug,
+  const initialRoutedKnowledgeBaseId =
+    initialActiveTab === "queue" && initialKnowledgeBaseSlug
+      ? initialKnowledgeBases.find((knowledgeBase) => knowledgeBase.slug === initialKnowledgeBaseSlug)?.id ??
+        cachedSessionRef.current?.knowledgeBases.find(
+          (knowledgeBase) => knowledgeBase.slug === initialKnowledgeBaseSlug,
         )?.id ??
         null
       : null;
   const canUseCachedQueueState =
-    !initialRoutedDeckId ||
-    cachedSessionRef.current?.selectedDeckDetailId === initialRoutedDeckId;
+    !initialRoutedKnowledgeBaseId ||
+    cachedSessionRef.current?.selectedKnowledgeBaseDetailId === initialRoutedKnowledgeBaseId;
   const cachedHasLoadedQuestion =
     cachedSessionRef.current?.hasLoadedQuestion ?? false;
   const canUseInitialReviewSession =
@@ -1345,8 +1341,8 @@ export default function ReviewApp({
       ? cachedSessionRef.current?.hasLoadedQueueStatus ?? false
       : false,
   );
-  const hasLoadedDecksRef = useRef(
-    cachedSessionRef.current?.hasLoadedDecks ?? initialDecks.length > 0,
+  const hasLoadedKnowledgeBasesRef = useRef(
+    cachedSessionRef.current?.hasLoadedKnowledgeBases ?? initialKnowledgeBases.length > 0,
   );
   const hasLoadedPreviousAnswerStatusRef = useRef(
     initialPreviousAnswerStatus !== null,
@@ -1389,10 +1385,6 @@ export default function ReviewApp({
               initialReviewSessionItem?.questionId ??
               null,
             question: cachedQuestion,
-            deckName:
-              cachedSessionRef.current?.currentDeckName ??
-              initialReviewSessionItem?.deckName ??
-              null,
             phase: "current",
           },
         ]
@@ -1415,17 +1407,11 @@ export default function ReviewApp({
       initialReviewSessionItem?.questionId ??
       null,
   );
-  const [currentDeckName, setCurrentDeckName] = useState<string | null>(
-    () =>
-      cachedSessionRef.current?.currentDeckName ??
-      initialReviewSessionItem?.deckName ??
-      null,
+  const [currentKnowledgeBaseName, setCurrentKnowledgeBaseName] = useState<string | null>(
+    () => cachedSessionRef.current?.currentKnowledgeBaseName ?? null,
   );
-  const [currentDeckId, setCurrentDeckId] = useState<string | null>(
-    () =>
-      cachedSessionRef.current?.currentDeckId ??
-      initialReviewSessionItem?.deckId ??
-      null,
+  const [currentKnowledgeBaseId, setCurrentKnowledgeBaseId] = useState<string | null>(
+    () => cachedSessionRef.current?.currentKnowledgeBaseId ?? null,
   );
   const [answer, setAnswer] = useState(
     () => cachedSessionRef.current?.answer ?? "",
@@ -1476,7 +1462,7 @@ export default function ReviewApp({
   const [isQueuePageLoading, setIsQueuePageLoading] = useState(
     () =>
       initialActiveTab === "queue" &&
-      Boolean(initialRoutedDeckId) &&
+      Boolean(initialRoutedKnowledgeBaseId) &&
       !(
         canUseCachedQueueState &&
         (cachedSessionRef.current?.hasLoadedQueueStatus ?? false)
@@ -1504,60 +1490,60 @@ export default function ReviewApp({
   const [queueSearchQuery, setQueueSearchQuery] = useState(
     () => cachedSessionRef.current?.queueSearchQuery ?? "",
   );
-  const [decks, setDecks] = useState<DeckManagementItem[]>(
-    () => cachedSessionRef.current?.decks ?? initialDecks,
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseManagementItem[]>(
+    () => cachedSessionRef.current?.knowledgeBases ?? initialKnowledgeBases,
   );
-  const [selectedDeckId, setSelectedDeckId] = useState(
+  const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState(
     () =>
-      cachedSessionRef.current?.selectedDeckId ??
-      initialRoutedDeckId ??
-      initialDecks[0]?.id ??
+      cachedSessionRef.current?.selectedKnowledgeBaseId ??
+      initialRoutedKnowledgeBaseId ??
+      initialKnowledgeBases[0]?.id ??
       "",
   );
-  const [deckSearchQuery, setDeckSearchQuery] = useState(
-    () => cachedSessionRef.current?.deckSearchQuery ?? "",
+  const [knowledgeBaseSearchQuery, setKnowledgeBaseSearchQuery] = useState(
+    () => cachedSessionRef.current?.knowledgeBaseSearchQuery ?? "",
   );
-  const [deckSortKey, setDeckSortKey] = useState<DeckSortKey>(
-    () => cachedSessionRef.current?.deckSortKey ?? "name",
+  const [knowledgeBaseSortKey, setKnowledgeBaseSortKey] = useState<KnowledgeBaseSortKey>(
+    () => cachedSessionRef.current?.knowledgeBaseSortKey ?? "name",
   );
-  const [selectedDeckDetailId, setSelectedDeckDetailId] = useState<
+  const [selectedKnowledgeBaseDetailId, setSelectedKnowledgeBaseDetailId] = useState<
     string | null
   >(() =>
-    initialActiveTab === "queue" && initialDeckSlug
-      ? initialRoutedDeckId ?? cachedSessionRef.current?.selectedDeckDetailId ?? null
+    initialActiveTab === "queue" && initialKnowledgeBaseSlug
+      ? initialRoutedKnowledgeBaseId ?? cachedSessionRef.current?.selectedKnowledgeBaseDetailId ?? null
       : null,
   );
-  const [isCreatingDeck, setIsCreatingDeck] = useState(
-    () => cachedSessionRef.current?.isCreatingDeck ?? false,
+  const [isCreatingKnowledgeBase, setIsCreatingKnowledgeBase] = useState(
+    () => cachedSessionRef.current?.isCreatingKnowledgeBase ?? false,
   );
-  const [editingDeckId, setEditingDeckId] = useState<string | null>(
-    () => cachedSessionRef.current?.editingDeckId ?? null,
+  const [editingKnowledgeBaseId, setEditingKnowledgeBaseId] = useState<string | null>(
+    () => cachedSessionRef.current?.editingKnowledgeBaseId ?? null,
   );
-  const [deckDraftName, setDeckDraftName] = useState(
-    () => cachedSessionRef.current?.deckDraftName ?? "",
+  const [knowledgeBaseDraftName, setKnowledgeBaseDraftName] = useState(
+    () => cachedSessionRef.current?.knowledgeBaseDraftName ?? "",
   );
-  const [deckDraftCoverage, setDeckDraftCoverage] = useState(
-    () => cachedSessionRef.current?.deckDraftCoverage ?? "",
+  const [knowledgeBaseDraftCoverage, setKnowledgeBaseDraftCoverage] = useState(
+    () => cachedSessionRef.current?.knowledgeBaseDraftCoverage ?? "",
   );
-  const [isDecksLoading, setIsDecksLoading] = useState(false);
-  const [isDeckSaving, setIsDeckSaving] = useState(false);
-  const [isDeckDeleting, setIsDeckDeleting] = useState(false);
-  const [deckPageMessage, setDeckPageMessage] = useState<string | null>(null);
-  const [deckEditorMessage, setDeckEditorMessage] = useState<string | null>(null);
-  const [deckEmbeddingPlot, setDeckEmbeddingPlot] =
-    useState<DeckEmbeddingPlotResponse>(
+  const [isKnowledgeBasesLoading, setIsKnowledgeBasesLoading] = useState(false);
+  const [isKnowledgeBaseSaving, setIsKnowledgeBaseSaving] = useState(false);
+  const [isKnowledgeBaseDeleting, setIsKnowledgeBaseDeleting] = useState(false);
+  const [knowledgeBasePageMessage, setKnowledgeBasePageMessage] = useState<string | null>(null);
+  const [knowledgeBaseEditorMessage, setKnowledgeBaseEditorMessage] = useState<string | null>(null);
+  const [knowledgeEmbeddingPlot, setKnowledgeEmbeddingPlot] =
+    useState<KnowledgeEmbeddingPlotResponse>(
       () =>
         canUseCachedQueueState
-          ? cachedSessionRef.current?.deckEmbeddingPlot ??
-            createEmptyDeckEmbeddingPlot()
-          : createEmptyDeckEmbeddingPlot(),
+          ? cachedSessionRef.current?.knowledgeEmbeddingPlot ??
+            createEmptyKnowledgeEmbeddingPlot()
+          : createEmptyKnowledgeEmbeddingPlot(),
     );
   const [messages, setMessages] = useState<ChatMessage[]>(
     () => cachedSessionRef.current?.messages ?? [],
   );
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialActiveTab);
-  const [routeDeckSlug, setRouteDeckSlug] = useState<string | null>(
-    initialActiveTab === "queue" ? initialDeckSlug : null,
+  const [routeKnowledgeBaseSlug, setRouteKnowledgeBaseSlug] = useState<string | null>(
+    initialActiveTab === "queue" ? initialKnowledgeBaseSlug : null,
   );
   const [isPreviousExpanded, setIsPreviousExpanded] = useState(
     () => cachedSessionRef.current?.isPreviousExpanded ?? false,
@@ -1632,9 +1618,9 @@ export default function ReviewApp({
   const isFlaggingQuestionRef = useRef(isFlaggingQuestion);
   const pendingRetryItemsRef = useRef(new Map<string, ReviewQueueItem>());
   const processedEvaluationIdsRef = useRef(new Set<string>());
-  const learnTargetDeckIdRef = useRef<string | null>(
-    cachedSessionRef.current?.selectedDeckDetailId ??
-      cachedSessionRef.current?.selectedDeckId ??
+  const learnTargetKnowledgeBaseIdRef = useRef<string | null>(
+    cachedSessionRef.current?.selectedKnowledgeBaseDetailId ??
+      cachedSessionRef.current?.selectedKnowledgeBaseId ??
       null,
   );
   const queueStageRef = useRef<HTMLElement | null>(null);
@@ -1644,7 +1630,7 @@ export default function ReviewApp({
       ? cachedSessionRef.current?.queueLoadedLimit ?? QUEUE_PAGE_SIZE
       : QUEUE_PAGE_SIZE,
   );
-  const loadedDeckEmbeddingPlotKeyRef = useRef<string | null>(null);
+  const loadedKnowledgeEmbeddingPlotKeyRef = useRef<string | null>(null);
   const isQueuePageLoadingRef = useRef(false);
   const queueStatusRequestIdRef = useRef(0);
   const questionAttemptsRequestKeysRef = useRef(new Set<string>());
@@ -1680,23 +1666,23 @@ export default function ReviewApp({
     (
       nextTab: ActiveTab,
       event?: ReactMouseEvent<HTMLAnchorElement>,
-      deckSlug?: string | null,
+      knowledgeBaseSlug?: string | null,
     ) => {
       event?.preventDefault();
       setActiveTab(nextTab);
-      setRouteDeckSlug(nextTab === "queue" ? deckSlug ?? null : null);
+      setRouteKnowledgeBaseSlug(nextTab === "queue" ? knowledgeBaseSlug ?? null : null);
       if (nextTab !== "queue") {
-        setSelectedDeckDetailId(null);
+        setSelectedKnowledgeBaseDetailId(null);
       }
 
       const nextPath =
-        nextTab === "queue" ? deckPath() : REVIEW_TAB_PATHS[nextTab];
+        nextTab === "queue" ? knowledgeBasePath() : REVIEW_TAB_PATHS[nextTab];
 
       if (window.location.pathname !== nextPath) {
         window.history.pushState(
           {
             activeTab: nextTab,
-            deckSlug: nextTab === "queue" ? deckSlug ?? null : null,
+            knowledgeBaseSlug: nextTab === "queue" ? knowledgeBaseSlug ?? null : null,
           },
           "",
           nextPath,
@@ -1712,12 +1698,12 @@ export default function ReviewApp({
 
   useEffect(() => {
     setActiveTab(initialActiveTab);
-    setRouteDeckSlug(initialActiveTab === "queue" ? initialDeckSlug : null);
+    setRouteKnowledgeBaseSlug(initialActiveTab === "queue" ? initialKnowledgeBaseSlug : null);
 
-    if (initialActiveTab !== "queue" || !initialDeckSlug) {
-      setSelectedDeckDetailId(null);
+    if (initialActiveTab !== "queue" || !initialKnowledgeBaseSlug) {
+      setSelectedKnowledgeBaseDetailId(null);
     }
-  }, [initialActiveTab, initialDeckSlug]);
+  }, [initialActiveTab, initialKnowledgeBaseSlug]);
 
   useEffect(() => {
     function syncTabFromHistory() {
@@ -1725,7 +1711,7 @@ export default function ReviewApp({
 
       if (nextRoute) {
         setActiveTab(nextRoute.activeTab);
-        setRouteDeckSlug(nextRoute.deckSlug);
+        setRouteKnowledgeBaseSlug(nextRoute.knowledgeBaseSlug);
         return;
       }
 
@@ -1766,7 +1752,6 @@ export default function ReviewApp({
       key: questionSwapLayerKey(currentQuestionId, question),
       questionId: currentQuestionId,
       question,
-      deckName: currentDeckName,
       phase: "entering",
     };
 
@@ -1802,7 +1787,7 @@ export default function ReviewApp({
       );
       questionSwapTimerRef.current = null;
     }, QUESTION_SWAP_ANIMATION_MS);
-  }, [currentDeckName, currentQuestionId, isLoadingQuestion, question]);
+  }, [currentKnowledgeBaseName, currentQuestionId, isLoadingQuestion, question]);
 
   useEffect(() => {
     questionIdRef.current = currentQuestionId;
@@ -1864,8 +1849,8 @@ export default function ReviewApp({
       question,
       currentSessionItem,
       sessionQueue,
-      currentDeckId,
-      currentDeckName,
+      currentKnowledgeBaseId,
+      currentKnowledgeBaseName,
       answer,
       speechPreview,
       queueRemaining,
@@ -1877,16 +1862,16 @@ export default function ReviewApp({
       queueSortKey,
       queueSearchInput,
       queueSearchQuery,
-      decks,
-      selectedDeckId,
-      deckSearchQuery,
-      deckSortKey,
-      selectedDeckDetailId,
-      isCreatingDeck,
-      editingDeckId,
-      deckDraftName,
-      deckDraftCoverage,
-      deckEmbeddingPlot,
+      knowledgeBases,
+      selectedKnowledgeBaseId,
+      knowledgeBaseSearchQuery,
+      knowledgeBaseSortKey,
+      selectedKnowledgeBaseDetailId,
+      isCreatingKnowledgeBase,
+      editingKnowledgeBaseId,
+      knowledgeBaseDraftName,
+      knowledgeBaseDraftCoverage,
+      knowledgeEmbeddingPlot,
       messages,
       isPreviousExpanded,
       expandedPreviousAnswerIds: new Set(expandedPreviousAnswerIds),
@@ -1900,7 +1885,7 @@ export default function ReviewApp({
       generatorMessage,
       hasLoadedQuestion: hasLoadedQuestionRef.current,
       hasLoadedQueueStatus: hasLoadedQueueStatusRef.current,
-      hasLoadedDecks: hasLoadedDecksRef.current,
+      hasLoadedKnowledgeBases: hasLoadedKnowledgeBasesRef.current,
       loadedQueueSortKey: loadedQueueSortKeyRef.current,
       loadedQueueSearchQuery: loadedQueueSearchQueryRef.current,
       queueLoadedLimit: queueLoadedLimitRef.current,
@@ -1909,19 +1894,19 @@ export default function ReviewApp({
     answer,
     currentQuestionId,
     currentSessionItem,
-    currentDeckId,
-    currentDeckName,
+    currentKnowledgeBaseId,
+    currentKnowledgeBaseName,
     currentUser,
-    deckDraftCoverage,
-    deckDraftName,
-    deckEmbeddingPlot,
-    deckSearchQuery,
-    deckSortKey,
-    decks,
-    editingDeckId,
+    knowledgeBaseDraftCoverage,
+    knowledgeBaseDraftName,
+    knowledgeEmbeddingPlot,
+    knowledgeBaseSearchQuery,
+    knowledgeBaseSortKey,
+    knowledgeBases,
+    editingKnowledgeBaseId,
     evaluations,
     expandedPreviousAnswerIds,
-    isCreatingDeck,
+    isCreatingKnowledgeBase,
     generatedQuestions,
     generatorFiles,
     generatorMessage,
@@ -1938,8 +1923,8 @@ export default function ReviewApp({
     recentAttempts,
     reviewQueue,
     reviewQueueTotal,
-    selectedDeckId,
-    selectedDeckDetailId,
+    selectedKnowledgeBaseId,
+    selectedKnowledgeBaseDetailId,
     selectedQuestionId,
     selectedQuestion,
     sessionQueue,
@@ -2056,53 +2041,53 @@ export default function ReviewApp({
     setIsQuestionGeneratorOpen(true);
   }, [resetQuestionGenerator]);
 
-  const rememberLearnTargetDeck = useCallback((deckId: string | null) => {
-    learnTargetDeckIdRef.current = deckId;
-    storeLearnTargetDeckId(deckId);
+  const rememberLearnTargetKnowledgeBase = useCallback((knowledgeBaseId: string | null) => {
+    learnTargetKnowledgeBaseIdRef.current = knowledgeBaseId;
+    storeLearnTargetKnowledgeBaseId(knowledgeBaseId);
   }, []);
 
   useEffect(() => {
-    if (learnTargetDeckIdRef.current) {
+    if (learnTargetKnowledgeBaseIdRef.current) {
       return;
     }
 
-    learnTargetDeckIdRef.current = getStoredLearnTargetDeckId();
+    learnTargetKnowledgeBaseIdRef.current = getStoredLearnTargetKnowledgeBaseId();
   }, []);
 
-  const selectedDeck =
-    decks.find((deck) => deck.id === selectedDeckId) ?? decks[0] ?? null;
-  const selectedDeckDetail =
-    decks.find((deck) => deck.id === selectedDeckDetailId) ?? null;
-  const editingDeck =
-    decks.find((deck) => deck.id === editingDeckId) ?? null;
-  const deckDraftNameKey = normalizeDeckNameForComparison(deckDraftName);
-  const isDeckDraftNameDuplicate =
-    deckDraftNameKey.length > 0 &&
-    decks.some(
-      (deck) =>
-        deck.id !== editingDeckId &&
-        normalizeDeckNameForComparison(deck.name) === deckDraftNameKey,
+  const selectedKnowledgeBase =
+    knowledgeBases.find((knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
+  const selectedKnowledgeBaseDetail =
+    knowledgeBases.find((knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseDetailId) ?? null;
+  const editingKnowledgeBase =
+    knowledgeBases.find((knowledgeBase) => knowledgeBase.id === editingKnowledgeBaseId) ?? null;
+  const knowledgeBaseDraftNameKey = normalizeKnowledgeBaseNameForComparison(knowledgeBaseDraftName);
+  const isKnowledgeBaseDraftNameDuplicate =
+    knowledgeBaseDraftNameKey.length > 0 &&
+    knowledgeBases.some(
+      (knowledgeBase) =>
+        knowledgeBase.id !== editingKnowledgeBaseId &&
+        normalizeKnowledgeBaseNameForComparison(knowledgeBase.name) === knowledgeBaseDraftNameKey,
     );
-  const deckDraftNameMessage = isDeckDraftNameDuplicate
-    ? "Deck name already exists."
-    : deckEditorMessage;
-  const isDeckEditorBusy = isDeckSaving || isDeckDeleting;
-  const canSaveDeckDraft =
-    !isDeckEditorBusy && deckDraftNameKey.length > 0 && !isDeckDraftNameDuplicate;
-  const visibleDecks = useMemo(() => {
-    const normalizedQuery = deckSearchQuery.trim().toLowerCase();
-    const filteredDecks = normalizedQuery
-      ? decks.filter((deck) =>
-          `${deck.name} ${deck.slug}`.toLowerCase().includes(normalizedQuery),
+  const knowledgeBaseDraftNameMessage = isKnowledgeBaseDraftNameDuplicate
+    ? "KnowledgeBase name already exists."
+    : knowledgeBaseEditorMessage;
+  const isKnowledgeBaseEditorBusy = isKnowledgeBaseSaving || isKnowledgeBaseDeleting;
+  const canSaveKnowledgeBaseDraft =
+    !isKnowledgeBaseEditorBusy && knowledgeBaseDraftNameKey.length > 0 && !isKnowledgeBaseDraftNameDuplicate;
+  const visibleKnowledgeBases = useMemo(() => {
+    const normalizedQuery = knowledgeBaseSearchQuery.trim().toLowerCase();
+    const filteredKnowledgeBases = normalizedQuery
+      ? knowledgeBases.filter((knowledgeBase) =>
+          `${knowledgeBase.name} ${knowledgeBase.slug}`.toLowerCase().includes(normalizedQuery),
         )
-      : decks;
+      : knowledgeBases;
 
-    return [...filteredDecks].sort((a, b) => {
-      if (deckSortKey === "name") {
+    return [...filteredKnowledgeBases].sort((a, b) => {
+      if (knowledgeBaseSortKey === "name") {
         return a.name.localeCompare(b.name);
       }
 
-      if (deckSortKey === "due") {
+      if (knowledgeBaseSortKey === "due") {
         return b.dueCount - a.dueCount || a.name.localeCompare(b.name);
       }
 
@@ -2112,41 +2097,41 @@ export default function ReviewApp({
         a.name.localeCompare(b.name)
       );
     });
-  }, [deckSearchQuery, deckSortKey, decks]);
-  const rotationDeckCount = decks.filter((deck) => deck.inReviewRotation).length;
-  const rotationDueCount = decks.reduce(
-    (total, deck) => (deck.inReviewRotation ? total + deck.dueCount : total),
+  }, [knowledgeBaseSearchQuery, knowledgeBaseSortKey, knowledgeBases]);
+  const rotationKnowledgeBaseCount = knowledgeBases.filter((knowledgeBase) => knowledgeBase.inReviewRotation).length;
+  const rotationDueCount = knowledgeBases.reduce(
+    (total, knowledgeBase) => (knowledgeBase.inReviewRotation ? total + knowledgeBase.dueCount : total),
     0,
   );
-  const totalCardCount = decks.reduce((total, deck) => total + deck.cardCount, 0);
-  const loadDecks = useCallback(async () => {
-    setIsDecksLoading(true);
-    setDeckPageMessage(null);
+  const totalCardCount = knowledgeBases.reduce((total, knowledgeBase) => total + knowledgeBase.cardCount, 0);
+  const loadKnowledgeBases = useCallback(async () => {
+    setIsKnowledgeBasesLoading(true);
+    setKnowledgeBasePageMessage(null);
 
     try {
-      const response = await fetch("/api/decks", {
+      const response = await fetch("/api/knowledgeBases", {
         cache: "no-store",
       });
 
       if (!response.ok) {
-        throw new Error("Could not load decks.");
+        throw new Error("Could not load knowledgeBases.");
       }
 
-      const data = (await response.json()) as DecksResponse;
+      const data = (await response.json()) as KnowledgeBasesResponse;
 
-      setDecks(data.decks);
-      setSelectedDeckId((currentDeckId) =>
-        data.decks.some((deck) => deck.id === currentDeckId)
-          ? currentDeckId
-          : data.decks[0]?.id ?? "",
+      setKnowledgeBases(data.knowledgeBases);
+      setSelectedKnowledgeBaseId((currentKnowledgeBaseId) =>
+        data.knowledgeBases.some((knowledgeBase) => knowledgeBase.id === currentKnowledgeBaseId)
+          ? currentKnowledgeBaseId
+          : data.knowledgeBases[0]?.id ?? "",
       );
     } catch (loadError) {
-      setDeckPageMessage(
-        loadError instanceof Error ? loadError.message : "Could not load decks.",
+      setKnowledgeBasePageMessage(
+        loadError instanceof Error ? loadError.message : "Could not load knowledgeBases.",
       );
     } finally {
-      hasLoadedDecksRef.current = true;
-      setIsDecksLoading(false);
+      hasLoadedKnowledgeBasesRef.current = true;
+      setIsKnowledgeBasesLoading(false);
     }
   }, []);
 
@@ -2162,8 +2147,8 @@ export default function ReviewApp({
     setSessionQueue([]);
     setQuestion(null);
     setCurrentQuestionId(null);
-    setCurrentDeckId(null);
-    setCurrentDeckName(null);
+    setCurrentKnowledgeBaseId(null);
+    setCurrentKnowledgeBaseName(null);
     setAnswer("");
     setSpeechPreview("");
     setQueueRemaining(0);
@@ -2172,147 +2157,147 @@ export default function ReviewApp({
     setReviewQueueVersion((currentVersion) => currentVersion + 1);
   }, []);
 
-  const openDeckEditor = useCallback((deck: DeckManagementItem) => {
-    setSelectedDeckId(deck.id);
-    setDeckDraftName(deck.name);
-    setDeckDraftCoverage(deck.coverage ?? "");
-    setDeckEditorMessage(null);
-    setIsCreatingDeck(false);
-    setEditingDeckId(deck.id);
+  const openKnowledgeBaseEditor = useCallback((knowledgeBase: KnowledgeBaseManagementItem) => {
+    setSelectedKnowledgeBaseId(knowledgeBase.id);
+    setKnowledgeBaseDraftName(knowledgeBase.name);
+    setKnowledgeBaseDraftCoverage(knowledgeBase.coverage ?? "");
+    setKnowledgeBaseEditorMessage(null);
+    setIsCreatingKnowledgeBase(false);
+    setEditingKnowledgeBaseId(knowledgeBase.id);
   }, []);
 
-  const createDeck = useCallback(() => {
-    setDeckPageMessage(null);
-    setDeckEditorMessage(null);
-    setDeckDraftName("");
-    setDeckDraftCoverage("");
-    setEditingDeckId(null);
-    setIsCreatingDeck(true);
+  const createKnowledgeBase = useCallback(() => {
+    setKnowledgeBasePageMessage(null);
+    setKnowledgeBaseEditorMessage(null);
+    setKnowledgeBaseDraftName("");
+    setKnowledgeBaseDraftCoverage("");
+    setEditingKnowledgeBaseId(null);
+    setIsCreatingKnowledgeBase(true);
   }, []);
 
-  const saveDeckDraft = useCallback(async () => {
-    if ((!editingDeckId && !isCreatingDeck) || isDeckSaving) {
+  const saveKnowledgeBaseDraft = useCallback(async () => {
+    if ((!editingKnowledgeBaseId && !isCreatingKnowledgeBase) || isKnowledgeBaseSaving) {
       return;
     }
 
-    const nextName = deckDraftName.trim();
+    const nextName = knowledgeBaseDraftName.trim();
 
     if (!nextName) {
-      setDeckEditorMessage("Deck name is required.");
+      setKnowledgeBaseEditorMessage("KnowledgeBase name is required.");
       return;
     }
 
-    if (isDeckDraftNameDuplicate) {
-      setDeckEditorMessage("Deck name already exists.");
+    if (isKnowledgeBaseDraftNameDuplicate) {
+      setKnowledgeBaseEditorMessage("KnowledgeBase name already exists.");
       return;
     }
 
-    setDeckEditorMessage(null);
-    setDeckPageMessage(null);
-    setIsDeckSaving(true);
+    setKnowledgeBaseEditorMessage(null);
+    setKnowledgeBasePageMessage(null);
+    setIsKnowledgeBaseSaving(true);
 
     try {
       const response = await fetch(
-        isCreatingDeck
-          ? "/api/decks"
-          : `/api/decks/${encodeURIComponent(editingDeckId as string)}`,
+        isCreatingKnowledgeBase
+          ? "/api/knowledgeBases"
+          : `/api/knowledgeBases/${encodeURIComponent(editingKnowledgeBaseId as string)}`,
         {
-          method: isCreatingDeck ? "POST" : "PATCH",
+          method: isCreatingKnowledgeBase ? "POST" : "PATCH",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
             name: nextName,
-            coverage: deckDraftCoverage,
-            ...(isCreatingDeck ? { inReviewRotation: true } : {}),
+            coverage: knowledgeBaseDraftCoverage,
+            ...(isCreatingKnowledgeBase ? { inReviewRotation: true } : {}),
           }),
         },
       );
-      const data = (await response.json()) as DeckMutationResponse;
+      const data = (await response.json()) as KnowledgeBaseMutationResponse;
 
-      if (!response.ok || !data.ok || !data.deck) {
+      if (!response.ok || !data.ok || !data.knowledgeBase) {
         throw new Error(
           data.error ??
-            (isCreatingDeck ? "Could not create deck." : "Could not update deck."),
+            (isCreatingKnowledgeBase ? "Could not create knowledgeBase." : "Could not update knowledgeBase."),
         );
       }
 
-      const savedDeck = data.deck as DeckManagementItem;
+      const savedKnowledgeBase = data.knowledgeBase as KnowledgeBaseManagementItem;
 
-      if (isCreatingDeck) {
-        setDecks((currentDecks) => [
-          savedDeck,
-          ...currentDecks,
+      if (isCreatingKnowledgeBase) {
+        setKnowledgeBases((currentKnowledgeBases) => [
+          savedKnowledgeBase,
+          ...currentKnowledgeBases,
         ]);
-        setSelectedDeckId(savedDeck.id);
-        rememberLearnTargetDeck(savedDeck.id);
+        setSelectedKnowledgeBaseId(savedKnowledgeBase.id);
+        rememberLearnTargetKnowledgeBase(savedKnowledgeBase.id);
         resetReviewSessionForServerReload();
       } else {
-        setDecks((currentDecks) =>
-          currentDecks.map((deck) =>
-            deck.id === editingDeckId ? savedDeck : deck,
+        setKnowledgeBases((currentKnowledgeBases) =>
+          currentKnowledgeBases.map((knowledgeBase) =>
+            knowledgeBase.id === editingKnowledgeBaseId ? savedKnowledgeBase : knowledgeBase,
           ),
         );
 
-        if (selectedDeckDetailId === savedDeck.id) {
-          setRouteDeckSlug(savedDeck.slug);
-          navigateToTab("queue", undefined, savedDeck.slug);
+        if (selectedKnowledgeBaseDetailId === savedKnowledgeBase.id) {
+          setRouteKnowledgeBaseSlug(savedKnowledgeBase.slug);
+          navigateToTab("queue", undefined, savedKnowledgeBase.slug);
         }
       }
 
-      setIsCreatingDeck(false);
-      setEditingDeckId(null);
+      setIsCreatingKnowledgeBase(false);
+      setEditingKnowledgeBaseId(null);
     } catch (updateError) {
-      setDeckEditorMessage(
+      setKnowledgeBaseEditorMessage(
         updateError instanceof Error
           ? updateError.message
-          : isCreatingDeck
-            ? "Could not create deck."
-            : "Could not update deck.",
+          : isCreatingKnowledgeBase
+            ? "Could not create knowledgeBase."
+            : "Could not update knowledgeBase.",
       );
     } finally {
-      setIsDeckSaving(false);
+      setIsKnowledgeBaseSaving(false);
     }
   }, [
-    deckDraftName,
-    deckDraftCoverage,
-    editingDeckId,
-    isCreatingDeck,
-    isDeckDraftNameDuplicate,
-    isDeckSaving,
+    knowledgeBaseDraftName,
+    knowledgeBaseDraftCoverage,
+    editingKnowledgeBaseId,
+    isCreatingKnowledgeBase,
+    isKnowledgeBaseDraftNameDuplicate,
+    isKnowledgeBaseSaving,
     navigateToTab,
-    rememberLearnTargetDeck,
+    rememberLearnTargetKnowledgeBase,
     resetReviewSessionForServerReload,
-    selectedDeckDetailId,
+    selectedKnowledgeBaseDetailId,
   ]);
 
-  const toggleDeckRotation = useCallback(async (deck: DeckManagementItem) => {
-    setDeckPageMessage(null);
+  const toggleKnowledgeBaseRotation = useCallback(async (knowledgeBase: KnowledgeBaseManagementItem) => {
+    setKnowledgeBasePageMessage(null);
 
     try {
-      const response = await fetch(`/api/decks/${encodeURIComponent(deck.id)}`, {
+      const response = await fetch(`/api/knowledgeBases/${encodeURIComponent(knowledgeBase.id)}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          inReviewRotation: !deck.inReviewRotation,
+          inReviewRotation: !knowledgeBase.inReviewRotation,
         }),
       });
-      const data = (await response.json()) as DeckMutationResponse;
+      const data = (await response.json()) as KnowledgeBaseMutationResponse;
 
-      if (!response.ok || !data.ok || !data.deck) {
+      if (!response.ok || !data.ok || !data.knowledgeBase) {
         throw new Error(data.error ?? "Could not update rotation.");
       }
 
-      setDecks((currentDecks) =>
-        currentDecks.map((currentDeck) =>
-          currentDeck.id === deck.id ? (data.deck as DeckManagementItem) : currentDeck,
+      setKnowledgeBases((currentKnowledgeBases) =>
+        currentKnowledgeBases.map((currentKnowledgeBase) =>
+          currentKnowledgeBase.id === knowledgeBase.id ? (data.knowledgeBase as KnowledgeBaseManagementItem) : currentKnowledgeBase,
         ),
       );
       resetReviewSessionForServerReload();
     } catch (toggleError) {
-      setDeckPageMessage(
+      setKnowledgeBasePageMessage(
         toggleError instanceof Error
           ? toggleError.message
           : "Could not update rotation.",
@@ -2320,9 +2305,9 @@ export default function ReviewApp({
     }
   }, [resetReviewSessionForServerReload]);
 
-  const resetDeckQueueState = useCallback(() => {
+  const resetKnowledgeBaseQueueState = useCallback(() => {
     queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
-    loadedDeckEmbeddingPlotKeyRef.current = null;
+    loadedKnowledgeEmbeddingPlotKeyRef.current = null;
     hasLoadedQueueStatusRef.current = false;
     loadedQueueSortKeyRef.current = null;
     loadedQueueSearchQueryRef.current = null;
@@ -2331,125 +2316,121 @@ export default function ReviewApp({
     setReviewQueueTotal(0);
     setQueueSearchInput("");
     setQueueSearchQuery("");
-    setDeckEmbeddingPlot(createEmptyDeckEmbeddingPlot());
+    setKnowledgeEmbeddingPlot(createEmptyKnowledgeEmbeddingPlot());
     setQueueVirtualRange({
       start: 0,
       end: QUEUE_PAGE_SIZE,
     });
   }, []);
 
-  const openDeckQueue = useCallback(
-    (deck: DeckManagementItem, options: { updateUrl?: boolean } = {}) => {
-      const shouldReset = selectedDeckDetailId !== deck.id;
+  const openKnowledgeBaseQueue = useCallback(
+    (knowledgeBase: KnowledgeBaseManagementItem, options: { updateUrl?: boolean } = {}) => {
+      const shouldReset = selectedKnowledgeBaseDetailId !== knowledgeBase.id;
 
-      setSelectedDeckId(deck.id);
-      setSelectedDeckDetailId(deck.id);
-      setRouteDeckSlug(deck.slug);
-      rememberLearnTargetDeck(deck.id);
+      setSelectedKnowledgeBaseId(knowledgeBase.id);
+      setSelectedKnowledgeBaseDetailId(knowledgeBase.id);
+      setRouteKnowledgeBaseSlug(knowledgeBase.slug);
+      rememberLearnTargetKnowledgeBase(knowledgeBase.id);
 
       if (shouldReset) {
-        resetDeckQueueState();
+        resetKnowledgeBaseQueueState();
       }
 
       if (options.updateUrl ?? true) {
-        navigateToTab("queue", undefined, deck.slug);
+        navigateToTab("queue", undefined, knowledgeBase.slug);
       } else {
         setActiveTab("queue");
       }
     },
-    [navigateToTab, rememberLearnTargetDeck, resetDeckQueueState, selectedDeckDetailId],
+    [navigateToTab, rememberLearnTargetKnowledgeBase, resetKnowledgeBaseQueueState, selectedKnowledgeBaseDetailId],
   );
 
-  const deleteEditingDeck = useCallback(async () => {
-    if (!editingDeck || isCreatingDeck || isDeckDeleting) {
+  const deleteEditingKnowledgeBase = useCallback(async () => {
+    if (!editingKnowledgeBase || isCreatingKnowledgeBase || isKnowledgeBaseDeleting) {
       return;
     }
 
     const shouldDelete = window.confirm(
-      `Delete "${editingDeck.name}" and all of its questions, answers, review history, and embeddings? This cannot be undone.`,
+      `Delete "${editingKnowledgeBase.name}" and all of its questions, answers, review history, and embeddings? This cannot be undone.`,
     );
 
     if (!shouldDelete) {
       return;
     }
 
-    const deckId = editingDeck.id;
-    const deckName = editingDeck.name;
-    const wasRotationDeck = editingDeck.inReviewRotation;
-    const nextDecks = decks.filter((deck) => deck.id !== deckId);
-    const wasOpenDeck = selectedDeckDetailId === deckId;
-    const wasCurrentQuestionDeck = currentDeckId === deckId;
+    const knowledgeBaseId = editingKnowledgeBase.id;
+    const knowledgeBaseName = editingKnowledgeBase.name;
+    const wasRotationKnowledgeBase = editingKnowledgeBase.inReviewRotation;
+    const nextKnowledgeBases = knowledgeBases.filter((knowledgeBase) => knowledgeBase.id !== knowledgeBaseId);
+    const wasOpenKnowledgeBase = selectedKnowledgeBaseDetailId === knowledgeBaseId;
+    const wasCurrentQuestionKnowledgeBase = currentKnowledgeBaseId === knowledgeBaseId;
 
-    setDeckEditorMessage(null);
-    setDeckPageMessage(null);
-    setIsDeckDeleting(true);
+    setKnowledgeBaseEditorMessage(null);
+    setKnowledgeBasePageMessage(null);
+    setIsKnowledgeBaseDeleting(true);
 
     try {
-      const response = await fetch(`/api/decks/${encodeURIComponent(deckId)}`, {
+      const response = await fetch(`/api/knowledgeBases/${encodeURIComponent(knowledgeBaseId)}`, {
         method: "DELETE",
       });
-      const data = (await response.json()) as DeckMutationResponse;
+      const data = (await response.json()) as KnowledgeBaseMutationResponse;
 
       if (!response.ok || !data.ok) {
-        throw new Error(data.error ?? "Could not delete deck.");
+        throw new Error(data.error ?? "Could not delete knowledgeBase.");
       }
 
-      setDecks(nextDecks);
-      setSelectedDeckId((currentDeckIdValue) =>
-        currentDeckIdValue === deckId
-          ? nextDecks[0]?.id ?? ""
-          : currentDeckIdValue,
+      setKnowledgeBases(nextKnowledgeBases);
+      setSelectedKnowledgeBaseId((currentKnowledgeBaseIdValue) =>
+        currentKnowledgeBaseIdValue === knowledgeBaseId
+          ? nextKnowledgeBases[0]?.id ?? ""
+          : currentKnowledgeBaseIdValue,
       );
-      rememberLearnTargetDeck(null);
-      setEvaluations((currentEvaluations) =>
-        currentEvaluations.filter((evaluation) => evaluation.deckId !== deckId),
-      );
+      rememberLearnTargetKnowledgeBase(null);
+      setEvaluations((currentEvaluations) => currentEvaluations);
       setMessages((currentMessages) =>
-        currentMessages.filter(
-          (message) => message.kind !== "answer" || message.deckId !== deckId,
-        ),
+        currentMessages.filter((message) => message.kind !== "answer"),
       );
 
-      if (wasRotationDeck || wasCurrentQuestionDeck) {
+      if (wasRotationKnowledgeBase || wasCurrentQuestionKnowledgeBase) {
         resetReviewSessionForServerReload();
 
-        if (wasCurrentQuestionDeck) {
+        if (wasCurrentQuestionKnowledgeBase) {
           setMessages([]);
         }
       }
 
-      if (wasOpenDeck) {
-        setSelectedDeckDetailId(null);
-        setRouteDeckSlug(null);
-        resetDeckQueueState();
+      if (wasOpenKnowledgeBase) {
+        setSelectedKnowledgeBaseDetailId(null);
+        setRouteKnowledgeBaseSlug(null);
+        resetKnowledgeBaseQueueState();
         navigateToTab("queue");
       }
 
       setSelectedQuestionId(null);
       setSelectedQuestion(null);
-      setIsCreatingDeck(false);
-      setEditingDeckId(null);
-      setDeckPageMessage(`Deleted ${deckName}.`);
+      setIsCreatingKnowledgeBase(false);
+      setEditingKnowledgeBaseId(null);
+      setKnowledgeBasePageMessage(`Deleted ${knowledgeBaseName}.`);
     } catch (deleteError) {
-      setDeckEditorMessage(
+      setKnowledgeBaseEditorMessage(
         deleteError instanceof Error
           ? deleteError.message
-          : "Could not delete deck.",
+          : "Could not delete knowledgeBase.",
       );
     } finally {
-      setIsDeckDeleting(false);
+      setIsKnowledgeBaseDeleting(false);
     }
   }, [
-    currentDeckId,
-    decks,
-    editingDeck,
-    isCreatingDeck,
-    isDeckDeleting,
+    currentKnowledgeBaseId,
+    knowledgeBases,
+    editingKnowledgeBase,
+    isCreatingKnowledgeBase,
+    isKnowledgeBaseDeleting,
     navigateToTab,
-    rememberLearnTargetDeck,
+    rememberLearnTargetKnowledgeBase,
     resetReviewSessionForServerReload,
-    resetDeckQueueState,
-    selectedDeckDetailId,
+    resetKnowledgeBaseQueueState,
+    selectedKnowledgeBaseDetailId,
   ]);
 
   const hasPendingEvaluationActivity =
@@ -2465,50 +2446,6 @@ export default function ReviewApp({
 
     return () => window.clearInterval(interval);
   }, [hasPendingEvaluationActivity]);
-
-  useEffect(() => {
-    if (activeTab !== "queue" || hasLoadedDecksRef.current || isDecksLoading) {
-      return;
-    }
-
-    void loadDecks();
-  }, [activeTab, isDecksLoading, loadDecks]);
-
-  useEffect(() => {
-    if (activeTab !== "queue") {
-      return;
-    }
-
-    if (!routeDeckSlug) {
-      if (selectedDeckDetailId) {
-        setSelectedDeckDetailId(null);
-        resetDeckQueueState();
-      }
-
-      return;
-    }
-
-    const routedDeck = decks.find((deck) => deck.slug === routeDeckSlug);
-
-    if (routedDeck) {
-      setDeckPageMessage(null);
-      openDeckQueue(routedDeck, { updateUrl: false });
-      return;
-    }
-
-    if (hasLoadedDecksRef.current && !isDecksLoading) {
-      setSelectedDeckDetailId(null);
-      setDeckPageMessage(`Deck "${routeDeckSlug}" was not found.`);
-    }
-  }, [
-    activeTab,
-    decks,
-    isDecksLoading,
-    openDeckQueue,
-    resetDeckQueueState,
-    routeDeckSlug,
-    selectedDeckDetailId,
-  ]);
 
   useEffect(() => {
     if (cachedSessionRef.current?.currentUser || initialCurrentUser) {
@@ -2662,8 +2599,8 @@ export default function ReviewApp({
     questionIdRef.current = data.questionId;
     setQuestion(data.question);
     questionRef.current = data.question;
-    setCurrentDeckId(data.deckId);
-    setCurrentDeckName(data.deckName);
+    setCurrentKnowledgeBaseId(null);
+    setCurrentKnowledgeBaseName(null);
     setQueueRemaining(data.queueRemaining);
     setToolbarDueCount(data.queueRemaining);
 
@@ -2683,8 +2620,8 @@ export default function ReviewApp({
     questionIdRef.current = item?.questionId ?? null;
     setQuestion(item?.question ?? null);
     questionRef.current = item?.question ?? null;
-    setCurrentDeckId(item?.deckId ?? null);
-    setCurrentDeckName(item?.deckName ?? null);
+    setCurrentKnowledgeBaseId(null);
+    setCurrentKnowledgeBaseName(null);
 
     if (item?.question && options?.appendToMessages !== false) {
       appendQuestion(item.question);
@@ -2826,19 +2763,15 @@ export default function ReviewApp({
       offset: "0",
       sort: queueSortKey,
       includeQuestionAttempts: "0",
-      includeDeckEmbeddingPlot: "0",
+      includeKnowledgeEmbeddingPlot: "0",
     });
-
-    if (selectedDeckDetailId) {
-      params.set("deckId", selectedDeckDetailId);
-    }
 
     if (queueSearchQuery) {
       params.set("query", queueSearchQuery);
     }
 
     return `/api/queue-status?${params.toString()}`;
-  }, [queueSearchQuery, queueSortKey, selectedDeckDetailId]);
+  }, [queueSearchQuery, queueSortKey]);
 
   const previousAnswerStatusUrl = useCallback(() => {
     const params = new URLSearchParams({
@@ -2848,7 +2781,7 @@ export default function ReviewApp({
       includeReviewQueue: "0",
       includeQuestionAttempts: "0",
       includeRecentAttempts: "1",
-      includeDeckEmbeddingPlot: "0",
+      includeKnowledgeEmbeddingPlot: "0",
       includeQueueCounts: "0",
     });
 
@@ -2860,29 +2793,21 @@ export default function ReviewApp({
       limit: String(Math.max(0, Math.floor(limit))),
       offset: "0",
       sort: queueSortKey,
-      includeDeckEmbeddingPlot: "0",
+      includeKnowledgeEmbeddingPlot: "0",
     });
 
-    if (selectedDeckDetailId) {
-      params.set("deckId", selectedDeckDetailId);
-    }
-
     return `/api/queue-status/stream?${params.toString()}`;
-  }, [queueSortKey, selectedDeckDetailId]);
+  }, [queueSortKey]);
 
-  const deckEmbeddingPlotUrl = useCallback((limit: number) => {
+  const knowledgeEmbeddingPlotUrl = useCallback((limit: number) => {
     const params = new URLSearchParams({
       limit: String(Math.max(0, Math.floor(limit))),
       offset: "0",
       sort: queueSortKey,
     });
 
-    if (selectedDeckDetailId) {
-      params.set("deckId", selectedDeckDetailId);
-    }
-
-    return `/api/deck-embedding-plot?${params.toString()}`;
-  }, [queueSortKey, selectedDeckDetailId]);
+    return `/api/knowledge-embedding-plot?${params.toString()}`;
+  }, [queueSortKey]);
 
   const applyQueueStatus = useCallback((
     data: QueueStatusResponse,
@@ -2925,13 +2850,13 @@ export default function ReviewApp({
     loadedQueueSortKeyRef.current = queueSortKey;
     loadedQueueSearchQueryRef.current = queueSearchQuery;
     if (
-      data.deckEmbeddingPlot &&
-      (data.deckEmbeddingPlot.model ||
-        data.deckEmbeddingPlot.totalQuestions > 0 ||
-        data.deckEmbeddingPlot.embeddedQuestions > 0 ||
-        data.deckEmbeddingPlot.points.length > 0)
+      data.knowledgeEmbeddingPlot &&
+      (data.knowledgeEmbeddingPlot.model ||
+        data.knowledgeEmbeddingPlot.totalQuestions > 0 ||
+        data.knowledgeEmbeddingPlot.embeddedQuestions > 0 ||
+        data.knowledgeEmbeddingPlot.points.length > 0)
     ) {
-      setDeckEmbeddingPlot(data.deckEmbeddingPlot);
+      setKnowledgeEmbeddingPlot(data.knowledgeEmbeddingPlot);
     }
   }, [queueSearchQuery, queueSortKey]);
 
@@ -2985,20 +2910,16 @@ export default function ReviewApp({
     }
   }, [previousAnswerStatusUrl]);
 
-  const loadDeckEmbeddingPlot = useCallback(async (limit = QUEUE_PAGE_SIZE) => {
-    if (!selectedDeckDetailId) {
-      return;
-    }
-
+  const loadKnowledgeEmbeddingPlot = useCallback(async (limit = QUEUE_PAGE_SIZE) => {
     const normalizedLimit = Math.max(QUEUE_PAGE_SIZE, Math.floor(limit));
-    const plotKey = `${selectedDeckDetailId}:${queueSortKey}:${normalizedLimit}`;
+    const plotKey = `${queueSortKey}:${normalizedLimit}`;
 
-    if (loadedDeckEmbeddingPlotKeyRef.current === plotKey) {
+    if (loadedKnowledgeEmbeddingPlotKeyRef.current === plotKey) {
       return;
     }
 
     try {
-      const response = await fetch(deckEmbeddingPlotUrl(normalizedLimit), {
+      const response = await fetch(knowledgeEmbeddingPlotUrl(normalizedLimit), {
         cache: "no-store",
       });
 
@@ -3006,14 +2927,14 @@ export default function ReviewApp({
         return;
       }
 
-      const data = (await response.json()) as DeckEmbeddingPlotResponse;
+      const data = (await response.json()) as KnowledgeEmbeddingPlotResponse;
 
-      loadedDeckEmbeddingPlotKeyRef.current = plotKey;
-      setDeckEmbeddingPlot(data);
+      loadedKnowledgeEmbeddingPlotKeyRef.current = plotKey;
+      setKnowledgeEmbeddingPlot(data);
     } catch {
       // The queue remains usable without the optional embedding map.
     }
-  }, [deckEmbeddingPlotUrl, queueSortKey, selectedDeckDetailId]);
+  }, [knowledgeEmbeddingPlotUrl, queueSortKey]);
 
   useEffect(() => {
     if (activeTab !== "review") {
@@ -3047,7 +2968,7 @@ export default function ReviewApp({
   ]);
 
   useEffect(() => {
-    if (activeTab !== "queue" || !selectedDeckDetailId) {
+    if (activeTab !== "queue") {
       return;
     }
 
@@ -3058,11 +2979,11 @@ export default function ReviewApp({
 
     if (shouldLoadQueueStatus) {
       queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
-      loadedDeckEmbeddingPlotKeyRef.current = null;
+      loadedKnowledgeEmbeddingPlotKeyRef.current = null;
       setReviewQueue([]);
       setRecentAttempts([]);
       setReviewQueueTotal(0);
-      setDeckEmbeddingPlot(createEmptyDeckEmbeddingPlot());
+      setKnowledgeEmbeddingPlot(createEmptyKnowledgeEmbeddingPlot());
       setQueueVirtualRange({
         start: 0,
         end: QUEUE_PAGE_SIZE,
@@ -3120,26 +3041,23 @@ export default function ReviewApp({
     queueSearchQuery,
     queueSortKey,
     queueStatusStreamUrl,
-    selectedDeckDetailId,
   ]);
 
   useEffect(() => {
     if (
       activeTab !== "queue" ||
-      !selectedDeckDetailId ||
       reviewQueue.length === 0
     ) {
       return;
     }
 
-    void loadDeckEmbeddingPlot(
+    void loadKnowledgeEmbeddingPlot(
       Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current),
     );
   }, [
     activeTab,
-    loadDeckEmbeddingPlot,
+    loadKnowledgeEmbeddingPlot,
     reviewQueue.length,
-    selectedDeckDetailId,
   ]);
 
   const gradingEvaluationIds = useMemo(
@@ -3247,7 +3165,7 @@ export default function ReviewApp({
           message.correctAnswer === evaluation.correctAnswer &&
           message.nextDue === evaluation.nextDue &&
           message.resolvedAt === evaluation.resolvedAt &&
-          message.deckId === evaluation.deckId &&
+          message.evaluationId === evaluation.id &&
           message.traceId === evaluation.traceId &&
           message.cost === evaluation.cost
         ) {
@@ -3267,7 +3185,6 @@ export default function ReviewApp({
           correctAnswer: evaluation.correctAnswer,
           nextDue: evaluation.nextDue,
           resolvedAt: evaluation.resolvedAt,
-          deckId: evaluation.deckId,
           traceId: evaluation.traceId,
           cost: evaluation.cost,
         };
@@ -3386,8 +3303,8 @@ export default function ReviewApp({
 
     const submittedQuestion = activeQuestion;
     const submittedQuestionId = questionIdRef.current;
-    const submittedDeckId = currentDeckId;
-    const submittedDeckName = currentDeckName;
+    const submittedKnowledgeBaseId = currentKnowledgeBaseId;
+    const submittedKnowledgeBaseName = currentKnowledgeBaseName;
     const submittedSessionItem = currentSessionItemRef.current;
     const submittedAnswer = (answerOverride ?? answerRef.current).trim();
 
@@ -3414,7 +3331,6 @@ export default function ReviewApp({
         id: optimisticMessageId,
         kind: "answer",
         questionId: submittedQuestionId,
-        deckId: currentDeckId,
         question: submittedQuestion,
         answer: submittedAnswer || "(blank)",
         evaluationId: optimisticEvaluationId,
@@ -3482,8 +3398,8 @@ export default function ReviewApp({
       });
 
       if (!nextSessionItem) {
-        if (submittedDeckId) {
-          rememberLearnTargetDeck(submittedDeckId);
+        if (submittedKnowledgeBaseId) {
+          rememberLearnTargetKnowledgeBase(submittedKnowledgeBaseId);
         }
 
         learnTopUpCooldownUntilRef.current = 0;
@@ -3505,8 +3421,8 @@ export default function ReviewApp({
       currentSessionItemRef.current = submittedSessionItem;
       setQuestion(submittedQuestion);
       questionRef.current = submittedQuestion;
-      setCurrentDeckId(submittedDeckId);
-      setCurrentDeckName(submittedDeckName);
+      setCurrentKnowledgeBaseId(submittedKnowledgeBaseId);
+      setCurrentKnowledgeBaseName(submittedKnowledgeBaseName);
       setAnswer(submittedAnswer);
       answerRef.current = submittedAnswer;
       setError(
@@ -3522,9 +3438,9 @@ export default function ReviewApp({
   }, [
     advanceReviewSessionQueue,
     clearPendingSpeechCommand,
-    currentDeckId,
-    currentDeckName,
-    rememberLearnTargetDeck,
+    currentKnowledgeBaseId,
+    currentKnowledgeBaseName,
+    rememberLearnTargetKnowledgeBase,
   ]);
 
   const flagCurrentQuestion = useCallback(async () => {
@@ -3923,7 +3839,6 @@ export default function ReviewApp({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          deckId: selectedDeckDetailId,
           scope: generatorScope,
           files: generatorFiles,
           count,
@@ -3992,7 +3907,7 @@ export default function ReviewApp({
     setGeneratorMessage(null);
   }
 
-  async function addSelectedGeneratedQuestionsToDeck() {
+  async function addSelectedGeneratedQuestionsToKnowledgeBase() {
     const questionsToAdd = generatedQuestions.filter(
       (item) => item.status === "selected",
     );
@@ -4022,7 +3937,6 @@ export default function ReviewApp({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          deckId: selectedDeckDetailId,
           questions: questionsToAdd.map((item) => ({
             question: item.question,
             conciseAnswer: item.conciseAnswer,
@@ -4046,7 +3960,7 @@ export default function ReviewApp({
         data.added > 0
           ? `${data.added} ${
               data.added === 1 ? "question" : "questions"
-            } added to deck${
+            } added to your knowledge base${
               data.rejected ? `, ${data.rejected} semantic duplicates rejected` : ""
             }.`
           : questionsToAdd.length === 1
@@ -4054,7 +3968,6 @@ export default function ReviewApp({
             : "Questions already exist or were rejected as duplicates.",
       );
       await loadStatus();
-      await loadDecks();
 
       if (!questionRef.current) {
         await loadNextQuestion({ surfaceError: false });
@@ -4082,22 +3995,22 @@ export default function ReviewApp({
     }
   }
 
-  const activeReviewDeckIds = useMemo(
+  const activeReviewKnowledgeBaseIds = useMemo(
     () =>
       new Set(
-        decks
-          .filter((deck) => deck.inReviewRotation)
-          .map((deck) => deck.id),
+        knowledgeBases
+          .filter((knowledgeBase) => knowledgeBase.inReviewRotation)
+          .map((knowledgeBase) => knowledgeBase.id),
       ),
-    [decks],
+    [knowledgeBases],
   );
-  const isDeckInReviewRotation = (deckId: string | null | undefined) =>
-    deckId == null || decks.length === 0 || activeReviewDeckIds.has(deckId);
+  const isKnowledgeBaseInReviewRotation = (knowledgeBaseId: string | null | undefined) =>
+    knowledgeBaseId == null || knowledgeBases.length === 0 || activeReviewKnowledgeBaseIds.has(knowledgeBaseId);
 
   const sessionPreviousAnswers: PreviousAnswerItem[] = messages
     .filter(
       (message): message is Extract<ChatMessage, { kind: "answer" }> =>
-        message.kind === "answer" && isDeckInReviewRotation(message.deckId),
+        message.kind === "answer" && isKnowledgeBaseInReviewRotation(null),
     )
     .slice()
     .reverse()
@@ -4141,7 +4054,7 @@ export default function ReviewApp({
   const evaluationPreviousAnswers: PreviousAnswerItem[] = evaluations
     .filter(
       (evaluation) =>
-        isDeckInReviewRotation(evaluation.deckId) &&
+        isKnowledgeBaseInReviewRotation(null) &&
         !sessionPreviousEvaluationIds.has(evaluation.id) &&
         evaluation.answer !== null,
     )
@@ -4202,7 +4115,7 @@ export default function ReviewApp({
   const recentAttemptPreviousAnswers: PreviousAnswerItem[] = recentAttempts
     .filter((attempt) => {
       if (
-        !isDeckInReviewRotation(attempt.deckId) ||
+        !isKnowledgeBaseInReviewRotation(null) ||
         attempt.question === question ||
         livePreviousQuestions.has(attempt.question)
       ) {
@@ -4250,7 +4163,7 @@ export default function ReviewApp({
       (item) =>
         item.lastScore !== null &&
         item.lastAnswer !== null &&
-        isDeckInReviewRotation(item.deckId) &&
+        isKnowledgeBaseInReviewRotation(null) &&
         !livePreviousQuestions.has(item.question) &&
         !recentAttemptQuestions.has(item.question),
     )
@@ -4493,13 +4406,6 @@ export default function ReviewApp({
   const topUpLearnQueue = useCallback(async () => {
     const now = Date.now();
     const count = 50;
-    const topUpDeckId =
-      selectedDeckDetailId ||
-      learnTargetDeckIdRef.current ||
-      currentDeckId ||
-      selectedDeckId ||
-      null;
-
     if (isLearnTopUpPendingRef.current) {
       return;
     }
@@ -4513,10 +4419,10 @@ export default function ReviewApp({
     isLearnTopUpPendingRef.current = true;
     setIsLearnTopUpPending(true);
     setLearnTopUpMessage(null);
-    setLearnGenerationStatus("Updating deck memory");
+    setLearnGenerationStatus("Updating knowledge memory");
     setLearnGenerationProgress({
       phase: "memory",
-      status: "Updating deck memory",
+      status: "Updating knowledge memory",
       progress: 0,
       generated: 0,
       total: count,
@@ -4532,7 +4438,6 @@ export default function ReviewApp({
         },
         body: JSON.stringify({
           count,
-          ...(topUpDeckId ? { deckId: topUpDeckId } : {}),
         }),
       });
       const data = await parseTopUpResponse(response, count, (progress) => {
@@ -4543,8 +4448,8 @@ export default function ReviewApp({
       if (data.added > 0) {
         setLearnTopUpMessage(
           data.added === 1
-            ? `1 question added to ${data.deckName}`
-            : `${data.added} questions added to ${data.deckName}`,
+            ? "1 question added to your knowledge base"
+            : `${data.added} questions added to your knowledge base`,
         );
         setLearnGenerationStatus("Refreshing the queue");
         setLearnGenerationProgress((currentProgress) => ({
@@ -4559,7 +4464,6 @@ export default function ReviewApp({
           latestQuestion: currentProgress?.latestQuestion ?? null,
         }));
         await loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
-        await loadDecks();
 
         setLearnGenerationStatus("Loading the next question");
         setLearnGenerationProgress((currentProgress) => ({
@@ -4599,12 +4503,12 @@ export default function ReviewApp({
       setLearnGenerationProgress(null);
     }
   }, [
-    currentDeckId,
-    loadDecks,
+    currentKnowledgeBaseId,
+    loadKnowledgeBases,
     loadNextQuestion,
     loadStatus,
-    selectedDeckDetailId,
-    selectedDeckId,
+    selectedKnowledgeBaseDetailId,
+    selectedKnowledgeBaseId,
   ]);
 
   useEffect(() => {
@@ -4844,8 +4748,8 @@ export default function ReviewApp({
   ]);
 
   usePageScrollLock(
-    isCreatingDeck ||
-      Boolean(editingDeck) ||
+    isCreatingKnowledgeBase ||
+      Boolean(editingKnowledgeBase) ||
       isEmbeddingMapOpen ||
       isQuestionGeneratorOpen ||
       isSettingsOpen ||
@@ -4885,7 +4789,7 @@ export default function ReviewApp({
   }, [selectQuestion, selectedQuestionStats]);
 
   useEffect(() => {
-    if (activeTab !== "queue" || !selectedDeckDetailId) {
+    if (activeTab !== "queue") {
       return;
     }
 
@@ -4900,7 +4804,6 @@ export default function ReviewApp({
     };
   }, [
     activeTab,
-    selectedDeckDetailId,
     sortedReviewQueue.length,
     updateQueueVirtualRange,
   ]);
@@ -4908,7 +4811,6 @@ export default function ReviewApp({
   useEffect(() => {
     if (
       activeTab !== "queue" ||
-      !selectedDeckDetailId ||
       isQueuePageLoadingRef.current
     ) {
       return;
@@ -4932,7 +4834,6 @@ export default function ReviewApp({
     loadMoreQueueRows,
     queueVirtualRange.start,
     queueVirtualRange.end,
-    selectedDeckDetailId,
   ]);
 
   return (
@@ -5266,26 +5167,20 @@ export default function ReviewApp({
         </div>
 
         <section
-          className={`queue-stage ${
-            selectedDeckDetailId ? "" : "deck-stage"
-          }`}
+          className="queue-stage"
           ref={queueStageRef}
           hidden={activeTab !== "queue"}
           id="queue-panel"
           role="tabpanel"
           aria-labelledby="queue-tab"
         >
-          {selectedDeckDetailId ? (
-            <>
-              <div className="queue-detail-header">
-                <div className="queue-detail-heading">
-                  <h2>{selectedDeckDetail?.name ?? "Deck"}</h2>
-                  <p>
-                    {selectedDeckDetail?.cardCount ?? 0}{" "}
-                    {(selectedDeckDetail?.cardCount ?? 0) === 1 ? "card" : "cards"}
-                  </p>
-                </div>
+          <>
+            <div className="queue-detail-header">
+              <div className="queue-detail-heading">
+                <h2>Knowledge base</h2>
+                <p>{reviewQueueTotal} {reviewQueueTotal === 1 ? "card" : "cards"}</p>
               </div>
+            </div>
 
               <div className="queue-toolbar">
                 <div className="queue-action-group">
@@ -5447,300 +5342,9 @@ export default function ReviewApp({
                   ) : null}
                 </ol>
               )}
-            </>
-          ) : (
-            <>
-              <div className="queue-toolbar deck-toolbar">
-                <button
-                  className="queue-generate-trigger"
-                  type="button"
-                  onClick={createDeck}
-                >
-                  <Plus aria-hidden="true" />
-                  <span>Create deck</span>
-                </button>
-                <label className="deck-search-label">
-                  <span className="sr-only">Search decks</span>
-                  <span className="deck-search-shell">
-                    <Search aria-hidden="true" />
-                    <input
-                      className="deck-search-input"
-                      type="search"
-                      value={deckSearchQuery}
-                      onChange={(event) => setDeckSearchQuery(event.target.value)}
-                      placeholder="Search decks"
-                    />
-                  </span>
-                </label>
-                <label className="queue-sort-label">
-                  Sort by
-                  <span className="queue-sort-select-shell">
-                    <select
-                      className="queue-sort-select"
-                      value={deckSortKey}
-                      onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                        setDeckSortKey(event.target.value as DeckSortKey)
-                      }
-                      aria-label="Sort decks"
-                    >
-                      <option value="updated">Updated</option>
-                      <option value="due">Due count</option>
-                      <option value="name">Name</option>
-                    </select>
-                    <ChevronDown aria-hidden="true" />
-                  </span>
-                </label>
-              </div>
-
-              {deckPageMessage ? (
-                <p className="queue-empty" role="status">
-                  {deckPageMessage}
-                </p>
-              ) : null}
-
-              {isDecksLoading ? (
-                <DeckListLoadingPlaceholders />
-              ) : decks.length === 0 ? (
-                <p className="queue-empty">No decks yet.</p>
-              ) : visibleDecks.length === 0 ? (
-                <p className="queue-empty">No matching decks.</p>
-              ) : (
-                <ol className="queue-list deck-list" ref={queueListRef}>
-                  {visibleDecks.map((deck) => {
-                    const isSelected = selectedDeck?.id === deck.id;
-
-                    return (
-                      <li className="queue-row deck-row" key={deck.id}>
-                        <div
-                          className={`queue-row-card deck-row-card ${
-                            isSelected ? "deck-row-card-selected" : ""
-                          }`}
-                          role="button"
-                          tabIndex={0}
-                          aria-label={`Open ${deck.name}`}
-                          aria-pressed={isSelected}
-                          onClick={() => openDeckQueue(deck)}
-                          onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-                            if (event.key === "Enter" || event.key === " ") {
-                              event.preventDefault();
-                              openDeckQueue(deck);
-                            }
-                          }}
-                        >
-                          <div className="deck-row-main">
-                            <div className="deck-row-copy">
-                              <p className="queue-question deck-name">{deck.name}</p>
-                              {deck.coverage || deck.slug ? (
-                                <p className="queue-origin deck-description">
-                                  {deck.coverage || deck.slug}
-                                </p>
-                              ) : null}
-                            </div>
-                            <div className="deck-row-meta" aria-label="Deck details">
-                              <span
-                                className={`due-badge ${
-                                  deck.dueCount > 0 ? "now" : "scheduled"
-                                }`}
-                              >
-                                {deck.dueCount} due
-                              </span>
-                              <span>{deck.cardCount} cards</span>
-                              <span>{formatReviewDate(deck.lastReviewedAt)}</span>
-                            </div>
-                          </div>
-                          <div className="deck-row-actions">
-                            <button
-                              className={`deck-rotation-toggle ${
-                                deck.inReviewRotation
-                                  ? "deck-rotation-toggle-on"
-                                  : ""
-                              }`}
-                              type="button"
-                              aria-label={
-                                deck.inReviewRotation
-                                  ? `Remove ${deck.name} from review rotation`
-                                  : `Add ${deck.name} to review rotation`
-                              }
-                              aria-pressed={deck.inReviewRotation}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void toggleDeckRotation(deck);
-                              }}
-                            >
-                              <span />
-                            </button>
-                            <button
-                              className="deck-icon-button"
-                              type="button"
-                              aria-label={`Open ${deck.name} settings`}
-                              title="Settings"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                openDeckEditor(deck);
-                              }}
-                            >
-                              <Settings aria-hidden="true" />
-                            </button>
-                          </div>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-
-              <div className="deck-summary-strip" aria-label="Deck summary">
-                <span>{decks.length} decks</span>
-                <span>{rotationDeckCount} in rotation</span>
-                <span>{rotationDueCount} due in rotation</span>
-                <span>{totalCardCount} cards</span>
-              </div>
-            </>
-          )}
+          </>
         </section>
       </section>
-
-      {isCreatingDeck || editingDeck ? (
-        <div
-          className="deck-editor-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (!isDeckEditorBusy && event.target === event.currentTarget) {
-              setIsCreatingDeck(false);
-              setEditingDeckId(null);
-            }
-          }}
-        >
-          <form
-            className="deck-editor-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-busy={isDeckEditorBusy}
-            aria-labelledby="deck-editor-title"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void saveDeckDraft();
-            }}
-          >
-            <div className="deck-editor-header">
-              <div>
-                <p className="previous-field-label">Deck</p>
-                <h2 id="deck-editor-title">
-                  {isCreatingDeck ? "New deck" : "Edit deck"}
-                </h2>
-              </div>
-              <button
-                className="user-menu-trigger"
-                type="button"
-                aria-label="Close deck editor"
-                disabled={isDeckEditorBusy}
-                onClick={() => {
-                  setIsCreatingDeck(false);
-                  setEditingDeckId(null);
-                }}
-              >
-                <X aria-hidden="true" />
-              </button>
-            </div>
-
-            <div className="deck-editor-grid">
-              <label className="settings-field">
-                <span>Name</span>
-                <input
-                  className="settings-input"
-                  value={deckDraftName}
-                  onChange={(event) => {
-                    setDeckDraftName(event.target.value);
-                    setDeckEditorMessage(null);
-                  }}
-                  placeholder="Deck name"
-                  aria-describedby={
-                    deckDraftNameMessage ? "deck-editor-message" : undefined
-                  }
-                  disabled={isDeckEditorBusy}
-                />
-              </label>
-              <label className="settings-field">
-                <span>Covers</span>
-                <textarea
-                  className="settings-input deck-coverage-input"
-                  value={deckDraftCoverage}
-                  onChange={(event) => {
-                    setDeckDraftCoverage(event.target.value);
-                    setDeckEditorMessage(null);
-                  }}
-                  placeholder="Topics, boundaries, and intended question material"
-                  maxLength={2000}
-                  rows={5}
-                  disabled={isDeckEditorBusy}
-                />
-              </label>
-            </div>
-
-            {deckDraftNameMessage ? (
-              <p
-                className="deck-editor-status"
-                id="deck-editor-message"
-                role="alert"
-              >
-                {deckDraftNameMessage}
-              </p>
-            ) : null}
-
-            <div className="deck-editor-stats" aria-label="Deck question summary">
-              <div>
-                <dt>{editingDeck?.cardCount ?? 0}</dt>
-                <dd>questions</dd>
-              </div>
-              <div>
-                <dt>{editingDeck?.dueCount ?? 0}</dt>
-                <dd>due</dd>
-              </div>
-              <div>
-                <dt>{editingDeck?.inReviewRotation ? "on" : "off"}</dt>
-                <dd>rotation</dd>
-              </div>
-            </div>
-
-            <div className="deck-editor-actions">
-              {!isCreatingDeck && editingDeck ? (
-                <button
-                  className="deck-delete-link"
-                  type="button"
-                  disabled={isDeckEditorBusy}
-                  onClick={() => {
-                    void deleteEditingDeck();
-                  }}
-                >
-                  {isDeckDeleting ? "Deleting..." : "Delete deck"}
-                </button>
-              ) : (
-                <span className="deck-editor-action-spacer" aria-hidden="true" />
-              )}
-              <div className="deck-editor-action-buttons">
-                <button
-                  className="resting-secondary"
-                  type="button"
-                  disabled={isDeckEditorBusy}
-                  onClick={() => {
-                    setIsCreatingDeck(false);
-                    setEditingDeckId(null);
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="resting-primary"
-                  type="submit"
-                  disabled={!canSaveDeckDraft}
-                >
-                  {isDeckSaving ? "Saving..." : "Save"}
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-      ) : null}
 
       {isQuestionGeneratorOpen ? (
         <div
@@ -5938,13 +5542,13 @@ export default function ReviewApp({
                       <button
                         className="generator-primary-action"
                         type="button"
-                        onClick={() => void addSelectedGeneratedQuestionsToDeck()}
+                        onClick={() => void addSelectedGeneratedQuestionsToKnowledgeBase()}
                         disabled={
                           generatedQuestionCounts.selected === 0 ||
                           generatedQuestionCounts.adding > 0
                         }
                       >
-                        {generatedQuestionCounts.adding > 0 ? "Adding..." : "Add to Deck"}
+                        {generatedQuestionCounts.adding > 0 ? "Adding..." : "Add"}
                       </button>
                     </div>
                   </div>
@@ -5955,7 +5559,7 @@ export default function ReviewApp({
         </div>
       ) : null}
 
-      {isEmbeddingMapOpen && selectedDeckDetailId ? (
+      {isEmbeddingMapOpen ? (
         <div
           className="embedding-map-modal-backdrop"
           role="presentation"
@@ -5973,12 +5577,12 @@ export default function ReviewApp({
           >
             <div className="embedding-map-modal-header">
               <div>
-                <p className="embedding-map-modal-kicker">Deck map</p>
+                <p className="embedding-map-modal-kicker">Knowledge base map</p>
                 <h2
                   className="embedding-map-modal-title"
                   id="embedding-map-modal-title"
                 >
-                  {selectedDeckDetail?.name ?? "Deck"}
+                  Knowledge base
                 </h2>
               </div>
               <button
@@ -5990,8 +5594,8 @@ export default function ReviewApp({
             </div>
 
             <div className="embedding-map-modal-body">
-              <DeckEmbeddingPlot
-                plot={deckEmbeddingPlot}
+              <KnowledgeEmbeddingPlot
+                plot={knowledgeEmbeddingPlot}
                 reviewQueue={reviewQueue}
               />
             </div>

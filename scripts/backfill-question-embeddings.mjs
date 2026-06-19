@@ -179,7 +179,7 @@ async function loadQuestions(pool, options) {
   const result = await pool.query(
     `
       SELECT
-        q.deck_id,
+        q.user_id,
         q.id AS question_id,
         q.question,
         q.concise_answer,
@@ -187,7 +187,7 @@ async function loadQuestions(pool, options) {
 	      FROM questions q
 	      LEFT JOIN question_embeddings qe
 	        ON qe.question_id = q.id
-	       AND qe.deck_id = q.deck_id
+	       AND qe.user_id = q.user_id
        AND qe.embedding_model = $1
        AND qe.embedding_kind = $2
        AND qe.source_version = $3
@@ -220,7 +220,7 @@ async function saveEmbeddings(pool, rows, options) {
     await pool.query(
       `
         INSERT INTO question_embeddings (
-          deck_id,
+          user_id,
           question_id,
           question,
           embedding_model,
@@ -234,7 +234,7 @@ async function saveEmbeddings(pool, rows, options) {
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8::vector, $9, $9)
         ON CONFLICT (
-          deck_id,
+          user_id,
           question_id,
           embedding_model,
           embedding_kind,
@@ -247,7 +247,7 @@ async function saveEmbeddings(pool, rows, options) {
           updated_at = excluded.updated_at
       `,
       [
-        row.deck_id,
+        row.user_id,
         row.question_id,
         row.question,
         options.model,

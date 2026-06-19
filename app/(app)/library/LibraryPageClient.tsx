@@ -557,7 +557,7 @@ export default function LibraryPageClient({
               </select>
             </label>
             <div
-              className="deck-search-label library-search-label"
+              className="kb-search-label library-search-label"
               onBlur={(event) => {
                 const nextTarget = event.relatedTarget as Node | null;
 
@@ -571,7 +571,7 @@ export default function LibraryPageClient({
                 Search question bank
               </label>
               <span
-                className={`deck-search-shell library-token-search-shell${
+                className={`kb-search-shell library-token-search-shell${
                   isTagPickerOpen ? " library-token-search-shell-open" : ""
                 }`}
               >
@@ -591,7 +591,7 @@ export default function LibraryPageClient({
                   ))}
                   <input
                     id="library-question-search"
-                    className="deck-search-input library-token-search-input"
+                    className="kb-search-input library-token-search-input"
                     type="search"
                     value={searchInputValue}
                     onChange={(event) =>
@@ -651,7 +651,7 @@ export default function LibraryPageClient({
             </div>
           </div>
 
-          {message ? <p className="deck-editor-status">{message}</p> : null}
+          {message ? <p className="kb-editor-status">{message}</p> : null}
 
           <div className="tags-summary-strip library-summary-strip">
             <span>{questionCountLabel}</span>

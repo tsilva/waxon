@@ -40,18 +40,16 @@ Waxon is a Next.js application for typed recall practice. It serves due question
 
 The README identifies these important tables and relationships:
 
-* `users` own `decks`.
-* The default deck is `Deep Learning`.
-* `questions` stores per-card state and uses `deck_id`.
-* `question_attempts` stores each resolved user attempt with `deck_id`, raw answer, concise LLM answer summary, score, justification, and timestamps.
+* `questions` stores per-card state directly under `user_id`.
+* `question_attempts` stores each resolved user attempt with raw answer, concise LLM answer summary, score, justification, and timestamps.
 * Waxon maps Clerk accounts through `auth_accounts`.
 
 # Relevant Paths
 
 * `app/review/` and `app/api/review-queue/` contain review experience surfaces.
-* `/review`, `/learn`, `/library`, `/stats`, `/tags`, `/decks`, and `/queue` serve static-first route shells; signed-in data for those surfaces should load through their client hydrators and API routes rather than blocking the page document render.
+* `/review`, `/learn`, `/library`, `/stats`, `/tags`, and `/queue` serve static-first route shells; signed-in data for those surfaces should load through their client hydrators and API routes rather than blocking the page document render.
 * Authenticated app pages live under the route group `app/(app)/`, which preserves their public URL paths while keeping the root public layout free of the authenticated provider shell. Clerk sign-in and sign-up live under `app/(auth)/` so they keep Clerk context and `app/(auth)/auth-globals.css` without loading the authenticated app toolbar shell or full app stylesheet.
-* Internal app routes are accessible in `pnpm dev --port auto` through local test auth as `eng.tiago.silva@gmail.com`. Lighthouse audits for protected pages should include `/review`, `/learn`, a representative `/learn/courses/[courseId]`, `/library`, `/tags`, `/stats`, `/admin`, and a representative `/admin/traces/[traceId]`. `/decks`, `/decks/[deckSlug]`, and `/queue` intentionally redirect to `/library`.
+* Internal app routes are accessible in `pnpm dev --port auto` through local test auth as `eng.tiago.silva@gmail.com`. Lighthouse audits for protected pages should include `/review`, `/learn`, a representative `/learn/courses/[courseId]`, `/library`, `/tags`, `/stats`, `/admin`, and a representative `/admin/traces/[traceId]`. `/queue` intentionally redirects to `/library`.
 * `app/PreviousAnswerRow.tsx` is the shared question-row widget used by Review, Learn evaluation rows, and Library question rows.
 * `app/api/submit-answer/` and answer evaluation libraries are part of grading.
 * `app/lib/scheduler.ts` contains scheduling behavior.

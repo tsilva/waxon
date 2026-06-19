@@ -4,7 +4,7 @@ import type {
   SortDirection,
   SortKey,
   TraceStatus,
-} from "./AdminPageClient";
+} from "./adminTypes";
 
 export const ADMIN_VIEW_STATE_COOKIE = "waxon_admin_view_state";
 

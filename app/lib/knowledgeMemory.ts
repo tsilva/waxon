@@ -5,27 +5,31 @@ import {
 } from "./openRouter";
 import {
   getRecentQuestionAttempts,
-  listDecks,
   readQuestions,
-  updateDeck,
-  type DeckSummary,
 } from "./postgresStore";
 
-export const MAX_DECK_MEMORY_CHARS = 8_000;
+export const MAX_KNOWLEDGE_MEMORY_CHARS = 8_000;
 const MAX_MEMORY_CONTEXT_QUESTIONS = 220;
 const MAX_MEMORY_CONTEXT_ATTEMPTS = 40;
 
-type DeckMemoryRefreshReason =
+type KnowledgeMemoryRefreshReason =
   | "before_generation"
   | "after_answer_batch"
   | "cron"
   | "manual";
 
-type DeckMemoryQuestionContext = {
+type KnowledgeMemoryQuestionContext = {
   question: string;
   conciseAnswer: string;
   reviews: string;
   questionProvenance: string;
+};
+
+export type KnowledgeSummary = {
+  name: string;
+  goal: string;
+  cardCount: number;
+  dueCount: number;
 };
 
 export function normalizeMarkdownText(value: unknown, maxLength: number): string {
@@ -43,16 +47,16 @@ function escapeMarkdownHeading(heading: string): string {
   return heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export function initialDeckMemory(deck: { name: string; goal: string }): string {
+export function initialKnowledgeMemory(input: { name: string; goal: string }): string {
   return [
-    "# Deck Memory",
+    "# Knowledge Memory",
     "",
     "## Goal",
-    `${deck.goal || deck.name}`,
+    `${input.goal || input.name}`,
     "",
     "## Curriculum Map",
     "- Status: not yet inferred.",
-    "- Scope: infer from the deck goal, then keep this section compact.",
+    "- Scope: infer from the user's active knowledge base, then keep this section compact.",
     "",
     "## Target Ledger",
     "- Status: not yet inferred.",
@@ -76,13 +80,13 @@ export function initialDeckMemory(deck: { name: string; goal: string }): string 
   ].join("\n");
 }
 
-export function normalizeDeckMemory(
+export function normalizeKnowledgeMemory(
   memory: string,
-  deck: { name: string; goal: string },
+  input: { name: string; goal: string },
 ): string {
-  const source = memory.trim() || initialDeckMemory(deck);
+  const source = memory.trim() || initialKnowledgeMemory(input);
 
-  return source.slice(0, MAX_DECK_MEMORY_CHARS);
+  return source.slice(0, MAX_KNOWLEDGE_MEMORY_CHARS);
 }
 
 export function memorySectionBody(memory: string, heading: string): string {
@@ -97,60 +101,53 @@ export function memorySectionBody(memory: string, heading: string): string {
   return match?.[1]?.trim() ?? "";
 }
 
-function buildDeckMemorySystemPrompt(): string {
+function buildKnowledgeMemorySystemPrompt(): string {
   return [
-    "You update deck MEMORY.md files.",
-    "The memory is a durable deck-level curriculum asset, not a question-generation response.",
-    "Infer the current learning state from the deck goal, current memory, existing questions, and recent answer attempts.",
-    "Preserve established scope unless the deck goal clearly requires expanding it. Never narrow a broad or complete goal into only a beginner subset.",
+    "You update knowledge MEMORY.md files.",
+    "The memory is a durable user-level curriculum asset, not a question-generation response.",
+    "Infer the current learning state from the knowledge-base goal, current memory, existing questions, and recent answer attempts.",
+    "Preserve established scope unless the knowledge-base goal clearly requires expanding it. Never narrow a broad or complete goal into only a beginner subset.",
     "Maintain compact sections: Goal, Curriculum Map, Target Ledger, Proficiency, Weak Points, Frontier, Frontier Queue, Completion.",
     "Use Target Ledger statuses: todo, planned, strong, partial, weak.",
     "Mark answered high-score targets strong, low-score targets weak or partial, generated unanswered targets planned, and future uncovered targets todo.",
     "For finite goals, make the Target Ledger or module map explicit enough that completion is auditable.",
     "Preserve exact symbols, formulas, code identifiers, names, terms, kana, and other atomic target strings.",
-    "Return strict JSON only: {\"memory\":\"# Deck Memory\\n...\"}",
+    "Return strict JSON only: {\"memory\":\"# Knowledge Memory\\n...\"}",
   ].join("\n\n");
 }
 
 function compactQuestionContext(
-  questions: DeckMemoryQuestionContext[],
-): DeckMemoryQuestionContext[] {
+  questions: KnowledgeMemoryQuestionContext[],
+): KnowledgeMemoryQuestionContext[] {
   return questions.slice(0, MAX_MEMORY_CONTEXT_QUESTIONS);
 }
 
-export async function refreshDeckMemory(input: {
+export async function refreshKnowledgeMemory(input: {
   apiKey: string;
   model: string;
   userId: string;
-  deckId: string;
-  reason: DeckMemoryRefreshReason;
+  reason: KnowledgeMemoryRefreshReason;
 }): Promise<{
-  deck: DeckSummary;
+  knowledgeBase: KnowledgeSummary;
   memory: string;
   updated: boolean;
 }> {
-  const deck = (await listDecks({ userId: input.userId })).find(
-    (candidate) => candidate.id === input.deckId,
-  );
-
-  if (!deck) {
-    throw new Error("Deck not found.");
-  }
-
-  const deckGoal = deck.coverage || deck.name;
-  const currentMemory = normalizeDeckMemory(deck.memory, {
-    name: deck.name,
-    goal: deckGoal,
-  });
-  const questions = await readQuestions({
-    userId: input.userId,
-    deckId: deck.id,
-  });
+  const knowledgeBase: KnowledgeSummary = {
+    name: "Knowledge base",
+    goal: "Continue expanding and maintaining the user's knowledge base.",
+    cardCount: 0,
+    dueCount: 0,
+  };
+  const currentMemory = normalizeKnowledgeMemory("", knowledgeBase);
+  const questions = await readQuestions({ userId: input.userId });
   const recentAttempts = await getRecentQuestionAttempts({
     userId: input.userId,
-    deckId: deck.id,
     limit: MAX_MEMORY_CONTEXT_ATTEMPTS,
   });
+  knowledgeBase.cardCount = questions.length;
+  knowledgeBase.dueCount = questions.filter(
+    (question) => question.flagged_at === null && question.next_due <= Date.now(),
+  ).length;
   const questionContext = compactQuestionContext(
     questions.map((question) => ({
       question: question.question,
@@ -163,9 +160,8 @@ export async function refreshDeckMemory(input: {
   const { response, body } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     trace: {
-      operation: "refresh_deck_memory",
+      operation: "refresh_knowledge_memory",
       userId: input.userId,
-      deckId: deck.id,
     },
     body: {
       model: input.model,
@@ -175,22 +171,22 @@ export async function refreshDeckMemory(input: {
       messages: [
         {
           role: "system",
-          content: buildDeckMemorySystemPrompt(),
+          content: buildKnowledgeMemorySystemPrompt(),
         },
         {
           role: "user",
           content: [
             `Refresh reason: ${input.reason}.`,
-            "Deck:",
+            "Knowledge base:",
             JSON.stringify({
-              name: deck.name,
-              goal: deckGoal,
-              cardCount: deck.cardCount,
-              dueCount: deck.dueCount,
+              name: knowledgeBase.name,
+              goal: knowledgeBase.goal,
+              cardCount: knowledgeBase.cardCount,
+              dueCount: knowledgeBase.dueCount,
             }),
             "Current MEMORY.md:",
             currentMemory,
-            "Existing deck questions:",
+            "Existing knowledge-base questions:",
             JSON.stringify(questionContext),
             "Recent answer attempts:",
             JSON.stringify(recentAttempts),
@@ -202,7 +198,7 @@ export async function refreshDeckMemory(input: {
 
   if (!response.ok) {
     return {
-      deck,
+      knowledgeBase,
       memory: currentMemory,
       updated: false,
     };
@@ -215,7 +211,7 @@ export async function refreshDeckMemory(input: {
     parsed = extractJsonObject(content) as { memory?: unknown };
   } catch {
     return {
-      deck,
+      knowledgeBase,
       memory: currentMemory,
       updated: false,
     };
@@ -223,26 +219,20 @@ export async function refreshDeckMemory(input: {
 
   const nextMemory = normalizeMarkdownText(
     parsed.memory,
-    MAX_DECK_MEMORY_CHARS,
+    MAX_KNOWLEDGE_MEMORY_CHARS,
   );
 
-  if (!nextMemory || nextMemory === deck.memory.trim()) {
+  if (!nextMemory || nextMemory === currentMemory) {
     return {
-      deck,
+      knowledgeBase,
       memory: nextMemory || currentMemory,
       updated: false,
     };
   }
 
-  const updatedDeck = await updateDeck({
-    userId: input.userId,
-    deckId: deck.id,
-    memory: nextMemory,
-  });
-
   return {
-    deck: updatedDeck,
+    knowledgeBase,
     memory: nextMemory,
-    updated: true,
+    updated: false,
   };
 }

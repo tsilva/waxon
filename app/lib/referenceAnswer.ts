@@ -8,7 +8,6 @@ import {
 export type ReferenceAnswerInput = {
   question: string;
   userId?: string | null;
-  deckId?: string | null;
 };
 
 const REFERENCE_ANSWER_TIMEOUT_MS = 25_000;
@@ -55,7 +54,6 @@ export async function generateReferenceAnswer(
       trace: {
         operation: "reference_answer",
         userId: input.userId,
-        deckId: input.deckId,
         question: input.question,
       },
       body: {

@@ -309,7 +309,6 @@ export async function evaluateCourseChatProgress(input: {
     trace: {
       operation: "course_chat_progress",
       userId: input.userId,
-      deckId: input.course.id,
       question: page.title,
     },
     body: {
@@ -391,7 +390,6 @@ export async function generateCourseQuestionAttemptToolResult(input: {
     trace: {
       operation: "course_question_attempt_tool",
       userId: input.userId,
-      deckId: input.course.deckId,
       question: page.title,
     },
     body: {
@@ -473,7 +471,6 @@ export async function streamCourseChatTurn(input: {
     trace: {
       operation: "course_chat_turn",
       userId: input.userId,
-      deckId: input.course.id,
       question: page.title,
     },
     body: {
@@ -640,7 +637,6 @@ export async function generateCoursePage(input: {
     trace: {
       operation: "course_page",
       userId: input.userId,
-      deckId: input.courseId,
       question: page.title,
     },
     body: {

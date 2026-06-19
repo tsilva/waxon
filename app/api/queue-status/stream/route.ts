@@ -100,14 +100,12 @@ export async function GET(request: Request) {
   const limit = Number.parseInt(url.searchParams.get("limit") ?? "", 10);
   const offset = Number.parseInt(url.searchParams.get("offset") ?? "", 10);
   const sort = url.searchParams.get("sort");
-  const deckId = url.searchParams.get("deckId")?.trim();
   const mode = url.searchParams.get("mode");
   const query = url.searchParams.get("query")?.trim();
   const statusInput = {
     limit: Number.isFinite(limit) ? limit : undefined,
     offset: Number.isFinite(offset) ? offset : undefined,
     sortKey: sort === "creation-date" ? ("creation-date" as const) : ("review-date" as const),
-    deckId: deckId || undefined,
     query: query || undefined,
     includeReviewQueue:
       mode === "review"
@@ -121,8 +119,8 @@ export async function GET(request: Request) {
       url.searchParams.get("includeRecentAttempts"),
       false,
     ),
-    includeDeckEmbeddingPlot: isEnabled(
-      url.searchParams.get("includeDeckEmbeddingPlot"),
+    includeKnowledgeEmbeddingPlot: isEnabled(
+      url.searchParams.get("includeKnowledgeEmbeddingPlot"),
       false,
     ),
     includeQueueCounts: isEnabled(
@@ -192,7 +190,7 @@ export async function GET(request: Request) {
           reviewQueueOffset: lastStatus.reviewQueueOffset,
           reviewQueueLimit: lastStatus.reviewQueueLimit,
           reviewQueueHasMore: lastStatus.reviewQueueHasMore,
-          deckEmbeddingPlot: lastStatus.deckEmbeddingPlot,
+          knowledgeEmbeddingPlot: lastStatus.knowledgeEmbeddingPlot,
         };
       };
 
@@ -206,7 +204,7 @@ export async function GET(request: Request) {
           includeReviewQueue: false,
           includeQuestionAttempts: false,
           includeRecentAttempts: false,
-          includeDeckEmbeddingPlot: false,
+          includeKnowledgeEmbeddingPlot: false,
           includeQueueCounts: false,
         };
       };

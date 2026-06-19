@@ -12,10 +12,7 @@ import {
   DEFAULT_EMBEDDING_MODEL,
 } from "@/app/lib/embeddingSource";
 import { getCurrentUser } from "@/app/lib/auth";
-import {
-  ensureQuestionsDatabase,
-  resolveOwnedDeckId,
-} from "@/app/lib/postgresStore";
+import { ensureQuestionsDatabase } from "@/app/lib/postgresStore";
 import {
   extractChatCompletionText,
   getOpenRouterChatConfig,
@@ -30,7 +27,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_GENERATE_BODY_BYTES = 96 * 1024;
-const MAX_DECK_ID_CHARS = 200;
 const MAX_SCOPE_CHARS = 12_000;
 const MAX_FILE_COUNT = 6;
 const MAX_FILE_NAME_CHARS = 160;
@@ -289,7 +285,7 @@ function buildContext(input: {
 
 function buildQuestionGenerationSystemPrompt(questionQualityReference: string): string {
   return [
-    "You generate high-quality spaced-repetition questions for a study deck.",
+    "You generate high-quality spaced-repetition questions for a user's knowledge base.",
     "Maximize coverage across the content instead of making variants of the same point.",
     "Avoid generic questions such as 'What is the key idea behind the topic?'",
     "Each question needs a short expected answer for dedupe embeddings; do not include explanations, numbering, or preambles.",
@@ -392,14 +388,12 @@ async function summarizeGenerationContext(input: {
   model: string;
   context: string;
   userId: string;
-  deckId: string;
 }): Promise<string> {
   const { response, body } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     trace: {
       operation: "generate_questions_context_summary",
       userId: input.userId,
-      deckId: input.deckId,
     },
     body: {
       model: input.model,
@@ -431,14 +425,12 @@ async function fetchSummaryEmbedding(input: {
   apiKey: string;
   summary: string;
   userId: string;
-  deckId: string;
 }): Promise<number[]> {
   const { response, body } = await openRouterEmbeddings({
     apiKey: input.apiKey,
     trace: {
       operation: "generate_questions_summary_embedding",
       userId: input.userId,
-      deckId: input.deckId,
     },
     body: {
       model: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
@@ -466,7 +458,6 @@ async function loadGenerationNeighbors(input: {
   apiKey: string;
   summary: string;
   userId: string;
-  deckId: string;
 }): Promise<
   Array<{
     question: string;
@@ -489,7 +480,8 @@ async function loadGenerationNeighbors(input: {
           <=> $1::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS}) AS distance
       FROM question_embeddings qe
       JOIN questions q ON q.id = qe.question_id
-      WHERE qe.deck_id = $2
+        AND q.user_id = qe.user_id
+      WHERE qe.user_id = $2
         AND qe.embedding_model = $3
         AND qe.embedding_kind = $4
         AND qe.source_version = $5
@@ -501,7 +493,7 @@ async function loadGenerationNeighbors(input: {
     `,
     [
       vectorLiteral(embedding),
-      input.deckId,
+      input.userId,
       process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
       DEDUPE_EMBEDDING_KIND,
       DEDUPE_SOURCE_VERSION,
@@ -539,15 +531,6 @@ export async function POST(request: Request) {
     parsed.value && typeof parsed.value === "object"
       ? (parsed.value as Record<string, unknown>)
       : {};
-  const requestedDeckId = normalizeBoundedText(payload.deckId, {
-    field: "deckId",
-    maxLength: MAX_DECK_ID_CHARS,
-  });
-
-  if (!requestedDeckId.ok) {
-    return requestedDeckId.response;
-  }
-
   const scope = normalizeBoundedText(payload.scope, {
     field: "scope",
     maxLength: MAX_SCOPE_CHARS,
@@ -606,21 +589,6 @@ export async function POST(request: Request) {
   }
 
   await ensureQuestionsDatabase();
-  let deckId: string;
-
-  try {
-    deckId = await resolveOwnedDeckId({
-      userId: user.id,
-      deckId: requestedDeckId.value || undefined,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Deck not found.";
-
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: message === "Deck not found." ? 404 : 500 },
-    );
-  }
 
   const context = buildContext({ scope: scope.value, files: files.value });
   const contextSummary =
@@ -631,13 +599,11 @@ export async function POST(request: Request) {
           model,
           context,
           userId: user.id,
-          deckId,
         });
   const generationNeighbors = await loadGenerationNeighbors({
     apiKey,
     summary: contextSummary,
     userId: user.id,
-    deckId,
   });
   const questionQualityReference = getQuestionQualityReference();
   const { response, body: data } = await openRouterChatCompletion({
@@ -645,7 +611,6 @@ export async function POST(request: Request) {
     trace: {
       operation: "generate_questions",
       userId: user.id,
-      deckId,
     },
     body: {
       model,
@@ -682,7 +647,7 @@ export async function POST(request: Request) {
               : "",
             generationNeighbors.length > 0
               ? [
-                  "Nearby already-covered questions from the deck:",
+                  "Nearby already-covered questions from the knowledge base:",
                   JSON.stringify(
                     generationNeighbors.map((neighbor) => ({
                       q: neighbor.question,

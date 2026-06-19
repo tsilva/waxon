@@ -1,4 +1,4 @@
-import type { ReviewToolbarTab } from "@/app/ReviewToolbar";
+import type { ReviewToolbarTab } from "@/app/toolbarTypes";
 
 export type ToolbarSnapshotDetail = {
   activeTab: ReviewToolbarTab;

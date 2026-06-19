@@ -66,7 +66,6 @@ export async function POST(request: Request) {
   const answer = await generateReferenceAnswer({
     question,
     userId: user.id,
-    deckId: snapshot?.deckId ?? null,
   });
 
   if (snapshot && !answer.startsWith("Reference answer is unavailable")) {

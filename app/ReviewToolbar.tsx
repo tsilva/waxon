@@ -10,20 +10,13 @@ import {
   type ToolbarDueCountDetail,
   type ToolbarSnapshotDetail,
 } from "@/app/toolbarEvents";
+import type { ReviewToolbarTab } from "@/app/toolbarTypes";
 import {
   useEffect,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-
-export type ReviewToolbarTab =
-  | "learn"
-  | "review"
-  | "library"
-  | "tags"
-  | "stats"
-  | "admin";
 
 type ReviewToolbarProps = {
   activeTab: ReviewToolbarTab;

@@ -1,6 +1,6 @@
-import { and, eq, gte, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, lt, lte, sql } from "drizzle-orm";
 import { db } from "@/app/db/client";
-import { decks, questionAttempts, questions } from "@/app/db/schema";
+import { questionAttempts, questions } from "@/app/db/schema";
 import { getCurrentUser } from "@/app/lib/auth";
 import { DAY } from "@/app/lib/scheduler";
 
@@ -31,23 +31,12 @@ export async function loadReviewStats(): Promise<StatsResponse> {
   const scheduledUntil = todayStart + 14 * DAY;
   const processedSince = todayStart - 13 * DAY;
   const processedUntil = todayStart + DAY;
-  const rotationDeckIds = db
-    .select({ id: decks.id })
-    .from(decks)
-    .where(
-      and(
-        eq(decks.userId, user.id),
-        eq(decks.inReviewRotation, true),
-        isNull(decks.archivedAt),
-      ),
-    );
-
   const dueCountQuery = db
     .select({ value: sql<number>`count(*)::int` })
     .from(questions)
     .where(
       and(
-        inArray(questions.deckId, rotationDeckIds),
+        eq(questions.userId, user.id),
         isNull(questions.flaggedAt),
         lte(questions.nextDue, now),
       ),
@@ -57,7 +46,7 @@ export async function loadReviewStats(): Promise<StatsResponse> {
     .from(questions)
     .where(
       and(
-        inArray(questions.deckId, rotationDeckIds),
+        eq(questions.userId, user.id),
         isNull(questions.flaggedAt),
       ),
     );
@@ -79,7 +68,7 @@ export async function loadReviewStats(): Promise<StatsResponse> {
     .from(questions)
     .where(
       and(
-        inArray(questions.deckId, rotationDeckIds),
+        eq(questions.userId, user.id),
         isNull(questions.flaggedAt),
         lt(questions.nextDue, scheduledUntil),
       ),
@@ -101,7 +90,7 @@ export async function loadReviewStats(): Promise<StatsResponse> {
     .from(questionAttempts)
     .where(
       and(
-        inArray(questionAttempts.deckId, rotationDeckIds),
+        eq(questionAttempts.userId, user.id),
         gte(questionAttempts.resolvedAt, processedSince),
         lt(questionAttempts.resolvedAt, processedUntil),
       ),

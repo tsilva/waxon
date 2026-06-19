@@ -5,7 +5,6 @@ import {
   check,
   customType,
   doublePrecision,
-  foreignKey,
   index,
   integer,
   jsonb,
@@ -99,54 +98,15 @@ export const authAccounts = pgTable(
   ],
 );
 
-export const decks = pgTable(
-  "decks",
-  {
-    id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    slug: text("slug").notNull(),
-    coverage: text("coverage").notNull().default(""),
-    memory: text("memory").notNull().default(""),
-    inReviewRotation: boolean("in_review_rotation").notNull().default(true),
-    archivedAt: bigint("archived_at", { mode: "number" }),
-    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
-    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
-  },
-  (table) => [
-    uniqueIndex("decks_user_slug_idx").on(table.userId, table.slug),
-    index("decks_active_user_updated_idx")
-      .on(table.userId, table.updatedAt.desc(), table.name)
-      .where(sql`${table.archivedAt} IS NULL`),
-    index("decks_user_rotation_archive_idx").on(
-      table.userId,
-      table.inReviewRotation,
-      table.archivedAt,
-    ),
-    check("decks_id_nonempty_check", sql`length(trim(${table.id})) > 0`),
-    check("decks_name_nonempty_check", sql`length(trim(${table.name})) > 0`),
-    check("decks_slug_nonempty_check", sql`length(trim(${table.slug})) > 0`),
-    check("decks_coverage_length_check", sql`length(${table.coverage}) <= 2000`),
-    check("decks_memory_length_check", sql`length(${table.memory}) <= 12000`),
-    check("decks_created_at_check", sql`${table.createdAt} >= 0`),
-    check(
-      "decks_updated_at_check",
-      sql`${table.updatedAt} >= ${table.createdAt}`,
-    ),
-  ],
-);
-
 export const questions = pgTable(
   "questions",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
     question: text("question").notNull(),
     questionSlug: text("question_slug").notNull(),
-    deckId: text("deck_id")
-      .notNull()
-      .references(() => decks.id, { onDelete: "cascade" }),
     reviews: text("reviews").notNull().default(""),
     nextDue: bigint("next_due", { mode: "number" }).notNull().default(0),
     generatedFromQuestion: text("generated_from_question"),
@@ -160,25 +120,19 @@ export const questions = pgTable(
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
   },
   (table) => [
-    unique("questions_deck_id_unique").on(table.deckId, table.id),
-    unique("questions_id_question_unique").on(table.id, table.question),
-    unique("questions_deck_question_unique").on(table.deckId, table.question),
-    uniqueIndex("questions_deck_question_slug_idx").on(
-      table.deckId,
+    uniqueIndex("questions_user_question_slug_idx").on(
+      table.userId,
       table.questionSlug,
     ),
-    index("questions_deck_next_due_idx").on(table.deckId, table.nextDue),
-    index("questions_active_deck_due_idx")
-      .on(table.deckId, table.nextDue, table.createdAt, table.question)
+    unique("questions_id_question_unique").on(table.id, table.question),
+    uniqueIndex("questions_user_question_idx").on(table.userId, table.question),
+    index("questions_user_next_due_idx").on(table.userId, table.nextDue),
+    index("questions_active_user_due_idx")
+      .on(table.userId, table.nextDue, table.createdAt, table.question)
       .where(sql`${table.flaggedAt} IS NULL`),
-    index("questions_active_deck_created_idx")
-      .on(table.deckId, table.createdAt.desc(), table.question)
+    index("questions_active_user_created_idx")
+      .on(table.userId, table.createdAt.desc(), table.question)
       .where(sql`${table.flaggedAt} IS NULL`),
-    foreignKey({
-      name: "questions_deck_generated_from_question_fk",
-      columns: [table.deckId, table.generatedFromQuestion],
-      foreignColumns: [table.deckId, table.question],
-    }),
     check(
       "questions_question_nonempty_check",
       sql`length(trim(${table.question})) > 0`,
@@ -204,9 +158,9 @@ export const questionAttempts = pgTable(
   "question_attempts",
   {
     id: serial("id").primaryKey(),
-    deckId: text("deck_id")
+    userId: text("user_id")
       .notNull()
-      .references(() => decks.id, { onDelete: "cascade" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     questionId: uuid("question_id")
       .notNull()
       .references(() => questions.id, { onDelete: "cascade" }),
@@ -219,28 +173,18 @@ export const questionAttempts = pgTable(
     resolvedAt: bigint("resolved_at", { mode: "number" }).notNull(),
   },
   (table) => [
-    foreignKey({
-      name: "question_attempts_deck_question_id_fk",
-      columns: [table.deckId, table.questionId],
-      foreignColumns: [questions.deckId, questions.id],
-    }).onDelete("cascade"),
-    foreignKey({
-      name: "question_attempts_question_id_question_fk",
-      columns: [table.questionId, table.question],
-      foreignColumns: [questions.id, questions.question],
-    }).onDelete("cascade"),
-    index("question_attempts_deck_question_submitted_idx").on(
-      table.deckId,
+    index("question_attempts_user_question_submitted_idx").on(
+      table.userId,
       table.question,
       table.submittedAt.desc(),
     ),
-    index("question_attempts_deck_submitted_idx").on(
-      table.deckId,
+    index("question_attempts_user_submitted_idx").on(
+      table.userId,
       table.submittedAt.desc(),
       table.id.desc(),
     ),
-    index("question_attempts_deck_resolved_idx").on(
-      table.deckId,
+    index("question_attempts_user_resolved_idx").on(
+      table.userId,
       table.resolvedAt.desc(),
       table.id.desc(),
     ),
@@ -264,9 +208,9 @@ export const questionEmbeddings = pgTable(
   "question_embeddings",
   {
     id: serial("id").primaryKey(),
-    deckId: text("deck_id")
+    userId: text("user_id")
       .notNull()
-      .references(() => decks.id, { onDelete: "cascade" }),
+      .references(() => users.id, { onDelete: "cascade" }),
     questionId: uuid("question_id")
       .notNull()
       .references(() => questions.id, { onDelete: "cascade" }),
@@ -283,25 +227,15 @@ export const questionEmbeddings = pgTable(
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
   },
   (table) => [
-    foreignKey({
-      name: "question_embeddings_deck_question_id_fk",
-      columns: [table.deckId, table.questionId],
-      foreignColumns: [questions.deckId, questions.id],
-    }).onDelete("cascade"),
-    foreignKey({
-      name: "question_embeddings_question_id_question_fk",
-      columns: [table.questionId, table.question],
-      foreignColumns: [questions.id, questions.question],
-    }).onDelete("cascade"),
     uniqueIndex("question_embeddings_current_source_idx").on(
-      table.deckId,
+      table.userId,
       table.questionId,
       table.embeddingModel,
       table.embeddingKind,
       table.sourceVersion,
     ),
     index("question_embeddings_lookup_idx").on(
-      table.deckId,
+      table.userId,
       table.embeddingModel,
       table.embeddingKind,
       table.sourceVersion,
@@ -309,7 +243,7 @@ export const questionEmbeddings = pgTable(
     ),
     index("question_embeddings_current_nonempty_lookup_idx")
       .on(
-        table.deckId,
+        table.userId,
         table.embeddingModel,
         table.embeddingKind,
         table.sourceVersion,
@@ -417,9 +351,6 @@ export const courses = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    deckId: text("deck_id")
-      .notNull()
-      .references(() => decks.id, { onDelete: "cascade" }),
     topicPrompt: text("topic_prompt").notNull(),
     title: text("title").notNull(),
     description: text("description").notNull().default(""),
@@ -437,7 +368,6 @@ export const courses = pgTable(
       table.status,
       table.updatedAt.desc(),
     ),
-    index("courses_deck_id_idx").on(table.deckId),
     check("courses_topic_prompt_nonempty_check", sql`length(trim(${table.topicPrompt})) > 0`),
     check("courses_title_nonempty_check", sql`length(trim(${table.title})) > 0`),
     check(
@@ -585,9 +515,6 @@ export const answerEvaluations = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    deckId: text("deck_id")
-      .notNull()
-      .references(() => decks.id, { onDelete: "cascade" }),
     question: text("question").notNull(),
     rawAnswer: text("raw_answer").notNull(),
     status: text("status").notNull(),
@@ -606,10 +533,6 @@ export const answerEvaluations = pgTable(
     index("answer_evaluations_user_status_submitted_idx").on(
       table.userId,
       table.status,
-      table.submittedAt.desc(),
-    ),
-    index("answer_evaluations_deck_submitted_idx").on(
-      table.deckId,
       table.submittedAt.desc(),
     ),
     index("answer_evaluations_trace_id_idx").on(table.traceId),
@@ -687,7 +610,7 @@ export const llmTraceInteractions = pgTable(
         'Question generation',
         'Reference answer',
         'Embedding',
-        'Deck memory',
+        'Knowledge memory',
         'Quality gate',
         'Summarization',
         'Other'

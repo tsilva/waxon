@@ -1,4 +1,0 @@
-interface:
-  display_name: "Dedupe Deck"
-  short_description: "Find and trash duplicate deck questions"
-  default_prompt: "Use $deck-dedupe to review a deck for duplicate questions."

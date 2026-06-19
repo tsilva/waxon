@@ -1,11 +1,10 @@
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import {
   courseChatMessages,
   coursePageAttempts,
   coursePages,
   courses,
-  decks,
 } from "@/app/db/schema";
 import { getCurrentUser } from "./auth";
 import {
@@ -20,8 +19,6 @@ import {
 } from "./courseContent";
 import {
   applyEvaluationToPostgres,
-  createDeck,
-  deleteDeck,
   upsertDueQuestions,
   type DueQuestion,
 } from "./postgresStore";
@@ -61,8 +58,6 @@ export type CourseChatMessageRecord = {
 export type CourseRecord = {
   id: string;
   userId: string;
-  deckId: string;
-  deckName: string;
   topicPrompt: string;
   title: string;
   description: string;
@@ -195,49 +190,11 @@ function toCoursePage(row: {
   };
 }
 
-function baseCourseDeckName(title: string): string {
-  const normalized = title.trim().replace(/\s+/g, " ").slice(0, 90);
-
-  return `Course - ${normalized || "Untitled Course"}`;
-}
-
-async function createUniqueCourseDeck(input: {
-  title: string;
-  description: string;
-}) {
-  const baseName = baseCourseDeckName(input.title);
-
-  for (let suffix = 1; suffix < 10_000; suffix += 1) {
-    const name = suffix === 1 ? baseName : `${baseName} (${suffix})`;
-
-    try {
-      return await createDeck({
-        name,
-        coverage: input.description,
-        inReviewRotation: true,
-      });
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === "Deck name already exists."
-      ) {
-        continue;
-      }
-
-      throw error;
-    }
-  }
-
-  throw new Error("Could not create a unique course deck.");
-}
-
 async function loadCourseRows(userId: string, courseId?: string) {
   return db
     .select({
       id: courses.id,
       userId: courses.userId,
-      deckId: courses.deckId,
-      deckName: decks.name,
       topicPrompt: courses.topicPrompt,
       title: courses.title,
       description: courses.description,
@@ -260,14 +217,6 @@ async function loadCourseRows(userId: string, courseId?: string) {
       )`,
     })
     .from(courses)
-    .innerJoin(
-      decks,
-      and(
-        eq(decks.id, courses.deckId),
-        eq(decks.userId, courses.userId),
-        isNull(decks.archivedAt),
-      ),
-    )
     .where(
       courseId
         ? and(eq(courses.userId, userId), eq(courses.id, courseId))
@@ -295,8 +244,6 @@ function hydrateCourse(input: {
   return {
     id: input.row.id,
     userId: input.row.userId,
-    deckId: input.row.deckId,
-    deckName: input.row.deckName ?? baseCourseDeckName(input.row.title),
     topicPrompt: input.row.topicPrompt,
     title: input.row.title,
     description: input.row.description,
@@ -370,10 +317,7 @@ export async function deleteCourse(courseId: string): Promise<void> {
     throw new Error("Course not found.");
   }
 
-  await deleteDeck({
-    deckId: course.deckId,
-    userId: course.userId,
-  });
+  await db.delete(courses).where(and(eq(courses.userId, course.userId), eq(courses.id, course.id)));
 }
 
 export async function createCourse(input: {
@@ -382,16 +326,11 @@ export async function createCourse(input: {
 }): Promise<CourseDetail> {
   const user = await getCurrentUser();
   const toc = validateCourseToc(input.toc);
-  const deck = await createUniqueCourseDeck({
-    title: toc.title,
-    description: toc.description,
-  });
   const now = Date.now();
   const [course] = await db
     .insert(courses)
     .values({
       userId: user.id,
-      deckId: deck.id,
       topicPrompt: input.topic,
       title: toc.title,
       description: toc.description,
@@ -434,19 +373,11 @@ export async function updateCourseToc(input: {
       updatedAt: now,
     })
     .where(and(eq(courses.userId, user.id), eq(courses.id, input.courseId)))
-    .returning({ id: courses.id, deckId: courses.deckId });
+    .returning({ id: courses.id });
 
   if (!course) {
     throw new Error("Course could not be updated.");
   }
-
-  await db
-    .update(decks)
-    .set({
-      name: toc.title,
-      updatedAt: now,
-    })
-    .where(and(eq(decks.userId, user.id), eq(decks.id, course.deckId)));
 
   const detail = await getCourse(course.id);
 
@@ -603,7 +534,6 @@ export async function recordCourseChatQuestionAttempt(
   const now = Date.now();
   const [dueQuestion] = await upsertDueQuestions({
     userId: input.course.userId,
-    deckId: input.course.deckId,
     sourceQuestion: null,
     now,
     questions: [
@@ -666,7 +596,6 @@ export async function saveCoursePage(input: {
   const now = Date.now();
   const [question] = await upsertDueQuestions({
     userId: input.course.userId,
-    deckId: input.course.deckId,
     sourceQuestion: null,
     now,
     questions: [

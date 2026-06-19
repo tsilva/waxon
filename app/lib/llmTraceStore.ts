@@ -14,7 +14,7 @@ export type LlmTraceInteractionKind =
   | "Question generation"
   | "Reference answer"
   | "Embedding"
-  | "Deck memory"
+  | "Knowledge memory"
   | "Quality gate"
   | "Summarization"
   | "Other";
@@ -119,7 +119,7 @@ export function classifyLlmInteractionKind(
   }
 
   if (normalizedOperation.includes("memory")) {
-    return "Deck memory";
+    return "Knowledge memory";
   }
 
   if (normalizedOperation.includes("reference")) {
@@ -428,7 +428,7 @@ async function createLlmTraceTable(
         'Question generation',
         'Reference answer',
         'Embedding',
-        'Deck memory',
+        'Knowledge memory',
         'Quality gate',
         'Summarization',
         'Other'
@@ -515,7 +515,7 @@ function isTraceInteractionKind(
     value === "Question generation" ||
     value === "Reference answer" ||
     value === "Embedding" ||
-    value === "Deck memory" ||
+    value === "Knowledge memory" ||
     value === "Quality gate" ||
     value === "Summarization" ||
     value === "Other"

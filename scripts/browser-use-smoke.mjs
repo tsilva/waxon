@@ -1,7 +1,6 @@
 const DEFAULT_BROWSER_CLIENT_MODULE =
   "/Users/tsilva/.codex/plugins/cache/openai-bundled/browser/26.602.40724/scripts/browser-client.mjs";
 
-const TEST_DECK_SLUG = "browser-smoke";
 const CORRECT_QUESTION =
   "Browser smoke correct card: what exact token proves this answer is correct?";
 const INCORRECT_QUESTION =
@@ -176,27 +175,26 @@ export async function runWaxonBrowserSmoke(options = {}) {
     checks: [],
   };
 
-  await tab.goto(`${baseUrl}/decks`);
+  await tab.goto(`${baseUrl}/library`);
   await tab.playwright.waitForLoadState({
     state: "domcontentloaded",
     timeoutMs: 20_000,
   });
   await setupSmokeData(tab, baseUrl);
 
-  await tab.goto(`${baseUrl}/decks/${TEST_DECK_SLUG}`);
+  await tab.goto(`${baseUrl}/library`);
   await tab.playwright.waitForLoadState({
     state: "domcontentloaded",
     timeoutMs: 20_000,
   });
-  await waitForRoutedText(tab, "Browser Smoke");
   await waitForRoutedText(tab, CORRECT_QUESTION);
   await waitForRoutedText(tab, INCORRECT_QUESTION);
-  results.screenshots.deck = await writeScreenshot(
+  results.screenshots.library = await writeScreenshot(
     tab,
-    "waxon-browser-smoke-deck",
+    "waxon-browser-smoke-library",
     screenshotDir,
   );
-  results.checks.push("Browser Smoke deck details render both seeded cards.");
+  results.checks.push("Library renders both seeded smoke cards.");
 
   await openQuestionDetails(tab, CORRECT_QUESTION);
   await waitForVisibleText(tab, "LLM answer");
@@ -205,7 +203,7 @@ export async function runWaxonBrowserSmoke(options = {}) {
     "waxon-browser-smoke-question-details",
     screenshotDir,
   );
-  results.checks.push("Question details modal opens from the deck queue.");
+  results.checks.push("Question details modal opens from the library queue.");
 
   const closeStats = tab.playwright.getByRole("button", {
     name: "Close stats",
@@ -236,7 +234,7 @@ export async function runWaxonBrowserSmoke(options = {}) {
   );
   results.checks.push("Incorrect answer resolves to score 2.");
 
-  await tab.goto(`${baseUrl}/decks/${TEST_DECK_SLUG}`);
+  await tab.goto(`${baseUrl}/library`);
   await tab.playwright.waitForLoadState({
     state: "domcontentloaded",
     timeoutMs: 20_000,

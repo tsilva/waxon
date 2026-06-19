@@ -37,13 +37,8 @@ function appUserIdForClerkUser(clerkUserId: string): string {
   return `clerk:${clerkUserId}`;
 }
 
-export function getDeckIdForUser(userId: string): string {
-  return `${userId}:deep-learning`;
-}
-
 function setTraceIdentity(input: {
   userId: string;
-  deckId: string;
   email: string;
   displayName: string;
 }): void {
@@ -53,10 +48,8 @@ function setTraceIdentity(input: {
     username: input.displayName,
   });
   Sentry.setTag("user_id", input.userId);
-  Sentry.setTag("deck_id", input.deckId);
   Sentry.setContext("waxon", {
     userId: input.userId,
-    deckId: input.deckId,
   });
 }
 
@@ -78,11 +71,9 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
     const localUserDisplayName =
       existingLocalUser?.displayName ?? localTestUser.displayName;
     const localUserEmail = existingLocalUser?.email ?? localTestUser.email;
-    const deckId = getDeckIdForUser(localUserId);
 
     setTraceIdentity({
       userId: localUserId,
-      deckId,
       email: localUserEmail,
       displayName: localUserDisplayName,
     });
@@ -147,9 +138,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
     .limit(1);
 
   const userId = existingAccount?.userId ?? appUserIdForClerkUser(clerkUserId);
-  const deckId = getDeckIdForUser(userId);
-
-  setTraceIdentity({ userId, deckId, email, displayName });
+  setTraceIdentity({ userId, email, displayName });
 
   const [row] = await db
     .insert(users)
