@@ -717,7 +717,7 @@ export default function LibraryPageClient({
                         ) : (
                           item.conceptSlugs.map((slug) => (
                             <span className="library-chip" key={slug}>
-                              {slug}
+                              #{slug}
                             </span>
                           ))
                         )}
@@ -899,7 +899,7 @@ export default function LibraryPageClient({
                 <div className="stats-concept-list">
                   {selectedQuestionDetails.conceptSlugs.map((slug) => (
                     <span className="stats-concept-chip" key={slug}>
-                      {slug}
+                      #{slug}
                     </span>
                   ))}
                 </div>

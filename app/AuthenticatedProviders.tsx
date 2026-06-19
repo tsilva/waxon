@@ -1,5 +1,6 @@
 "use client";
 
+import { AppErrorProvider } from "./AppErrorModal";
 import { AuthShell } from "./AuthShell";
 import { PersistentReviewToolbarActions } from "./PersistentReviewToolbarActions";
 
@@ -10,8 +11,10 @@ export function AuthenticatedProviders({
 }) {
   return (
     <AuthShell>
-      <PersistentReviewToolbarActions />
-      {children}
+      <AppErrorProvider>
+        <PersistentReviewToolbarActions />
+        {children}
+      </AppErrorProvider>
     </AuthShell>
   );
 }

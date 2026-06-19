@@ -2935,7 +2935,8 @@ textarea {
 .settings-modal-backdrop,
 .stats-modal-backdrop,
 .admin-call-modal-backdrop,
-.kb-editor-modal-backdrop {
+.kb-editor-modal-backdrop,
+.app-error-modal-backdrop {
   position: fixed;
   inset: 0;
   z-index: 80;
@@ -2953,7 +2954,8 @@ textarea {
 .settings-modal,
 .stats-modal,
 .admin-call-modal,
-.kb-editor-modal {
+.kb-editor-modal,
+.app-error-modal {
   width: min(880px, 100%);
   max-height: min(860px, calc(100vh - 48px));
   overflow-y: auto;
@@ -2967,6 +2969,12 @@ textarea {
 
 .settings-modal {
   width: min(560px, 100%);
+}
+
+.app-error-modal {
+  display: grid;
+  gap: 18px;
+  width: min(680px, 100%);
 }
 
 .kb-editor-modal {
@@ -3047,7 +3055,8 @@ textarea {
 .settings-modal-header,
 .stats-modal-header,
 .admin-call-modal-header,
-.kb-editor-header {
+.kb-editor-header,
+.app-error-modal-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 18px;
@@ -3060,7 +3069,8 @@ textarea {
 .embedding-map-modal-kicker,
 .settings-modal-kicker,
 .stats-modal-kicker,
-.admin-call-modal-kicker {
+.admin-call-modal-kicker,
+.app-error-modal-kicker {
   margin: 0 0 8px;
   color: var(--muted-strong);
   font-size: 12px;
@@ -3074,12 +3084,52 @@ textarea {
 .embedding-map-modal-title,
 .settings-modal-title,
 .stats-modal-title,
-.admin-call-modal-title {
+.admin-call-modal-title,
+.app-error-modal-title {
   margin: 0;
   color: var(--ink);
   font-size: clamp(22px, 2.1vw, 30px);
   font-weight: 780;
   line-height: 1.22;
+}
+
+.app-error-modal-message {
+  margin: 0;
+  color: var(--danger);
+  font-size: 15px;
+  font-weight: 720;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.app-error-modal-details {
+  border: 1px solid rgb(227 218 196 / 74%);
+  border-radius: 8px;
+  background: rgb(251 248 240 / 68%);
+}
+
+.app-error-modal-details summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: var(--muted-strong);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.app-error-modal-details pre {
+  max-height: min(300px, 38vh);
+  margin: 0;
+  overflow: auto;
+  border-top: 1px solid rgb(227 218 196 / 70%);
+  padding: 12px;
+  color: var(--ink-soft);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .stats-modal-question-id {
@@ -7426,7 +7476,8 @@ textarea {
   .settings-modal-backdrop,
   .stats-modal-backdrop,
   .admin-call-modal-backdrop,
-  .kb-editor-modal-backdrop {
+  .kb-editor-modal-backdrop,
+  .app-error-modal-backdrop {
     align-items: stretch;
     padding: 10px;
   }
@@ -7436,7 +7487,8 @@ textarea {
   .settings-modal,
   .stats-modal,
   .admin-call-modal,
-  .kb-editor-modal {
+  .kb-editor-modal,
+  .app-error-modal {
     max-height: none;
     border-radius: 14px;
     padding: 18px;

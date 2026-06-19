@@ -44,6 +44,7 @@ import type {
 } from "./reviewTypes";
 import { vectorLiteral } from "./vectorLiteral";
 import {
+  activeConceptEligibilityClause,
   assignConceptSlugsForQuestions,
   ensureFallbackConceptTagForUser,
   getQuestionConceptSlugs,
@@ -660,6 +661,7 @@ export async function getDueQuestions(
         eq(questions.userId, context.userId),
         isNull(questions.flaggedAt),
         lte(questions.nextDue, Math.round(now)),
+        activeConceptEligibilityClause(context.userId),
         excludeQuestionIds.length > 0
           ? notInArray(questions.id, excludeQuestionIds)
           : sql`true`,
@@ -690,6 +692,7 @@ export async function countDueQuestions(
         eq(questions.userId, context.userId),
         isNull(questions.flaggedAt),
         lte(questions.nextDue, Math.round(now)),
+        activeConceptEligibilityClause(context.userId),
       ),
     );
 
@@ -712,6 +715,7 @@ export async function getNextScheduledQuestionDue(
         eq(questions.userId, context.userId),
         isNull(questions.flaggedAt),
         gt(questions.nextDue, Math.round(now)),
+        activeConceptEligibilityClause(context.userId),
         excludeQuestionIds.length > 0
           ? notInArray(questions.id, excludeQuestionIds)
           : sql`true`,
@@ -738,6 +742,7 @@ export async function getQueuedQuestionsPage(
   const whereClause = and(
     eq(questions.userId, context.userId),
     isNull(questions.flaggedAt),
+    activeConceptEligibilityClause(context.userId),
     excludeQuestionIds.length > 0
       ? notInArray(questions.id, excludeQuestionIds)
       : sql`true`,
@@ -844,6 +849,14 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
   const clauses = [
     "q.user_id = $1",
     "q.flagged_at IS NULL",
+    `EXISTS (
+      SELECT 1
+      FROM question_concept_tags qct
+      INNER JOIN concept_tags ct ON ct.id = qct.concept_tag_id
+      WHERE qct.question_id = q.id
+        AND ct.user_id = $1
+        AND ct.active = true
+    )`,
     "qe.user_id = q.user_id",
     "qe.embedding_model = $2",
     "qe.embedding_kind = $3",
