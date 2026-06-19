@@ -2815,6 +2815,7 @@ textarea {
   font-style: normal;
 }
 
+.math-literal,
 .math-operator,
 .math-text {
   font-style: normal;

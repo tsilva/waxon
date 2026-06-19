@@ -4,7 +4,10 @@ import {
   Fragment,
   type ReactNode,
 } from "react";
-import { renderLatexCommandText } from "@/app/lib/latexMath";
+import {
+  isUprightMathLiteral,
+  renderLatexCommandText,
+} from "@/app/lib/latexMath";
 
 type MathParseResult = {
   content: string;
@@ -205,7 +208,15 @@ function renderMathNodes(expression: string): ReactNode[] {
       }
     }
 
-    nodes.push(character);
+    nodes.push(
+      isUprightMathLiteral(character) ? (
+        <span className="math-literal" key={`literal-${index}`}>
+          {character}
+        </span>
+      ) : (
+        character
+      ),
+    );
     index += 1;
   }
 
