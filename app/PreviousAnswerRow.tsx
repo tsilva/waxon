@@ -141,12 +141,16 @@ export function PreviousAnswerRow({
             text={question}
           />
           {isPending ? (
-            <p
-              className="previous-question-feedback previous-question-feedback-pending"
-              aria-live="polite"
-            >
-              Evaluating...
-            </p>
+            supportingContent !== undefined ? (
+              supportingContent
+            ) : (
+              <p
+                className="previous-question-feedback previous-question-feedback-pending"
+                aria-live="polite"
+              >
+                Evaluating...
+              </p>
+            )
           ) : supportingContent !== undefined ? (
             supportingContent
           ) : (

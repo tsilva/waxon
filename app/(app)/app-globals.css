@@ -6574,6 +6574,22 @@ textarea {
   background: rgb(251 248 240 / 72%);
 }
 
+.learn-pending-evaluation-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.learn-pending-answer {
+  display: grid;
+  gap: 5px;
+  border-left: 2px solid rgb(166 124 82 / 28%);
+  padding-left: 12px;
+}
+
+.learn-pending-answer .previous-answer {
+  margin: 0;
+}
+
 .learn-chat-end {
   width: 1px;
   height: clamp(12px, 2vh, 20px);

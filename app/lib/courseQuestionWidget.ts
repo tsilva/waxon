@@ -21,6 +21,8 @@ const QUESTION_WIDGET_COMMENT_PATTERN =
   /<!--\s*waxon:question-widget\s+([\s\S]*?)\s*-->/gu;
 const ANSWERED_QUESTION_COMMENT_PATTERN =
   /<!--\s*waxon:answered-question[\s\S]*?-->\s*/gu;
+const ANSWERED_QUESTION_COMMENT_CAPTURE_PATTERN =
+  /<!--\s*waxon:answered-question([\s\S]*?)-->\s*/u;
 const MAX_WIDGET_TEXT_CHARS = 1_200;
 const MAX_WIDGET_ID_CHARS = 80;
 const MAX_CHOICE_TEXT_CHARS = 500;
@@ -133,6 +135,43 @@ export function parseCourseQuestionWidgets(content: string): {
 
 export function stripAnsweredQuestionMetadata(content: string): string {
   return content.replace(ANSWERED_QUESTION_COMMENT_PATTERN, "").trim();
+}
+
+export function parseCourseQuestionWidgetAnswer(content: string): {
+  question: string | null;
+  widgetId: string | null;
+  answer: string;
+} | null {
+  const match = content.match(ANSWERED_QUESTION_COMMENT_CAPTURE_PATTERN);
+
+  if (!match) {
+    return null;
+  }
+
+  const metadata = match[1] ?? "";
+  const answer = stripAnsweredQuestionMetadata(content);
+  let question: string | null = null;
+  let widgetId: string | null = null;
+
+  for (const line of metadata.split(/\n/u)) {
+    const [rawKey, ...rawValueParts] = line.split(":");
+    const key = rawKey?.trim().toLowerCase();
+    const value = rawValueParts.join(":").trim();
+
+    if (key === "question" && value) {
+      question = normalizeText(value, MAX_WIDGET_TEXT_CHARS);
+    }
+
+    if (key === "widget_id" && value) {
+      widgetId = normalizeText(value, MAX_WIDGET_ID_CHARS);
+    }
+  }
+
+  return {
+    question,
+    widgetId,
+    answer,
+  };
 }
 
 function sanitizeCommentText(value: string): string {
