@@ -2,6 +2,7 @@
 
 import { useClerk, useUser } from "@clerk/nextjs";
 import {
+  ArrowUp,
   BookOpen,
   Loader2,
   PlusCircle,
@@ -32,6 +33,12 @@ import {
 } from "@/app/lib/courseMessageMetrics";
 import { shouldShowCourseChatInterruptedWarning } from "@/app/lib/courseChatTurn";
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
+import {
+  parseCourseQuestionWidgets,
+  serializeCourseQuestionWidgetAnswer,
+  stripAnsweredQuestionMetadata,
+  type CourseQuestionWidget,
+} from "@/app/lib/courseQuestionWidget";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import {
   getSpeechRecognitionConstructor,
@@ -219,6 +226,113 @@ function LearnPendingEvaluationCard({ id }: { id: string }) {
   );
 }
 
+function LearnQuestionWidgetCard({
+  widget,
+  disabled,
+  onSubmit,
+}: {
+  widget: CourseQuestionWidget;
+  disabled: boolean;
+  onSubmit: (widget: CourseQuestionWidget, answer: string) => void;
+}) {
+  const [answer, setAnswer] = useState("");
+  const canSubmit = answer.trim().length > 0 && !disabled;
+
+  if (widget.type === "multiple_choice") {
+    return (
+      <section
+        className="learn-question-widget learn-question-widget-choice"
+        aria-label={widget.question}
+      >
+        <MarkdownInline
+          as="p"
+          className="learn-question-widget-prompt"
+          enableMath
+          text={widget.question}
+        />
+        <div className="learn-question-choice-grid">
+          {widget.choices.map((choice) => (
+            <button
+              className="learn-question-choice"
+              disabled={disabled}
+              key={`${widget.id}-${choice.id}`}
+              type="button"
+              onClick={() => {
+                onSubmit(widget, `${choice.id}) ${choice.text}`);
+              }}
+            >
+              <span>{choice.id}</span>
+              <MarkdownInline
+                as="p"
+                className="learn-question-choice-text"
+                enableMath
+                text={choice.text}
+              />
+            </button>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!canSubmit) {
+      return;
+    }
+
+    onSubmit(widget, answer.trim());
+    setAnswer("");
+  }
+
+  return (
+    <form
+      className="learn-question-widget learn-question-widget-free-text"
+      aria-label={widget.question}
+      onSubmit={handleSubmit}
+    >
+      <MarkdownInline
+        as="p"
+        className="learn-question-widget-prompt"
+        enableMath
+        text={widget.question}
+      />
+      <div className="learn-question-free-text-row">
+        <textarea
+          className="learn-question-free-text-input"
+          value={answer}
+          placeholder={widget.placeholder ?? "Type your answer here..."}
+          rows={3}
+          disabled={disabled}
+          aria-label="Answer question"
+          onChange={(event) => setAnswer(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !event.metaKey &&
+              !event.ctrlKey
+            ) {
+              event.preventDefault();
+              event.currentTarget.form?.requestSubmit();
+            }
+          }}
+        />
+        <button
+          className="learn-question-widget-submit"
+          type="submit"
+          disabled={!canSubmit}
+          aria-label="Submit answer"
+          title="Submit answer"
+        >
+          <ArrowUp aria-hidden="true" />
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function extractFinalLearnerQuestion(content: string): string | null {
   const text = content.trim();
   const questionEnd = text.lastIndexOf("?");
@@ -256,7 +370,11 @@ function findPreviousLearnerQuestion(
       continue;
     }
 
-    const question = extractFinalLearnerQuestion(message.content);
+    const parsedMetrics = parseCourseMessageMetrics(message.content);
+    const parsedWidgets = parseCourseQuestionWidgets(parsedMetrics.content);
+    const widgetQuestion = parsedWidgets.widgets.at(-1)?.question;
+    const question =
+      widgetQuestion ?? extractFinalLearnerQuestion(parsedWidgets.content);
 
     if (question) {
       return question;
@@ -1163,9 +1281,8 @@ export default function LearnPageClient({
     setSelectedEvaluationDetails(null);
   }
 
-  async function submitChatPrompt(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = displayedTopic.trim();
+  async function submitChatContent(rawContent: string) {
+    const content = rawContent.trim();
 
     if (!content || isStreaming) {
       return;
@@ -1388,6 +1505,20 @@ export default function LearnPageClient({
     } finally {
       setIsStreaming(false);
     }
+  }
+
+  async function submitChatPrompt(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submitChatContent(displayedTopic);
+  }
+
+  function submitQuestionWidget(
+    widget: CourseQuestionWidget,
+    answer: string,
+  ) {
+    void submitChatContent(
+      serializeCourseQuestionWidgetAnswer({ widget, answer }),
+    );
   }
 
   function handleChatComposerKeyDown(
@@ -1650,7 +1781,15 @@ export default function LearnPageClient({
                       const parsedMessage = parseCourseMessageMetrics(
                         message.content,
                       );
-                      const visibleMessageContent = parsedMessage.content;
+                      const metadataStrippedContent =
+                        message.role === "user"
+                          ? stripAnsweredQuestionMetadata(parsedMessage.content)
+                          : parsedMessage.content;
+                      const parsedWidgets =
+                        message.role === "assistant"
+                          ? parseCourseQuestionWidgets(metadataStrippedContent)
+                          : { content: metadataStrippedContent, widgets: [] };
+                      const visibleMessageContent = parsedWidgets.content;
                       const messageMetrics =
                         message.metrics ?? parsedMessage.metrics;
                       const evaluationSnippet =
@@ -1701,24 +1840,37 @@ export default function LearnPageClient({
                       const messageKind = evaluationSnippet
                         ? "evaluation"
                         : message.role;
+                      const hasLaterUserAnswer =
+                        message.role === "assistant" &&
+                        parsedWidgets.widgets.length > 0 &&
+                        chatMessages
+                          .slice(messageIndex + 1)
+                          .some((laterMessage) => laterMessage.role === "user");
+                      const shouldShowQuestionWidgets =
+                        message.role === "assistant" &&
+                        parsedWidgets.widgets.length > 0 &&
+                        !hasLaterUserAnswer &&
+                        !evaluationSnippet;
 
                       return (
                         <div
                           className={`learn-chat-message learn-chat-message-${message.role} learn-chat-message-${messageKind}`}
                           key={message.id}
                         >
-                          {messageContent ? (
+                          {messageContent || shouldShowQuestionWidgets ? (
                             <div className="learn-chat-message-stack">
-                              <MarkdownContent
-                                className={`learn-chat-message-content learn-chat-message-content-${messageKind}`}
-                                text={messageContent}
-                                enableCodeBlocks
-                                enableHeadings={
-                                  message.role === "assistant" &&
-                                  !evaluationSnippet
-                                }
-                                enableMath={message.role === "assistant"}
-                              />
+                              {messageContent ? (
+                                <MarkdownContent
+                                  className={`learn-chat-message-content learn-chat-message-content-${messageKind}`}
+                                  text={messageContent}
+                                  enableCodeBlocks
+                                  enableHeadings={
+                                    message.role === "assistant" &&
+                                    !evaluationSnippet
+                                  }
+                                  enableMath={message.role === "assistant"}
+                                />
+                              ) : null}
                               {message.interrupted ? (
                                 <p
                                   className="learn-chat-interrupted"
@@ -1731,6 +1883,18 @@ export default function LearnPageClient({
                               <LearnChatMessageMetrics
                                 metrics={messageMetrics}
                               />
+                              {shouldShowQuestionWidgets ? (
+                                <div className="learn-question-widget-stack">
+                                  {parsedWidgets.widgets.map((widget) => (
+                                    <LearnQuestionWidgetCard
+                                      key={`${message.id}-${widget.id}`}
+                                      widget={widget}
+                                      disabled={isStreaming}
+                                      onSubmit={submitQuestionWidget}
+                                    />
+                                  ))}
+                                </div>
+                              ) : null}
                             </div>
                           ) : (
                             <span

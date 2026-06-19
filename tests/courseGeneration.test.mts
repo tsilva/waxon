@@ -7,6 +7,10 @@ import {
   shouldShowCourseChatInterruptedWarning,
 } from "../app/lib/courseChatTurn.ts";
 import {
+  parseCourseQuestionWidgets,
+  serializeCourseQuestionWidget,
+} from "../app/lib/courseQuestionWidget.ts";
+import {
   parseCourseQuestionAttemptToolResult,
   reformatMultipleChoiceQuestionForReview,
   stripMultipleChoiceOptionsFromQuestion,
@@ -23,7 +27,7 @@ test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for
 
   assert.match(result.text, /Why PPO Needs an Entropy Term/u);
   assert.match(result.text, /Explain why entropy/u);
-  assert.match(result.text, /What is the main idea/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
   assert.equal(result.appendedText, result.text);
 });
 
@@ -35,9 +39,8 @@ test("ensureCourseChatTurnHasLearnerQuestion appends checkpoint to lesson withou
   });
 
   assert.match(result.text, /Entropy regularization rewards/u);
-  assert.match(result.text, /Checkpoint/u);
-  assert.match(result.text, /What is the main idea/u);
-  assert.match(result.appendedText, /Checkpoint/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.type, "free_text");
+  assert.equal(parseCourseQuestionWidgets(result.appendedText).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion preserves a complete learner question", () => {
@@ -61,9 +64,9 @@ test("ensureCourseChatTurnHasLearnerQuestion repairs dangling learner prompt", (
     pageObjective: "Explain why PPO constrains policy changes.",
   });
 
-  assert.match(result.text, /In your own\.\n\n\*\*Checkpoint\*\*/u);
-  assert.match(result.text, /What is the main idea/u);
-  assert.match(result.appendedText, /Checkpoint/u);
+  assert.match(result.text, /In your own\.\n\nFocus on this milestone/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
+  assert.equal(parseCourseQuestionWidgets(result.appendedText).widgets[0]?.type, "free_text");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion repairs mid-word truncation", () => {
@@ -73,12 +76,25 @@ test("ensureCourseChatTurnHasLearnerQuestion repairs mid-word truncation", () =>
     pageObjective: "Review how advantages shape policy updates.",
   });
 
-  assert.match(result.text, /worse than expec\.\n\n\*\*Checkpoint\*\*/u);
-  assert.match(result.text, /What is the main idea/u);
+  assert.match(result.text, /worse than expec\.\n\nFocus on this milestone/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
 });
 
 test("isCourseChatTurnComplete accepts terminal questions and multiple choice", () => {
   assert.equal(isCourseChatTurnComplete("Why does that matter for PPO?"), true);
+  assert.equal(
+    isCourseChatTurnComplete(
+      [
+        "Entropy keeps the policy exploratory.",
+        serializeCourseQuestionWidget({
+          type: "free_text",
+          id: "entropy-check",
+          question: "Why does entropy matter for PPO exploration?",
+        }),
+      ].join("\n\n"),
+    ),
+    true,
+  );
   assert.equal(
     isCourseChatTurnComplete(
       "Choose the best option.\n\nA) Increase the sampled action\nB) Decrease the sampled action",
@@ -336,6 +352,51 @@ test("parseCourseQuestionAttemptToolResult reads choices from tutor message cont
       "C) The advantage is negative",
       "D) The policy loss is zero",
     ].join("\n"),
+  );
+
+  assert.equal(result.toolCall, "record_course_question_attempt");
+
+  if (result.toolCall === "record_course_question_attempt") {
+    assert.equal(result.answer, selectedAnswer);
+  }
+});
+
+test("parseCourseQuestionAttemptToolResult reads choices from a hidden question widget", () => {
+  const selectedAnswer =
+    "The sampled action is now half as likely under the new policy";
+  const result = parseCourseQuestionAttemptToolResult(
+    JSON.stringify({
+      toolCall: "record_course_question_attempt",
+      question: "What does a PPO ratio r = 0.5 mean?",
+      answer: "The model inferred option B.",
+      answerSummary: "Learner selected B.",
+      conciseAnswer: selectedAnswer,
+      correctAnswer: selectedAnswer,
+      justification:
+        "A PPO ratio of 0.5 means the new policy probability is half of the old policy probability.",
+      score: 10,
+    }),
+    [
+      "<!-- waxon:answered-question",
+      "question: What does a PPO ratio r = 0.5 mean?",
+      "widget_id: ratio-check",
+      "-->",
+      "B",
+    ].join("\n"),
+    serializeCourseQuestionWidget({
+      type: "multiple_choice",
+      id: "ratio-check",
+      question: "What does a PPO ratio r = 0.5 mean?",
+      choices: [
+        {
+          id: "A",
+          text: "The sampled action is now twice as likely under the new policy",
+        },
+        { id: "B", text: selectedAnswer },
+        { id: "C", text: "The advantage is negative" },
+        { id: "D", text: "The policy loss is zero" },
+      ],
+    }),
   );
 
   assert.equal(result.toolCall, "record_course_question_attempt");

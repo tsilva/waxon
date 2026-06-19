@@ -37,6 +37,7 @@ Waxon is a Next.js application for typed recall practice. It serves due question
 * Learn course creation streams partial TOCs to the client. Once the first valid TOC page arrives, the first chat lesson can start from an in-memory draft course while the full TOC and durable course record continue finalizing in parallel.
 * Learn chat milestone advancement is intentionally conservative: the progress tool can propose advancing, but the route only advances after a recorded high-scoring answer evaluation demonstrates mastery.
 * Learn extracted review questions preserve inline code/math markdown by transferring matching formatting spans from the original tutor question into the server-side extracted question record.
+* Learn chat assistant turns can end with a hidden `waxon:question-widget` marker. `LearnPageClient` parses that marker into an inline free-text or multiple-choice widget, and widget submissions still post back through `/api/courses/chat`, where the existing course question-attempt evaluator records the generated question and answer into the durable question bank.
 
 # Data Model Cues
 
