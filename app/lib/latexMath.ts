@@ -29,3 +29,7 @@ export function renderLatexCommandText(commandName: string): string | null {
 
   return mathSymbolMap[commandName] ?? commandName;
 }
+
+export function isUprightMathLiteral(character: string): boolean {
+  return /^[\s\d()[\]{}.,;:!?=+\-*/<>|]$/u.test(character);
+}
