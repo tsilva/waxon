@@ -42,6 +42,7 @@ import { shouldShowCourseChatInterruptedWarning } from "@/app/lib/courseChatTurn
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import {
   parseCourseQuestionWidgets,
+  parseCourseQuestionWidgetAnswer,
   serializeCourseQuestionWidgetAnswer,
   stripAnsweredQuestionMetadata,
   type CourseQuestionWidget,
@@ -102,6 +103,7 @@ type LearnChatMessage = {
   metrics?: CourseMessageMetrics | null;
   status?: string;
   pendingEvaluation?: boolean;
+  widgetAnswerDetails?: LearnWidgetAnswerDetails | null;
   interrupted?: boolean;
   createdAt?: number;
 };
@@ -121,6 +123,11 @@ type LearnEvaluationDetails = {
   feedback: string;
   correctAnswer: string | null;
   createdAt?: number;
+};
+
+type LearnWidgetAnswerDetails = {
+  question: string | null;
+  answer: string;
 };
 
 const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
@@ -213,7 +220,15 @@ function LearnQuestionEvaluationCard({
   );
 }
 
-function LearnPendingEvaluationCard({ id }: { id: string }) {
+function LearnPendingEvaluationCard({
+  id,
+  answerDetails,
+}: {
+  id: string;
+  answerDetails?: LearnWidgetAnswerDetails | null;
+}) {
+  const question = answerDetails?.question?.trim() || "Answer evaluation";
+
   return (
     <ol
       className="learn-chat-evaluation-list"
@@ -221,13 +236,33 @@ function LearnPendingEvaluationCard({ id }: { id: string }) {
     >
       <PreviousAnswerRow
         id={id}
-        question="Answer evaluation"
+        question={question}
         questionLabel="Evaluation"
         status="grading"
         score={null}
         feedback={null}
         timeLabel="Checking answer"
         className="learn-chat-evaluation-row"
+        supportingContent={
+          answerDetails?.answer ? (
+            <div className="learn-pending-evaluation-copy">
+              <div className="learn-pending-answer">
+                <span className="previous-field-label">Your answer</span>
+                <MarkdownContent
+                  className="previous-answer"
+                  enableMath
+                  text={answerDetails.answer}
+                />
+              </div>
+              <p
+                className="previous-question-feedback previous-question-feedback-pending"
+                aria-live="polite"
+              >
+                Evaluating...
+              </p>
+            </div>
+          ) : undefined
+        }
       />
     </ol>
   );
@@ -385,6 +420,30 @@ function findPreviousLearnerQuestion(
 
     if (question) {
       return question;
+    }
+  }
+
+  return null;
+}
+
+function findPreviousWidgetAnswer(
+  messages: LearnChatMessage[],
+  messageIndex: number,
+): LearnWidgetAnswerDetails | null {
+  for (let index = messageIndex - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+
+    if (message?.role !== "user") {
+      continue;
+    }
+
+    const parsedAnswer = parseCourseQuestionWidgetAnswer(message.content);
+
+    if (parsedAnswer?.answer) {
+      return {
+        question: parsedAnswer.question,
+        answer: parsedAnswer.answer,
+      };
     }
   }
 
@@ -1288,7 +1347,10 @@ export default function LearnPageClient({
     setSelectedEvaluationDetails(null);
   }
 
-  async function submitChatContent(rawContent: string) {
+  async function submitChatContent(
+    rawContent: string,
+    options: { widgetAnswerDetails?: LearnWidgetAnswerDetails } = {},
+  ) {
     const content = rawContent.trim();
 
     if (!content || isStreaming) {
@@ -1307,6 +1369,16 @@ export default function LearnPageClient({
       content: "",
       status: "Thinking...",
     };
+    const pendingEvaluationMessage: LearnChatMessage | null =
+      options.widgetAnswerDetails
+        ? {
+            id: `${assistantMessageId}-evaluation`,
+            role: "assistant",
+            content: "",
+            pendingEvaluation: true,
+            widgetAnswerDetails: options.widgetAnswerDetails,
+          }
+        : null;
     const nextMessages = [...chatMessages, userMessage];
 
     shouldAutoScrollChatRef.current = true;
@@ -1315,7 +1387,11 @@ export default function LearnPageClient({
     setError(null);
     setIsStreaming(true);
     setDraftCourseToc(null);
-    setChatMessages([...nextMessages, assistantMessage]);
+    setChatMessages([
+      ...nextMessages,
+      ...(pendingEvaluationMessage ? [pendingEvaluationMessage] : []),
+      assistantMessage,
+    ]);
 
     try {
       const response = await fetch("/api/courses/chat", {
@@ -1525,6 +1601,12 @@ export default function LearnPageClient({
   ) {
     void submitChatContent(
       serializeCourseQuestionWidgetAnswer({ widget, answer }),
+      {
+        widgetAnswerDetails: {
+          question: widget.question,
+          answer,
+        },
+      },
     );
   }
 
@@ -1777,10 +1859,15 @@ export default function LearnPageClient({
                   <div className="learn-chat-thread" ref={chatThreadRef}>
                     {chatMessages.map((message, messageIndex) => {
                       if (message.pendingEvaluation) {
+                        const answerDetails =
+                          message.widgetAnswerDetails ??
+                          findPreviousWidgetAnswer(chatMessages, messageIndex);
+
                         return (
                           <LearnPendingEvaluationCard
                             key={message.id}
                             id={message.id}
+                            answerDetails={answerDetails}
                           />
                         );
                       }
@@ -1788,6 +1875,17 @@ export default function LearnPageClient({
                       const parsedMessage = parseCourseMessageMetrics(
                         message.content,
                       );
+                      const widgetAnswer =
+                        message.role === "user"
+                          ? parseCourseQuestionWidgetAnswer(
+                              parsedMessage.content,
+                            )
+                          : null;
+
+                      if (widgetAnswer?.answer) {
+                        return null;
+                      }
+
                       const metadataStrippedContent =
                         message.role === "user"
                           ? stripAnsweredQuestionMetadata(parsedMessage.content)

@@ -7,6 +7,7 @@ import {
   shouldShowCourseChatInterruptedWarning,
 } from "../app/lib/courseChatTurn.ts";
 import {
+  parseCourseQuestionWidgetAnswer,
   parseCourseQuestionWidgets,
   serializeCourseQuestionWidget,
 } from "../app/lib/courseQuestionWidget.ts";
@@ -404,6 +405,25 @@ test("parseCourseQuestionAttemptToolResult reads choices from a hidden question 
   if (result.toolCall === "record_course_question_attempt") {
     assert.equal(result.answer, selectedAnswer);
   }
+});
+
+test("parseCourseQuestionWidgetAnswer reads hidden question metadata", () => {
+  const parsed = parseCourseQuestionWidgetAnswer(
+    [
+      "<!-- waxon:answered-question",
+      "question: A regression model has R-squared = 0.80. What does that mean?",
+      "widget_id: r2-check",
+      "-->",
+      "B) The model explains about 80% of the variation in the outcome values.",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(parsed, {
+    question: "A regression model has R-squared = 0.80. What does that mean?",
+    widgetId: "r2-check",
+    answer:
+      "B) The model explains about 80% of the variation in the outcome values.",
+  });
 });
 
 test("parseCourseQuestionAttemptToolResult preserves inline markdown from tutor question", () => {
