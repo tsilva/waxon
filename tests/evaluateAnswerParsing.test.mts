@@ -147,13 +147,34 @@ test("parseEvaluation formats formulas in correctAnswer as markdown", () => {
     justification: "Key idea present.",
     answerSummary: "Compared shifted logit sum.",
     correctAnswer:
-      "Since `exp(-1)<1`, `exp(0)+exp(-1)<2`; ln is increasing, so `ln(sum)<ln(2)`.",
+      "Since $exp(-1)<1$, $exp(0)+exp(-1)<2$; ln is increasing, so $ln(sum)<ln(2)$.",
+  });
+});
+
+test("parseEvaluation formats compact exponent correct answers as math", () => {
+  const result = parseEvaluation(
+    JSON.stringify({
+      score: 5,
+      justification: "Missing exponent notation.",
+      answerSummary: "x - 7",
+      correctAnswer: "`x^{-7}` (or `1/x^7`)",
+    }),
+    "fallback answer",
+  );
+
+  assert.deepEqual(result, {
+    status: "graded",
+    score: 5,
+    justification: "Missing exponent notation.",
+    answerSummary: "x - 7",
+    correctAnswer: "$x^{-7}$ (or $1/x^7$)",
   });
 });
 
 test("evaluateAnswer prompt prefers explicit matrix product notation", () => {
   const prompt = buildSystemPrompt();
 
+  assert.match(prompt, /inline math for mathematical formulas/u);
   assert.match(prompt, /Q = x @ W_q/u);
   assert.match(prompt, /implicit multiplication/u);
   assert.match(prompt, /Q = XW_Q/u);

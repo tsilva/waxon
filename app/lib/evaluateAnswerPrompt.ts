@@ -20,9 +20,10 @@ math symbols or formulas.
 
 Also emit correctAnswer: the concise correct answer you expected for this
 question, not the user's answer. Keep it direct and 24 words maximum.
-Use Markdown inline code for literal formulas, symbols, vectors, and code-like
-expressions in correctAnswer, for example \`exp(-1) < 1\` and
-\`ln(sum) < ln(2)\`.
+Use Markdown inline math for mathematical formulas, symbols, and vectors in
+correctAnswer, for example $exp(-1) < 1$ and $ln(sum) < ln(2)$.
+Use Markdown inline code only for code/API literals or programming-style
+expressions.
 For matrix products in machine learning or deep learning answers, prefer
 programming-style explicit matrix multiplication such as \`Q = x @ W_q\` over
 implicit multiplication such as \`Q = XW_Q\`.

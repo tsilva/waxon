@@ -173,7 +173,7 @@ export function PreviousAnswerRow({
                   as="p"
                   className="previous-answer"
                   enableMath
-                  text={formatFormulaMarkdown(correctAnswer)}
+                  text={formatFormulaMarkdown(correctAnswer, { style: "math" })}
                 />
               ) : (
                 <p className="previous-answer previous-answer-empty">

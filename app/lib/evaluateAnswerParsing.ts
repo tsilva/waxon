@@ -145,10 +145,11 @@ function conciseCorrectAnswer(
   const words = source.trim().replace(/\s+/g, " ").split(" ");
 
   if (words.length <= MAX_CORRECT_ANSWER_WORDS) {
-    return formatFormulaMarkdown(words.join(" "));
+    return formatFormulaMarkdown(words.join(" "), { style: "math" });
   }
 
   return formatFormulaMarkdown(
     `${words.slice(0, MAX_CORRECT_ANSWER_WORDS).join(" ")}...`,
+    { style: "math" },
   );
 }

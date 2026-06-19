@@ -1942,6 +1942,7 @@ export default function LearnPageClient({
                   enableMath
                   text={formatFormulaMarkdown(
                     selectedEvaluationDetails.correctAnswer,
+                    { style: "math" },
                   )}
                 />
               ) : (

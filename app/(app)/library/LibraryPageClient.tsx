@@ -733,7 +733,9 @@ export default function LibraryPageClient({
                               as="p"
                               className="previous-answer"
                               enableMath
-                              text={formatFormulaMarkdown(item.conciseAnswer)}
+                              text={formatFormulaMarkdown(item.conciseAnswer, {
+                                style: "math",
+                              })}
                             />
                           </div>
                         ) : null}
@@ -868,6 +870,7 @@ export default function LibraryPageClient({
                   enableMath
                   text={formatFormulaMarkdown(
                     selectedQuestionDetails.conciseAnswer,
+                    { style: "math" },
                   )}
                 />
               ) : (
