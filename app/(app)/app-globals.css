@@ -6539,7 +6539,6 @@ textarea {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 4px clamp(24px, 2.4vw, 34px) 0 0;
-  scroll-behavior: smooth;
 }
 
 .learn-chat-thread::before {
