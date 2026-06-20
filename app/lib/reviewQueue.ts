@@ -116,7 +116,6 @@ type QueueState = {
 };
 
 const globalForQueue = globalThis as typeof globalThis & {
-  waxonQueue?: QueueState;
   waxonQueueStates?: Map<string, QueueState>;
 };
 
@@ -139,30 +138,11 @@ const queueStates =
 
 globalForQueue.waxonQueueStates = queueStates;
 
-if (globalForQueue.waxonQueue?.userId) {
-  queueStates.set(globalForQueue.waxonQueue.userId, globalForQueue.waxonQueue);
-  globalForQueue.waxonQueue = undefined;
-}
-
-function normalizeQueueState(state: QueueState): QueueState {
-  const legacyState = state as QueueState & {
-    inFlightQuestions?: Set<string>;
-    latestByQuestion?: Record<string, LatestEvaluation>;
-  };
-
-  state.inFlightQuestionKeys ??=
-    legacyState.inFlightQuestions ?? new Set<string>();
-  state.latestByQuestionKey ??= legacyState.latestByQuestion ?? {};
-  state.subscribers ??= new Set<QueueStatusSubscriber>();
-
-  return state;
-}
-
 function getQueueStateForUser(userId: string): QueueState {
   const existing = queueStates.get(userId);
 
   if (existing) {
-    return normalizeQueueState(existing);
+    return existing;
   }
 
   const state = createQueueState(userId);
