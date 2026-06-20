@@ -741,6 +741,7 @@ export default function LearnPageClient({
     useState<string | null>(null);
   const chatThreadRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollChatRef = useRef(true);
+  const autoScrollFrameRef = useRef<number | null>(null);
   const touchScrollStartYRef = useRef<number | null>(null);
   const canViewAdmin = isAdminEmail(currentUser?.email);
   const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
@@ -881,7 +882,7 @@ export default function LearnPageClient({
     }
 
     function handleWheel(event: WheelEvent) {
-      if (event.deltaY < 0) {
+      if (event.deltaY !== 0) {
         shouldAutoScrollChatRef.current = false;
       }
     }
@@ -894,11 +895,7 @@ export default function LearnPageClient({
       const startY = touchScrollStartYRef.current;
       const currentY = event.touches[0]?.clientY;
 
-      if (
-        typeof startY === "number" &&
-        typeof currentY === "number" &&
-        currentY > startY
-      ) {
+      if (typeof startY === "number" && typeof currentY === "number") {
         shouldAutoScrollChatRef.current = false;
       }
     }
@@ -906,8 +903,11 @@ export default function LearnPageClient({
     function handleKeyDown(event: KeyboardEvent) {
       if (
         event.key === "ArrowUp" ||
+        event.key === "ArrowDown" ||
         event.key === "PageUp" ||
-        event.key === "Home"
+        event.key === "PageDown" ||
+        event.key === "Home" ||
+        event.key === "End"
       ) {
         shouldAutoScrollChatRef.current = false;
       }
@@ -937,12 +937,28 @@ export default function LearnPageClient({
       return;
     }
 
-    window.requestAnimationFrame(() => {
+    if (autoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(autoScrollFrameRef.current);
+    }
+
+    autoScrollFrameRef.current = window.requestAnimationFrame(() => {
+      autoScrollFrameRef.current = null;
+      if (!shouldAutoScrollChatRef.current) {
+        return;
+      }
+
       thread.scrollTo({
         top: thread.scrollHeight,
-        behavior: "smooth",
+        behavior: "auto",
       });
     });
+
+    return () => {
+      if (autoScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(autoScrollFrameRef.current);
+        autoScrollFrameRef.current = null;
+      }
+    };
   }, [chatMessages, isStreaming]);
 
   useEffect(() => {
