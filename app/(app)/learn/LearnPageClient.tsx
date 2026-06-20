@@ -238,11 +238,11 @@ function LearnPendingEvaluationCard({
       <PreviousAnswerRow
         id={id}
         question={question}
-        questionLabel="Evaluation"
+        questionLabel="Evaluating"
         status="grading"
         score={null}
         feedback={null}
-        timeLabel="Checking answer"
+        metaContent={null}
         className="learn-chat-evaluation-row"
         supportingContent={
           answerDetails?.answer ? (
@@ -255,14 +255,8 @@ function LearnPendingEvaluationCard({
                   text={answerDetails.answer}
                 />
               </div>
-              <p
-                className="previous-question-feedback previous-question-feedback-pending"
-                aria-live="polite"
-              >
-                Evaluating...
-              </p>
             </div>
-          ) : undefined
+          ) : null
         }
       />
     </ol>
@@ -473,6 +467,10 @@ function shouldShowLearnQuestionWidgets(input: {
 
 function hasActiveLearnQuestionWidgets(messages: LearnChatMessage[]) {
   return messages.some((message, messageIndex) => {
+    if (message.pendingEvaluation) {
+      return true;
+    }
+
     if (message.role !== "assistant") {
       return false;
     }
@@ -491,6 +489,15 @@ function hasActiveLearnQuestionWidgets(messages: LearnChatMessage[]) {
       hasEvaluationSnippet: Boolean(evaluationSnippet),
     });
   });
+}
+
+function isWaitingForQuestionWidgetEvaluation(
+  messages: LearnChatMessage[],
+  messageIndex: number,
+) {
+  return messages
+    .slice(0, messageIndex)
+    .some((message) => message.pendingEvaluation);
 }
 
 function courseChatFallbackId(message: StoredCourseChatMessage, index: number) {
@@ -2034,20 +2041,28 @@ export default function LearnPageClient({
                               </div>
                             </div>
                           ) : !shouldShowQuestionWidgets ? (
-                            <span
-                              className={`learn-chat-message learn-chat-message-${message.role} learn-chat-message-${messageKind} learn-chat-pending`}
-                              role="status"
-                              aria-live="polite"
-                            >
-                              <span className="learn-chat-pending-status">
-                                {pendingStatus(message)}
+                            !isWaitingForQuestionWidgetEvaluation(
+                              chatMessages,
+                              messageIndex,
+                            ) ? (
+                              <span
+                                className={`learn-chat-message learn-chat-message-${message.role} learn-chat-message-${messageKind} learn-chat-pending`}
+                                role="status"
+                                aria-live="polite"
+                              >
+                                <span className="learn-chat-pending-status">
+                                  {pendingStatus(message)}
+                                </span>
+                                <span
+                                  className="progress-dot-suffix"
+                                  aria-hidden="true"
+                                >
+                                  <span />
+                                  <span />
+                                  <span />
+                                </span>
                               </span>
-                              <span className="progress-dot-suffix" aria-hidden="true">
-                                <span />
-                                <span />
-                                <span />
-                              </span>
-                            </span>
+                            ) : null
                           ) : null}
                           {shouldShowQuestionWidgets ? (
                             <div className="learn-question-widget-stack">
