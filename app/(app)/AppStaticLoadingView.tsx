@@ -13,6 +13,13 @@ const staticViewAttributes = {
   admin: { "data-admin-static": true },
 } as const;
 
+const readerTabs = [
+  ["Review", "/review"],
+  ["Learn", "/learn"],
+  ["Library", "/library"],
+  ["Tags", "/tags"],
+] as const;
+
 export function AppStaticLoadingView({
   staticView,
 }: AppStaticLoadingViewProps) {
@@ -42,18 +49,17 @@ export function AppStaticLoadingView({
               aria-label="Waxon views"
               aria-busy="true"
             >
-              <Link className="reader-tab" href="/review" prefetch={false} role="tab">
-                Review
-              </Link>
-              <Link className="reader-tab" href="/learn" prefetch={false} role="tab">
-                Learn
-              </Link>
-              <Link className="reader-tab" href="/library" prefetch={false} role="tab">
-                Library
-              </Link>
-              <Link className="reader-tab" href="/tags" prefetch={false} role="tab">
-                Tags
-              </Link>
+              {readerTabs.map(([label, href]) => (
+                <Link
+                  className="reader-tab"
+                  href={href}
+                  key={href}
+                  prefetch={false}
+                  role="tab"
+                >
+                  {label}
+                </Link>
+              ))}
             </div>
           </div>
           <div className="reader-actions reader-actions-placeholder" />

@@ -18,6 +18,11 @@ type AuthenticatedClientHydratorProps<TProps extends object> = {
   staticSelector: string;
 };
 
+type AuthenticatedClientHydratorConfig<TProps extends object> = Omit<
+  AuthenticatedClientHydratorProps<TProps>,
+  "componentProps"
+>;
+
 export function AuthenticatedClientHydrator<TProps extends object>({
   componentProps,
   loadClient,
@@ -79,4 +84,19 @@ export function AuthenticatedClientHydrator<TProps extends object>({
       </AuthenticatedProviders>
     </>
   );
+}
+
+export function createAuthenticatedClientHydrator<TProps extends object>({
+  loadClient,
+  staticSelector,
+}: AuthenticatedClientHydratorConfig<TProps>) {
+  return function Hydrator(componentProps: TProps) {
+    return (
+      <AuthenticatedClientHydrator
+        componentProps={componentProps}
+        loadClient={loadClient}
+        staticSelector={staticSelector}
+      />
+    );
+  };
 }

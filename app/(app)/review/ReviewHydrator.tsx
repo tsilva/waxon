@@ -1,22 +1,10 @@
 "use client";
 
-import { AuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
-import type { ReviewInitialViewProps } from "./ReviewStaticView";
+import { createAuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
+import type { ReviewAppProps } from "./ReviewApp";
 
-type ReviewAppComponent = (props: ReviewInitialViewProps) => React.ReactElement;
-
-function loadReviewApp(): Promise<ReviewAppComponent> {
-  return import("./ReviewApp").then(
-    (reviewModule) => reviewModule.default as ReviewAppComponent,
-  );
-}
-
-export function ReviewHydrator(initialProps: ReviewInitialViewProps) {
-  return (
-    <AuthenticatedClientHydrator
-      componentProps={initialProps}
-      loadClient={loadReviewApp}
-      staticSelector="[data-review-static]"
-    />
-  );
-}
+export const ReviewHydrator =
+  createAuthenticatedClientHydrator<ReviewAppProps>({
+    loadClient: () => import("./ReviewApp").then((module) => module.default),
+    staticSelector: "[data-review-static]",
+  });
