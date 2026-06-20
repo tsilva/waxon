@@ -1,10 +1,10 @@
 import { LearnHydrator } from "./LearnHydrator";
-import { LearnStaticView } from "./LearnStaticView";
+import { AppStaticLoadingView } from "../AppStaticLoadingView";
 
 export default function LearnPage() {
   return (
     <>
-      <LearnStaticView />
+      <AppStaticLoadingView staticView="learn" />
       <LearnHydrator />
     </>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { AuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
+import { createAuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
 import type { ConceptTagSummary } from "@/app/lib/conceptTags";
 import type { QuestionBankPage } from "@/app/lib/questionBank";
 
@@ -17,22 +17,9 @@ type LibraryPageClientProps = {
   showAdmin?: boolean;
 };
 
-type LibraryPageClientComponent = (
-  props: LibraryPageClientProps,
-) => React.ReactElement;
-
-function loadLibraryPageClient(): Promise<LibraryPageClientComponent> {
-  return import("./LibraryPageClient").then(
-    (libraryModule) => libraryModule.default as LibraryPageClientComponent,
-  );
-}
-
-export function LibraryHydrator(initialProps: LibraryPageClientProps) {
-  return (
-    <AuthenticatedClientHydrator
-      componentProps={initialProps}
-      loadClient={loadLibraryPageClient}
-      staticSelector="[data-library-static]"
-    />
-  );
-}
+export const LibraryHydrator =
+  createAuthenticatedClientHydrator<LibraryPageClientProps>({
+    loadClient: () =>
+      import("./LibraryPageClient").then((module) => module.default),
+    staticSelector: "[data-library-static]",
+  });

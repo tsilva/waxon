@@ -1,5 +1,5 @@
 import { LearnHydrator } from "../../LearnHydrator";
-import { LearnStaticView } from "../../LearnStaticView";
+import { AppStaticLoadingView } from "../../../AppStaticLoadingView";
 
 type LearnCoursePageProps = {
   params: Promise<{
@@ -14,7 +14,7 @@ export default async function LearnCoursePage({
 
   return (
     <>
-      <LearnStaticView />
+      <AppStaticLoadingView staticView="learn" />
       <LearnHydrator initialCourseId={courseId} />
     </>
   );

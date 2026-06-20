@@ -1,10 +1,10 @@
+import { AppStaticLoadingView } from "../AppStaticLoadingView";
 import { LibraryHydrator } from "./LibraryHydrator";
-import { LibraryStaticView } from "./LibraryStaticView";
 
 export default function LibraryPage() {
   return (
     <>
-      <LibraryStaticView />
+      <AppStaticLoadingView staticView="library" />
       <LibraryHydrator />
     </>
   );

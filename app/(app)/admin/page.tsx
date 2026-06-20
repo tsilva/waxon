@@ -1,6 +1,6 @@
+import { AppStaticLoadingView } from "../AppStaticLoadingView";
 import { AdminHydrator } from "./AdminHydrator";
 import { getAdminPageShellProps } from "./adminPageShell";
-import { AdminStaticView } from "./AdminStaticView";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ export default async function AdminPage() {
 
   return (
     <>
-      <AdminStaticView />
+      <AppStaticLoadingView staticView="admin" />
       <AdminHydrator
         currentUser={currentUser}
         initialViewState={initialViewState}

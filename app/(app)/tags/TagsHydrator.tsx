@@ -1,6 +1,6 @@
 "use client";
 
-import { AuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
+import { createAuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
 import type { ConceptTagSummary } from "@/app/lib/conceptTags";
 
 type UserProfile = {
@@ -15,20 +15,8 @@ type TagsPageClientProps = {
   showAdmin?: boolean;
 };
 
-type TagsPageClientComponent = (props: TagsPageClientProps) => React.ReactElement;
-
-function loadTagsPageClient(): Promise<TagsPageClientComponent> {
-  return import("./TagsPageClient").then(
-    (tagsModule) => tagsModule.default as TagsPageClientComponent,
-  );
-}
-
-export function TagsHydrator() {
-  return (
-    <AuthenticatedClientHydrator
-      componentProps={{}}
-      loadClient={loadTagsPageClient}
-      staticSelector="[data-tags-static]"
-    />
-  );
-}
+export const TagsHydrator =
+  createAuthenticatedClientHydrator<TagsPageClientProps>({
+    loadClient: () => import("./TagsPageClient").then((module) => module.default),
+    staticSelector: "[data-tags-static]",
+  });

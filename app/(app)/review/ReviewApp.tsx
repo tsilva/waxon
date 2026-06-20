@@ -52,7 +52,6 @@ import {
   Layers,
   Plus,
   Search,
-  Settings,
   Sparkles,
   Trash2,
   Upload,
@@ -181,7 +180,7 @@ type QuestionSwapLayer = {
 
 type ActiveTab = "review" | "queue";
 
-type ReviewAppProps = {
+export type ReviewAppProps = {
   initialActiveTab?: ActiveTab;
   initialKnowledgeBaseSlug?: string | null;
   initialKnowledgeBases?: KnowledgeBaseManagementItem[];
@@ -479,51 +478,6 @@ type KnowledgeBaseManagementItem = {
   inReviewRotation: boolean;
 };
 
-const knowledgeBaseLoadingRows = Array.from({ length: 4 }, (_, index) => index);
-
-function KnowledgeBaseListLoadingPlaceholders() {
-  return (
-    <>
-      <span className="sr-only" role="status">
-        Loading knowledgeBases
-      </span>
-      <ol className="queue-list knowledgeBase-list knowledgeBase-skeleton-list" aria-hidden="true">
-        {knowledgeBaseLoadingRows.map((row) => (
-          <li className="queue-row knowledgeBase-row knowledgeBase-skeleton-row" key={row}>
-            <div className="queue-row-card knowledgeBase-row-card knowledgeBase-skeleton-card">
-              <div className="knowledgeBase-row-main">
-                <div className="knowledgeBase-row-copy knowledgeBase-skeleton-copy">
-                  <span className="admin-skeleton-line knowledgeBase-skeleton-name" />
-                  <span className="admin-skeleton-line knowledgeBase-skeleton-slug" />
-                </div>
-                <div className="knowledgeBase-row-meta knowledgeBase-skeleton-meta">
-                  <span className="admin-skeleton-pill knowledgeBase-skeleton-due" />
-                  <span className="admin-skeleton-line knowledgeBase-skeleton-count" />
-                  <span className="admin-skeleton-line knowledgeBase-skeleton-date" />
-                </div>
-              </div>
-              <div className="knowledgeBase-row-actions">
-                <span className="knowledgeBase-skeleton-toggle" />
-                <span className="admin-skeleton-refresh knowledgeBase-skeleton-button" />
-              </div>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </>
-  );
-}
-
-type KnowledgeBasesResponse = {
-  knowledgeBases: KnowledgeBaseManagementItem[];
-};
-
-type KnowledgeBaseMutationResponse = {
-  ok: boolean;
-  knowledgeBase?: KnowledgeBaseManagementItem;
-  error?: string;
-};
-
 type GeneratedQuestionStatus = "new" | "selected" | "adding" | "added";
 
 type GeneratedQuestionCandidate = {
@@ -739,10 +693,6 @@ function MarkdownContent(
   props: Omit<ComponentProps<typeof SharedMarkdownContent>, "enableMath">,
 ) {
   return <SharedMarkdownContent enableMath {...props} />;
-}
-
-function normalizeKnowledgeBaseNameForComparison(input: string): string {
-  return input.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function formatEvaluationPhase(phase: EvaluationPhase | null): string {
@@ -1192,20 +1142,20 @@ export default function ReviewApp({
   const [queueSearchQuery, setQueueSearchQuery] = useState(
     () => cachedSessionRef.current?.queueSearchQuery ?? "",
   );
-  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBaseManagementItem[]>(
+  const [knowledgeBases] = useState<KnowledgeBaseManagementItem[]>(
     () => cachedSessionRef.current?.knowledgeBases ?? initialKnowledgeBases,
   );
-  const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState(
+  const [selectedKnowledgeBaseId] = useState(
     () =>
       cachedSessionRef.current?.selectedKnowledgeBaseId ??
       initialRoutedKnowledgeBaseId ??
       initialKnowledgeBases[0]?.id ??
       "",
   );
-  const [knowledgeBaseSearchQuery, setKnowledgeBaseSearchQuery] = useState(
+  const [knowledgeBaseSearchQuery] = useState(
     () => cachedSessionRef.current?.knowledgeBaseSearchQuery ?? "",
   );
-  const [knowledgeBaseSortKey, setKnowledgeBaseSortKey] = useState<KnowledgeBaseSortKey>(
+  const [knowledgeBaseSortKey] = useState<KnowledgeBaseSortKey>(
     () => cachedSessionRef.current?.knowledgeBaseSortKey ?? "name",
   );
   const [selectedKnowledgeBaseDetailId, setSelectedKnowledgeBaseDetailId] = useState<
@@ -1215,23 +1165,18 @@ export default function ReviewApp({
       ? initialRoutedKnowledgeBaseId ?? cachedSessionRef.current?.selectedKnowledgeBaseDetailId ?? null
       : null,
   );
-  const [isCreatingKnowledgeBase, setIsCreatingKnowledgeBase] = useState(
+  const [isCreatingKnowledgeBase] = useState(
     () => cachedSessionRef.current?.isCreatingKnowledgeBase ?? false,
   );
-  const [editingKnowledgeBaseId, setEditingKnowledgeBaseId] = useState<string | null>(
+  const [editingKnowledgeBaseId] = useState<string | null>(
     () => cachedSessionRef.current?.editingKnowledgeBaseId ?? null,
   );
-  const [knowledgeBaseDraftName, setKnowledgeBaseDraftName] = useState(
+  const [knowledgeBaseDraftName] = useState(
     () => cachedSessionRef.current?.knowledgeBaseDraftName ?? "",
   );
-  const [knowledgeBaseDraftCoverage, setKnowledgeBaseDraftCoverage] = useState(
+  const [knowledgeBaseDraftCoverage] = useState(
     () => cachedSessionRef.current?.knowledgeBaseDraftCoverage ?? "",
   );
-  const [isKnowledgeBasesLoading, setIsKnowledgeBasesLoading] = useState(false);
-  const [isKnowledgeBaseSaving, setIsKnowledgeBaseSaving] = useState(false);
-  const [isKnowledgeBaseDeleting, setIsKnowledgeBaseDeleting] = useState(false);
-  const [knowledgeBasePageMessage, setKnowledgeBasePageMessage] = useState<string | null>(null);
-  const [knowledgeBaseEditorMessage, setKnowledgeBaseEditorMessage] = useState<string | null>(null);
   const [knowledgeEmbeddingPlot, setKnowledgeEmbeddingPlot] =
     useState<KnowledgeEmbeddingPlotResponse>(
       () =>
@@ -1244,7 +1189,7 @@ export default function ReviewApp({
     () => cachedSessionRef.current?.messages ?? [],
   );
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialActiveTab);
-  const [routeKnowledgeBaseSlug, setRouteKnowledgeBaseSlug] = useState<string | null>(
+  const [, setRouteKnowledgeBaseSlug] = useState<string | null>(
     initialActiveTab === "queue" ? initialKnowledgeBaseSlug : null,
   );
   const [isPreviousExpanded, setIsPreviousExpanded] = useState(
@@ -1311,7 +1256,7 @@ export default function ReviewApp({
   const [error, setError] = useState<string | null>(null);
   const { showError } = useAppError();
   const [currentTime, setCurrentTime] = useState(() => Date.now());
-  const [reviewQueueVersion, setReviewQueueVersion] = useState(0);
+  const [reviewQueueVersion] = useState(0);
   const answerRef = useRef(answer);
   const questionRef = useRef(question);
   const questionSwapTimerRef = useRef<number | null>(null);
@@ -1776,385 +1721,6 @@ export default function ReviewApp({
 
     learnTargetKnowledgeBaseIdRef.current = getStoredLearnTargetKnowledgeBaseId();
   }, []);
-
-  const selectedKnowledgeBase =
-    knowledgeBases.find((knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
-  const selectedKnowledgeBaseDetail =
-    knowledgeBases.find((knowledgeBase) => knowledgeBase.id === selectedKnowledgeBaseDetailId) ?? null;
-  const editingKnowledgeBase =
-    knowledgeBases.find((knowledgeBase) => knowledgeBase.id === editingKnowledgeBaseId) ?? null;
-  const knowledgeBaseDraftNameKey = normalizeKnowledgeBaseNameForComparison(knowledgeBaseDraftName);
-  const isKnowledgeBaseDraftNameDuplicate =
-    knowledgeBaseDraftNameKey.length > 0 &&
-    knowledgeBases.some(
-      (knowledgeBase) =>
-        knowledgeBase.id !== editingKnowledgeBaseId &&
-        normalizeKnowledgeBaseNameForComparison(knowledgeBase.name) === knowledgeBaseDraftNameKey,
-    );
-  const knowledgeBaseDraftNameMessage = isKnowledgeBaseDraftNameDuplicate
-    ? "KnowledgeBase name already exists."
-    : knowledgeBaseEditorMessage;
-  const isKnowledgeBaseEditorBusy = isKnowledgeBaseSaving || isKnowledgeBaseDeleting;
-  const canSaveKnowledgeBaseDraft =
-    !isKnowledgeBaseEditorBusy && knowledgeBaseDraftNameKey.length > 0 && !isKnowledgeBaseDraftNameDuplicate;
-  const visibleKnowledgeBases = useMemo(() => {
-    const normalizedQuery = knowledgeBaseSearchQuery.trim().toLowerCase();
-    const filteredKnowledgeBases = normalizedQuery
-      ? knowledgeBases.filter((knowledgeBase) =>
-          `${knowledgeBase.name} ${knowledgeBase.slug}`.toLowerCase().includes(normalizedQuery),
-        )
-      : knowledgeBases;
-
-    return [...filteredKnowledgeBases].sort((a, b) => {
-      if (knowledgeBaseSortKey === "name") {
-        return a.name.localeCompare(b.name);
-      }
-
-      if (knowledgeBaseSortKey === "due") {
-        return b.dueCount - a.dueCount || a.name.localeCompare(b.name);
-      }
-
-      return (
-        Number(b.inReviewRotation) - Number(a.inReviewRotation) ||
-        b.dueCount - a.dueCount ||
-        a.name.localeCompare(b.name)
-      );
-    });
-  }, [knowledgeBaseSearchQuery, knowledgeBaseSortKey, knowledgeBases]);
-  const rotationKnowledgeBaseCount = knowledgeBases.filter((knowledgeBase) => knowledgeBase.inReviewRotation).length;
-  const rotationDueCount = knowledgeBases.reduce(
-    (total, knowledgeBase) => (knowledgeBase.inReviewRotation ? total + knowledgeBase.dueCount : total),
-    0,
-  );
-  const totalCardCount = knowledgeBases.reduce((total, knowledgeBase) => total + knowledgeBase.cardCount, 0);
-  const loadKnowledgeBases = useCallback(async () => {
-    setIsKnowledgeBasesLoading(true);
-    setKnowledgeBasePageMessage(null);
-
-    try {
-      const response = await fetch("/api/knowledgeBases", {
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        throw new Error("Could not load knowledgeBases.");
-      }
-
-      const data = (await response.json()) as KnowledgeBasesResponse;
-
-      setKnowledgeBases(data.knowledgeBases);
-      setSelectedKnowledgeBaseId((currentKnowledgeBaseId) =>
-        data.knowledgeBases.some((knowledgeBase) => knowledgeBase.id === currentKnowledgeBaseId)
-          ? currentKnowledgeBaseId
-          : data.knowledgeBases[0]?.id ?? "",
-      );
-    } catch (loadError) {
-      setKnowledgeBasePageMessage(
-        loadError instanceof Error ? loadError.message : "Could not load knowledgeBases.",
-      );
-    } finally {
-      hasLoadedKnowledgeBasesRef.current = true;
-      setIsKnowledgeBasesLoading(false);
-    }
-  }, []);
-
-  const resetReviewSessionForServerReload = useCallback(() => {
-    reviewSessionReloadGenerationRef.current += 1;
-    hasLoadedQuestionRef.current = false;
-    currentSessionItemRef.current = null;
-    sessionQueueRef.current = [];
-    questionRef.current = null;
-    questionIdRef.current = null;
-    answerRef.current = "";
-    setCurrentSessionItem(null);
-    setSessionQueue([]);
-    setQuestion(null);
-    setCurrentQuestionId(null);
-    setCurrentKnowledgeBaseId(null);
-    setCurrentKnowledgeBaseName(null);
-    setAnswer("");
-    setSpeechPreview("");
-    setQueueRemaining(0);
-    setToolbarDueCount(null);
-    setError(null);
-    setReviewQueueVersion((currentVersion) => currentVersion + 1);
-  }, []);
-
-  const openKnowledgeBaseEditor = useCallback((knowledgeBase: KnowledgeBaseManagementItem) => {
-    setSelectedKnowledgeBaseId(knowledgeBase.id);
-    setKnowledgeBaseDraftName(knowledgeBase.name);
-    setKnowledgeBaseDraftCoverage(knowledgeBase.coverage ?? "");
-    setKnowledgeBaseEditorMessage(null);
-    setIsCreatingKnowledgeBase(false);
-    setEditingKnowledgeBaseId(knowledgeBase.id);
-  }, []);
-
-  const createKnowledgeBase = useCallback(() => {
-    setKnowledgeBasePageMessage(null);
-    setKnowledgeBaseEditorMessage(null);
-    setKnowledgeBaseDraftName("");
-    setKnowledgeBaseDraftCoverage("");
-    setEditingKnowledgeBaseId(null);
-    setIsCreatingKnowledgeBase(true);
-  }, []);
-
-  const saveKnowledgeBaseDraft = useCallback(async () => {
-    if ((!editingKnowledgeBaseId && !isCreatingKnowledgeBase) || isKnowledgeBaseSaving) {
-      return;
-    }
-
-    const nextName = knowledgeBaseDraftName.trim();
-
-    if (!nextName) {
-      setKnowledgeBaseEditorMessage("KnowledgeBase name is required.");
-      return;
-    }
-
-    if (isKnowledgeBaseDraftNameDuplicate) {
-      setKnowledgeBaseEditorMessage("KnowledgeBase name already exists.");
-      return;
-    }
-
-    setKnowledgeBaseEditorMessage(null);
-    setKnowledgeBasePageMessage(null);
-    setIsKnowledgeBaseSaving(true);
-
-    try {
-      const response = await fetch(
-        isCreatingKnowledgeBase
-          ? "/api/knowledgeBases"
-          : `/api/knowledgeBases/${encodeURIComponent(editingKnowledgeBaseId as string)}`,
-        {
-          method: isCreatingKnowledgeBase ? "POST" : "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: nextName,
-            coverage: knowledgeBaseDraftCoverage,
-            ...(isCreatingKnowledgeBase ? { inReviewRotation: true } : {}),
-          }),
-        },
-      );
-      const data = (await response.json()) as KnowledgeBaseMutationResponse;
-
-      if (!response.ok || !data.ok || !data.knowledgeBase) {
-        throw new Error(
-          data.error ??
-            (isCreatingKnowledgeBase ? "Could not create knowledgeBase." : "Could not update knowledgeBase."),
-        );
-      }
-
-      const savedKnowledgeBase = data.knowledgeBase as KnowledgeBaseManagementItem;
-
-      if (isCreatingKnowledgeBase) {
-        setKnowledgeBases((currentKnowledgeBases) => [
-          savedKnowledgeBase,
-          ...currentKnowledgeBases,
-        ]);
-        setSelectedKnowledgeBaseId(savedKnowledgeBase.id);
-        rememberLearnTargetKnowledgeBase(savedKnowledgeBase.id);
-        resetReviewSessionForServerReload();
-      } else {
-        setKnowledgeBases((currentKnowledgeBases) =>
-          currentKnowledgeBases.map((knowledgeBase) =>
-            knowledgeBase.id === editingKnowledgeBaseId ? savedKnowledgeBase : knowledgeBase,
-          ),
-        );
-
-        if (selectedKnowledgeBaseDetailId === savedKnowledgeBase.id) {
-          setRouteKnowledgeBaseSlug(savedKnowledgeBase.slug);
-          navigateToTab("queue", undefined, savedKnowledgeBase.slug);
-        }
-      }
-
-      setIsCreatingKnowledgeBase(false);
-      setEditingKnowledgeBaseId(null);
-    } catch (updateError) {
-      setKnowledgeBaseEditorMessage(
-        updateError instanceof Error
-          ? updateError.message
-          : isCreatingKnowledgeBase
-            ? "Could not create knowledgeBase."
-            : "Could not update knowledgeBase.",
-      );
-    } finally {
-      setIsKnowledgeBaseSaving(false);
-    }
-  }, [
-    knowledgeBaseDraftName,
-    knowledgeBaseDraftCoverage,
-    editingKnowledgeBaseId,
-    isCreatingKnowledgeBase,
-    isKnowledgeBaseDraftNameDuplicate,
-    isKnowledgeBaseSaving,
-    navigateToTab,
-    rememberLearnTargetKnowledgeBase,
-    resetReviewSessionForServerReload,
-    selectedKnowledgeBaseDetailId,
-  ]);
-
-  const toggleKnowledgeBaseRotation = useCallback(async (knowledgeBase: KnowledgeBaseManagementItem) => {
-    setKnowledgeBasePageMessage(null);
-
-    try {
-      const response = await fetch(`/api/knowledgeBases/${encodeURIComponent(knowledgeBase.id)}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          inReviewRotation: !knowledgeBase.inReviewRotation,
-        }),
-      });
-      const data = (await response.json()) as KnowledgeBaseMutationResponse;
-
-      if (!response.ok || !data.ok || !data.knowledgeBase) {
-        throw new Error(data.error ?? "Could not update rotation.");
-      }
-
-      setKnowledgeBases((currentKnowledgeBases) =>
-        currentKnowledgeBases.map((currentKnowledgeBase) =>
-          currentKnowledgeBase.id === knowledgeBase.id ? (data.knowledgeBase as KnowledgeBaseManagementItem) : currentKnowledgeBase,
-        ),
-      );
-      resetReviewSessionForServerReload();
-    } catch (toggleError) {
-      setKnowledgeBasePageMessage(
-        toggleError instanceof Error
-          ? toggleError.message
-          : "Could not update rotation.",
-      );
-    }
-  }, [resetReviewSessionForServerReload]);
-
-  const resetKnowledgeBaseQueueState = useCallback(() => {
-    queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
-    loadedKnowledgeEmbeddingPlotKeyRef.current = null;
-    hasLoadedQueueStatusRef.current = false;
-    loadedQueueSortKeyRef.current = null;
-    loadedQueueSearchQueryRef.current = null;
-    setReviewQueue([]);
-    setRecentAttempts([]);
-    setReviewQueueTotal(0);
-    setQueueSearchInput("");
-    setQueueSearchQuery("");
-    setKnowledgeEmbeddingPlot(createEmptyKnowledgeEmbeddingPlot());
-    setQueueVirtualRange({
-      start: 0,
-      end: QUEUE_PAGE_SIZE,
-    });
-  }, []);
-
-  const openKnowledgeBaseQueue = useCallback(
-    (knowledgeBase: KnowledgeBaseManagementItem, options: { updateUrl?: boolean } = {}) => {
-      const shouldReset = selectedKnowledgeBaseDetailId !== knowledgeBase.id;
-
-      setSelectedKnowledgeBaseId(knowledgeBase.id);
-      setSelectedKnowledgeBaseDetailId(knowledgeBase.id);
-      setRouteKnowledgeBaseSlug(knowledgeBase.slug);
-      rememberLearnTargetKnowledgeBase(knowledgeBase.id);
-
-      if (shouldReset) {
-        resetKnowledgeBaseQueueState();
-      }
-
-      if (options.updateUrl ?? true) {
-        navigateToTab("queue", undefined, knowledgeBase.slug);
-      } else {
-        setActiveTab("queue");
-      }
-    },
-    [navigateToTab, rememberLearnTargetKnowledgeBase, resetKnowledgeBaseQueueState, selectedKnowledgeBaseDetailId],
-  );
-
-  const deleteEditingKnowledgeBase = useCallback(async () => {
-    if (!editingKnowledgeBase || isCreatingKnowledgeBase || isKnowledgeBaseDeleting) {
-      return;
-    }
-
-    const shouldDelete = window.confirm(
-      `Delete "${editingKnowledgeBase.name}" and all of its questions, answers, review history, and embeddings? This cannot be undone.`,
-    );
-
-    if (!shouldDelete) {
-      return;
-    }
-
-    const knowledgeBaseId = editingKnowledgeBase.id;
-    const knowledgeBaseName = editingKnowledgeBase.name;
-    const wasRotationKnowledgeBase = editingKnowledgeBase.inReviewRotation;
-    const nextKnowledgeBases = knowledgeBases.filter((knowledgeBase) => knowledgeBase.id !== knowledgeBaseId);
-    const wasOpenKnowledgeBase = selectedKnowledgeBaseDetailId === knowledgeBaseId;
-    const wasCurrentQuestionKnowledgeBase = currentKnowledgeBaseId === knowledgeBaseId;
-
-    setKnowledgeBaseEditorMessage(null);
-    setKnowledgeBasePageMessage(null);
-    setIsKnowledgeBaseDeleting(true);
-
-    try {
-      const response = await fetch(`/api/knowledgeBases/${encodeURIComponent(knowledgeBaseId)}`, {
-        method: "DELETE",
-      });
-      const data = (await response.json()) as KnowledgeBaseMutationResponse;
-
-      if (!response.ok || !data.ok) {
-        throw new Error(data.error ?? "Could not delete knowledgeBase.");
-      }
-
-      setKnowledgeBases(nextKnowledgeBases);
-      setSelectedKnowledgeBaseId((currentKnowledgeBaseIdValue) =>
-        currentKnowledgeBaseIdValue === knowledgeBaseId
-          ? nextKnowledgeBases[0]?.id ?? ""
-          : currentKnowledgeBaseIdValue,
-      );
-      rememberLearnTargetKnowledgeBase(null);
-      setEvaluations((currentEvaluations) => currentEvaluations);
-      setMessages((currentMessages) =>
-        currentMessages.filter((message) => message.kind !== "answer"),
-      );
-
-      if (wasRotationKnowledgeBase || wasCurrentQuestionKnowledgeBase) {
-        resetReviewSessionForServerReload();
-
-        if (wasCurrentQuestionKnowledgeBase) {
-          setMessages([]);
-        }
-      }
-
-      if (wasOpenKnowledgeBase) {
-        setSelectedKnowledgeBaseDetailId(null);
-        setRouteKnowledgeBaseSlug(null);
-        resetKnowledgeBaseQueueState();
-        navigateToTab("queue");
-      }
-
-      setSelectedQuestionId(null);
-      setSelectedQuestion(null);
-      setIsCreatingKnowledgeBase(false);
-      setEditingKnowledgeBaseId(null);
-      setKnowledgeBasePageMessage(`Deleted ${knowledgeBaseName}.`);
-    } catch (deleteError) {
-      setKnowledgeBaseEditorMessage(
-        deleteError instanceof Error
-          ? deleteError.message
-          : "Could not delete knowledgeBase.",
-      );
-    } finally {
-      setIsKnowledgeBaseDeleting(false);
-    }
-  }, [
-    currentKnowledgeBaseId,
-    knowledgeBases,
-    editingKnowledgeBase,
-    isCreatingKnowledgeBase,
-    isKnowledgeBaseDeleting,
-    navigateToTab,
-    rememberLearnTargetKnowledgeBase,
-    resetReviewSessionForServerReload,
-    resetKnowledgeBaseQueueState,
-    selectedKnowledgeBaseDetailId,
-  ]);
 
   const hasPendingEvaluationActivity =
     evaluations.some((evaluation) => evaluation.status === "grading") ||
@@ -4285,14 +3851,7 @@ export default function ReviewApp({
       setIsLearnTopUpPending(false);
       setLearnGenerationProgress(null);
     }
-  }, [
-    currentKnowledgeBaseId,
-    loadKnowledgeBases,
-    loadNextQuestion,
-    loadStatus,
-    selectedKnowledgeBaseDetailId,
-    selectedKnowledgeBaseId,
-  ]);
+  }, [loadNextQuestion, loadStatus]);
 
   useEffect(() => {
     topUpLearnQueueRef.current = topUpLearnQueue;
@@ -4532,7 +4091,7 @@ export default function ReviewApp({
 
   usePageScrollLock(
     isCreatingKnowledgeBase ||
-      Boolean(editingKnowledgeBase) ||
+      Boolean(editingKnowledgeBaseId) ||
       isEmbeddingMapOpen ||
       isQuestionGeneratorOpen ||
       isSettingsOpen ||

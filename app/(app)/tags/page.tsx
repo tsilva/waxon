@@ -1,10 +1,10 @@
+import { AppStaticLoadingView } from "../AppStaticLoadingView";
 import { TagsHydrator } from "./TagsHydrator";
-import { TagsStaticView } from "./TagsStaticView";
 
 export default function TagsPage() {
   return (
     <>
-      <TagsStaticView />
+      <AppStaticLoadingView staticView="tags" />
       <TagsHydrator />
     </>
   );

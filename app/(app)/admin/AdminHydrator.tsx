@@ -1,6 +1,6 @@
 "use client";
 
-import { AuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
+import { createAuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
 import type { AuthenticatedUser } from "@/app/lib/auth";
 import type { AdminCachedViewState } from "./adminViewStateCookie";
 import type { AdminPageClient } from "./AdminPageClient";
@@ -15,11 +15,14 @@ type AdminHydratorProps = {
 
 type AdminPageClientProps = Parameters<AdminPageClientComponent>[0];
 
-function loadAdminPageClient(): Promise<AdminPageClientComponent> {
-  return import("./AdminPageClient").then(
-    (adminModule) => adminModule.AdminPageClient as AdminPageClientComponent,
-  );
-}
+const AdminPageClientHydrator =
+  createAuthenticatedClientHydrator<AdminPageClientProps>({
+    loadClient: () =>
+      import("./AdminPageClient").then(
+        (module) => module.AdminPageClient as AdminPageClientComponent,
+      ),
+    staticSelector: "[data-admin-static]",
+  });
 
 export function AdminHydrator({
   currentUser,
@@ -34,11 +37,5 @@ export function AdminHydrator({
     selectedTraceId,
   };
 
-  return (
-    <AuthenticatedClientHydrator
-      componentProps={componentProps}
-      loadClient={loadAdminPageClient}
-      staticSelector="[data-admin-static]"
-    />
-  );
+  return <AdminPageClientHydrator {...componentProps} />;
 }
