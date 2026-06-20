@@ -1,6 +1,5 @@
 "use client";
 
-import { useClerk, useUser } from "@clerk/nextjs";
 import {
   FileText,
   GitMerge,
@@ -10,15 +9,13 @@ import {
   ToggleRight,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
-import { isAdminEmail } from "@/app/lib/adminAccess";
+import { useEffect, useState } from "react";
 import type {
   ConceptTaggedQuestionSummary,
   ConceptTagSummary,
 } from "@/app/lib/conceptTags";
-import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
+import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
@@ -75,8 +72,6 @@ export default function TagsPageClient({
   initialUser = null,
   showAdmin = false,
 }: TagsPageClientProps) {
-  const clerk = useClerk();
-  const { user: clerkUser } = useUser();
   const [conceptTags, setConceptTags] = useState(initialConceptTags ?? []);
   const [currentUser, setCurrentUser] = useState(initialUser);
   const [isTagsLoading, setIsTagsLoading] = useState(initialConceptTags === null);
@@ -91,10 +86,6 @@ export default function TagsPageClient({
   );
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const accountWidgetsCustomPages = useMemo(
-    () => createAccountWidgetsCustomPages(),
-    [],
-  );
   const normalizedQuery = query.trim().toLowerCase();
   const visibleTags = conceptTags.filter((tag) =>
     normalizedQuery ? tag.slug.includes(normalizedQuery) : true,
@@ -104,20 +95,17 @@ export default function TagsPageClient({
   const dueCount = conceptTags
     .filter((tag) => tag.active)
     .reduce((total, tag) => total + tag.dueCount, 0);
-  const canViewAdmin =
-    showAdmin ||
-    isAdminEmail(
-      clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email,
-    );
-  const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
-  const menuDisplayName =
-    clerkUser?.fullName ||
-    clerkUser?.username ||
-    currentUser?.displayName ||
-    "Account";
-  const menuEmail =
-    clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
-  const isLocalAuth = isLocalTestAuthEnabled();
+  const {
+    canViewAdmin,
+    menuAvatarUrl,
+    menuDisplayName,
+    menuEmail,
+    onManageAccount,
+    onSignOut,
+  } = useToolbarAccount(currentUser, {
+    localSignOutHref: "/",
+    showAdmin,
+  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -514,14 +502,8 @@ export default function TagsPageClient({
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
-          onManageAccount={() => {
-            if (!isLocalAuth) {
-              clerk.openUserProfile({
-                customPages: accountWidgetsCustomPages,
-              });
-            }
-          }}
-          onSignOut={() => void clerk.signOut({ redirectUrl: "/" })}
+          onManageAccount={onManageAccount}
+          onSignOut={onSignOut}
         />
 
         <section className="queue-stage tags-stage" aria-label="Concept tags">

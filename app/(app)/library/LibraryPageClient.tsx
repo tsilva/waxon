@@ -1,6 +1,5 @@
 "use client";
 
-import { useClerk, useUser } from "@clerk/nextjs";
 import { ChevronDown, Search, X } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -11,10 +10,7 @@ import {
   useState,
   type KeyboardEvent,
 } from "react";
-import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
-import { isAdminEmail } from "@/app/lib/adminAccess";
 import type { ConceptTagSummary } from "@/app/lib/conceptTags";
-import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
 import type {
   QuestionBankItem,
@@ -23,6 +19,7 @@ import type {
   QuestionBankStatusFilter,
 } from "@/app/lib/questionBank";
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
+import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
@@ -202,8 +199,6 @@ export default function LibraryPageClient({
   showAdmin = false,
 }: LibraryPageClientProps) {
   const searchParams = useSearchParams();
-  const clerk = useClerk();
-  const { user: clerkUser } = useUser();
   const [questionBank, setQuestionBank] = useState(
     initialQuestionBank ?? EMPTY_QUESTION_BANK,
   );
@@ -226,27 +221,21 @@ export default function LibraryPageClient({
     initialConceptTags === null || initialUser === null,
   );
   const [message, setMessage] = useState<string | null>(null);
-  const accountWidgetsCustomPages = useMemo(
-    () => createAccountWidgetsCustomPages(),
-    [],
-  );
   const now = Date.now();
   const activeTags = conceptTags.filter((tag) => tag.active);
   const dueCount = activeTags.reduce((total, tag) => total + tag.dueCount, 0);
-  const canViewAdmin =
-    showAdmin ||
-    isAdminEmail(
-      clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email,
-    );
-  const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
-  const menuDisplayName =
-    clerkUser?.fullName ||
-    clerkUser?.username ||
-    currentUser?.displayName ||
-    "Account";
-  const menuEmail =
-    clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
-  const isLocalAuth = isLocalTestAuthEnabled();
+  const {
+    canViewAdmin,
+    menuAvatarUrl,
+    menuDisplayName,
+    menuEmail,
+    onManageAccount,
+    onSignOut,
+  } = useToolbarAccount(currentUser, {
+    localManageHref: "/review",
+    localSignOutHref: "/",
+    showAdmin,
+  });
   const isInitialQuestionBankLoading =
     isLoading && questionBank.items.length === 0 && questionBank.total === 0;
   const questionCountLabel = questionBank.hasMore
@@ -538,22 +527,8 @@ export default function LibraryPageClient({
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
-          onManageAccount={() => {
-            if (isLocalAuth) {
-              window.location.assign("/review");
-            } else {
-              clerk.openUserProfile({
-                customPages: accountWidgetsCustomPages,
-              });
-            }
-          }}
-          onSignOut={() => {
-            if (isLocalAuth) {
-              window.location.assign("/");
-            } else {
-              void clerk.signOut({ redirectUrl: "/" });
-            }
-          }}
+          onManageAccount={onManageAccount}
+          onSignOut={onSignOut}
         />
 
         <section

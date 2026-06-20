@@ -2,7 +2,6 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import {
   courseChatMessages,
-  coursePageAttempts,
   coursePages,
   courses,
 } from "@/app/db/schema";
@@ -14,13 +13,11 @@ import {
   validateCourseToc,
   type CourseChoice,
   type CourseMultipleChoiceWidget,
-  type CoursePageContent,
   type CourseToc,
 } from "./courseContent";
 import {
   applyEvaluationToPostgres,
   upsertDueQuestions,
-  type DueQuestion,
 } from "./postgresStore";
 import { reformatMultipleChoiceQuestionForReview } from "./courseQuestionAttemptParsing";
 
@@ -76,12 +73,6 @@ export type CourseRecord = {
 export type CourseDetail = CourseRecord & {
   pages: CoursePageRecord[];
   chatMessages: CourseChatMessageRecord[];
-};
-
-export type CourseAnswerResult = {
-  correct: boolean;
-  feedback: string;
-  course: CourseDetail;
 };
 
 export type CourseChatQuestionAttemptInput = {
@@ -467,46 +458,6 @@ export async function addCourseConversationCost(input: {
     .where(and(eq(courses.userId, user.id), eq(courses.id, input.courseId)));
 }
 
-export async function getCoursePageByPosition(input: {
-  courseId: string;
-  chapterIndex: number;
-  pageIndex: number;
-}): Promise<CoursePageRecord | null> {
-  const user = await getCurrentUser();
-  const [row] = await db
-    .select()
-    .from(coursePages)
-    .innerJoin(
-      courses,
-      and(eq(courses.id, coursePages.courseId), eq(courses.userId, user.id)),
-    )
-    .where(
-      and(
-        eq(coursePages.courseId, input.courseId),
-        eq(coursePages.chapterIndex, input.chapterIndex),
-        eq(coursePages.pageIndex, input.pageIndex),
-      ),
-    )
-    .limit(1);
-
-  return row ? toCoursePage(row.course_pages) : null;
-}
-
-function courseQuestionProvenance(input: {
-  course: CourseDetail;
-  chapterIndex: number;
-  pageIndex: number;
-}): string {
-  const page = input.course.toc.pages[input.pageIndex];
-
-  return [
-    `Course: ${input.course.title}`,
-    page ? `Page ${input.pageIndex + 1}: ${page.title}` : "",
-  ]
-    .filter(Boolean)
-    .join(" | ");
-}
-
 function courseChatQuestionProvenance(course: CourseDetail): string {
   const page = course.toc.pages[course.currentPageIndex];
 
@@ -574,157 +525,6 @@ export async function recordCourseChatQuestionAttempt(
   return {
     questionId: dueQuestion.questionId,
     attemptSaved: Boolean(persisted),
-  };
-}
-
-export async function saveCoursePage(input: {
-  course: CourseDetail;
-  chapterIndex: number;
-  pageIndex: number;
-  page: CoursePageContent;
-}): Promise<CoursePageRecord> {
-  const existing = input.course.pages.find(
-    (page) =>
-      page.chapterIndex === input.chapterIndex &&
-      page.pageIndex === input.pageIndex,
-  );
-
-  if (existing) {
-    return existing;
-  }
-
-  const now = Date.now();
-  const [question] = await upsertDueQuestions({
-    userId: input.course.userId,
-    sourceQuestion: null,
-    now,
-    questions: [
-      {
-        question: input.page.question,
-        conciseAnswer: input.page.correctAnswer,
-        proposedConceptSlugs: input.page.proposedConceptSlugs,
-        sourceText: input.page.body,
-        questionProvenance: courseQuestionProvenance({
-          course: input.course,
-          chapterIndex: input.chapterIndex,
-          pageIndex: input.pageIndex,
-        }),
-      },
-    ],
-  });
-
-  const [row] = await db
-    .insert(coursePages)
-    .values({
-      courseId: input.course.id,
-      questionId: (question as DueQuestion | undefined)?.questionId ?? null,
-      chapterIndex: input.chapterIndex,
-      pageIndex: input.pageIndex,
-      title: input.page.title,
-      body: input.page.body,
-      summary: input.page.summary,
-      question: input.page.question,
-      choices: input.page.choices,
-      correctChoiceId: input.page.correctChoiceId,
-      correctAnswer: input.page.correctAnswer,
-      explanation: input.page.explanation,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoNothing()
-    .returning();
-
-  if (row) {
-    await db
-      .update(courses)
-      .set({ updatedAt: now })
-      .where(eq(courses.id, input.course.id));
-
-    return toCoursePage(row);
-  }
-
-  const loaded = await getCoursePageByPosition({
-    courseId: input.course.id,
-    chapterIndex: input.chapterIndex,
-    pageIndex: input.pageIndex,
-  });
-
-  if (!loaded) {
-    throw new Error("Could not save course page.");
-  }
-
-  return loaded;
-}
-
-export async function answerCoursePage(input: {
-  courseId: string;
-  pageId: string;
-  selectedChoiceId: string;
-}): Promise<CourseAnswerResult | null> {
-  const course = await getCourse(input.courseId);
-
-  if (!course) {
-    return null;
-  }
-
-  const page = course.pages.find((item) => item.id === input.pageId);
-
-  if (!page) {
-    return null;
-  }
-
-  const selectedChoiceId = input.selectedChoiceId.trim().toUpperCase();
-  const selectedChoice = page.choices.find(
-    (choice) => choice.id === selectedChoiceId,
-  );
-
-  if (!selectedChoice) {
-    throw new Error("Selected choice does not exist.");
-  }
-
-  const isCorrect = selectedChoice.id === page.correctChoiceId;
-  const feedback = isCorrect
-    ? page.explanation || "Correct."
-    : "Not quite. Re-read the page and try again.";
-  const now = Date.now();
-
-  await db.insert(coursePageAttempts).values({
-    courseId: course.id,
-    pageId: page.id,
-    selectedChoiceId: selectedChoice.id,
-    isCorrect,
-    feedback,
-    attemptedAt: now,
-  });
-
-  if (isCorrect) {
-    const nextPosition = nextCoursePosition({
-      toc: course.toc,
-      chapterIndex: page.chapterIndex,
-      pageIndex: page.pageIndex,
-    });
-
-    await db
-      .update(courses)
-      .set({
-        status: nextPosition ? "active" : "completed",
-        currentChapterIndex: nextPosition?.chapterIndex ?? page.chapterIndex,
-        currentPageIndex: nextPosition?.pageIndex ?? page.pageIndex,
-        updatedAt: now,
-      })
-      .where(eq(courses.id, course.id));
-  }
-
-  const updated = await getCourse(course.id);
-
-  if (!updated) {
-    throw new Error("Could not reload course.");
-  }
-
-  return {
-    correct: isCorrect,
-    feedback,
-    course: updated,
   };
 }
 

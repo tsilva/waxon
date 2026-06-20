@@ -5,9 +5,7 @@ import {
 } from "./openRouter";
 import { extractJsonObject } from "./jsonObject";
 import {
-  parseCoursePageJson,
   parseCourseTocJson,
-  type CoursePageContent,
   type CourseToc,
 } from "./courseContent";
 import {
@@ -616,71 +614,4 @@ export async function generateCourseToc(input: {
   reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
 
   return parseCourseTocJson(extractChatCompletionText(body));
-}
-
-export async function generateCoursePage(input: {
-  apiKey: string;
-  model?: string;
-  userId: string;
-  courseId: string;
-  topic: string;
-  toc: CourseToc;
-  chapterIndex: number;
-  pageIndex: number;
-  previousSummaries: string[];
-}): Promise<CoursePageContent> {
-  const page = input.toc.pages[input.pageIndex];
-
-  if (input.chapterIndex !== 0 || !page) {
-    throw new Error("Course page position does not exist.");
-  }
-
-  const { body, response } = await openRouterChatCompletion({
-    apiKey: input.apiKey,
-    stream: false,
-    trace: {
-      operation: "course_page",
-      userId: input.userId,
-      question: page.title,
-    },
-    body: {
-      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
-      response_format: COURSE_JSON_RESPONSE_FORMAT,
-      temperature: 0.45,
-      max_tokens: 2_800,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You write one page of a Waxon mini-course. Return strict JSON only. Generate only the requested page. Interactive widgets must be emitted as UI tool calls, not embedded in prose.",
-        },
-        {
-          role: "user",
-          content: [
-            `Original topic: ${input.topic}`,
-            `Full course TOC JSON: ${JSON.stringify(input.toc)}`,
-            `Current page index: ${input.pageIndex}`,
-            `Current page title: ${page.title}`,
-            `Current page objective: ${page.objective}`,
-            `Previous page summaries: ${input.previousSummaries.length > 0 ? input.previousSummaries.join(" | ") : "None"}`,
-            "Return JSON with shape:",
-            "{\"title\":\"...\",\"body\":\"markdown lesson body\",\"summary\":\"...\",\"proposedConceptSlugs\":[\"concept-slug\"],\"toolCalls\":[{\"name\":\"render_multiple_choice\",\"arguments\":{\"type\":\"multiple_choice\",\"id\":\"page-check\",\"question\":\"open-ended question without answer choices\",\"choices\":[{\"id\":\"A\",\"text\":\"...\"},{\"id\":\"B\",\"text\":\"...\"},{\"id\":\"C\",\"text\":\"...\"},{\"id\":\"D\",\"text\":\"...\"}],\"correctChoiceId\":\"A\",\"correctAnswer\":\"exact text of correct choice\",\"explanation\":\"brief feedback for the correct answer\"}}]}",
-            "The body should teach the page clearly in 350-700 words.",
-            "proposedConceptSlugs must contain 1-3 full self-disambiguating lowercase kebab-case concept slugs tested by the page question.",
-            "Call the render_multiple_choice UI tool exactly once in toolCalls.",
-            "The tool-call question must be usable later as a free-response review prompt, so do not include A/B/C/D choices in the question text.",
-            "Do not mention the answer choices in the lesson body.",
-            "Use exactly four answer choices with ids A, B, C, D.",
-            "The correctAnswer must exactly match the correct choice text.",
-          ].join("\n"),
-        },
-      ],
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error("Course page generation failed.");
-  }
-
-  return parseCoursePageJson(extractChatCompletionText(body));
 }

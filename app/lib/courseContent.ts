@@ -26,38 +26,14 @@ export type CourseMultipleChoiceWidget = {
   explanation: string;
 };
 
-export type CoursePageContent = {
-  title: string;
-  body: string;
-  summary: string;
-  question: string;
-  choices: CourseChoice[];
-  correctChoiceId: string;
-  correctAnswer: string;
-  explanation: string;
-  widget: CourseMultipleChoiceWidget;
-  proposedConceptSlugs: string[];
-};
-
 const MAX_COURSE_TITLE_CHARS = 90;
 const MAX_COURSE_DESCRIPTION_CHARS = 320;
 export const MAX_COURSE_PAGES = 16;
 const MAX_PAGE_TITLE_CHARS = 120;
 const MAX_OBJECTIVE_CHARS = 260;
-const MAX_PAGE_BODY_CHARS = 8_000;
-const MAX_PAGE_SUMMARY_CHARS = 700;
-const MAX_PAGE_QUESTION_CHARS = 1_200;
-const MAX_CHOICE_TEXT_CHARS = 500;
-const MAX_EXPLANATION_CHARS = 1_200;
-const MAX_CONCEPT_SLUGS = 3;
-const MAX_CONCEPT_SLUG_CHARS = 120;
 
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
-}
-
-function normalizeMarkdown(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
 }
 
 function truncateText(value: string, maxLength: number): string {
@@ -70,14 +46,6 @@ function readObject(value: unknown): Record<string, unknown> {
   }
 
   return value as Record<string, unknown>;
-}
-
-function readArray(value: unknown, field: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`${field} must be an array.`);
-  }
-
-  return value;
 }
 
 function readOptionalArray(value: unknown): unknown[] {
@@ -139,184 +107,8 @@ export function validateCourseToc(value: unknown): CourseToc {
   };
 }
 
-function hasEmbeddedChoices(question: string, choices: CourseChoice[]): boolean {
-  if (/(^|[\s\n\r])(?:[A-D]|\d+)[).:-]\s+\S/iu.test(question)) {
-    return true;
-  }
-
-  const lowerQuestion = question.toLowerCase();
-  const embeddedChoiceCount = choices.filter((choice) =>
-    lowerQuestion.includes(choice.text.toLowerCase()),
-  ).length;
-
-  return embeddedChoiceCount >= 2;
-}
-
-function parseToolCallArguments(value: unknown): Record<string, unknown> {
-  if (typeof value === "string") {
-    return readObject(extractJsonObject(value));
-  }
-
-  return readObject(value);
-}
-
-function normalizeToolCall(value: unknown): {
-  name: string;
-  arguments: Record<string, unknown>;
-} | null {
-  const record = readObject(value);
-  const functionRecord =
-    record.function && typeof record.function === "object"
-      ? (record.function as Record<string, unknown>)
-      : null;
-  const name = normalizeText(record.name ?? functionRecord?.name);
-  const rawArguments = record.arguments ?? functionRecord?.arguments;
-
-  if (!name && normalizeText(record.type) === "multiple_choice") {
-    return {
-      name: "render_multiple_choice",
-      arguments: record,
-    };
-  }
-
-  if (!name || rawArguments === undefined) {
-    return null;
-  }
-
-  return {
-    name,
-    arguments: parseToolCallArguments(rawArguments),
-  };
-}
-
-function readMultipleChoiceWidget(record: Record<string, unknown>) {
-  const toolCallSources = [
-    ...readOptionalArray(record.toolCalls),
-    ...readOptionalArray(record.tool_calls),
-    ...readOptionalArray(record.widgets),
-  ];
-
-  for (const rawToolCall of toolCallSources) {
-    const toolCall = normalizeToolCall(rawToolCall);
-
-    if (toolCall?.name === "render_multiple_choice") {
-      return toolCall.arguments;
-    }
-  }
-
-  return record;
-}
-
-export function parseCoursePageJson(source: string): CoursePageContent {
-  return validateCoursePageContent(extractJsonObject(source));
-}
-
-export function validateCoursePageContent(value: unknown): CoursePageContent {
-  const record = readObject(value);
-  const widgetRecord = readMultipleChoiceWidget(record);
-  const title = truncateText(normalizeText(record.title), MAX_PAGE_TITLE_CHARS);
-  const body = truncateText(normalizeMarkdown(record.body), MAX_PAGE_BODY_CHARS);
-  const summary = truncateText(
-    normalizeText(record.summary),
-    MAX_PAGE_SUMMARY_CHARS,
-  );
-  const question = truncateText(
-    normalizeText(widgetRecord.question),
-    MAX_PAGE_QUESTION_CHARS,
-  );
-  const rawChoices = readArray(widgetRecord.choices, "choices");
-  const correctChoiceId = normalizeText(
-    widgetRecord.correctChoiceId,
-  ).toUpperCase();
-  const correctAnswer = truncateText(
-    normalizeText(widgetRecord.correctAnswer),
-    MAX_CHOICE_TEXT_CHARS,
-  );
-  const explanation = truncateText(
-    normalizeText(widgetRecord.explanation),
-    MAX_EXPLANATION_CHARS,
-  );
-  const proposedConceptSlugs = readOptionalArray(
-    record.proposedConceptSlugs ?? record.conceptSlugs,
-  )
-    .map((slug) => truncateText(normalizeText(slug), MAX_CONCEPT_SLUG_CHARS))
-    .filter(Boolean)
-    .slice(0, MAX_CONCEPT_SLUGS);
-
-  if (!title || !body || !summary || !question) {
-    throw new Error("Course page requires title, body, summary, and question.");
-  }
-
-  if (rawChoices.length !== 4) {
-    throw new Error("Course page must include exactly 4 choices.");
-  }
-
-  const seenChoiceIds = new Set<string>();
-  const choices = rawChoices.map((rawChoice) => {
-    const choice = readObject(rawChoice);
-    const id = normalizeText(choice.id).toUpperCase();
-    const text = truncateText(normalizeText(choice.text), MAX_CHOICE_TEXT_CHARS);
-
-    if (!id || !text) {
-      throw new Error("Each choice requires an id and text.");
-    }
-
-    if (seenChoiceIds.has(id)) {
-      throw new Error("Choice ids must be unique.");
-    }
-
-    seenChoiceIds.add(id);
-    return { id, text };
-  });
-
-  const correctChoice = choices.find((choice) => choice.id === correctChoiceId);
-
-  if (!correctChoice) {
-    throw new Error("correctChoiceId must match one of the choices.");
-  }
-
-  if (!correctAnswer || correctAnswer !== correctChoice.text) {
-    throw new Error("correctAnswer must match the correct choice text.");
-  }
-
-  if (hasEmbeddedChoices(question, choices)) {
-    throw new Error("Question must not include multiple-choice options.");
-  }
-
-  const widget: CourseMultipleChoiceWidget = {
-    type: "multiple_choice",
-    id: normalizeText(widgetRecord.id) || "page-check",
-    question,
-    choices,
-    correctChoiceId,
-    correctAnswer,
-    explanation,
-  };
-
-  return {
-    title,
-    body,
-    summary,
-    question,
-    choices,
-    correctChoiceId,
-    correctAnswer,
-    explanation,
-    widget,
-    proposedConceptSlugs,
-  };
-}
-
 export function coursePageCount(toc: CourseToc): number {
   return toc.pages.length;
-}
-
-export function coursePositionExists(input: {
-  toc: CourseToc;
-  chapterIndex: number;
-  pageIndex: number;
-}): boolean {
-  return input.chapterIndex === 0 && Boolean(input.toc.pages[input.pageIndex]);
 }
 
 export function nextCoursePosition(input: {
@@ -324,7 +116,7 @@ export function nextCoursePosition(input: {
   chapterIndex: number;
   pageIndex: number;
 }): { chapterIndex: number; pageIndex: number } | null {
-  if (!coursePositionExists(input)) {
+  if (input.chapterIndex !== 0 || !input.toc.pages[input.pageIndex]) {
     return null;
   }
 

@@ -4,29 +4,8 @@ import {
   MAX_COURSE_PAGES,
   coursePageCount,
   nextCoursePosition,
-  parseCoursePageJson,
-  validateCoursePageContent,
   validateCourseToc,
 } from "../app/lib/courseContent.ts";
-
-function validPage(overrides: Record<string, unknown> = {}) {
-  return {
-    title: "Posterior intuition",
-    body: "A posterior updates prior belief with likelihood evidence.",
-    summary: "Posterior belief combines prior and likelihood.",
-    question: "What does a Bayesian posterior represent?",
-    choices: [
-      { id: "A", text: "A prior before evidence" },
-      { id: "B", text: "A likelihood without normalization" },
-      { id: "C", text: "Updated belief after evidence" },
-      { id: "D", text: "A fixed frequentist parameter" },
-    ],
-    correctChoiceId: "C",
-    correctAnswer: "Updated belief after evidence",
-    explanation: "The posterior is the updated belief conditioned on evidence.",
-    ...overrides,
-  };
-}
 
 test("validateCourseToc normalizes and caps generated course shape", () => {
   const toc = validateCourseToc({
@@ -88,103 +67,4 @@ test("nextCoursePosition advances through flat pages", () => {
     pageIndex: 2,
   });
   assert.equal(nextCoursePosition({ toc, chapterIndex: 0, pageIndex: 2 }), null);
-});
-
-test("parseCoursePageJson accepts valid markdown page and MCQ", () => {
-  const page = parseCoursePageJson(JSON.stringify(validPage()));
-
-  assert.equal(page.choices.length, 4);
-  assert.equal(page.correctChoiceId, "C");
-  assert.equal(page.correctAnswer, "Updated belief after evidence");
-  assert.equal(page.widget.type, "multiple_choice");
-  assert.equal(page.widget.question, "What does a Bayesian posterior represent?");
-});
-
-test("parseCoursePageJson accepts a multiple-choice UI tool call", () => {
-  const { question, choices, correctChoiceId, correctAnswer, explanation } =
-    validPage();
-  const page = parseCoursePageJson(
-    JSON.stringify({
-      title: "Posterior intuition",
-      body: "A posterior updates prior belief with likelihood evidence.",
-      summary: "Posterior belief combines prior and likelihood.",
-      toolCalls: [
-        {
-          name: "render_multiple_choice",
-          arguments: {
-            type: "multiple_choice",
-            id: "page-check",
-            question,
-            choices,
-            correctChoiceId,
-            correctAnswer,
-            explanation,
-          },
-        },
-      ],
-    }),
-  );
-
-  assert.equal(page.question, question);
-  assert.equal(page.widget.id, "page-check");
-  assert.equal(page.choices.length, 4);
-});
-
-test("parseCoursePageJson accepts OpenAI-style tool_calls arguments", () => {
-  const { question, choices, correctChoiceId, correctAnswer, explanation } =
-    validPage();
-  const page = parseCoursePageJson(
-    JSON.stringify({
-      title: "Posterior intuition",
-      body: "A posterior updates prior belief with likelihood evidence.",
-      summary: "Posterior belief combines prior and likelihood.",
-      tool_calls: [
-        {
-          function: {
-            name: "render_multiple_choice",
-            arguments: JSON.stringify({
-              type: "multiple_choice",
-              id: "native-page-check",
-              question,
-              choices,
-              correctChoiceId,
-              correctAnswer,
-              explanation,
-            }),
-          },
-        },
-      ],
-    }),
-  );
-
-  assert.equal(page.question, question);
-  assert.equal(page.widget.id, "native-page-check");
-});
-
-test("validateCoursePageContent rejects malformed MCQs", () => {
-  assert.throws(
-    () => validateCoursePageContent(validPage({ choices: [] })),
-    /exactly 4 choices/u,
-  );
-  assert.throws(
-    () => validateCoursePageContent(validPage({ correctChoiceId: "Z" })),
-    /correctChoiceId/u,
-  );
-  assert.throws(
-    () => validateCoursePageContent(validPage({ correctAnswer: "Wrong" })),
-    /correctAnswer/u,
-  );
-});
-
-test("validateCoursePageContent rejects choices embedded in review question", () => {
-  assert.throws(
-    () =>
-      validateCoursePageContent(
-        validPage({
-          question:
-            "What does a Bayesian posterior represent?\nA. Prior\nB. Likelihood",
-        }),
-      ),
-    /must not include multiple-choice options/u,
-  );
 });

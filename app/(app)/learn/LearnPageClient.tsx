@@ -1,6 +1,5 @@
 "use client";
 
-import { useClerk, useUser } from "@clerk/nextjs";
 import {
   ArrowUp,
   BookOpen,
@@ -20,12 +19,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { AnswerComposer } from "@/app/AnswerComposer";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
-import { isAdminEmail } from "@/app/lib/adminAccess";
 import {
   isQuestionEvaluationSnippet,
   parseQuestionEvaluationSnippet,
@@ -44,7 +41,7 @@ import {
   stripAnsweredQuestionMetadata,
   type CourseQuestionWidget,
 } from "@/app/lib/courseQuestionWidget";
-import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 
 export type CourseToc = {
@@ -702,13 +699,6 @@ export default function LearnPageClient({
   initialDueCount,
   initialSelectedCourse,
 }: LearnPageClientProps = {}) {
-  const clerk = useClerk();
-  const { user: clerkUser } = useUser();
-  const isLocalAuth = isLocalTestAuthEnabled();
-  const accountWidgetsCustomPages = useMemo(
-    () => createAccountWidgetsCustomPages(),
-    [],
-  );
   const [topic, setTopic] = useState("");
   const [chatMessages, setChatMessages] = useState<LearnChatMessage[]>(() =>
     initialSelectedCourse?.chatMessages?.length
@@ -743,15 +733,18 @@ export default function LearnPageClient({
   const shouldAutoScrollChatRef = useRef(true);
   const autoScrollFrameRef = useRef<number | null>(null);
   const touchScrollStartYRef = useRef<number | null>(null);
-  const canViewAdmin = isAdminEmail(currentUser?.email);
-  const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
-  const menuDisplayName =
-    clerkUser?.fullName ||
-    currentUser?.displayName ||
-    clerkUser?.username ||
-    "Waxon user";
-  const menuEmail =
-    clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
+  const {
+    canViewAdmin,
+    menuAvatarUrl,
+    menuDisplayName,
+    menuEmail,
+    onManageAccount,
+    onSignOut,
+  } = useToolbarAccount(currentUser, {
+    fallbackDisplayName: "Waxon user",
+    localManageHref: "/review",
+    localSignOutHref: "/",
+  });
   const streamingStatus =
     chatMessages.find(
       (message) => message.role === "assistant" && !message.content,
@@ -1524,22 +1517,8 @@ export default function LearnPageClient({
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
-          onManageAccount={() => {
-            if (isLocalAuth) {
-              window.location.assign("/review");
-            } else {
-              clerk.openUserProfile({
-                customPages: accountWidgetsCustomPages,
-              });
-            }
-          }}
-          onSignOut={() => {
-            if (isLocalAuth) {
-              window.location.assign("/");
-            } else {
-              void clerk.signOut({ redirectUrl: "/" });
-            }
-          }}
+          onManageAccount={onManageAccount}
+          onSignOut={onSignOut}
         />
 
         <section
