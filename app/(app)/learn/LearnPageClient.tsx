@@ -21,10 +21,7 @@ import {
   useState,
 } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
-import {
-  AnswerComposer,
-  ComposerMicButton,
-} from "@/app/AnswerComposer";
+import { AnswerComposer } from "@/app/AnswerComposer";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
@@ -48,12 +45,6 @@ import {
   type CourseQuestionWidget,
 } from "@/app/lib/courseQuestionWidget";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
-import {
-  getSpeechRecognitionConstructor,
-  mergeTranscriptText,
-  type SpeechRecognition,
-  type SpeechStatus,
-} from "@/app/lib/speechRecognition";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 
 export type CourseToc = {
@@ -465,32 +456,6 @@ function shouldShowLearnQuestionWidgets(input: {
     .some((laterMessage) => laterMessage.role === "user");
 }
 
-function hasActiveLearnQuestionWidgets(messages: LearnChatMessage[]) {
-  return messages.some((message, messageIndex) => {
-    if (message.pendingEvaluation) {
-      return true;
-    }
-
-    if (message.role !== "assistant") {
-      return false;
-    }
-
-    const parsedMessage = parseCourseMessageMetrics(message.content);
-    const parsedWidgets = parseCourseQuestionWidgets(parsedMessage.content);
-    const evaluationSnippet = parseQuestionEvaluationSnippet(
-      parsedWidgets.content,
-    );
-
-    return shouldShowLearnQuestionWidgets({
-      messages,
-      message,
-      messageIndex,
-      widgetCount: parsedWidgets.widgets.length,
-      hasEvaluationSnippet: Boolean(evaluationSnippet),
-    });
-  });
-}
-
 function isWaitingForQuestionWidgetEvaluation(
   messages: LearnChatMessage[],
   messageIndex: number,
@@ -550,19 +515,6 @@ function courseProgressLabel(course: Course): string {
   return `${currentPage} of ${totalPages}`;
 }
 
-function formatConversationCost(cost: number): string | null {
-  if (!Number.isFinite(cost) || cost <= 0) {
-    return null;
-  }
-
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: cost < 0.01 ? 4 : 2,
-    maximumFractionDigits: cost < 0.01 ? 4 : 2,
-  }).format(cost);
-}
-
 function formatMessagePrice(cost: number | null | undefined): string | null {
   if (cost === null || cost === undefined || !Number.isFinite(cost)) {
     return null;
@@ -588,45 +540,6 @@ function formatTokensPerSecond(
   }
 
   return `${tokensPerSecond.toFixed(tokensPerSecond < 10 ? 1 : 0)} tok/s`;
-}
-
-function formatContextPercent(
-  contextPercent: number | null | undefined,
-): string | null {
-  if (
-    contextPercent === null ||
-    contextPercent === undefined ||
-    !Number.isFinite(contextPercent) ||
-    contextPercent < 0
-  ) {
-    return null;
-  }
-
-  if (contextPercent > 0 && contextPercent < 1) {
-    return "<1% ctx";
-  }
-
-  return `${Math.min(100, Math.round(contextPercent))}% ctx`;
-}
-
-function latestCourseContextPercent(
-  messages: LearnChatMessage[],
-): number | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    const metrics =
-      message?.metrics ?? parseCourseMessageMetrics(message?.content ?? "").metrics;
-
-    if (
-      metrics?.contextPercent !== null &&
-      metrics?.contextPercent !== undefined &&
-      Number.isFinite(metrics.contextPercent)
-    ) {
-      return metrics.contextPercent;
-    }
-  }
-
-  return null;
 }
 
 function LearnChatMessageMetrics({
@@ -812,7 +725,6 @@ export default function LearnPageClient({
   );
   const [draftCourseToc, setDraftCourseToc] = useState<CourseToc | null>(null);
   const [isStartingNewCourse, setIsStartingNewCourse] = useState(false);
-  const [draftConversationCost, setDraftConversationCost] = useState(0);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(
     initialCurrentUser ?? null,
   );
@@ -827,14 +739,9 @@ export default function LearnPageClient({
   const [isDeletingCourse, setIsDeletingCourse] = useState(false);
   const [courseSettingsMessage, setCourseSettingsMessage] =
     useState<string | null>(null);
-  const [speechPreview, setSpeechPreview] = useState("");
-  const [speechStatus, setSpeechStatus] = useState<SpeechStatus>("idle");
-  const [speechMessage, setSpeechMessage] = useState<string | null>(null);
   const chatThreadRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollChatRef = useRef(true);
   const touchScrollStartYRef = useRef<number | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const keepListeningRef = useRef(false);
   const canViewAdmin = isAdminEmail(currentUser?.email);
   const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
   const menuDisplayName =
@@ -848,26 +755,6 @@ export default function LearnPageClient({
     chatMessages.find(
       (message) => message.role === "assistant" && !message.content,
     )?.status ?? "Thinking...";
-  const displayedTopic =
-    selectedCourse && speechPreview
-      ? mergeTranscriptText(topic, speechPreview)
-      : topic;
-  const hasActiveQuestionWidgets = useMemo(
-    () => hasActiveLearnQuestionWidgets(chatMessages),
-    [chatMessages],
-  );
-  const isSpeechActive =
-    speechStatus === "starting" || speechStatus === "listening";
-  const conversationCostLabel = formatConversationCost(
-    selectedCourse?.conversationCost ?? draftConversationCost,
-  );
-  const conversationContextLabel = formatContextPercent(
-    latestCourseContextPercent(chatMessages),
-  );
-  const conversationMetricItems = [
-    conversationCostLabel,
-    conversationContextLabel,
-  ].filter((item): item is string => Boolean(item));
   const courseSettingsCourse = useMemo(
     () => courses.find((course) => course.id === courseSettingsId) ?? null,
     [courseSettingsId, courses],
@@ -1075,13 +962,6 @@ export default function LearnPageClient({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [courseSettingsCourse, isDeletingCourse]);
 
-  useEffect(() => {
-    return () => {
-      keepListeningRef.current = false;
-      recognitionRef.current?.stop();
-    };
-  }, []);
-
   function appendAssistantDelta(messageId: string, delta: string) {
     setChatMessages((messages) =>
       messages.map((message) =>
@@ -1098,87 +978,6 @@ export default function LearnPageClient({
         message.id === messageId ? { ...message, status } : message,
       ),
     );
-  }
-
-  function appendSpeechText(text: string) {
-    setTopic((current) => mergeTranscriptText(current, text));
-  }
-
-  function stopSpeech() {
-    keepListeningRef.current = false;
-    recognitionRef.current?.stop();
-    recognitionRef.current = null;
-    setSpeechPreview("");
-    setSpeechMessage(null);
-    setSpeechStatus("idle");
-  }
-
-  function startSpeech() {
-    const SpeechRecognitionConstructor = getSpeechRecognitionConstructor();
-
-    if (!SpeechRecognitionConstructor) {
-      setSpeechStatus("unsupported");
-      setSpeechMessage("Speech recognition is not available in this browser.");
-      return;
-    }
-
-    keepListeningRef.current = true;
-    setSpeechStatus("starting");
-    setSpeechMessage("Starting microphone...");
-
-    const recognition = new SpeechRecognitionConstructor();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = navigator.language || "en-US";
-    recognition.onresult = (event) => {
-      let finalTranscript = "";
-      let interimTranscript = "";
-
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const result = event.results[index];
-        const transcript = result[0]?.transcript ?? "";
-
-        if (result.isFinal) {
-          finalTranscript = mergeTranscriptText(finalTranscript, transcript);
-        } else {
-          interimTranscript = mergeTranscriptText(interimTranscript, transcript);
-        }
-      }
-
-      setSpeechPreview(interimTranscript);
-
-      if (finalTranscript) {
-        setSpeechPreview("");
-        appendSpeechText(finalTranscript);
-      }
-    };
-    recognition.onerror = () => {
-      setSpeechStatus("error");
-      setSpeechMessage("Microphone transcription stopped.");
-    };
-    recognition.onend = () => {
-      if (!keepListeningRef.current) {
-        return;
-      }
-
-      try {
-        recognition.start();
-      } catch {
-        setSpeechStatus("error");
-        setSpeechMessage("Microphone transcription stopped.");
-      }
-    };
-
-    recognitionRef.current = recognition;
-
-    try {
-      recognition.start();
-      setSpeechStatus("listening");
-      setSpeechMessage("Streaming speech into the answer.");
-    } catch {
-      setSpeechStatus("error");
-      setSpeechMessage("Microphone transcription could not start.");
-    }
   }
 
   function insertQuestionEvaluationSnippet(
@@ -1267,7 +1066,6 @@ export default function LearnPageClient({
       return;
     }
 
-    stopSpeech();
     setError(null);
     setLoadingCourseId(courseId);
 
@@ -1296,14 +1094,12 @@ export default function LearnPageClient({
     }
 
     shouldAutoScrollChatRef.current = true;
-    stopSpeech();
     setSelectedCourse(null);
     setDraftCourseToc(null);
     setIsStartingNewCourse(true);
     setChatMessages([INITIAL_CHAT_MESSAGE]);
     setExpandedLearnEvaluationIds(new Set());
     setTopic("");
-    setDraftConversationCost(0);
     setError(null);
     updateLearnHistory("/learn", "push");
   }
@@ -1358,7 +1154,6 @@ export default function LearnPageClient({
         setDraftCourseToc(null);
         setChatMessages([INITIAL_CHAT_MESSAGE]);
         setExpandedLearnEvaluationIds(new Set());
-        setDraftConversationCost(0);
         setTopic("");
         updateLearnHistory("/learn", "replace");
       }
@@ -1437,7 +1232,6 @@ export default function LearnPageClient({
 
     shouldAutoScrollChatRef.current = true;
     setTopic("");
-    stopSpeech();
     setError(null);
     setIsStreaming(true);
     setDraftCourseToc(null);
@@ -1588,25 +1382,14 @@ export default function LearnPageClient({
               if (selectedCourse?.id !== data.course.id) {
                 updateLearnHistory(learnCoursePath(data.course.id), "replace");
               }
-            } else if (
-              typeof data.turnCost === "number" ||
-              data.responseMetrics
-            ) {
-              const turnCost =
-                typeof data.turnCost === "number" ? data.turnCost : 0;
-
-              if (turnCost > 0) {
-                setDraftConversationCost((cost) => cost + turnCost);
-              }
-              if (data.responseMetrics) {
-                setChatMessages((messages) =>
-                  messages.map((message) =>
-                    message.id === assistantMessageId
-                      ? { ...message, metrics: data.responseMetrics }
-                      : message,
-                  ),
-                );
-              }
+            } else if (data.responseMetrics) {
+              setChatMessages((messages) =>
+                messages.map((message) =>
+                  message.id === assistantMessageId
+                    ? { ...message, metrics: data.responseMetrics }
+                    : message,
+                ),
+              );
             } else if (data.chatMessages?.length) {
               setChatMessages(
                 data.chatMessages.map(storedMessageToLearnMessage),
@@ -1646,7 +1429,7 @@ export default function LearnPageClient({
 
   async function submitChatPrompt(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await submitChatContent(displayedTopic);
+    await submitChatContent(topic);
   }
 
   function submitQuestionWidget(
@@ -2081,23 +1864,16 @@ export default function LearnPageClient({
                     })}
                     <div className="learn-chat-end" />
                   </div>
-                  {!hasActiveQuestionWidgets ? (
+                  {!selectedCourse ? (
                     <AnswerComposer
                       id="learn-topic-input"
                       className="learn-course-answer-composer"
-                      value={selectedCourse ? displayedTopic : topic}
-                      onValueChange={(nextTopic) => {
-                        setSpeechPreview("");
-                        setTopic(nextTopic);
-                      }}
+                      value={topic}
+                      onValueChange={setTopic}
                       onSubmit={submitChatPrompt}
                       onKeyDown={handleChatComposerKeyDown}
-                      placeholder={
-                        selectedCourse
-                          ? "Type your answer here..."
-                          : "Learn convolutional neural networks for vision"
-                      }
-                      ariaLabel={selectedCourse ? "Answer here" : "Learning goal"}
+                      placeholder="Learn convolutional neural networks for vision"
+                      ariaLabel="Learning goal"
                       rows={4}
                       disabled={isStreaming}
                       submitDisabled={!topic.trim() || isStreaming}
@@ -2107,38 +1883,6 @@ export default function LearnPageClient({
                         isStreaming ? (
                           <Loader2 className="learn-spin-icon" aria-hidden="true" />
                         ) : undefined
-                      }
-                      secondaryAction={
-                        selectedCourse ? (
-                          <ComposerMicButton
-                            isActive={isSpeechActive}
-                            onClick={isSpeechActive ? stopSpeech : startSpeech}
-                            disabled={isStreaming}
-                          />
-                        ) : undefined
-                      }
-                      after={
-                        selectedCourse &&
-                        (speechMessage || conversationMetricItems.length > 0) ? (
-                          <>
-                            {conversationMetricItems.length > 0 ? (
-                              <div
-                                className="learn-conversation-cost"
-                                aria-label={`Conversation metrics: ${conversationMetricItems.join(", ")}`}
-                              >
-                                {conversationMetricItems.join(" / ")}
-                              </div>
-                            ) : null}
-                            {speechMessage ? (
-                              <p
-                                className={`speech-status speech-status-${speechStatus}`}
-                                aria-live="polite"
-                              >
-                                {speechMessage}
-                              </p>
-                            ) : null}
-                          </>
-                        ) : null
                       }
                     />
                   ) : null}
