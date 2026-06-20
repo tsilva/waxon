@@ -1,5 +1,6 @@
 export type LearnQuestionEvaluationSnippet = {
   content: string;
+  questionId: string | null;
   question: string | null;
   correctAnswer: string | null;
   score: number;
@@ -8,7 +9,7 @@ export type LearnQuestionEvaluationSnippet = {
 const QUESTION_EVALUATION_SNIPPET_PATTERN =
   /^<!--\s*waxon:evaluation-snippet score=(\d{1,2})\s*-->\s*/u;
 const QUESTION_EVALUATION_METADATA_COMMENT_PATTERN =
-  /<!--\s*waxon:evaluation-(question|correct-answer)\s+([\s\S]*?)\s*-->\s*/gu;
+  /<!--\s*waxon:evaluation-(question-id|question|correct-answer)\s+([\s\S]*?)\s*-->\s*/gu;
 const QUESTION_EVALUATION_SCORE_LINE_PATTERN =
   /^(?:\*\*)?Score\s+\d{1,2}\s*\/\s*10(?:\*\*)?$/iu;
 
@@ -75,6 +76,7 @@ export function parseQuestionEvaluationSnippet(
 
   const normalizedScore = Math.max(0, Math.min(10, score));
   const metadata = {
+    questionId: null as string | null,
     question: null as string | null,
     correctAnswer: null as string | null,
   };
@@ -86,6 +88,10 @@ export function parseQuestionEvaluationSnippet(
     QUESTION_EVALUATION_METADATA_COMMENT_PATTERN,
     (_comment, kind: string, value: string) => {
       const decoded = decodeEvaluationMetadata(value);
+
+      if (kind === "question-id" && !metadata.questionId) {
+        metadata.questionId = decoded;
+      }
 
       if (kind === "question" && !metadata.question) {
         metadata.question = decoded;
@@ -120,6 +126,7 @@ export function parseQuestionEvaluationSnippet(
 
   return {
     content: visibleFeedback,
+    questionId: metadata.questionId,
     question,
     correctAnswer:
       metadata.correctAnswer ??

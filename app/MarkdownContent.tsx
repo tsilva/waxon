@@ -5,6 +5,8 @@ import {
   type ReactNode,
 } from "react";
 import {
+  isInlineMathClosingDollarDelimiter,
+  isInlineMathDollarDelimiter,
   isUprightMathLiteral,
   renderLatexCommandText,
 } from "@/app/lib/latexMath";
@@ -50,6 +52,16 @@ function findClosingDelimiter(
       source.startsWith(delimiter, index) &&
       source[index - 1] !== "\\"
     ) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function findClosingInlineMathDollar(source: string, startIndex: number) {
+  for (let index = startIndex; index < source.length; index += 1) {
+    if (isInlineMathClosingDollarDelimiter(source, index)) {
       return index;
     }
   }
@@ -287,10 +299,9 @@ function renderInlineMarkdown(
 
     if (
       options.enableMath &&
-      text[index] === "$" &&
-      text[index + 1] !== "$"
+      isInlineMathDollarDelimiter(text, index)
     ) {
-      const closeIndex = findClosingDelimiter(text, "$", index + 1);
+      const closeIndex = findClosingInlineMathDollar(text, index + 1);
 
       if (closeIndex > index) {
         nodes.push(

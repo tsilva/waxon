@@ -118,6 +118,7 @@ type LearnPageClientProps = {
 };
 
 type LearnEvaluationDetails = {
+  questionId: string | null;
   question: string;
   score: number;
   feedback: string;
@@ -448,6 +449,48 @@ function findPreviousWidgetAnswer(
   }
 
   return null;
+}
+
+function shouldShowLearnQuestionWidgets(input: {
+  messages: LearnChatMessage[];
+  message: LearnChatMessage;
+  messageIndex: number;
+  widgetCount: number;
+  hasEvaluationSnippet: boolean;
+}) {
+  if (
+    input.message.role !== "assistant" ||
+    input.widgetCount === 0 ||
+    input.hasEvaluationSnippet
+  ) {
+    return false;
+  }
+
+  return !input.messages
+    .slice(input.messageIndex + 1)
+    .some((laterMessage) => laterMessage.role === "user");
+}
+
+function hasActiveLearnQuestionWidgets(messages: LearnChatMessage[]) {
+  return messages.some((message, messageIndex) => {
+    if (message.role !== "assistant") {
+      return false;
+    }
+
+    const parsedMessage = parseCourseMessageMetrics(message.content);
+    const parsedWidgets = parseCourseQuestionWidgets(parsedMessage.content);
+    const evaluationSnippet = parseQuestionEvaluationSnippet(
+      parsedWidgets.content,
+    );
+
+    return shouldShowLearnQuestionWidgets({
+      messages,
+      message,
+      messageIndex,
+      widgetCount: parsedWidgets.widgets.length,
+      hasEvaluationSnippet: Boolean(evaluationSnippet),
+    });
+  });
 }
 
 function courseChatFallbackId(message: StoredCourseChatMessage, index: number) {
@@ -802,6 +845,10 @@ export default function LearnPageClient({
     selectedCourse && speechPreview
       ? mergeTranscriptText(topic, speechPreview)
       : topic;
+  const hasActiveQuestionWidgets = useMemo(
+    () => hasActiveLearnQuestionWidgets(chatMessages),
+    [chatMessages],
+  );
   const isSpeechActive =
     speechStatus === "starting" || speechStatus === "listening";
   const conversationCostLabel = formatConversationCost(
@@ -1931,6 +1978,7 @@ export default function LearnPageClient({
                             }
                             onDetailsClick={() =>
                               openLearnEvaluationDetails({
+                                questionId: evaluationSnippet.questionId,
                                 question: evaluationQuestion,
                                 score: evaluationSnippet.score,
                                 feedback: evaluationSnippet.content,
@@ -1945,17 +1993,14 @@ export default function LearnPageClient({
                       const messageKind = evaluationSnippet
                         ? "evaluation"
                         : message.role;
-                      const hasLaterUserAnswer =
-                        message.role === "assistant" &&
-                        parsedWidgets.widgets.length > 0 &&
-                        chatMessages
-                          .slice(messageIndex + 1)
-                          .some((laterMessage) => laterMessage.role === "user");
                       const shouldShowQuestionWidgets =
-                        message.role === "assistant" &&
-                        parsedWidgets.widgets.length > 0 &&
-                        !hasLaterUserAnswer &&
-                        !evaluationSnippet;
+                        shouldShowLearnQuestionWidgets({
+                          messages: chatMessages,
+                          message,
+                          messageIndex,
+                          widgetCount: parsedWidgets.widgets.length,
+                          hasEvaluationSnippet: Boolean(evaluationSnippet),
+                        });
 
                       return (
                         <Fragment key={message.id}>
@@ -2021,65 +2066,67 @@ export default function LearnPageClient({
                     })}
                     <div className="learn-chat-end" />
                   </div>
-                  <AnswerComposer
-                    id="learn-topic-input"
-                    className="learn-course-answer-composer"
-                    value={selectedCourse ? displayedTopic : topic}
-                    onValueChange={(nextTopic) => {
-                      setSpeechPreview("");
-                      setTopic(nextTopic);
-                    }}
-                    onSubmit={submitChatPrompt}
-                    onKeyDown={handleChatComposerKeyDown}
-                    placeholder={
-                      selectedCourse
-                        ? "Type your answer here..."
-                        : "Learn convolutional neural networks for vision"
-                    }
-                    ariaLabel={selectedCourse ? "Answer here" : "Learning goal"}
-                    rows={4}
-                    disabled={isStreaming}
-                    submitDisabled={!topic.trim() || isStreaming}
-                    submitAriaLabel={isStreaming ? streamingStatus : "Send"}
-                    submitTitle={isStreaming ? streamingStatus : "Send"}
-                    submitIcon={
-                      isStreaming ? (
-                        <Loader2 className="learn-spin-icon" aria-hidden="true" />
-                      ) : undefined
-                    }
-                    secondaryAction={
-                      selectedCourse ? (
-                        <ComposerMicButton
-                          isActive={isSpeechActive}
-                          onClick={isSpeechActive ? stopSpeech : startSpeech}
-                          disabled={isStreaming}
-                        />
-                      ) : undefined
-                    }
-                    after={
-                      selectedCourse &&
-                      (speechMessage || conversationMetricItems.length > 0) ? (
-                        <>
-                          {conversationMetricItems.length > 0 ? (
-                            <div
-                              className="learn-conversation-cost"
-                              aria-label={`Conversation metrics: ${conversationMetricItems.join(", ")}`}
-                            >
-                              {conversationMetricItems.join(" / ")}
-                            </div>
-                          ) : null}
-                          {speechMessage ? (
-                            <p
-                              className={`speech-status speech-status-${speechStatus}`}
-                              aria-live="polite"
-                            >
-                              {speechMessage}
-                            </p>
-                          ) : null}
-                        </>
-                      ) : null
-                    }
-                  />
+                  {!hasActiveQuestionWidgets ? (
+                    <AnswerComposer
+                      id="learn-topic-input"
+                      className="learn-course-answer-composer"
+                      value={selectedCourse ? displayedTopic : topic}
+                      onValueChange={(nextTopic) => {
+                        setSpeechPreview("");
+                        setTopic(nextTopic);
+                      }}
+                      onSubmit={submitChatPrompt}
+                      onKeyDown={handleChatComposerKeyDown}
+                      placeholder={
+                        selectedCourse
+                          ? "Type your answer here..."
+                          : "Learn convolutional neural networks for vision"
+                      }
+                      ariaLabel={selectedCourse ? "Answer here" : "Learning goal"}
+                      rows={4}
+                      disabled={isStreaming}
+                      submitDisabled={!topic.trim() || isStreaming}
+                      submitAriaLabel={isStreaming ? streamingStatus : "Send"}
+                      submitTitle={isStreaming ? streamingStatus : "Send"}
+                      submitIcon={
+                        isStreaming ? (
+                          <Loader2 className="learn-spin-icon" aria-hidden="true" />
+                        ) : undefined
+                      }
+                      secondaryAction={
+                        selectedCourse ? (
+                          <ComposerMicButton
+                            isActive={isSpeechActive}
+                            onClick={isSpeechActive ? stopSpeech : startSpeech}
+                            disabled={isStreaming}
+                          />
+                        ) : undefined
+                      }
+                      after={
+                        selectedCourse &&
+                        (speechMessage || conversationMetricItems.length > 0) ? (
+                          <>
+                            {conversationMetricItems.length > 0 ? (
+                              <div
+                                className="learn-conversation-cost"
+                                aria-label={`Conversation metrics: ${conversationMetricItems.join(", ")}`}
+                              >
+                                {conversationMetricItems.join(" / ")}
+                              </div>
+                            ) : null}
+                            {speechMessage ? (
+                              <p
+                                className={`speech-status speech-status-${speechStatus}`}
+                                aria-live="polite"
+                              >
+                                {speechMessage}
+                              </p>
+                            ) : null}
+                          </>
+                        ) : null
+                      }
+                    />
+                  ) : null}
                 </section>
               ) : null}
             </div>
@@ -2193,6 +2240,12 @@ export default function LearnPageClient({
                     text={selectedEvaluationDetails.question}
                   />
                 </div>
+                <p className="stats-modal-question-id">
+                  <span>Question ID:</span>
+                  <code>
+                    {selectedEvaluationDetails.questionId ?? "Unavailable"}
+                  </code>
+                </p>
               </div>
               <button
                 className="stats-modal-close"

@@ -105,6 +105,30 @@ test("isCourseChatTurnComplete accepts terminal questions and multiple choice", 
   assert.equal(isCourseChatTurnComplete("In your own"), false);
 });
 
+test("parseCourseQuestionWidgets strips trailing partial widget comments during streaming", () => {
+  const parsed = parseCourseQuestionWidgets(
+    [
+      "Key distinction:",
+      "",
+      "- Total variation: actual price vs. average price.",
+      "- Residual variation: actual price vs. predicted price.",
+      "",
+      "<!-- waxon:question-widget %7B%22type%22%3A%22multiple_choice%22%2C%22id",
+    ].join("\n"),
+  );
+
+  assert.equal(
+    parsed.content,
+    [
+      "Key distinction:",
+      "",
+      "- Total variation: actual price vs. average price.",
+      "- Residual variation: actual price vs. predicted price.",
+    ].join("\n"),
+  );
+  assert.deepEqual(parsed.widgets, []);
+});
+
 test("shouldShowCourseChatInterruptedWarning only flags the latest incomplete tutor turn", () => {
   assert.equal(
     shouldShowCourseChatInterruptedWarning({

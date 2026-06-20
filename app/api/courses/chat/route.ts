@@ -45,6 +45,7 @@ const MAX_STORED_CHAT_MESSAGES = 200;
 const MAX_TOPIC_CHARS = 800;
 
 function buildQuestionEvaluationSnippet(input: {
+  questionId?: string | null;
   question: string;
   correctAnswer: string;
   score: number;
@@ -61,6 +62,9 @@ function buildQuestionEvaluationSnippet(input: {
     role: "assistant",
     content: [
       `<!-- waxon:evaluation-snippet score=${score} -->`,
+      input.questionId
+        ? `<!-- waxon:evaluation-question-id ${encodeURIComponent(input.questionId)} -->`
+        : "",
       question
         ? `<!-- waxon:evaluation-question ${encodeURIComponent(question)} -->`
         : "",
@@ -310,7 +314,19 @@ export async function POST(request: Request) {
                     return null;
                   }
 
+                  const recordedAttempt = await recordCourseChatQuestionAttempt({
+                    course: courseForEvaluation,
+                    question: questionAttempt.question,
+                    answer: questionAttempt.answer,
+                    answerSummary: questionAttempt.answerSummary,
+                    conciseAnswer: questionAttempt.conciseAnswer,
+                    correctAnswer: questionAttempt.correctAnswer,
+                    justification: questionAttempt.justification,
+                    score: questionAttempt.score,
+                    submittedAt: Date.now(),
+                  });
                   const evaluationSnippet = buildQuestionEvaluationSnippet({
+                    questionId: recordedAttempt?.questionId ?? null,
                     question: questionAttempt.question,
                     correctAnswer: questionAttempt.correctAnswer,
                     score: questionAttempt.score,
@@ -323,17 +339,6 @@ export async function POST(request: Request) {
                       questionAttemptMetrics,
                     ),
                   };
-                  await recordCourseChatQuestionAttempt({
-                    course: courseForEvaluation,
-                    question: questionAttempt.question,
-                    answer: questionAttempt.answer,
-                    answerSummary: questionAttempt.answerSummary,
-                    conciseAnswer: questionAttempt.conciseAnswer,
-                    correctAnswer: questionAttempt.correctAnswer,
-                    justification: questionAttempt.justification,
-                    score: questionAttempt.score,
-                    submittedAt: Date.now(),
-                  });
                   send("evaluation", {
                     score: questionAttempt.score,
                     justification: questionAttempt.justification,

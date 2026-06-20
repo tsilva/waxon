@@ -8,10 +8,12 @@ import {
 test("parseQuestionEvaluationSnippet extracts metadata and strips internal comments", () => {
   const question =
     "In one sentence, what happens to the probability of a sampled action when its advantage is positive versus negative?";
+  const questionId = "2f432fc8-129f-46ba-b8ee-702c528a8050";
   const correctAnswer =
     "If the advantage is positive, the sampled action's probability increases; if the advantage is negative, its probability decreases.";
   const content = [
     "<!-- waxon:evaluation-snippet score=4 -->",
+    `<!-- waxon:evaluation-question-id ${encodeURIComponent(questionId)} -->`,
     `<!-- waxon:evaluation-question ${encodeURIComponent(question)} -->`,
     `<!-- waxon:evaluation-correct-answer ${encodeURIComponent(correctAnswer)} -->`,
     "**Score 4/10**",
@@ -26,6 +28,7 @@ test("parseQuestionEvaluationSnippet extracts metadata and strips internal comme
   assert.deepEqual(parsed, {
     content:
       "The answer partially captures the positive-advantage case, but misses the negative-advantage case.",
+    questionId,
     question,
     correctAnswer,
     score: 4,
@@ -45,6 +48,7 @@ test("parseQuestionEvaluationSnippet reads metadata regardless of comment order"
   const parsed = parseQuestionEvaluationSnippet(content);
 
   assert.equal(parsed?.question, "What is expected?");
+  assert.equal(parsed?.questionId, null);
   assert.equal(parsed?.correctAnswer, "Expected answer.");
   assert.equal(parsed?.content, "Good answer.");
 });
