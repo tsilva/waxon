@@ -13,6 +13,7 @@ const mathSymbolMap: Record<string, string> = {
   cdot: "·",
   le: "≤",
   ge: "≥",
+  approx: "≈",
   log: "log",
   neq: "≠",
   sum: "∑",
@@ -35,7 +36,7 @@ export function isUprightMathLiteral(character: string): boolean {
 }
 
 export function isCurrencyDollarSign(source: string, index: number): boolean {
-  return source[index] === "$" && /^\s*[\d.]/u.test(source.slice(index + 1));
+  return source[index] === "$" && /^\s*(?:\d|\.\d)/u.test(source.slice(index + 1));
 }
 
 export function isInlineMathDollarDelimiter(
@@ -45,9 +46,22 @@ export function isInlineMathDollarDelimiter(
   if (
     source[index] !== "$" ||
     source[index - 1] === "\\" ||
-    source[index + 1] === "$" ||
-    isCurrencyDollarSign(source, index)
+    source[index + 1] === "$"
   ) {
+    return false;
+  }
+
+  if (isCurrencyDollarSign(source, index)) {
+    for (let cursor = index + 1; cursor < source.length; cursor += 1) {
+      if (source[cursor] === "\n") {
+        return false;
+      }
+
+      if (isInlineMathClosingDollarDelimiter(source, cursor)) {
+        return true;
+      }
+    }
+
     return false;
   }
 

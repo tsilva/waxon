@@ -14,6 +14,7 @@ test("renderLatexCommandText hides transparent TeX delimiter commands", () => {
 });
 
 test("renderLatexCommandText maps supported math symbols and keeps unknown operators readable", () => {
+  assert.equal(renderLatexCommandText("approx"), "≈");
   assert.equal(renderLatexCommandText("sum"), "∑");
   assert.equal(renderLatexCommandText("ln"), "ln");
   assert.equal(renderLatexCommandText("exp"), "exp");
@@ -38,6 +39,18 @@ test("dollar delimiter detection keeps currency amounts out of inline math", () 
   assert.equal(isInlineMathClosingDollarDelimiter(text, text.indexOf("$300")), false);
 });
 
+test("currency detection accepts decimal prices without treating punctuation as currency", () => {
+  const text = "The fee is $.99, but the math value is $1001$.";
+  const currencyIndex = text.indexOf("$.99");
+  const mathOpenIndex = text.indexOf("$1001");
+  const mathCloseIndex = text.lastIndexOf("$");
+
+  assert.equal(isCurrencyDollarSign(text, currencyIndex), true);
+  assert.equal(isCurrencyDollarSign(text, mathCloseIndex), false);
+  assert.equal(isInlineMathDollarDelimiter(text, mathOpenIndex), true);
+  assert.equal(isInlineMathClosingDollarDelimiter(text, mathCloseIndex), true);
+});
+
 test("dollar delimiter detection handles spaced currency amounts in generated choices", () => {
   const text =
     "Actual minus average: $ 320,000 - $250,000 = $70,000";
@@ -58,6 +71,16 @@ test("dollar delimiter detection still accepts compact inline math", () => {
   const openIndex = text.indexOf("$");
   const closeIndex = text.lastIndexOf("$");
 
+  assert.equal(isInlineMathDollarDelimiter(text, openIndex), true);
+  assert.equal(isInlineMathClosingDollarDelimiter(text, closeIndex), true);
+});
+
+test("dollar delimiter detection accepts numeric-only inline math", () => {
+  const text = "Expected answer is $1001$, not a currency amount.";
+  const openIndex = text.indexOf("$");
+  const closeIndex = text.lastIndexOf("$");
+
+  assert.equal(isCurrencyDollarSign(text, openIndex), true);
   assert.equal(isInlineMathDollarDelimiter(text, openIndex), true);
   assert.equal(isInlineMathClosingDollarDelimiter(text, closeIndex), true);
 });
