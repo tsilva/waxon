@@ -1250,6 +1250,8 @@ export default function ReviewApp({
   const [isPreviousExpanded, setIsPreviousExpanded] = useState(
     () => cachedSessionRef.current?.isPreviousExpanded ?? false,
   );
+  const [isLoadingMorePreviousAnswers, setIsLoadingMorePreviousAnswers] =
+    useState(false);
   const [expandedPreviousAnswerIds, setExpandedPreviousAnswerIds] = useState<
     Set<string>
   >(() => new Set(cachedSessionRef.current?.expandedPreviousAnswerIds ?? []));
@@ -2495,7 +2497,7 @@ export default function ReviewApp({
     return `/api/queue-status?${params.toString()}`;
   }, [queueSearchQuery, queueSortKey]);
 
-  const previousAnswerStatusUrl = useCallback(() => {
+  const previousAnswerStatusUrl = useCallback((recentAttemptsLimit: number) => {
     const params = new URLSearchParams({
       limit: "0",
       offset: "0",
@@ -2503,6 +2505,7 @@ export default function ReviewApp({
       includeReviewQueue: "0",
       includeQuestionAttempts: "0",
       includeRecentAttempts: "1",
+      recentAttemptsLimit: String(Math.max(0, Math.floor(recentAttemptsLimit))),
       includeKnowledgeEmbeddingPlot: "0",
       includeQueueCounts: "0",
     });
@@ -2612,9 +2615,11 @@ export default function ReviewApp({
     }
   }, [applyQueueStatus, queueStatusUrl]);
 
-  const loadPreviousAnswerStatus = useCallback(async () => {
+  const loadPreviousAnswerStatus = useCallback(async (
+    recentAttemptsLimit = COLLAPSED_PREVIOUS_ANSWER_LIMIT,
+  ) => {
     try {
-      const response = await fetch(previousAnswerStatusUrl(), {
+      const response = await fetch(previousAnswerStatusUrl(recentAttemptsLimit), {
         cache: "no-store",
       });
 
@@ -2631,6 +2636,20 @@ export default function ReviewApp({
       // Previous answers are supplemental; keep the review loop usable.
     }
   }, [previousAnswerStatusUrl]);
+
+  const loadMorePreviousAnswers = useCallback(async () => {
+    if (isLoadingMorePreviousAnswers) {
+      return;
+    }
+
+    setIsLoadingMorePreviousAnswers(true);
+    try {
+      await loadPreviousAnswerStatus(EXPANDED_PREVIOUS_ANSWER_LIMIT);
+      setIsPreviousExpanded(true);
+    } finally {
+      setIsLoadingMorePreviousAnswers(false);
+    }
+  }, [isLoadingMorePreviousAnswers, loadPreviousAnswerStatus]);
 
   const loadKnowledgeEmbeddingPlot = useCallback(async (limit = QUEUE_PAGE_SIZE) => {
     const normalizedLimit = Math.max(QUEUE_PAGE_SIZE, Math.floor(limit));
@@ -3972,6 +3991,11 @@ export default function ReviewApp({
     : previousAnswers.slice(0, COLLAPSED_PREVIOUS_ANSWER_LIMIT);
   const hasHiddenPreviousAnswers =
     previousAnswers.length > visiblePreviousAnswers.length;
+  const canLoadMorePreviousAnswers =
+    !isPreviousExpanded &&
+    (hasHiddenPreviousAnswers ||
+      recentAttempts.length >= COLLAPSED_PREVIOUS_ANSWER_LIMIT ||
+      previousAnswers.length >= COLLAPSED_PREVIOUS_ANSWER_LIMIT);
   const isReviewResting = !isLoadingQuestion && !question;
   const activeLearnGenerationProgress =
     learnGenerationProgress ??
@@ -4850,6 +4874,7 @@ export default function ReviewApp({
 
             <ol className="previous-list">
               {visiblePreviousAnswers.map((item, index) => {
+                const isPendingPreviousAnswer = item.status === "grading";
                 const isDetailsExpanded = expandedPreviousAnswerIds.has(item.id);
                 const detailId = `previous-answer-details-${index}-${item.id.replace(
                   /[^A-Za-z0-9_-]/g,
@@ -4872,6 +4897,13 @@ export default function ReviewApp({
                     cost={item.cost}
                     timestamp={item.timestamp}
                     timeLabel={item.timeLabel}
+                    questionLabel={
+                      isPendingPreviousAnswer ? "Evaluating" : undefined
+                    }
+                    supportingContent={
+                      isPendingPreviousAnswer ? null : undefined
+                    }
+                    metaContent={isPendingPreviousAnswer ? null : undefined}
                     secondaryMetaContent={
                       scheduleLabel ? (
                         <span className="previous-schedule-label">
@@ -4913,13 +4945,16 @@ export default function ReviewApp({
                 ),
               )}
             </ol>
-            {hasHiddenPreviousAnswers ? (
+            {canLoadMorePreviousAnswers ? (
               <button
                 className="load-more-answers"
                 type="button"
-                onClick={() => setIsPreviousExpanded(true)}
+                onClick={() => {
+                  void loadMorePreviousAnswers();
+                }}
+                disabled={isLoadingMorePreviousAnswers}
               >
-                Load more
+                {isLoadingMorePreviousAnswers ? "Loading..." : "Load more"}
               </button>
             ) : null}
           </section>

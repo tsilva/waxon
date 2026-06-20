@@ -33,3 +33,39 @@ export function renderLatexCommandText(commandName: string): string | null {
 export function isUprightMathLiteral(character: string): boolean {
   return /^[\s\d()[\]{}.,;:!?=+\-*/<>|]$/u.test(character);
 }
+
+export function isCurrencyDollarSign(source: string, index: number): boolean {
+  return source[index] === "$" && /^\s*[\d.]/u.test(source.slice(index + 1));
+}
+
+export function isInlineMathDollarDelimiter(
+  source: string,
+  index: number,
+): boolean {
+  if (
+    source[index] !== "$" ||
+    source[index - 1] === "\\" ||
+    source[index + 1] === "$" ||
+    isCurrencyDollarSign(source, index)
+  ) {
+    return false;
+  }
+
+  return !/^\s$/u.test(source[index + 1] ?? "");
+}
+
+export function isInlineMathClosingDollarDelimiter(
+  source: string,
+  index: number,
+): boolean {
+  if (
+    source[index] !== "$" ||
+    source[index - 1] === "\\" ||
+    source[index + 1] === "$" ||
+    isCurrencyDollarSign(source, index)
+  ) {
+    return false;
+  }
+
+  return !/^\s$/u.test(source[index - 1] ?? "");
+}

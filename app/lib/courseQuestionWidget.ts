@@ -19,6 +19,8 @@ export type CourseQuestionWidget =
 
 const QUESTION_WIDGET_COMMENT_PATTERN =
   /<!--\s*waxon:question-widget\s+([\s\S]*?)\s*-->/gu;
+const TRAILING_PARTIAL_QUESTION_WIDGET_COMMENT_PATTERN =
+  /\s*<!--\s*waxon:question-widget\b[\s\S]*$/u;
 const ANSWERED_QUESTION_COMMENT_PATTERN =
   /<!--\s*waxon:answered-question[\s\S]*?-->\s*/gu;
 const ANSWERED_QUESTION_COMMENT_CAPTURE_PATTERN =
@@ -114,18 +116,20 @@ export function parseCourseQuestionWidgets(content: string): {
   widgets: CourseQuestionWidget[];
 } {
   const widgets: CourseQuestionWidget[] = [];
-  const strippedContent = content.replace(
-    QUESTION_WIDGET_COMMENT_PATTERN,
-    (_comment, encodedWidget: string) => {
-      const widget = parseEncodedWidget(encodedWidget);
+  const strippedContent = content
+    .replace(
+      QUESTION_WIDGET_COMMENT_PATTERN,
+      (_comment, encodedWidget: string) => {
+        const widget = parseEncodedWidget(encodedWidget);
 
-      if (widget) {
-        widgets.push(widget);
-      }
+        if (widget) {
+          widgets.push(widget);
+        }
 
-      return "";
-    },
-  );
+        return "";
+      },
+    )
+    .replace(TRAILING_PARTIAL_QUESTION_WIDGET_COMMENT_PATTERN, "");
 
   return {
     content: strippedContent.trim(),
