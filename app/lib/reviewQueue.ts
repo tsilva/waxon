@@ -82,11 +82,6 @@ type Submission = {
 type QueueStatusBroadcastMode = "full" | "evaluations";
 type QueueStatusSubscriber = (mode: QueueStatusBroadcastMode) => void;
 
-type NextQuestionInput = {
-  excludeQuestionId?: string | null;
-  excludeQuestion?: string | null;
-};
-
 type QueueStatusInput = {
   limit?: number;
   offset?: number;
@@ -724,47 +719,6 @@ export async function loadReviewSessionQueue(input: {
   };
 }
 
-export async function loadInitialReviewPageData(): Promise<{
-  currentUser: Awaited<ReturnType<typeof getCurrentUser>>;
-  reviewSessionQueue: {
-    items: ReviewQueueItem[];
-  };
-  previousAnswerStatus: QueueStatusSnapshot;
-}> {
-  const user = await getCurrentUser();
-  const state = getQueueStateForUser(user.id);
-  const now = Date.now();
-  const [dueQuestions, previousAnswerStatus] = await Promise.all([
-    getDueQuestions(now, {
-      userId: user.id,
-      limit: 1,
-    }),
-    queueStatusForUser(user.id, {
-      limit: 0,
-      offset: 0,
-      includeReviewQueue: false,
-      includeQuestionAttempts: false,
-      includeRecentAttempts: true,
-      recentAttemptsLimit: 6,
-      includeKnowledgeEmbeddingPlot: false,
-      includeQueueCounts: true,
-    }),
-  ]);
-
-  return {
-    currentUser: user,
-    reviewSessionQueue: {
-      items: dueQuestions.map((item) =>
-        toReviewQueueItem(item, {
-          now,
-          latest: state.latestByQuestionKey[questionKey(item)],
-        }),
-      ),
-    },
-    previousAnswerStatus,
-  };
-}
-
 async function initializeQueue(): Promise<QueueContext> {
   const { user, state } = await ensureQueueContext();
 
@@ -1115,28 +1069,11 @@ export async function peekNextQuestion(): Promise<{
   questionId: string | null;
   question: string | null;
   queueRemaining: number;
-}>;
-export async function peekNextQuestion(input: NextQuestionInput): Promise<{
-  questionId: string | null;
-  question: string | null;
-  queueRemaining: number;
-}>;
-export async function peekNextQuestion(input: NextQuestionInput = {}): Promise<{
-  questionId: string | null;
-  question: string | null;
-  queueRemaining: number;
 }> {
   const { user, state } = await initializeQueue();
   await refreshIfEmpty(state, user.id);
-  const excludedQuestionKey = input.excludeQuestionId?.trim() || null;
-  const excludedQuestion = input.excludeQuestion?.trim() || null;
-  const matchingQueue = state.queue.filter(
+  const availableQueue = state.queue.filter(
     (item) => !state.inFlightQuestionKeys.has(questionKey(item)),
-  );
-  const availableQueue = matchingQueue.filter(
-    (item) =>
-      item.questionId !== excludedQuestionKey &&
-      item.question !== excludedQuestion,
   );
   const nextQuestion = availableQueue[0] ?? null;
 

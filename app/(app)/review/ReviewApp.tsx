@@ -1,15 +1,11 @@
 "use client";
 
-import { useClerk, useUser } from "@clerk/nextjs";
 import Link from "next/link";
-import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import {
   AnswerComposer,
   ComposerMicButton,
 } from "@/app/AnswerComposer";
 import { useAppError } from "@/app/AppErrorModal";
-import { isAdminEmail } from "@/app/lib/adminAccess";
-import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
 import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
 import { SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
@@ -19,6 +15,7 @@ import {
   type SpeechRecognition,
   type SpeechStatus,
 } from "@/app/lib/speechRecognition";
+import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import {
   MarkdownContent as SharedMarkdownContent,
@@ -181,9 +178,6 @@ type QuestionSwapLayer = {
 type ActiveTab = "review" | "queue";
 
 export type ReviewAppProps = {
-  initialActiveTab?: ActiveTab;
-  initialKnowledgeBaseSlug?: string | null;
-  initialKnowledgeBases?: KnowledgeBaseManagementItem[];
   initialCurrentUser?: UserProfileResponse | null;
   initialPreviousAnswerStatus?: QueueStatusResponse | null;
   initialReviewSessionQueue?: ReviewQueueItem[] | null;
@@ -210,15 +204,6 @@ type ReviewSessionSnapshot = {
   queueSortKey: QueueSortKey;
   queueSearchInput: string;
   queueSearchQuery: string;
-  knowledgeBases: KnowledgeBaseManagementItem[];
-  selectedKnowledgeBaseId: string;
-  knowledgeBaseSearchQuery: string;
-  knowledgeBaseSortKey: KnowledgeBaseSortKey;
-  selectedKnowledgeBaseDetailId: string | null;
-  isCreatingKnowledgeBase: boolean;
-  editingKnowledgeBaseId: string | null;
-  knowledgeBaseDraftName: string;
-  knowledgeBaseDraftCoverage: string;
   knowledgeEmbeddingPlot: KnowledgeEmbeddingPlotResponse;
   messages: ChatMessage[];
   isPreviousExpanded: boolean;
@@ -233,7 +218,6 @@ type ReviewSessionSnapshot = {
   generatorMessage: string | null;
   hasLoadedQuestion: boolean;
   hasLoadedQueueStatus: boolean;
-  hasLoadedKnowledgeBases: boolean;
   loadedQueueSortKey: QueueSortKey | null;
   loadedQueueSearchQuery: string | null;
   queueLoadedLimit: number;
@@ -451,32 +435,10 @@ function getReviewRouteStateFromPathname(pathname: string): ReviewRouteState | n
     };
   }
 
-  if (pathname.startsWith(`${REVIEW_TAB_PATHS.queue}/`)) {
-    const knowledgeBaseSlug = pathname.slice(REVIEW_TAB_PATHS.queue.length + 1);
-
-    return {
-      activeTab: "queue",
-      knowledgeBaseSlug: knowledgeBaseSlug ? decodeURIComponent(knowledgeBaseSlug) : null,
-    };
-  }
-
   return null;
 }
 
 type QueueSortKey = "review-date" | "creation-date";
-
-type KnowledgeBaseSortKey = "updated" | "due" | "name";
-
-type KnowledgeBaseManagementItem = {
-  id: string;
-  name: string;
-  slug: string;
-  coverage: string;
-  dueCount: number;
-  cardCount: number;
-  lastReviewedAt: number | null;
-  inReviewRotation: boolean;
-};
 
 type GeneratedQuestionStatus = "new" | "selected" | "adding" | "added";
 
@@ -942,36 +904,14 @@ function isTextContextFile(file: File): boolean {
 }
 
 export default function ReviewApp({
-  initialActiveTab = "review",
-  initialKnowledgeBaseSlug = null,
-  initialKnowledgeBases = [],
   initialCurrentUser = null,
   initialPreviousAnswerStatus = null,
   initialReviewSessionQueue = null,
 }: ReviewAppProps) {
-  const clerk = useClerk();
-  const { user: clerkUser } = useUser();
-  const isLocalAuth = isLocalTestAuthEnabled();
-  const accountWidgetsCustomPages = useMemo(
-    () => createAccountWidgetsCustomPages(),
-    [],
-  );
   const cachedSessionRef = useRef(reviewSessionSnapshot);
-  const initialRoutedKnowledgeBaseId =
-    initialActiveTab === "queue" && initialKnowledgeBaseSlug
-      ? initialKnowledgeBases.find((knowledgeBase) => knowledgeBase.slug === initialKnowledgeBaseSlug)?.id ??
-        cachedSessionRef.current?.knowledgeBases.find(
-          (knowledgeBase) => knowledgeBase.slug === initialKnowledgeBaseSlug,
-        )?.id ??
-        null
-      : null;
-  const canUseCachedQueueState =
-    !initialRoutedKnowledgeBaseId ||
-    cachedSessionRef.current?.selectedKnowledgeBaseDetailId === initialRoutedKnowledgeBaseId;
   const cachedHasLoadedQuestion =
     cachedSessionRef.current?.hasLoadedQuestion ?? false;
   const canUseInitialReviewSession =
-    initialActiveTab === "review" &&
     !cachedHasLoadedQuestion &&
     initialReviewSessionQueue !== null;
   const initialReviewSessionItem = canUseInitialReviewSession
@@ -985,25 +925,16 @@ export default function ReviewApp({
     cachedHasLoadedQuestion || canUseInitialReviewSession,
   );
   const hasLoadedQueueStatusRef = useRef(
-    canUseCachedQueueState
-      ? cachedSessionRef.current?.hasLoadedQueueStatus ?? false
-      : false,
-  );
-  const hasLoadedKnowledgeBasesRef = useRef(
-    cachedSessionRef.current?.hasLoadedKnowledgeBases ?? initialKnowledgeBases.length > 0,
+    cachedSessionRef.current?.hasLoadedQueueStatus ?? false,
   );
   const hasLoadedPreviousAnswerStatusRef = useRef(
     initialPreviousAnswerStatus !== null,
   );
   const loadedQueueSortKeyRef = useRef<QueueSortKey | null>(
-    canUseCachedQueueState
-      ? cachedSessionRef.current?.loadedQueueSortKey ?? null
-      : null,
+    cachedSessionRef.current?.loadedQueueSortKey ?? null,
   );
   const loadedQueueSearchQueryRef = useRef<string | null>(
-    canUseCachedQueueState
-      ? cachedSessionRef.current?.loadedQueueSearchQuery ?? null
-      : null,
+    cachedSessionRef.current?.loadedQueueSearchQuery ?? null,
   );
   const [question, setQuestion] = useState<string | null>(
     () =>
@@ -1095,43 +1026,25 @@ export default function ReviewApp({
   );
   const [recentAttempts, setRecentAttempts] = useState<QuestionAttempt[]>(
     () =>
-      canUseCachedQueueState
-        ? cachedSessionRef.current?.recentAttempts ??
-          initialPreviousAnswerStatus?.recentAttempts ??
-          []
-        : initialPreviousAnswerStatus?.recentAttempts ?? [],
+      cachedSessionRef.current?.recentAttempts ??
+      initialPreviousAnswerStatus?.recentAttempts ??
+      [],
   );
   const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>(
-    () =>
-      canUseCachedQueueState ? cachedSessionRef.current?.reviewQueue ?? [] : [],
+    () => cachedSessionRef.current?.reviewQueue ?? [],
   );
   const [reviewQueueTotal, setReviewQueueTotal] = useState(
-    () =>
-      canUseCachedQueueState
-        ? cachedSessionRef.current?.reviewQueueTotal ?? 0
-        : 0,
+    () => cachedSessionRef.current?.reviewQueueTotal ?? 0,
   );
-  const [isQueuePageLoading, setIsQueuePageLoading] = useState(
-    () =>
-      initialActiveTab === "queue" &&
-      Boolean(initialRoutedKnowledgeBaseId) &&
-      !(
-        canUseCachedQueueState &&
-        (cachedSessionRef.current?.hasLoadedQueueStatus ?? false)
-      ),
-  );
+  const [isQueuePageLoading, setIsQueuePageLoading] = useState(false);
   const [isQueueStatusStreamActive, setIsQueueStatusStreamActive] =
     useState(false);
   const [questionAttemptsByKey, setQuestionAttemptsByKey] = useState<
     Record<string, QuestionAttempt[]>
   >({});
   const [queueVirtualRange, setQueueVirtualRange] = useState({
-    start: canUseCachedQueueState
-      ? cachedSessionRef.current?.queueVirtualRange.start ?? 0
-      : 0,
-    end: canUseCachedQueueState
-      ? cachedSessionRef.current?.queueVirtualRange.end ?? QUEUE_PAGE_SIZE
-      : QUEUE_PAGE_SIZE,
+    start: cachedSessionRef.current?.queueVirtualRange.start ?? 0,
+    end: cachedSessionRef.current?.queueVirtualRange.end ?? QUEUE_PAGE_SIZE,
   });
   const [queueSortKey, setQueueSortKey] = useState<QueueSortKey>(
     () => cachedSessionRef.current?.queueSortKey ?? "review-date",
@@ -1142,56 +1055,16 @@ export default function ReviewApp({
   const [queueSearchQuery, setQueueSearchQuery] = useState(
     () => cachedSessionRef.current?.queueSearchQuery ?? "",
   );
-  const [knowledgeBases] = useState<KnowledgeBaseManagementItem[]>(
-    () => cachedSessionRef.current?.knowledgeBases ?? initialKnowledgeBases,
-  );
-  const [selectedKnowledgeBaseId] = useState(
-    () =>
-      cachedSessionRef.current?.selectedKnowledgeBaseId ??
-      initialRoutedKnowledgeBaseId ??
-      initialKnowledgeBases[0]?.id ??
-      "",
-  );
-  const [knowledgeBaseSearchQuery] = useState(
-    () => cachedSessionRef.current?.knowledgeBaseSearchQuery ?? "",
-  );
-  const [knowledgeBaseSortKey] = useState<KnowledgeBaseSortKey>(
-    () => cachedSessionRef.current?.knowledgeBaseSortKey ?? "name",
-  );
-  const [selectedKnowledgeBaseDetailId, setSelectedKnowledgeBaseDetailId] = useState<
-    string | null
-  >(() =>
-    initialActiveTab === "queue" && initialKnowledgeBaseSlug
-      ? initialRoutedKnowledgeBaseId ?? cachedSessionRef.current?.selectedKnowledgeBaseDetailId ?? null
-      : null,
-  );
-  const [isCreatingKnowledgeBase] = useState(
-    () => cachedSessionRef.current?.isCreatingKnowledgeBase ?? false,
-  );
-  const [editingKnowledgeBaseId] = useState<string | null>(
-    () => cachedSessionRef.current?.editingKnowledgeBaseId ?? null,
-  );
-  const [knowledgeBaseDraftName] = useState(
-    () => cachedSessionRef.current?.knowledgeBaseDraftName ?? "",
-  );
-  const [knowledgeBaseDraftCoverage] = useState(
-    () => cachedSessionRef.current?.knowledgeBaseDraftCoverage ?? "",
-  );
   const [knowledgeEmbeddingPlot, setKnowledgeEmbeddingPlot] =
     useState<KnowledgeEmbeddingPlotResponse>(
       () =>
-        canUseCachedQueueState
-          ? cachedSessionRef.current?.knowledgeEmbeddingPlot ??
-            createEmptyKnowledgeEmbeddingPlot()
-          : createEmptyKnowledgeEmbeddingPlot(),
+        cachedSessionRef.current?.knowledgeEmbeddingPlot ??
+        createEmptyKnowledgeEmbeddingPlot(),
     );
   const [messages, setMessages] = useState<ChatMessage[]>(
     () => cachedSessionRef.current?.messages ?? [],
   );
-  const [activeTab, setActiveTab] = useState<ActiveTab>(initialActiveTab);
-  const [, setRouteKnowledgeBaseSlug] = useState<string | null>(
-    initialActiveTab === "queue" ? initialKnowledgeBaseSlug : null,
-  );
+  const [activeTab, setActiveTab] = useState<ActiveTab>("review");
   const [isPreviousExpanded, setIsPreviousExpanded] = useState(
     () => cachedSessionRef.current?.isPreviousExpanded ?? false,
   );
@@ -1219,15 +1092,17 @@ export default function ReviewApp({
   );
   const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
-  const canViewAdmin = isAdminEmail(currentUser?.email);
-  const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
-  const menuDisplayName =
-    clerkUser?.fullName ||
-    clerkUser?.username ||
-    currentUser?.displayName ||
-    "Account";
-  const menuEmail =
-    clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
+  const {
+    canViewAdmin,
+    menuAvatarUrl,
+    menuDisplayName,
+    menuEmail,
+    onManageAccount,
+    onSignOut,
+  } = useToolbarAccount(currentUser, {
+    localSignOutHref: "/",
+    onLocalManageAccount: () => setIsSettingsOpen(true),
+  });
   const [generatorScope, setGeneratorScope] = useState(
     () => cachedSessionRef.current?.generatorScope ?? "",
   );
@@ -1268,17 +1143,11 @@ export default function ReviewApp({
   const isFlaggingQuestionRef = useRef(isFlaggingQuestion);
   const pendingRetryItemsRef = useRef(new Map<string, ReviewQueueItem>());
   const processedEvaluationIdsRef = useRef(new Set<string>());
-  const learnTargetKnowledgeBaseIdRef = useRef<string | null>(
-    cachedSessionRef.current?.selectedKnowledgeBaseDetailId ??
-      cachedSessionRef.current?.selectedKnowledgeBaseId ??
-      null,
-  );
+  const learnTargetKnowledgeBaseIdRef = useRef<string | null>(null);
   const queueStageRef = useRef<HTMLElement | null>(null);
   const queueListRef = useRef<HTMLOListElement | null>(null);
   const queueLoadedLimitRef = useRef(
-    canUseCachedQueueState
-      ? cachedSessionRef.current?.queueLoadedLimit ?? QUEUE_PAGE_SIZE
-      : QUEUE_PAGE_SIZE,
+    cachedSessionRef.current?.queueLoadedLimit ?? QUEUE_PAGE_SIZE,
   );
   const loadedKnowledgeEmbeddingPlotKeyRef = useRef<string | null>(null);
   const isQueuePageLoadingRef = useRef(false);
@@ -1327,24 +1196,16 @@ export default function ReviewApp({
     (
       nextTab: ActiveTab,
       event?: ReactMouseEvent<HTMLAnchorElement>,
-      knowledgeBaseSlug?: string | null,
     ) => {
       event?.preventDefault();
       setActiveTab(nextTab);
-      setRouteKnowledgeBaseSlug(nextTab === "queue" ? knowledgeBaseSlug ?? null : null);
-      if (nextTab !== "queue") {
-        setSelectedKnowledgeBaseDetailId(null);
-      }
 
       const nextPath =
         nextTab === "queue" ? knowledgeBasePath() : REVIEW_TAB_PATHS[nextTab];
 
       if (window.location.pathname !== nextPath) {
         window.history.pushState(
-          {
-            activeTab: nextTab,
-            knowledgeBaseSlug: nextTab === "queue" ? knowledgeBaseSlug ?? null : null,
-          },
+          { activeTab: nextTab },
           "",
           nextPath,
         );
@@ -1358,21 +1219,11 @@ export default function ReviewApp({
   }, [navigateToTab]);
 
   useEffect(() => {
-    setActiveTab(initialActiveTab);
-    setRouteKnowledgeBaseSlug(initialActiveTab === "queue" ? initialKnowledgeBaseSlug : null);
-
-    if (initialActiveTab !== "queue" || !initialKnowledgeBaseSlug) {
-      setSelectedKnowledgeBaseDetailId(null);
-    }
-  }, [initialActiveTab, initialKnowledgeBaseSlug]);
-
-  useEffect(() => {
     function syncTabFromHistory() {
       const nextRoute = getReviewRouteStateFromPathname(window.location.pathname);
 
       if (nextRoute) {
         setActiveTab(nextRoute.activeTab);
-        setRouteKnowledgeBaseSlug(nextRoute.knowledgeBaseSlug);
         return;
       }
 
@@ -1530,15 +1381,6 @@ export default function ReviewApp({
       queueSortKey,
       queueSearchInput,
       queueSearchQuery,
-      knowledgeBases,
-      selectedKnowledgeBaseId,
-      knowledgeBaseSearchQuery,
-      knowledgeBaseSortKey,
-      selectedKnowledgeBaseDetailId,
-      isCreatingKnowledgeBase,
-      editingKnowledgeBaseId,
-      knowledgeBaseDraftName,
-      knowledgeBaseDraftCoverage,
       knowledgeEmbeddingPlot,
       messages,
       isPreviousExpanded,
@@ -1553,7 +1395,6 @@ export default function ReviewApp({
       generatorMessage,
       hasLoadedQuestion: hasLoadedQuestionRef.current,
       hasLoadedQueueStatus: hasLoadedQueueStatusRef.current,
-      hasLoadedKnowledgeBases: hasLoadedKnowledgeBasesRef.current,
       loadedQueueSortKey: loadedQueueSortKeyRef.current,
       loadedQueueSearchQuery: loadedQueueSearchQueryRef.current,
       queueLoadedLimit: queueLoadedLimitRef.current,
@@ -1565,16 +1406,9 @@ export default function ReviewApp({
     currentKnowledgeBaseId,
     currentKnowledgeBaseName,
     currentUser,
-    knowledgeBaseDraftCoverage,
-    knowledgeBaseDraftName,
     knowledgeEmbeddingPlot,
-    knowledgeBaseSearchQuery,
-    knowledgeBaseSortKey,
-    knowledgeBases,
-    editingKnowledgeBaseId,
     evaluations,
     expandedPreviousAnswerIds,
-    isCreatingKnowledgeBase,
     generatedQuestions,
     generatorFiles,
     generatorMessage,
@@ -1591,8 +1425,6 @@ export default function ReviewApp({
     recentAttempts,
     reviewQueue,
     reviewQueueTotal,
-    selectedKnowledgeBaseId,
-    selectedKnowledgeBaseDetailId,
     selectedQuestionId,
     selectedQuestion,
     sessionQueue,
@@ -3323,22 +3155,10 @@ export default function ReviewApp({
     }
   }
 
-  const activeReviewKnowledgeBaseIds = useMemo(
-    () =>
-      new Set(
-        knowledgeBases
-          .filter((knowledgeBase) => knowledgeBase.inReviewRotation)
-          .map((knowledgeBase) => knowledgeBase.id),
-      ),
-    [knowledgeBases],
-  );
-  const isKnowledgeBaseInReviewRotation = (knowledgeBaseId: string | null | undefined) =>
-    knowledgeBaseId == null || knowledgeBases.length === 0 || activeReviewKnowledgeBaseIds.has(knowledgeBaseId);
-
   const sessionPreviousAnswers: PreviousAnswerItem[] = messages
     .filter(
       (message): message is Extract<ChatMessage, { kind: "answer" }> =>
-        message.kind === "answer" && isKnowledgeBaseInReviewRotation(null),
+        message.kind === "answer",
     )
     .slice()
     .reverse()
@@ -3382,7 +3202,6 @@ export default function ReviewApp({
   const evaluationPreviousAnswers: PreviousAnswerItem[] = evaluations
     .filter(
       (evaluation) =>
-        isKnowledgeBaseInReviewRotation(null) &&
         !sessionPreviousEvaluationIds.has(evaluation.id) &&
         evaluation.answer !== null,
     )
@@ -3443,7 +3262,6 @@ export default function ReviewApp({
   const recentAttemptPreviousAnswers: PreviousAnswerItem[] = recentAttempts
     .filter((attempt) => {
       if (
-        !isKnowledgeBaseInReviewRotation(null) ||
         attempt.question === question ||
         livePreviousQuestions.has(attempt.question)
       ) {
@@ -3491,7 +3309,6 @@ export default function ReviewApp({
       (item) =>
         item.lastScore !== null &&
         item.lastAnswer !== null &&
-        isKnowledgeBaseInReviewRotation(null) &&
         !livePreviousQuestions.has(item.question) &&
         !recentAttemptQuestions.has(item.question),
     )
@@ -4090,9 +3907,7 @@ export default function ReviewApp({
   ]);
 
   usePageScrollLock(
-    isCreatingKnowledgeBase ||
-      Boolean(editingKnowledgeBaseId) ||
-      isEmbeddingMapOpen ||
+    isEmbeddingMapOpen ||
       isQuestionGeneratorOpen ||
       isSettingsOpen ||
       Boolean(selectedQuestionStats),
@@ -4196,22 +4011,8 @@ export default function ReviewApp({
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
           onReviewClick={(event) => navigateToTab("review", event)}
-          onManageAccount={() => {
-            if (isLocalAuth) {
-              setIsSettingsOpen(true);
-            } else {
-              clerk.openUserProfile({
-                customPages: accountWidgetsCustomPages,
-              });
-            }
-          }}
-          onSignOut={() => {
-            if (isLocalAuth) {
-              window.location.assign("/");
-            } else {
-              void clerk.signOut({ redirectUrl: "/" });
-            }
-          }}
+          onManageAccount={onManageAccount}
+          onSignOut={onSignOut}
         />
 
         <div

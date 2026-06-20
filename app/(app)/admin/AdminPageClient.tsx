@@ -1,6 +1,5 @@
 "use client";
 
-import { useClerk, useUser } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -19,9 +18,8 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import type { AuthenticatedUser } from "@/app/lib/auth";
-import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
@@ -1092,9 +1090,6 @@ export function AdminPageClient({
   selectedTraceId = null,
 }: AdminPageClientProps) {
   const router = useRouter();
-  const clerk = useClerk();
-  const { user: clerkUser } = useUser();
-  const isLocalAuth = isLocalTestAuthEnabled();
   const resolvedInitialViewState = useMemo(
     () =>
       initialAdminViewState({
@@ -1104,10 +1099,6 @@ export function AdminPageClient({
         initialViewState,
       }),
     [currentUser.email, initialDueCount, initialInteractions, initialViewState],
-  );
-  const accountWidgetsCustomPages = useMemo(
-    () => createAccountWidgetsCustomPages(),
-    [],
   );
   const [traceInteractions, setTraceInteractions] = useState(
     () => resolvedInitialViewState.interactions,
@@ -1119,14 +1110,18 @@ export function AdminPageClient({
   const [isInitialLoading, setIsInitialLoading] = useState(
     () => initialInteractions.length === 0,
   );
-  const menuAvatarUrl = clerkUser?.imageUrl || currentUser.avatarUrl;
-  const menuLabel =
-    clerkUser?.fullName ||
-    clerkUser?.username ||
-    currentUser.displayName ||
-    currentUser.email;
-  const menuEmail =
-    clerkUser?.primaryEmailAddress?.emailAddress || currentUser.email;
+  const {
+    menuAvatarUrl,
+    menuDisplayName,
+    menuEmail,
+    onManageAccount,
+    onSignOut,
+  } = useToolbarAccount(currentUser, {
+    fallbackDisplayName: currentUser.email,
+    localSignOutHref: "/",
+    onLocalManageAccount: () => router.push("/review"),
+    showAdmin: true,
+  });
   const latestDate = useMemo(
     () => latestTraceDate(traceInteractions),
     [traceInteractions],
@@ -1458,24 +1453,10 @@ export function AdminPageClient({
           dueCount={dueCount}
           showAdmin
           menuAvatarUrl={menuAvatarUrl}
-          menuDisplayName={menuLabel}
+          menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
-          onManageAccount={() => {
-            if (isLocalAuth) {
-              router.push("/review");
-            } else {
-              clerk.openUserProfile({
-                customPages: accountWidgetsCustomPages,
-              });
-            }
-          }}
-          onSignOut={() => {
-            if (isLocalAuth) {
-              window.location.assign("/");
-            } else {
-              void clerk.signOut({ redirectUrl: "/" });
-            }
-          }}
+          onManageAccount={onManageAccount}
+          onSignOut={onSignOut}
           onReviewClick={persistAdminPageCache}
         />
 

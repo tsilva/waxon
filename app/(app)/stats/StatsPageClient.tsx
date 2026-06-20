@@ -1,12 +1,9 @@
 "use client";
 
-import { useClerk, useUser } from "@clerk/nextjs";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
-import { isAdminEmail } from "@/app/lib/adminAccess";
-import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { DAY } from "@/app/lib/scheduler";
 import type { StatsResponse } from "@/app/lib/stats";
+import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
 type UserProfileResponse = {
@@ -412,36 +409,27 @@ export default function StatsPageClient({
   showAdmin = false,
   stats: initialStats = null,
 }: StatsPageClientProps) {
-  const clerk = useClerk();
-  const { user: clerkUser } = useUser();
-  const isLocalAuth = isLocalTestAuthEnabled();
   const [currentUser, setCurrentUser] = useState(initialCurrentUser);
   const [stats, setStats] = useState(initialStats);
   const [isStatsLoading, setIsStatsLoading] = useState(initialStats === null);
   const [statsMessage, setStatsMessage] = useState<string | null>(null);
   const emptyStats = useMemo(() => createEmptyStats(), []);
-  const accountWidgetsCustomPages = useMemo(
-    () => createAccountWidgetsCustomPages(),
-    [],
-  );
   const renderedStats = stats ?? emptyStats;
   const statsAnalytics = useMemo(
     () => buildStatsAnalytics(renderedStats),
     [renderedStats],
   );
-  const canViewAdmin =
-    showAdmin ||
-    isAdminEmail(
-      clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email,
-    );
-  const menuAvatarUrl = clerkUser?.imageUrl || currentUser?.avatarUrl || null;
-  const menuDisplayName =
-    clerkUser?.fullName ||
-    clerkUser?.username ||
-    currentUser?.displayName ||
-    "Account";
-  const menuEmail =
-    clerkUser?.primaryEmailAddress?.emailAddress || currentUser?.email || "";
+  const {
+    canViewAdmin,
+    menuAvatarUrl,
+    menuDisplayName,
+    menuEmail,
+    onManageAccount,
+    onSignOut,
+  } = useToolbarAccount(currentUser, {
+    localSignOutHref: "/",
+    showAdmin,
+  });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -510,20 +498,8 @@ export default function StatsPageClient({
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
-          onManageAccount={() => {
-            if (!isLocalAuth) {
-              clerk.openUserProfile({
-                customPages: accountWidgetsCustomPages,
-              });
-            }
-          }}
-          onSignOut={() => {
-            if (isLocalAuth) {
-              window.location.assign("/");
-            } else {
-              void clerk.signOut({ redirectUrl: "/" });
-            }
-          }}
+          onManageAccount={onManageAccount}
+          onSignOut={onSignOut}
         />
 
         <section className="stats-stage" aria-label="Review statistics">

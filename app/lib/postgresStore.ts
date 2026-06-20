@@ -1389,30 +1389,6 @@ export async function getAnswerEvaluationsByIds(input: UserContextInput & {
     .map(toEvaluationQueueItem);
 }
 
-export async function saveReferenceAnswer(input: {
-  questionId: string;
-  question: string;
-  answer: string;
-  now: number;
-  userId?: string;
-}): Promise<void> {
-  const context = await ensureSeedData(input);
-
-  await db
-    .update(questions)
-    .set({
-      referenceAnswer: input.answer,
-      updatedAt: Math.round(input.now),
-    })
-    .where(
-      and(
-        eq(questions.userId, context.userId),
-        eq(questions.id, input.questionId),
-        eq(questions.question, input.question),
-      ),
-    );
-}
-
 export type QuestionInput = {
   question: string;
   conciseAnswer?: string | null;
