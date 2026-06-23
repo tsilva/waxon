@@ -3,12 +3,12 @@ import {
   extractChatCompletionText,
   getOpenRouterEvaluationReasoning,
   openRouterChatCompletion,
-} from "./openRouter";
-import { extractJsonObject } from "./jsonObject";
+} from "./openRouter.ts";
+import { extractJsonObject } from "./jsonObject.ts";
 import {
   parseCourseTocJson,
   type CourseToc,
-} from "./courseContent";
+} from "./courseContent.ts";
 import {
   ensureCourseChatTurnHasLearnerQuestion,
   excerptCourseMessageForPrompt,
@@ -16,16 +16,17 @@ import {
 import {
   metricsFromOpenRouterUsage,
   type CourseMessageMetrics,
-} from "./courseMessageMetrics";
+} from "./courseMessageMetrics.ts";
 import {
   parseCourseQuestionAttemptToolResult,
   parseCourseAnswerDecisionToolResult,
   type CourseQuestionAttemptToolResult,
   type CourseAnswerDecisionToolResult,
-} from "./courseQuestionAttemptParsing";
+} from "./courseQuestionAttemptParsing.ts";
 import {
   parseCourseQuestionWidgetAnswer,
   parseCourseQuestionWidgets,
+  type CourseQuestionWidget,
 } from "./courseQuestionWidget.ts";
 import {
   normalizePartialCourseToc,
@@ -361,6 +362,7 @@ function latestAnsweredWidgetContext(messages: CourseChatMessage[]): {
   question: string | null;
   answer: string;
   choiceSource: string;
+  widget: CourseQuestionWidget | null;
 } | null {
   const latestUserMessage = [...messages]
     .reverse()
@@ -387,7 +389,45 @@ function latestAnsweredWidgetContext(messages: CourseChatMessage[]): {
     question,
     answer: parsedAnswer.answer,
     choiceSource: previousAssistantMessage.content,
+    widget: matchedWidget ?? null,
   };
+}
+
+function buildCourseAnswerDecisionUserPrompt(input: {
+  course: CourseDetail;
+  page: CourseToc["pages"][number];
+  previousAssistantContent: string;
+  latestUserContent: string;
+  answeredWidget: ReturnType<typeof latestAnsweredWidgetContext>;
+}): string {
+  const baseContext = [
+    `Course title: ${input.course.title}`,
+    `Current milestone: ${input.page.title}`,
+    `Milestone objective: ${input.page.objective}`,
+  ];
+
+  if (input.answeredWidget) {
+    const visibleLessonContext = parseCourseQuestionWidgets(
+      input.previousAssistantContent,
+    ).content;
+
+    return [
+      ...baseContext,
+      input.answeredWidget.widget
+        ? `Answered widget JSON: ${JSON.stringify(input.answeredWidget.widget)}`
+        : `Answered widget question: ${input.answeredWidget.question ?? "unknown"}`,
+      `Learner answer: ${input.answeredWidget.answer}`,
+      `Short lesson context:\n${excerptCourseMessageForPrompt(visibleLessonContext, 900)}`,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  return [
+    ...baseContext,
+    `Previous assistant message:\n${excerptCourseMessageForPrompt(input.previousAssistantContent, 2_000)}`,
+    `Latest learner answer:\n${excerptCourseMessageForPrompt(input.latestUserContent, 2_000)}`,
+  ].join("\n\n");
 }
 
 export async function generateCourseAnswerDecision(input: {
@@ -450,44 +490,30 @@ export async function generateCourseAnswerDecision(input: {
       response_format: COURSE_JSON_RESPONSE_FORMAT,
       reasoning: getOpenRouterEvaluationReasoning(model),
       temperature: 0,
-      max_tokens: 900,
+      max_tokens: 450,
       messages: [
         {
           role: "system",
           content: [
-            "You are Waxon's combined course answer decision tool.",
-            "Use one pass to record the learner's latest answer and decide milestone progress.",
-            "If deterministic widget metadata is provided, treat it as proof that the learner answered that question and return a record_course_question_attempt.",
-            "Write questionAttempt.question as a self-contained free-response review prompt that tests the same idea.",
-            "If the tutor question was multiple choice, rephrase it into recall form and do not use words like choose, option, A/B/C/D, or answer choice.",
-            "Grade the answer from 0 to 10 using normal Waxon review standards.",
-            "Always write correctAnswer as the concise ideal answer to the tutor question, even when the learner was fully correct.",
-            "Do not leave correctAnswer or conciseAnswer blank, null, generic, or omitted in a record_course_question_attempt call.",
-            "Use progressDecision.mark_milestone_done only when the learner clearly demonstrates the current objective with enough specificity to transfer it.",
-            "Use progressDecision.continue_current_milestone when the learner needs more practice on the same topic.",
-            "Return strict JSON only.",
-            "Shape: {\"questionAttempt\":{\"toolCall\":\"record_course_question_attempt\",\"question\":\"...\",\"answer\":\"...\",\"answerSummary\":\"...\",\"conciseAnswer\":\"...\",\"correctAnswer\":\"...\",\"justification\":\"...\",\"score\":number},\"progressDecision\":{\"toolCall\":\"mark_milestone_done\"|\"continue_current_milestone\",\"reason\":\"...\"}}.",
-            "Skip attempt shape: {\"questionAttempt\":{\"toolCall\":\"skip_course_question_attempt\",\"reason\":\"...\"},\"progressDecision\":{\"toolCall\":\"continue_current_milestone\",\"reason\":\"...\"}}.",
+            "You are Waxon's fast answer grader.",
+            "Return strict compact JSON only.",
+            "If widget/question evidence is present, grade that answered question.",
+            "Make questionAttempt.question a self-contained recall prompt, not multiple-choice wording.",
+            "Score 0-10. Use mark_milestone_done only for clear transferable mastery of the milestone.",
+            "Keep answerSummary, conciseAnswer, correctAnswer, justification, and reason under 16 words each.",
+            "Record shape: {\"questionAttempt\":{\"toolCall\":\"record_course_question_attempt\",\"question\":\"...\",\"answer\":\"...\",\"answerSummary\":\"...\",\"conciseAnswer\":\"...\",\"correctAnswer\":\"...\",\"justification\":\"...\",\"score\":number},\"progressDecision\":{\"toolCall\":\"mark_milestone_done\"|\"continue_current_milestone\",\"reason\":\"...\"}}.",
+            "Skip shape: {\"questionAttempt\":{\"toolCall\":\"skip_course_question_attempt\",\"reason\":\"...\"},\"progressDecision\":{\"toolCall\":\"continue_current_milestone\",\"reason\":\"...\"}}.",
           ].join(" "),
         },
         {
           role: "user",
-          content: [
-            `Course title: ${input.course.title}`,
-            `Current milestone: ${page.title}`,
-            `Milestone objective: ${page.objective}`,
-            answeredWidget
-              ? `Deterministic answered-widget question: ${answeredWidget.question ?? "unknown"}`
-              : "",
-            answeredWidget
-              ? `Deterministic answered-widget answer: ${answeredWidget.answer}`
-              : "",
-            `Previous assistant message:\n${excerptCourseMessageForPrompt(previousAssistantMessage.content, 4_000)}`,
-            `Latest learner answer:\n${excerptCourseMessageForPrompt(latestUserMessage.content, 4_000)}`,
-            `Recent conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
-          ]
-            .filter(Boolean)
-            .join("\n\n"),
+          content: buildCourseAnswerDecisionUserPrompt({
+            course: input.course,
+            page,
+            previousAssistantContent: previousAssistantMessage.content,
+            latestUserContent: latestUserMessage.content,
+            answeredWidget,
+          }),
         },
       ],
     },

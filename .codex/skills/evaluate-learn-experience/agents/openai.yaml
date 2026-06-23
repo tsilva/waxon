@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evaluate Learn Experience"
+  short_description: "Audit and tune Waxon Learn quality and latency"
+  default_prompt: "Use $evaluate-learn-experience to run a beginner-focused Learn course evaluation loop and tune prompts, models, or flow."
