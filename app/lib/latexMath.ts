@@ -12,16 +12,68 @@ const mathSymbolMap: Record<string, string> = {
   partial: "∂",
   cdot: "·",
   le: "≤",
+  leq: "≤",
   ge: "≥",
+  geq: "≥",
   approx: "≈",
   log: "log",
+  div: "÷",
   neq: "≠",
+  ne: "≠",
   sum: "∑",
   times: "×",
   theta: "θ",
+  ldots: "…",
+  cdots: "⋯",
+  infty: "∞",
+  pm: "±",
+  mp: "∓",
+  to: "→",
+  rightarrow: "→",
+  leftarrow: "←",
+  quad: " ",
+  qquad: " ",
+  ",": " ",
+  ":": " ",
+  ";": " ",
+  " ": " ",
 };
 
-const transparentDelimiterCommands = new Set(["left", "right"]);
+const transparentDelimiterCommands = new Set(["left", "right", "!"]);
+
+export type LatexCommandReadResult = {
+  commandName: string;
+  nextIndex: number;
+};
+
+export function readLatexCommand(
+  source: string,
+  startIndex: number,
+): LatexCommandReadResult | null {
+  if (source[startIndex] !== "\\") {
+    return null;
+  }
+
+  const letterCommand = source.slice(startIndex + 1).match(/^[A-Za-z]+/u);
+
+  if (letterCommand) {
+    return {
+      commandName: letterCommand[0],
+      nextIndex: startIndex + letterCommand[0].length + 1,
+    };
+  }
+
+  const singleCharacterCommand = source[startIndex + 1];
+
+  if (singleCharacterCommand && /^[,;:! ]$/u.test(singleCharacterCommand)) {
+    return {
+      commandName: singleCharacterCommand,
+      nextIndex: startIndex + 2,
+    };
+  }
+
+  return null;
+}
 
 export function renderLatexCommandText(commandName: string): string | null {
   if (transparentDelimiterCommands.has(commandName)) {

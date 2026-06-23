@@ -8,6 +8,7 @@ import {
   isInlineMathClosingDollarDelimiter,
   isInlineMathDollarDelimiter,
   isUprightMathLiteral,
+  readLatexCommand,
   renderLatexCommandText,
 } from "@/app/lib/latexMath";
 
@@ -200,13 +201,13 @@ function renderMathNodes(expression: string): ReactNode[] {
     }
 
     if (character === "\\") {
-      const command = expression.slice(index + 1).match(/^[A-Za-z]+/);
+      const command = readLatexCommand(expression, index);
 
       if (command) {
-        const commandText = renderLatexCommandText(command[0]);
+        const commandText = renderLatexCommandText(command.commandName);
 
         if (commandText === null) {
-          index += command[0].length + 1;
+          index = command.nextIndex;
           continue;
         }
 
@@ -215,7 +216,7 @@ function renderMathNodes(expression: string): ReactNode[] {
             {commandText}
           </span>,
         );
-        index += command[0].length + 1;
+        index = command.nextIndex;
         continue;
       }
     }

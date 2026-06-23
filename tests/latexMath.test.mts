@@ -5,6 +5,7 @@ import {
   isInlineMathClosingDollarDelimiter,
   isInlineMathDollarDelimiter,
   isUprightMathLiteral,
+  readLatexCommand,
   renderLatexCommandText,
 } from "../app/lib/latexMath.ts";
 
@@ -18,6 +19,33 @@ test("renderLatexCommandText maps supported math symbols and keeps unknown opera
   assert.equal(renderLatexCommandText("sum"), "∑");
   assert.equal(renderLatexCommandText("ln"), "ln");
   assert.equal(renderLatexCommandText("exp"), "exp");
+  assert.equal(renderLatexCommandText("div"), "÷");
+  assert.equal(renderLatexCommandText("leq"), "≤");
+  assert.equal(renderLatexCommandText("geq"), "≥");
+});
+
+test("renderLatexCommandText treats TeX spacing commands as spacing", () => {
+  assert.equal(renderLatexCommandText(","), " ");
+  assert.equal(renderLatexCommandText(":"), " ");
+  assert.equal(renderLatexCommandText(";"), " ");
+  assert.equal(renderLatexCommandText("quad"), " ");
+  assert.equal(renderLatexCommandText("!"), null);
+});
+
+test("readLatexCommand reads word and spacing commands", () => {
+  assert.deepEqual(readLatexCommand(String.raw`\div 4`, 0), {
+    commandName: "div",
+    nextIndex: 4,
+  });
+  assert.deepEqual(readLatexCommand(String.raw`4\,7`, 1), {
+    commandName: ",",
+    nextIndex: 3,
+  });
+  assert.deepEqual(readLatexCommand(String.raw`4\ 7`, 1), {
+    commandName: " ",
+    nextIndex: 3,
+  });
+  assert.equal(readLatexCommand(String.raw`\{x\}`, 0), null);
 });
 
 test("isUprightMathLiteral identifies punctuation, operators, and digits", () => {
