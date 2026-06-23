@@ -6,7 +6,8 @@ import {
 import {
   extractChatCompletionText,
   getOpenRouterApiKey,
-  getOpenRouterChatModel,
+  getOpenRouterEvaluationModel,
+  getOpenRouterEvaluationReasoning,
   openRouterChatCompletion,
 } from "./openRouter";
 import {
@@ -166,7 +167,7 @@ export async function evaluateAnswer(
   }
 
   const apiKey = getOpenRouterApiKey();
-  const model = getOpenRouterChatModel() ?? "";
+  const model = getOpenRouterEvaluationModel() ?? "";
 
   if (!apiKey) {
     const traceId = input.traceId ?? crypto.randomUUID();
@@ -229,6 +230,7 @@ export async function evaluateAnswer(
         response_format: {
           type: "json_object",
         },
+        reasoning: getOpenRouterEvaluationReasoning(model),
         stream: true,
         temperature: 0,
         max_tokens: 2_000,

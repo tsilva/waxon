@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_OPENROUTER_EVALUATION_MODEL,
   extractAffordableOpenRouterMaxTokens,
+  getOpenRouterEvaluationModel,
+  getOpenRouterEvaluationReasoning,
   openRouterChatCompletion,
   openRouterEmbeddings,
 } from "../app/lib/openRouter.ts";
@@ -88,6 +91,38 @@ test("extractAffordableOpenRouterMaxTokens ignores unrelated errors", () => {
       },
     }),
     null,
+  );
+});
+
+test("getOpenRouterEvaluationModel defaults to Mercury and allows env override", () => {
+  const originalModel = process.env.LLM_EVALUATION_MODEL;
+
+  try {
+    delete process.env.LLM_EVALUATION_MODEL;
+    assert.equal(
+      getOpenRouterEvaluationModel(),
+      DEFAULT_OPENROUTER_EVALUATION_MODEL,
+    );
+
+    process.env.LLM_EVALUATION_MODEL = "openai/gpt-4.1-nano";
+    assert.equal(getOpenRouterEvaluationModel(), "openai/gpt-4.1-nano");
+  } finally {
+    if (originalModel === undefined) {
+      delete process.env.LLM_EVALUATION_MODEL;
+    } else {
+      process.env.LLM_EVALUATION_MODEL = originalModel;
+    }
+  }
+});
+
+test("getOpenRouterEvaluationReasoning disables Mercury reasoning", () => {
+  assert.deepEqual(getOpenRouterEvaluationReasoning("inception/mercury-2"), {
+    effort: "none",
+    exclude: true,
+  });
+  assert.equal(
+    getOpenRouterEvaluationReasoning("google/gemini-3.5-flash"),
+    undefined,
   );
 });
 
