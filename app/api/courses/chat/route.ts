@@ -6,8 +6,7 @@ import {
 import { getCurrentUser } from "@/app/lib/auth";
 import {
   buildFallbackCourseToc,
-  evaluateCourseChatProgress,
-  generateCourseQuestionAttemptToolResult,
+  generateCourseAnswerDecision,
   generateCourseIntakeDecision,
   generateCourseToc,
   streamCourseChatTurn,
@@ -82,6 +81,12 @@ function buildQuestionEvaluationSnippet(input: {
 type CourseQuestionEvaluationResult = {
   message: CourseChatMessage;
   score: number;
+};
+
+type CourseChatLatencyMetrics = {
+  answer_decision_ms: number | null;
+  time_to_first_delta_ms: number | null;
+  chat_stream_ms: number | null;
 };
 
 function normalizeStoredMessages(value: unknown): CourseChatMessage[] {
@@ -262,8 +267,14 @@ export async function POST(request: Request) {
         let assistantContent = "";
         let turnCost = 0;
         let intakeDecisionMetrics: CourseMessageMetrics | null = null;
-        let questionAttemptMetrics: CourseMessageMetrics | null = null;
+        let answerDecisionMetrics: CourseMessageMetrics | null = null;
         let assistantTurnMetrics: CourseMessageMetrics | null = null;
+        const requestStartedAt = Date.now();
+        const latencyMetrics: CourseChatLatencyMetrics = {
+          answer_decision_ms: null,
+          time_to_first_delta_ms: null,
+          chat_stream_ms: null,
+        };
         const addTurnCost = (cost: number) => {
           if (Number.isFinite(cost) && cost > 0) {
             turnCost += cost;
@@ -271,8 +282,6 @@ export async function POST(request: Request) {
         };
         let questionEvaluationResult: CourseQuestionEvaluationResult | null =
           null;
-        let questionEvaluationPromise: Promise<CourseQuestionEvaluationResult | null> =
-          Promise.resolve(null);
         let finalCoursePromise: Promise<CourseDetail> | null = null;
 
         try {
@@ -284,97 +293,95 @@ export async function POST(request: Request) {
               throw new Error("Course could not be loaded.");
             }
 
-            const courseForEvaluation = course;
-            questionEvaluationPromise = shouldEvaluateLatestCourseAnswer(messages)
-              ? (async () => {
-                  send("evaluation_pending", {});
-                  const questionAttempt =
-                    await generateCourseQuestionAttemptToolResult({
-                      apiKey: openRouterConfig.apiKey,
-                      model: openRouterConfig.model,
-                      userId: user.id,
-                      course: courseForEvaluation,
-                      messages,
-                      onCost: addTurnCost,
-                      onMetrics(metrics) {
-                        questionAttemptMetrics = metrics;
-                      },
-                    }).catch(() => ({
-                      toolCall: "skip_course_question_attempt" as const,
-                      reason: "Question attempt tool was unavailable.",
-                    }));
+            if (shouldEvaluateLatestCourseAnswer(messages)) {
+              send("evaluation_pending", {});
+              const answerDecisionStartedAt = Date.now();
+              const answerDecision = await generateCourseAnswerDecision({
+                apiKey: openRouterConfig.apiKey,
+                model: openRouterConfig.model,
+                userId: user.id,
+                course,
+                messages,
+                onCost: addTurnCost,
+                onMetrics(metrics) {
+                  answerDecisionMetrics = metrics;
+                },
+              }).catch(() => ({
+                questionAttempt: {
+                  toolCall: "skip_course_question_attempt" as const,
+                  reason: "Course answer decision was unavailable.",
+                },
+                progressDecision: {
+                  toolCall: "continue_current_milestone" as const,
+                  reason: "Course answer decision was unavailable.",
+                },
+              }));
+              latencyMetrics.answer_decision_ms =
+                Date.now() - answerDecisionStartedAt;
+              progressDecision = answerDecision.progressDecision;
 
-                  if (
-                    questionAttempt.toolCall !==
-                    "record_course_question_attempt"
-                  ) {
-                    send("evaluation_skipped", {
-                      reason: questionAttempt.reason,
-                    });
-                    return null;
-                  }
-
-                  const recordedAttempt = await recordCourseChatQuestionAttempt({
-                    course: courseForEvaluation,
-                    question: questionAttempt.question,
-                    answer: questionAttempt.answer,
-                    answerSummary: questionAttempt.answerSummary,
-                    conciseAnswer: questionAttempt.conciseAnswer,
-                    correctAnswer: questionAttempt.correctAnswer,
-                    justification: questionAttempt.justification,
-                    score: questionAttempt.score,
-                    submittedAt: Date.now(),
-                  });
-                  const evaluationSnippet = buildQuestionEvaluationSnippet({
-                    questionId: recordedAttempt?.questionId ?? null,
-                    question: questionAttempt.question,
-                    correctAnswer: questionAttempt.correctAnswer,
-                    score: questionAttempt.score,
-                    justification: questionAttempt.justification,
-                  });
-                  const evaluationSnippetWithMetrics = {
-                    ...evaluationSnippet,
-                    content: appendCourseMessageMetrics(
-                      evaluationSnippet.content,
-                      questionAttemptMetrics,
-                    ),
-                  };
-                  send("evaluation", {
-                    score: questionAttempt.score,
-                    justification: questionAttempt.justification,
-                    content: evaluationSnippetWithMetrics.content,
-                  });
-
-                  return {
-                    message: evaluationSnippetWithMetrics,
-                    score: questionAttempt.score,
-                  };
-                })()
-              : Promise.resolve(null);
-            send("status", { status: "Planning next step" });
-
-            const progressDecisionPromise = evaluateCourseChatProgress({
-              apiKey: openRouterConfig.apiKey,
-              model: openRouterConfig.model,
-              userId: user.id,
-              course,
-              messages,
-              onCost: addTurnCost,
-            }).catch(() => ({
-              toolCall: "continue_current_milestone" as const,
-              reason: "Progress evaluation was unavailable.",
-            }));
-            progressDecision = await progressDecisionPromise;
-
-            if (progressDecision.toolCall === "mark_milestone_done") {
-              questionEvaluationResult = await questionEvaluationPromise;
-              progressDecision = requireCourseMilestoneMastery({
-                progressDecision,
-                evaluationScore: questionEvaluationResult?.score ?? null,
-              });
+              if (
+                answerDecision.questionAttempt.toolCall !==
+                "record_course_question_attempt"
+              ) {
+                send("evaluation_skipped", {
+                  reason: answerDecision.questionAttempt.reason,
+                });
+              } else {
+                const questionAttempt = answerDecision.questionAttempt;
+                const recordedAttempt = await recordCourseChatQuestionAttempt({
+                  course,
+                  question: questionAttempt.question,
+                  answer: questionAttempt.answer,
+                  answerSummary: questionAttempt.answerSummary,
+                  conciseAnswer: questionAttempt.conciseAnswer,
+                  correctAnswer: questionAttempt.correctAnswer,
+                  justification: questionAttempt.justification,
+                  score: questionAttempt.score,
+                  submittedAt: Date.now(),
+                });
+                const evaluationSnippet = buildQuestionEvaluationSnippet({
+                  questionId: recordedAttempt?.questionId ?? null,
+                  question: questionAttempt.question,
+                  correctAnswer: questionAttempt.correctAnswer,
+                  score: questionAttempt.score,
+                  justification: questionAttempt.justification,
+                });
+                const evaluationSnippetWithMetrics = {
+                  ...evaluationSnippet,
+                  content: appendCourseMessageMetrics(
+                    evaluationSnippet.content,
+                    answerDecisionMetrics,
+                  ),
+                };
+                questionEvaluationResult = {
+                  message: evaluationSnippetWithMetrics,
+                  score: questionAttempt.score,
+                };
+                send("evaluation", {
+                  score: questionAttempt.score,
+                  justification: questionAttempt.justification,
+                  content: evaluationSnippetWithMetrics.content,
+                });
+              }
+            } else {
+              progressDecision = {
+                toolCall: "continue_current_milestone",
+                reason: "No learner-facing question was answered.",
+              };
             }
 
-            if (progressDecision.toolCall === "mark_milestone_done") {
+            const checkedProgressDecision = requireCourseMilestoneMastery({
+              progressDecision:
+                progressDecision ?? {
+                  toolCall: "continue_current_milestone",
+                  reason: "No learner-facing question was answered.",
+                },
+              evaluationScore: questionEvaluationResult?.score ?? null,
+            });
+            progressDecision = checkedProgressDecision;
+
+            if (checkedProgressDecision.toolCall === "mark_milestone_done") {
               course = await advanceCourseProgress(course.id);
 
               if (!course) {
@@ -402,12 +409,16 @@ export async function POST(request: Request) {
 
             if (intakeDecision.action === "clarify") {
               send("status", { status: "Writing response" });
+              latencyMetrics.time_to_first_delta_ms =
+                Date.now() - requestStartedAt;
+              latencyMetrics.chat_stream_ms = 0;
               send("delta", { delta: intakeDecision.message });
               send("done", {
                 ok: true,
                 course: null,
                 turnCost,
                 responseMetrics: intakeDecisionMetrics,
+                latencyMetrics,
               });
               return;
             }
@@ -513,6 +524,7 @@ export async function POST(request: Request) {
           }
 
           send("status", { status: "Writing lesson" });
+          const chatStreamStartedAt = Date.now();
           assistantContent = await streamCourseChatTurn({
             apiKey: openRouterConfig.apiKey,
             model: openRouterConfig.model,
@@ -526,10 +538,12 @@ export async function POST(request: Request) {
             },
             onTextDelta(delta) {
               assistantContent += delta;
+              latencyMetrics.time_to_first_delta_ms ??=
+                Date.now() - requestStartedAt;
               send("delta", { delta });
             },
           });
-          questionEvaluationResult ??= await questionEvaluationPromise;
+          latencyMetrics.chat_stream_ms = Date.now() - chatStreamStartedAt;
 
           if (finalCoursePromise) {
             course = await finalCoursePromise;
@@ -562,6 +576,7 @@ export async function POST(request: Request) {
             course: updatedCourse,
             chatMessages,
             turnCost,
+            latencyMetrics,
           });
         } catch (error) {
           console.info("[waxon] course chat failed", {

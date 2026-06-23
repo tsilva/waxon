@@ -18,8 +18,14 @@ import {
 } from "./courseMessageMetrics";
 import {
   parseCourseQuestionAttemptToolResult,
+  parseCourseAnswerDecisionToolResult,
   type CourseQuestionAttemptToolResult,
+  type CourseAnswerDecisionToolResult,
 } from "./courseQuestionAttemptParsing";
+import {
+  parseCourseQuestionWidgetAnswer,
+  parseCourseQuestionWidgets,
+} from "./courseQuestionWidget.ts";
 import {
   normalizePartialCourseToc,
   type PartialCourseToc,
@@ -70,6 +76,7 @@ export type CourseChatMessage = {
 };
 
 export type { CourseQuestionAttemptToolResult };
+export type { CourseAnswerDecisionToolResult };
 
 function normalizeIntakeText(value: unknown, maxLength: number): string {
   return typeof value === "string"
@@ -347,6 +354,162 @@ export async function evaluateCourseChatProgress(input: {
   reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
 
   return parseCourseProgressDecision(extractChatCompletionText(body));
+}
+
+function latestAnsweredWidgetContext(messages: CourseChatMessage[]): {
+  question: string | null;
+  answer: string;
+  choiceSource: string;
+} | null {
+  const latestUserMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === "user");
+  const previousAssistantMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+  const parsedAnswer = parseCourseQuestionWidgetAnswer(
+    latestUserMessage?.content ?? "",
+  );
+
+  if (!latestUserMessage || !previousAssistantMessage || !parsedAnswer) {
+    return null;
+  }
+
+  const parsedWidgets = parseCourseQuestionWidgets(previousAssistantMessage.content);
+  const matchedWidget =
+    parsedWidgets.widgets.find(
+      (widget) => widget.id === parsedAnswer.widgetId,
+    ) ?? parsedWidgets.widgets.at(-1);
+  const question = parsedAnswer.question ?? matchedWidget?.question ?? null;
+
+  return {
+    question,
+    answer: parsedAnswer.answer,
+    choiceSource: previousAssistantMessage.content,
+  };
+}
+
+export async function generateCourseAnswerDecision(input: {
+  apiKey: string;
+  model?: string;
+  userId: string;
+  course: CourseDetail;
+  messages: CourseChatMessage[];
+} & CourseCostObserver): Promise<CourseAnswerDecisionToolResult> {
+  const latestUserMessage = [...input.messages]
+    .reverse()
+    .find((message) => message.role === "user");
+  const previousAssistantMessage = [...input.messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+
+  if (!latestUserMessage || !previousAssistantMessage) {
+    return {
+      questionAttempt: {
+        toolCall: "skip_course_question_attempt",
+        reason: "No prior tutor question and learner answer pair exists.",
+      },
+      progressDecision: {
+        toolCall: "continue_current_milestone",
+        reason: "No prior tutor question and learner answer pair exists.",
+      },
+    };
+  }
+
+  if (
+    normalizeIntakeText(previousAssistantMessage.content, 80).toLowerCase() ===
+    "what do you want to learn?"
+  ) {
+    return {
+      questionAttempt: {
+        toolCall: "skip_course_question_attempt",
+        reason: "The initial course intake prompt is not a review question.",
+      },
+      progressDecision: {
+        toolCall: "continue_current_milestone",
+        reason: "The initial course intake prompt is not a review question.",
+      },
+    };
+  }
+
+  const { page } = currentCourseMilestone(input.course);
+  const answeredWidget = latestAnsweredWidgetContext(input.messages);
+  const startedAt = Date.now();
+  const { body, response } = await openRouterChatCompletion({
+    apiKey: input.apiKey,
+    stream: false,
+    trace: {
+      operation: "course_answer_decision",
+      userId: input.userId,
+      question: page.title,
+    },
+    body: {
+      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
+      response_format: COURSE_JSON_RESPONSE_FORMAT,
+      temperature: 0,
+      max_tokens: 900,
+      messages: [
+        {
+          role: "system",
+          content: [
+            "You are Waxon's combined course answer decision tool.",
+            "Use one pass to record the learner's latest answer and decide milestone progress.",
+            "If deterministic widget metadata is provided, treat it as proof that the learner answered that question and return a record_course_question_attempt.",
+            "Write questionAttempt.question as a self-contained free-response review prompt that tests the same idea.",
+            "If the tutor question was multiple choice, rephrase it into recall form and do not use words like choose, option, A/B/C/D, or answer choice.",
+            "Grade the answer from 0 to 10 using normal Waxon review standards.",
+            "Always write correctAnswer as the concise ideal answer to the tutor question, even when the learner was fully correct.",
+            "Do not leave correctAnswer or conciseAnswer blank, null, generic, or omitted in a record_course_question_attempt call.",
+            "Use progressDecision.mark_milestone_done only when the learner clearly demonstrates the current objective with enough specificity to transfer it.",
+            "Use progressDecision.continue_current_milestone when the learner needs more practice on the same topic.",
+            "Return strict JSON only.",
+            "Shape: {\"questionAttempt\":{\"toolCall\":\"record_course_question_attempt\",\"question\":\"...\",\"answer\":\"...\",\"answerSummary\":\"...\",\"conciseAnswer\":\"...\",\"correctAnswer\":\"...\",\"justification\":\"...\",\"score\":number},\"progressDecision\":{\"toolCall\":\"mark_milestone_done\"|\"continue_current_milestone\",\"reason\":\"...\"}}.",
+            "Skip attempt shape: {\"questionAttempt\":{\"toolCall\":\"skip_course_question_attempt\",\"reason\":\"...\"},\"progressDecision\":{\"toolCall\":\"continue_current_milestone\",\"reason\":\"...\"}}.",
+          ].join(" "),
+        },
+        {
+          role: "user",
+          content: [
+            `Course title: ${input.course.title}`,
+            `Current milestone: ${page.title}`,
+            `Milestone objective: ${page.objective}`,
+            answeredWidget
+              ? `Deterministic answered-widget question: ${answeredWidget.question ?? "unknown"}`
+              : "",
+            answeredWidget
+              ? `Deterministic answered-widget answer: ${answeredWidget.answer}`
+              : "",
+            `Previous assistant message:\n${excerptCourseMessageForPrompt(previousAssistantMessage.content, 4_000)}`,
+            `Latest learner answer:\n${excerptCourseMessageForPrompt(latestUserMessage.content, 4_000)}`,
+            `Recent conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+        },
+      ],
+    },
+  });
+
+  if (!response.ok) {
+    return {
+      questionAttempt: {
+        toolCall: "skip_course_question_attempt",
+        reason: "Course answer decision failed.",
+      },
+      progressDecision: {
+        toolCall: "continue_current_milestone",
+        reason: "Course answer decision failed.",
+      },
+    };
+  }
+
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
+
+  return parseCourseAnswerDecisionToolResult(
+    extractChatCompletionText(body),
+    answeredWidget?.answer ?? latestUserMessage.content,
+    answeredWidget?.choiceSource ?? previousAssistantMessage.content,
+  );
 }
 
 export async function generateCourseQuestionAttemptToolResult(input: {
