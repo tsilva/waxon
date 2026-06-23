@@ -5443,14 +5443,17 @@ textarea {
 }
 
 .page-learn-active {
+  --learn-shell-edge-block: clamp(8px, 0.9vw, 14px);
+
   height: 100svh;
   min-height: 0;
   overflow: hidden;
+  padding-block: var(--learn-shell-edge-block);
 }
 
 .learn-shell {
   grid-template-columns: minmax(0, 1fr);
-  height: calc(100svh - (clamp(16px, 1.6vw, 24px) * 2));
+  height: calc(100svh - (var(--learn-shell-edge-block) * 2));
   min-height: 0;
 }
 
@@ -5463,7 +5466,7 @@ textarea {
   height: 100%;
   min-height: 0;
   overflow: visible;
-  padding: 24px clamp(22px, 3vw, 34px) 24px;
+  padding: 14px clamp(22px, 3vw, 34px) 16px;
 }
 
 .learn-kicker,
@@ -6012,7 +6015,7 @@ textarea {
   height: 100%;
   min-height: 0;
   margin: 0;
-  padding-top: 12px;
+  padding-top: 4px;
   overflow: visible;
 }
 
@@ -7336,7 +7339,7 @@ textarea {
     max-width: 100%;
     min-height: 0;
     overflow: visible;
-    padding: 20px 18px 24px;
+    padding: 14px 18px 16px;
   }
 
   .learn-chat-layout {
@@ -7437,7 +7440,7 @@ textarea {
   }
 
   .learn-chat-panel {
-    margin-bottom: 18px;
+    margin-bottom: 8px;
     min-height: 0;
     padding-top: 0;
   }
