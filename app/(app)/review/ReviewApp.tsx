@@ -537,6 +537,7 @@ type PendingSpeechCommand = {
 async function fetchReviewSessionQueue(input: {
   knowledgeBaseId?: string | null;
   excludeQuestionId?: string | null;
+  excludeQuestionIds?: Array<string | null | undefined>;
   limit?: number;
   offset?: number;
   signal?: AbortSignal;
@@ -549,6 +550,12 @@ async function fetchReviewSessionQueue(input: {
 
   if (input.excludeQuestionId) {
     params.append("excludeQuestionId", input.excludeQuestionId);
+  }
+
+  for (const questionId of input.excludeQuestionIds ?? []) {
+    if (questionId) {
+      params.append("excludeQuestionId", questionId);
+    }
   }
 
   if (input.limit !== undefined) {
@@ -618,7 +625,8 @@ const QUEUE_PAGE_GROWTH_FACTOR = 1.75;
 const QUEUE_ROW_ESTIMATED_HEIGHT = 132;
 const QUEUE_ROW_OVERSCAN = 14;
 const REVIEW_SESSION_FIRST_ITEM_LIMIT = 1;
-const REVIEW_SESSION_BACKGROUND_LIMIT = 199;
+const REVIEW_SESSION_LOOKAHEAD_LIMIT = 4;
+const REVIEW_SESSION_LOOKAHEAD_LOW_WATERMARK = 2;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 const STALE_EVALUATION_GRADING_MS = 120_000;
 const EVALUATION_STATUS_POLL_MS = 750;
@@ -643,6 +651,10 @@ function questionSwapLayerKey(
   question: string,
 ): string {
   return questionId ? `question-${questionId}` : `question-${question}`;
+}
+
+function reviewSessionItemKey(item: Pick<ReviewQueueItem, "questionId" | "question">): string {
+  return item.questionId ?? `question:${item.question}`;
 }
 
 function MarkdownInline(
@@ -1749,8 +1761,15 @@ export default function ReviewApp({
     }
   }, [appendQuestion]);
 
-  const loadReviewSessionRemainder = useCallback((firstItem: ReviewQueueItem) => {
+  const loadReviewSessionLookahead = useCallback((anchorItem: ReviewQueueItem) => {
     if (isReviewSessionBackgroundLoadingRef.current) {
+      return;
+    }
+
+    const currentQueue = sessionQueueRef.current;
+    const lookaheadLimit = REVIEW_SESSION_LOOKAHEAD_LIMIT - currentQueue.length;
+
+    if (lookaheadLimit <= 0) {
       return;
     }
 
@@ -1758,9 +1777,13 @@ export default function ReviewApp({
 
     isReviewSessionBackgroundLoadingRef.current = true;
 
+    const excludeQuestionIds = [anchorItem, ...currentQueue]
+      .map((item) => item.questionId)
+      .filter((questionId): questionId is string => Boolean(questionId));
+
     void fetchReviewSessionQueue({
-      excludeQuestionId: firstItem.questionId,
-      limit: REVIEW_SESSION_BACKGROUND_LIMIT,
+      excludeQuestionIds,
+      limit: lookaheadLimit,
     })
       .then((items) => {
         if (reviewSessionReloadGenerationRef.current !== reloadGeneration) {
@@ -1780,7 +1803,7 @@ export default function ReviewApp({
             continue;
           }
 
-          const itemKey = item.questionId ?? `question:${item.question}`;
+          const itemKey = reviewSessionItemKey(item);
 
           if (seenKeys.has(itemKey)) {
             continue;
@@ -1812,13 +1835,11 @@ export default function ReviewApp({
 
     try {
       let queue = sessionQueueRef.current;
-      let fetchedSingleItem = false;
 
       if (queue.length === 0) {
         queue = await fetchReviewSessionQueue({
           limit: REVIEW_SESSION_FIRST_ITEM_LIMIT,
         });
-        fetchedSingleItem = true;
       }
 
       if (reviewSessionReloadGenerationRef.current !== reloadGeneration) {
@@ -1834,8 +1855,11 @@ export default function ReviewApp({
         appendToMessages: options?.appendToMessages,
       });
 
-      if (nextItem && fetchedSingleItem) {
-        loadReviewSessionRemainder(nextItem);
+      if (
+        nextItem &&
+        nextQueue.length <= REVIEW_SESSION_LOOKAHEAD_LOW_WATERMARK
+      ) {
+        loadReviewSessionLookahead(nextItem);
       }
 
       return nextItem ?? null;
@@ -1852,7 +1876,7 @@ export default function ReviewApp({
     } finally {
       setIsLoadingQuestion(false);
     }
-  }, [applyReviewQueueItem, loadReviewSessionRemainder, surfaceReviewError]);
+  }, [applyReviewQueueItem, loadReviewSessionLookahead, surfaceReviewError]);
 
   const loadNextQuestion = useCallback(async (options?: {
     surfaceError?: boolean;
