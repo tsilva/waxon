@@ -163,6 +163,7 @@ export function AnswerComposer({
           rows={rows}
           autoFocus={autoFocus}
           disabled={disabled}
+          style={{ resize: "none" }}
         />
         {secondaryAction}
         {submitTooltipLabel ? (
