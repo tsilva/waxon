@@ -19,6 +19,14 @@ export type CourseQuestionAttemptToolResult =
       reason: string;
     };
 
+export type CourseAnswerDecisionToolResult = {
+  questionAttempt: CourseQuestionAttemptToolResult;
+  progressDecision: {
+    toolCall: "mark_milestone_done" | "continue_current_milestone";
+    reason: string;
+  };
+};
+
 function extractJsonObject(source: string): unknown | null {
   const trimmed = source.trim();
   const json = trimmed
@@ -390,5 +398,68 @@ export function parseCourseQuestionAttemptToolResult(
     correctAnswer: inferredCorrectAnswer,
     justification,
     score,
+  };
+}
+
+function parseProgressDecision(
+  value: unknown,
+): CourseAnswerDecisionToolResult["progressDecision"] {
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const toolCall = normalizeIntakeText(record.toolCall, 80);
+  const reason =
+    normalizeIntakeText(record.reason, 500) ||
+    "The learner needs another short check.";
+
+  if (toolCall === "mark_milestone_done") {
+    return {
+      toolCall,
+      reason,
+    };
+  }
+
+  return {
+    toolCall: "continue_current_milestone",
+    reason,
+  };
+}
+
+export function parseCourseAnswerDecisionToolResult(
+  source: string,
+  fallbackAnswer: string,
+  choiceSource = "",
+): CourseAnswerDecisionToolResult {
+  const value = extractJsonObject(source);
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      questionAttempt: {
+        toolCall: "skip_course_question_attempt",
+        reason: "Course answer decision returned no JSON object.",
+      },
+      progressDecision: {
+        toolCall: "continue_current_milestone",
+        reason: "Course answer decision returned no JSON object.",
+      },
+    };
+  }
+
+  const record = value as Record<string, unknown>;
+  const questionAttemptSource =
+    record.questionAttempt && typeof record.questionAttempt === "object"
+      ? JSON.stringify(record.questionAttempt)
+      : JSON.stringify(record);
+  const progressDecision =
+    parseProgressDecision(record.progressDecision ?? record);
+
+  return {
+    questionAttempt: parseCourseQuestionAttemptToolResult(
+      questionAttemptSource,
+      fallbackAnswer,
+      choiceSource,
+    ),
+    progressDecision,
   };
 }

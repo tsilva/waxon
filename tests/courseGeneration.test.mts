@@ -12,6 +12,7 @@ import {
   serializeCourseQuestionWidget,
 } from "../app/lib/courseQuestionWidget.ts";
 import {
+  parseCourseAnswerDecisionToolResult,
   parseCourseQuestionAttemptToolResult,
   reformatMultipleChoiceQuestionForReview,
   stripMultipleChoiceOptionsFromQuestion,
@@ -262,6 +263,85 @@ test("parseCourseQuestionAttemptToolResult accepts snake_case correct answer fie
       "The sampled action's probability decreases.",
     );
     assert.equal(result.conciseAnswer, "Probability decreases.");
+  }
+});
+
+test("parseCourseAnswerDecisionToolResult parses attempt and progress in one response", () => {
+  const result = parseCourseAnswerDecisionToolResult(
+    JSON.stringify({
+      questionAttempt: {
+        toolCall: "record_course_question_attempt",
+        question: "Why does PPO clip policy ratios?",
+        answer: "To keep updates bounded.",
+        answerSummary: "Learner said clipping bounds updates.",
+        conciseAnswer: "It bounds policy updates.",
+        correctAnswer:
+          "PPO clips ratios to limit how far the new policy moves from the old policy.",
+        justification: "Correct.",
+        score: 10,
+      },
+      progressDecision: {
+        toolCall: "mark_milestone_done",
+        reason: "The learner stated the stabilizing mechanism.",
+      },
+    }),
+    "fallback answer",
+  );
+
+  assert.equal(
+    result.questionAttempt.toolCall,
+    "record_course_question_attempt",
+  );
+  assert.equal(result.progressDecision.toolCall, "mark_milestone_done");
+
+  if (result.questionAttempt.toolCall === "record_course_question_attempt") {
+    assert.equal(result.questionAttempt.answer, "fallback answer");
+    assert.equal(result.questionAttempt.score, 10);
+  }
+});
+
+test("parseCourseAnswerDecisionToolResult maps deterministic widget choices", () => {
+  const selectedAnswer =
+    "The sampled action is now half as likely under the new policy";
+  const result = parseCourseAnswerDecisionToolResult(
+    JSON.stringify({
+      questionAttempt: {
+        toolCall: "record_course_question_attempt",
+        question: "What does a PPO ratio r = 0.5 mean?",
+        answer: "B",
+        answerSummary: "Learner selected B.",
+        conciseAnswer: selectedAnswer,
+        correctAnswer: selectedAnswer,
+        justification: "Correct.",
+        score: 10,
+      },
+      progressDecision: {
+        toolCall: "mark_milestone_done",
+        reason: "The learner selected the correct interpretation.",
+      },
+    }),
+    "B",
+    serializeCourseQuestionWidget({
+      type: "multiple_choice",
+      id: "ratio-check",
+      question: "What does a PPO ratio r = 0.5 mean?",
+      choices: [
+        {
+          id: "A",
+          text: "The sampled action is now twice as likely under the new policy",
+        },
+        { id: "B", text: selectedAnswer },
+      ],
+    }),
+  );
+
+  assert.equal(
+    result.questionAttempt.toolCall,
+    "record_course_question_attempt",
+  );
+
+  if (result.questionAttempt.toolCall === "record_course_question_attempt") {
+    assert.equal(result.questionAttempt.answer, selectedAnswer);
   }
 });
 
