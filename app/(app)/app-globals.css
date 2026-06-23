@@ -88,10 +88,19 @@ textarea {
   text-shadow: none;
 }
 
+:root {
+  --app-shell-edge-block: clamp(16px, 1.6vw, 24px);
+  --app-shell-edge-inline: clamp(16px, 1.6vw, 24px);
+}
+
+body:has(.page-learn-active) {
+  --app-shell-edge-block: clamp(8px, 0.9vw, 14px);
+}
+
 .page {
   min-height: 100vh;
   overflow: visible;
-  padding: clamp(16px, 1.6vw, 24px);
+  padding: var(--app-shell-edge-block) var(--app-shell-edge-inline);
   background:
     linear-gradient(180deg, rgb(255 255 255 / 64%), transparent 34%),
     radial-gradient(circle at 78% 4%, rgb(166 124 82 / 7%), transparent 28%),
@@ -110,7 +119,7 @@ textarea {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   width: min(1200px, 100%);
-  min-height: max(760px, calc(100svh - (clamp(16px, 1.6vw, 24px) * 2)));
+  min-height: max(760px, calc(100svh - (var(--app-shell-edge-block) * 2)));
   margin: 0 auto;
   overflow: hidden;
   border: 1px solid rgb(227 218 196 / 76%);
@@ -293,10 +302,10 @@ textarea {
 
 .persistent-toolbar-actions {
   position: absolute;
-  top: calc(clamp(16px, 1.6vw, 24px) + 15px);
+  top: calc(var(--app-shell-edge-block) + 15px);
   right: max(
     calc((100vw - 1200px) / 2 + clamp(26px, 3.8vw, 62px)),
-    calc(clamp(16px, 1.6vw, 24px) + clamp(26px, 3.8vw, 62px))
+    calc(var(--app-shell-edge-inline) + clamp(26px, 3.8vw, 62px))
   );
   z-index: 70;
 }
@@ -5443,17 +5452,14 @@ textarea {
 }
 
 .page-learn-active {
-  --learn-shell-edge-block: clamp(8px, 0.9vw, 14px);
-
   height: 100svh;
   min-height: 0;
   overflow: hidden;
-  padding-block: var(--learn-shell-edge-block);
 }
 
 .learn-shell {
   grid-template-columns: minmax(0, 1fr);
-  height: calc(100svh - (var(--learn-shell-edge-block) * 2));
+  height: calc(100svh - (var(--app-shell-edge-block) * 2));
   min-height: 0;
 }
 
