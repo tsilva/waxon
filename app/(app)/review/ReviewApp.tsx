@@ -1020,15 +1020,13 @@ export default function ReviewApp({
     () =>
       cachedSessionRef.current?.queueRemaining ??
       initialPreviousAnswerStatus?.queueRemaining ??
-      initialReviewSessionRemainingQueue.length,
+      0,
   );
   const [toolbarDueCount, setToolbarDueCount] = useState<number | null>(
     () =>
-      cachedHasLoadedQuestion
-        ? cachedSessionRef.current?.queueRemaining ?? null
-        : canUseInitialReviewSession
-          ? initialReviewSessionRemainingQueue.length
-          : null,
+      cachedSessionRef.current?.queueRemaining ??
+      initialPreviousAnswerStatus?.queueRemaining ??
+      null,
   );
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>(
     () =>
@@ -1330,10 +1328,6 @@ export default function ReviewApp({
 
   useEffect(() => {
     sessionQueueRef.current = sessionQueue;
-    setQueueRemaining(sessionQueue.length);
-    if (hasLoadedQuestionRef.current) {
-      setToolbarDueCount(sessionQueue.length);
-    }
   }, [sessionQueue]);
 
   useEffect(() => {
@@ -1929,7 +1923,7 @@ export default function ReviewApp({
       includeRecentAttempts: "1",
       recentAttemptsLimit: String(Math.max(0, Math.floor(recentAttemptsLimit))),
       includeKnowledgeEmbeddingPlot: "0",
-      includeQueueCounts: "0",
+      includeQueueCounts: "1",
     });
 
     return `/api/queue-status?${params.toString()}`;
@@ -2051,6 +2045,8 @@ export default function ReviewApp({
 
       const data = (await response.json()) as QueueStatusResponse;
 
+      setQueueRemaining(data.queueRemaining);
+      setToolbarDueCount(data.queueRemaining);
       setEvaluations(data.evaluations);
       setRecentAttempts(data.recentAttempts ?? []);
       hasLoadedPreviousAnswerStatusRef.current = true;
