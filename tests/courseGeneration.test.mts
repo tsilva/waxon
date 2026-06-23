@@ -6,10 +6,12 @@ import {
   isCourseChatTurnComplete,
   shouldShowCourseChatInterruptedWarning,
 } from "../app/lib/courseChatTurn.ts";
+import { generateCourseAnswerDecision } from "../app/lib/courseGeneration.ts";
 import {
   parseCourseQuestionWidgetAnswer,
   parseCourseQuestionWidgets,
   serializeCourseQuestionWidget,
+  serializeCourseQuestionWidgetAnswer,
 } from "../app/lib/courseQuestionWidget.ts";
 import {
   parseCourseAnswerDecisionToolResult,
@@ -342,6 +344,136 @@ test("parseCourseAnswerDecisionToolResult maps deterministic widget choices", ()
 
   if (result.questionAttempt.toolCall === "record_course_question_attempt") {
     assert.equal(result.questionAttempt.answer, selectedAnswer);
+  }
+});
+
+test("generateCourseAnswerDecision sends compact widget prompt", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | null = null;
+  const widget = {
+    type: "free_text" as const,
+    id: "cnn-check",
+    question:
+      "Explain why CNNs are effective for images by describing three key reasons.",
+    placeholder: "Type your answer here...",
+  };
+  const answer =
+    "They detect local patterns, preserve spatial structure, and share weights.";
+  const course = {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt: "Learn CNNs",
+    title: "CNNs",
+    description: "Learn convolutional neural networks.",
+    toc: {
+      title: "CNNs",
+      description: "Learn convolutional neural networks.",
+      pages: [
+        {
+          title: "CNN Inductive Bias",
+          objective:
+            "Explain why local patterns, spatial structure, and shared weights make CNNs effective.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: 1,
+    generatedPages: 1,
+    chatMessageCount: 2,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+
+  globalThis.fetch = async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<
+      string,
+      unknown
+    >;
+
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                questionAttempt: {
+                  toolCall: "record_course_question_attempt",
+                  question: widget.question,
+                  answer,
+                  answerSummary: "Learner named the three core CNN biases.",
+                  conciseAnswer: "Local patterns, spatial structure, shared weights.",
+                  correctAnswer:
+                    "CNNs use locality, spatial structure, and shared filters.",
+                  justification: "Correct.",
+                  score: 10,
+                },
+                progressDecision: {
+                  toolCall: "mark_milestone_done",
+                  reason: "The learner named all three core reasons.",
+                },
+              }),
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 220,
+          completion_tokens: 80,
+          total_tokens: 300,
+          cost: 0.0001,
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  };
+
+  try {
+    const result = await generateCourseAnswerDecision({
+      apiKey: "test-key",
+      model: "inception/mercury-2",
+      userId: "user_1",
+      course,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            "CNNs work well because the same local visual patterns can recur across an image.",
+            "This long filler represents lesson context that should be trimmed. ".repeat(
+              80,
+            ),
+            serializeCourseQuestionWidget(widget),
+          ].join("\n\n"),
+        },
+        {
+          role: "user",
+          content: serializeCourseQuestionWidgetAnswer({ widget, answer }),
+        },
+      ],
+    });
+
+    assert.equal(result.questionAttempt.toolCall, "record_course_question_attempt");
+    assert.ok(requestBody);
+    const capturedBody = requestBody as Record<string, unknown>;
+    assert.equal(capturedBody.max_tokens, 450);
+
+    const messages = capturedBody.messages as Array<{ content: string }>;
+    const systemPrompt = messages[0]?.content ?? "";
+    const userPrompt = messages[1]?.content ?? "";
+
+    assert.match(systemPrompt, /under 16 words/u);
+    assert.match(userPrompt, /Answered widget JSON/u);
+    assert.match(userPrompt, /Learner answer: They detect local patterns/u);
+    assert.doesNotMatch(userPrompt, /Recent conversation JSON/u);
+    assert.ok(userPrompt.length < 1_900);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

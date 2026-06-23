@@ -12,6 +12,10 @@ Every question is stored and resurfaced later based on the user's past performan
 
 When creating, cleaning up, deduplicating, or generating knowledge-base questions and probing questions, use the shared question-quality reference in [reference/question-quality.md](reference/question-quality.md).
 
+## Learn Experience Evaluation
+
+When evaluating or tuning the Learn course experience for teaching quality, factual accuracy, beginner clarity, answer-to-next-material latency, or tutor/evaluator model choice, use the project-level skill in [.codex/skills/evaluate-learn-experience/SKILL.md](.codex/skills/evaluate-learn-experience/SKILL.md).
+
 ## Project Knowledge
 
 Use `.agents/knowledge/` as the shared project knowledge bundle. At the start of every task, read `.agents/knowledge/index.md` and any relevant concept files before making changes. During work, add or update knowledge only when it is durable, evidence-backed, and useful to future agents. At the end of every task, explicitly consider whether the work produced new durable knowledge or invalidated existing knowledge; if so, update the bundle before handing control back. Put uncertain notes in `.agents/knowledge/inbox/` with `status: draft`; promote them only after verification. Do not store secrets, credentials, chain-of-thought, private customer data, or large raw logs.
