@@ -26,7 +26,8 @@ test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for
     pageObjective: "Explain why entropy keeps PPO policy updates exploratory.",
   });
 
-  assert.match(result.text, /Why PPO Needs an Entropy Term/u);
+  assert.doesNotMatch(result.text, /^#{1,6}\s+/u);
+  assert.doesNotMatch(result.text, /Why PPO Needs an Entropy Term/u);
   assert.match(result.text, /Explain why entropy/u);
   assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
   assert.equal(result.appendedText, result.text);

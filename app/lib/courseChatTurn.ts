@@ -29,8 +29,7 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
 
   if (!generatedText) {
     const fallbackLesson = [
-      `## ${input.pageTitle}`,
-      `Start with this milestone: ${input.pageObjective}`,
+      `This milestone is about ${input.pageObjective}`,
       "A good answer should name the core idea, explain why it matters, and connect it to a small example.",
       fallbackWidget,
     ].join("\n\n");
