@@ -120,6 +120,7 @@ export async function listQuestionBankItems(input: {
         FROM questions q
         WHERE q.user_id = $1
           AND ($2::text = ''
+            OR q.id::text ILIKE '%' || $2::text || '%'
             OR q.question ILIKE '%' || $2::text || '%'
             OR q.concise_answer ILIKE '%' || $2::text || '%'
             OR q.question_provenance ILIKE '%' || $2::text || '%'

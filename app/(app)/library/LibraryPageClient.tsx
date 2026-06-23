@@ -611,7 +611,7 @@ export default function LibraryPageClient({
                     placeholder={
                       selectedTagSlugs.length > 0
                         ? "Search or type #"
-                        : "Search questions or type #tag"
+                        : "Search questions, IDs, or type #tag"
                     }
                     role="combobox"
                     aria-expanded={isTagPickerOpen}

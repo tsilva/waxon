@@ -3016,7 +3016,7 @@ body:has(.page-learn-active) {
   border-radius: 0;
   background: transparent;
   color: var(--ink);
-  resize: vertical;
+  resize: none;
   padding: 15px 16px 4px;
   font-family: var(--font-question);
   font-size: 20px;
@@ -6307,7 +6307,7 @@ body:has(.page-learn-active) {
 .learn-question-free-text-input {
   width: 100%;
   min-height: 86px;
-  resize: vertical;
+  resize: none;
   border: 1px solid rgb(139 92 48 / 18%);
   border-radius: 8px;
   background: #ffffff;
