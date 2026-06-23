@@ -32,7 +32,10 @@ import {
   type CourseMessageMetrics,
 } from "@/app/lib/courseMessageMetrics";
 import type { CourseToc } from "@/app/lib/courseContent";
-import { getOpenRouterChatConfig } from "@/app/lib/openRouter";
+import {
+  getOpenRouterChatConfig,
+  getOpenRouterEvaluationConfig,
+} from "@/app/lib/openRouter";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -232,10 +235,18 @@ export async function POST(request: Request) {
   }
 
   const openRouterConfig = getOpenRouterChatConfig();
+  const openRouterEvaluationConfig = getOpenRouterEvaluationConfig();
 
   if (!openRouterConfig.ok) {
     return Response.json(
       { ok: false, error: openRouterConfig.error },
+      { status: 500 },
+    );
+  }
+
+  if (!openRouterEvaluationConfig.ok) {
+    return Response.json(
+      { ok: false, error: openRouterEvaluationConfig.error },
       { status: 500 },
     );
   }
@@ -297,8 +308,8 @@ export async function POST(request: Request) {
               send("evaluation_pending", {});
               const answerDecisionStartedAt = Date.now();
               const answerDecision = await generateCourseAnswerDecision({
-                apiKey: openRouterConfig.apiKey,
-                model: openRouterConfig.model,
+                apiKey: openRouterEvaluationConfig.apiKey,
+                model: openRouterEvaluationConfig.model,
                 userId: user.id,
                 course,
                 messages,

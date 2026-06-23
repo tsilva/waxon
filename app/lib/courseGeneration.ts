@@ -1,6 +1,7 @@
 import {
   DEFAULT_OPENROUTER_CHAT_MODEL,
   extractChatCompletionText,
+  getOpenRouterEvaluationReasoning,
   openRouterChatCompletion,
 } from "./openRouter";
 import { extractJsonObject } from "./jsonObject";
@@ -434,6 +435,7 @@ export async function generateCourseAnswerDecision(input: {
 
   const { page } = currentCourseMilestone(input.course);
   const answeredWidget = latestAnsweredWidgetContext(input.messages);
+  const model = input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL;
   const startedAt = Date.now();
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
@@ -444,8 +446,9 @@ export async function generateCourseAnswerDecision(input: {
       question: page.title,
     },
     body: {
-      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
+      model,
       response_format: COURSE_JSON_RESPONSE_FORMAT,
+      reasoning: getOpenRouterEvaluationReasoning(model),
       temperature: 0,
       max_tokens: 900,
       messages: [

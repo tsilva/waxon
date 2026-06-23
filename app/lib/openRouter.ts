@@ -60,6 +60,7 @@ const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 const STREAM_DONE_SENTINEL = "[DONE]";
 const AFFORDABLE_MAX_TOKENS_PATTERN = /can only afford\s+(\d+)/iu;
 export const DEFAULT_OPENROUTER_CHAT_MODEL = "google/gemini-3.5-flash";
+export const DEFAULT_OPENROUTER_EVALUATION_MODEL = "inception/mercury-2";
 
 type OpenRouterChatConfig =
   | {
@@ -90,6 +91,35 @@ export function getOpenRouterChatModel(input: {
   return input.requireConfiguredModel ? null : DEFAULT_OPENROUTER_CHAT_MODEL;
 }
 
+export function getOpenRouterEvaluationModel(input: {
+  requireConfiguredModel?: boolean;
+} = {}): string | null {
+  const model = process.env.LLM_EVALUATION_MODEL?.trim() ?? "";
+
+  if (model) {
+    return model;
+  }
+
+  if (input.requireConfiguredModel) {
+    return null;
+  }
+
+  return DEFAULT_OPENROUTER_EVALUATION_MODEL;
+}
+
+export function getOpenRouterEvaluationReasoning(
+  model: string,
+): unknown | undefined {
+  if (model.trim().toLowerCase() === "inception/mercury-2") {
+    return {
+      effort: "none",
+      exclude: true,
+    };
+  }
+
+  return undefined;
+}
+
 export function getOpenRouterChatConfig(input: {
   requireConfiguredModel?: boolean;
 } = {}): OpenRouterChatConfig {
@@ -110,6 +140,32 @@ export function getOpenRouterChatConfig(input: {
     return {
       ok: false,
       error: "LLM_MODEL is not configured.",
+    };
+  }
+
+  return { ok: true, apiKey, model };
+}
+
+export function getOpenRouterEvaluationConfig(input: {
+  requireConfiguredModel?: boolean;
+} = {}): OpenRouterChatConfig {
+  const apiKey = getOpenRouterApiKey();
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      error: "OPENROUTER_API_KEY or LLM_API_KEY is not configured.",
+    };
+  }
+
+  const model = getOpenRouterEvaluationModel({
+    requireConfiguredModel: input.requireConfiguredModel,
+  });
+
+  if (!model) {
+    return {
+      ok: false,
+      error: "LLM_EVALUATION_MODEL is not configured.",
     };
   }
 
