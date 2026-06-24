@@ -13,7 +13,7 @@ source:
 
 # Summary
 
-The `course_answer_decision` evaluator stayed on `inception/mercury-2` after real Learn turns and controlled OpenRouter probes. The durable request-shape change is a versioned evaluator `session_id`, a cacheable system text block, and a non-cacheable dynamic user text block. The volatile course, widget, learner answer, and lesson context remain after the cacheable system prompt.
+The `course_answer_decision` evaluator initially stayed on `inception/mercury-2` after real Learn turns and controlled OpenRouter probes. The durable request-shape change is a versioned evaluator `session_id`, a cacheable system text block, and a non-cacheable dynamic user text block. The volatile course, widget, learner answer, and lesson context remain after the cacheable system prompt.
 
 # Evidence
 
@@ -25,4 +25,4 @@ After changing the Mercury evaluator request shape, real Learn answer turns pers
 
 # Result
 
-Keep Mercury as the default Learn answer evaluator. Do not pad the evaluator prompt solely to cross Gemini cache thresholds unless a future model is both cached and faster in real Learn turns. For compact evaluator prompts, explicit cache markers and stable session routing improve request shape and sometimes reduce prompt cost, but OpenRouter/provider cache reads for Mercury are not guaranteed on every turn.
+This note is historical evidence for latency/cache tradeoffs, not current default-model policy. On 2026-06-24 the app defaults were later changed by explicit user directive to `google/gemini-3.1-flash-lite` for generic chat, Learn tutor calls, and answer evaluation. Do not pad the evaluator prompt solely to cross provider cache thresholds unless real Learn turns show better wall-clock latency and preserved grading quality. For compact evaluator prompts, explicit cache markers and stable session routing improve request shape and sometimes reduce prompt cost, but provider cache reads are not guaranteed on every turn.
