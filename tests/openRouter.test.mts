@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_OPENROUTER_CHAT_MODEL,
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
   DEFAULT_OPENROUTER_LEARN_MODEL,
   extractAffordableOpenRouterMaxTokens,
+  getOpenRouterChatModel,
   getOpenRouterEvaluationModel,
   getOpenRouterEvaluationReasoning,
   getOpenRouterLearnModel,
@@ -127,7 +129,25 @@ test("extractAffordableOpenRouterMaxTokens ignores unrelated errors", () => {
   );
 });
 
-test("getOpenRouterEvaluationModel defaults to Mercury and allows env override", () => {
+test("getOpenRouterChatModel defaults to Gemini 3.1 Flash Lite and allows env override", () => {
+  const originalModel = process.env.LLM_MODEL;
+
+  try {
+    delete process.env.LLM_MODEL;
+    assert.equal(getOpenRouterChatModel(), DEFAULT_OPENROUTER_CHAT_MODEL);
+
+    process.env.LLM_MODEL = "openai/gpt-4.1-nano";
+    assert.equal(getOpenRouterChatModel(), "openai/gpt-4.1-nano");
+  } finally {
+    if (originalModel === undefined) {
+      delete process.env.LLM_MODEL;
+    } else {
+      process.env.LLM_MODEL = originalModel;
+    }
+  }
+});
+
+test("getOpenRouterEvaluationModel defaults to Gemini 3.1 Flash Lite and allows env override", () => {
   const originalModel = process.env.LLM_EVALUATION_MODEL;
 
   try {
@@ -148,7 +168,7 @@ test("getOpenRouterEvaluationModel defaults to Mercury and allows env override",
   }
 });
 
-test("getOpenRouterLearnModel defaults to Gemini 2.5 Flash and ignores global chat model", () => {
+test("getOpenRouterLearnModel defaults to Gemini 3.1 Flash Lite and ignores global chat model", () => {
   const originalChatModel = process.env.LLM_MODEL;
   const originalLearnModel = process.env.LLM_LEARN_MODEL;
 
@@ -158,8 +178,8 @@ test("getOpenRouterLearnModel defaults to Gemini 2.5 Flash and ignores global ch
 
     assert.equal(getOpenRouterLearnModel(), DEFAULT_OPENROUTER_LEARN_MODEL);
 
-    process.env.LLM_LEARN_MODEL = "google/gemini-3.1-flash-lite";
-    assert.equal(getOpenRouterLearnModel(), "google/gemini-3.1-flash-lite");
+    process.env.LLM_LEARN_MODEL = "google/gemini-2.5-flash";
+    assert.equal(getOpenRouterLearnModel(), "google/gemini-2.5-flash");
   } finally {
     if (originalChatModel === undefined) {
       delete process.env.LLM_MODEL;
@@ -181,7 +201,7 @@ test("getOpenRouterEvaluationReasoning disables Mercury reasoning", () => {
     exclude: true,
   });
   assert.equal(
-    getOpenRouterEvaluationReasoning("google/gemini-3.5-flash"),
+    getOpenRouterEvaluationReasoning("google/gemini-3.1-flash-lite"),
     undefined,
   );
 });
