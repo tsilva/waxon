@@ -93,10 +93,6 @@ textarea {
   --app-shell-edge-inline: clamp(16px, 1.6vw, 24px);
 }
 
-body:has(.page-learn-active) {
-  --app-shell-edge-block: clamp(8px, 0.9vw, 14px);
-}
-
 .page {
   min-height: 100vh;
   overflow: visible;
@@ -6025,6 +6021,55 @@ body:has(.page-learn-active) {
   overflow: visible;
 }
 
+.learn-chat-panel-new-course {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.learn-new-course-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: min(900px, 100%);
+  margin: 0 auto 2px;
+}
+
+.learn-back-to-courses {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid rgb(166 124 82 / 24%);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: rgb(255 252 245 / 86%);
+  color: var(--accent);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 820;
+  line-height: 1;
+}
+
+.learn-back-to-courses svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.4;
+}
+
+.learn-back-to-courses:hover,
+.learn-back-to-courses:focus-visible {
+  border-color: rgb(166 124 82 / 44%);
+  background: #ffffff;
+  color: var(--accent-hover);
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 2px;
+}
+
+.learn-back-to-courses:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 .learn-chat-thread {
   display: flex;
   flex-direction: column;
@@ -6132,6 +6177,7 @@ body:has(.page-learn-active) {
 .learn-chat-message-user {
   align-self: flex-end;
   justify-self: end;
+  margin-left: auto;
   border-color: rgb(139 92 48 / 22%);
   background: rgb(166 124 82 / 18%);
   color: var(--ink);
@@ -6140,6 +6186,7 @@ body:has(.page-learn-active) {
 .learn-chat-message-assistant {
   align-self: flex-start;
   justify-self: start;
+  margin-right: auto;
   max-width: min(780px, 100%);
   border-color: rgb(227 218 196 / 82%);
   background: rgb(255 252 245 / 94%);
@@ -6375,6 +6422,7 @@ body:has(.page-learn-active) {
   font-size: 13px;
   font-weight: 730;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .learn-chat-pending {
@@ -6394,6 +6442,13 @@ body:has(.page-learn-active) {
 
 .learn-course-answer-composer .composer-row {
   grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 14px 14px 12px 18px;
+}
+
+.learn-course-answer-composer .composer-input {
+  min-height: 48px;
+  font-size: 16px;
+  line-height: 1.35;
 }
 
 @keyframes learn-spin {
@@ -6406,17 +6461,8 @@ body:has(.page-learn-active) {
   margin: 0 0 14px;
 }
 
-.learn-loading-layout {
-  pointer-events: none;
-}
-
 .learn-loading-courses {
   overflow: hidden;
-}
-
-.learn-loading-course-heading {
-  width: min(82px, 40%);
-  height: 12px;
 }
 
 .learn-loading-course-card {
@@ -6448,17 +6494,6 @@ body:has(.page-learn-active) {
 .learn-loading-course-pill {
   width: 82px;
   height: 25px;
-}
-
-.learn-loading-course-search {
-  width: min(260px, 62%);
-  height: 11px;
-  margin-left: 38px;
-}
-
-.learn-loading-course-create {
-  width: 86px;
-  pointer-events: none;
 }
 
 .learn-loading-course-meta {
