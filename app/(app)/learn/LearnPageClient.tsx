@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowLeft,
   ArrowUp,
   BookOpen,
   Loader2,
@@ -47,6 +48,7 @@ import {
 } from "@/app/lib/courseQuestionWidget";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
+import { shouldShowLearnQuestionWidgets } from "@/app/lib/learnQuestionWidgetVisibility";
 
 export type CourseToc = {
   title: string;
@@ -488,31 +490,6 @@ function findLaterWidgetAnswers(
   return answersByWidgetId;
 }
 
-function shouldShowLearnQuestionWidgets(input: {
-  messages: LearnChatMessage[];
-  message: LearnChatMessage;
-  messageIndex: number;
-  widgetCount: number;
-  answeredWidgetCount: number;
-  hasEvaluationSnippet: boolean;
-}) {
-  if (
-    input.message.role !== "assistant" ||
-    input.widgetCount === 0 ||
-    input.hasEvaluationSnippet
-  ) {
-    return false;
-  }
-
-  if (input.answeredWidgetCount > 0) {
-    return true;
-  }
-
-  return !input.messages
-    .slice(input.messageIndex + 1)
-    .some((laterMessage) => laterMessage.role === "user");
-}
-
 function isWaitingForQuestionWidgetEvaluation(
   messages: LearnChatMessage[],
   messageIndex: number,
@@ -714,28 +691,73 @@ function isMilestoneComplete(
   return pageIndex < course.currentPageIndex;
 }
 
-function LearnLoadingPlaceholders() {
+function LearnCourseToolbar({
+  courseSearchQuery,
+  createDisabled,
+  onCourseSearchQueryChange,
+  onCreateCourse,
+}: {
+  courseSearchQuery: string;
+  createDisabled: boolean;
+  onCourseSearchQueryChange: (value: string) => void;
+  onCreateCourse: () => void;
+}) {
+  return (
+    <div className="learn-course-toolbar">
+      <label className="learn-course-search-shell">
+        <Search aria-hidden="true" />
+        <span className="sr-only">Search courses</span>
+        <input
+          className="learn-course-search-input"
+          type="search"
+          value={courseSearchQuery}
+          onChange={(event) => onCourseSearchQueryChange(event.target.value)}
+          placeholder="Search courses"
+        />
+      </label>
+      <button
+        className="learn-course-create-button"
+        disabled={createDisabled}
+        type="button"
+        onClick={onCreateCourse}
+      >
+        <PlusCircle aria-hidden="true" />
+        Create
+      </button>
+    </div>
+  );
+}
+
+function LearnLoadingPlaceholders({
+  courseSearchQuery,
+  createDisabled,
+  onCourseSearchQueryChange,
+  onCreateCourse,
+}: {
+  courseSearchQuery: string;
+  createDisabled: boolean;
+  onCourseSearchQueryChange: (value: string) => void;
+  onCreateCourse: () => void;
+}) {
   return (
     <div
       className="learn-chat-layout learn-chat-layout-course-list learn-loading-layout"
-      role="status"
-      aria-label="Loading Learn"
-      aria-busy="true"
     >
       <section
         className="learn-course-picker learn-course-picker-full learn-loading-courses"
-        aria-hidden="true"
+        aria-label="Courses"
+        aria-busy="true"
       >
-        <div className="learn-course-picker-heading">
-          <span className="admin-skeleton-line learn-loading-course-heading" />
-        </div>
-        <div className="learn-course-toolbar">
-          <span className="learn-course-search-shell">
-            <span className="admin-skeleton-line learn-loading-course-search" />
-          </span>
-          <span className="learn-course-create-button learn-loading-course-create" />
-        </div>
-        <div className="learn-course-list">
+        <p className="sr-only" role="status">
+          Loading courses
+        </p>
+        <LearnCourseToolbar
+          courseSearchQuery={courseSearchQuery}
+          createDisabled={createDisabled}
+          onCourseSearchQueryChange={onCourseSearchQueryChange}
+          onCreateCourse={onCreateCourse}
+        />
+        <div className="learn-course-list" aria-hidden="true">
           {Array.from({ length: 5 }, (_, index) => (
             <article
               className="learn-course-item learn-course-card learn-loading-course-card"
@@ -1216,6 +1238,22 @@ export default function LearnPageClient({
     updateLearnHistory("/learn", "push");
   }
 
+  function returnToCourseList() {
+    if (isStreaming) {
+      return;
+    }
+
+    shouldAutoScrollChatRef.current = true;
+    setIsStartingNewCourse(false);
+    setSelectedCourse(null);
+    setDraftCourseToc(null);
+    setChatMessages([INITIAL_CHAT_MESSAGE]);
+    setExpandedLearnEvaluationIds(new Set());
+    setTopic("");
+    setError(null);
+    updateLearnHistory("/learn", "push");
+  }
+
   function openCourseSettings(course: Course) {
     if (isStreaming || loadingCourseId) {
       return;
@@ -1637,7 +1675,14 @@ export default function LearnPageClient({
             </p>
           ) : null}
 
-          {isBooting ? <LearnLoadingPlaceholders /> : null}
+          {isBooting ? (
+            <LearnLoadingPlaceholders
+              courseSearchQuery={courseSearchQuery}
+              createDisabled={Boolean(loadingCourseId)}
+              onCourseSearchQueryChange={setCourseSearchQuery}
+              onCreateCourse={startNewCourse}
+            />
+          ) : null}
 
           {!isBooting ? (
             <div
@@ -1708,30 +1753,12 @@ export default function LearnPageClient({
                   className="learn-course-picker learn-course-picker-full"
                   aria-label="Courses"
                 >
-                  <div className="learn-course-toolbar">
-                    <label className="learn-course-search-shell">
-                      <Search aria-hidden="true" />
-                      <span className="sr-only">Search courses</span>
-                      <input
-                        className="learn-course-search-input"
-                        type="search"
-                        value={courseSearchQuery}
-                        onChange={(event) =>
-                          setCourseSearchQuery(event.target.value)
-                        }
-                        placeholder="Search courses"
-                      />
-                    </label>
-                    <button
-                      className="learn-course-create-button"
-                      disabled={Boolean(loadingCourseId)}
-                      type="button"
-                      onClick={startNewCourse}
-                    >
-                      <PlusCircle aria-hidden="true" />
-                      Create
-                    </button>
-                  </div>
+                  <LearnCourseToolbar
+                    courseSearchQuery={courseSearchQuery}
+                    createDisabled={Boolean(loadingCourseId)}
+                    onCourseSearchQueryChange={setCourseSearchQuery}
+                    onCreateCourse={startNewCourse}
+                  />
                   <div className="learn-course-list">
                     {filteredCourses.length === 0 ? (
                       <p className="learn-course-empty">No matching courses.</p>
@@ -1787,11 +1814,26 @@ export default function LearnPageClient({
 
               {!showCourseList ? (
                 <section
-                  className="learn-chat-panel"
+                  className={`learn-chat-panel ${
+                    isStartingNewCourse ? "learn-chat-panel-new-course" : ""
+                  }`}
                   aria-label={
                     selectedCourse ? "Learn chat" : "Learn something new"
                   }
                 >
+                  {isStartingNewCourse && courses.length > 0 ? (
+                    <div className="learn-new-course-actions">
+                      <button
+                        className="learn-back-to-courses"
+                        disabled={isStreaming}
+                        type="button"
+                        onClick={returnToCourseList}
+                      >
+                        <ArrowLeft aria-hidden="true" />
+                        Courses
+                      </button>
+                    </div>
+                  ) : null}
                   <div className="learn-chat-thread" ref={chatThreadRef}>
                     {chatMessages.map((message, messageIndex) => {
                       if (message.pendingEvaluation) {
@@ -1998,7 +2040,7 @@ export default function LearnPageClient({
                       onKeyDown={handleChatComposerKeyDown}
                       placeholder="Learn convolutional neural networks for vision"
                       ariaLabel="Learning goal"
-                      rows={4}
+                      rows={2}
                       disabled={isStreaming}
                       submitDisabled={!topic.trim() || isStreaming}
                       submitAriaLabel={isStreaming ? streamingStatus : "Send"}
