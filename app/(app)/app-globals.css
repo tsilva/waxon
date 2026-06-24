@@ -5507,6 +5507,10 @@ textarea {
   padding: 14px clamp(26px, 3.8vw, 62px) 16px;
 }
 
+.learn-stage-course {
+  padding-bottom: 8px;
+}
+
 .learn-kicker,
 .learn-course-item span,
 .learn-course-item small,
@@ -6169,6 +6173,11 @@ textarea {
   width: 1px;
   height: clamp(12px, 2vh, 20px);
   flex: 0 0 clamp(12px, 2vh, 20px);
+}
+
+.learn-chat-layout-course .learn-chat-end {
+  height: 4px;
+  flex-basis: 4px;
 }
 
 .learn-chat-layout-empty .learn-chat-end {
@@ -7455,6 +7464,10 @@ textarea {
     min-height: 0;
     overflow: visible;
     padding: 14px 18px 16px;
+  }
+
+  .learn-stage-course {
+    padding-bottom: 8px;
   }
 
   .learn-chat-layout {

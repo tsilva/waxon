@@ -12,4 +12,5 @@
 
 ## 2026-06-24
 
+* **Runbook**: Added the verified Neon admin trace purge order: delete `answer_evaluations` before `llm_trace_interactions`, and preserve `question_attempts`.
 * **Experiment**: Recorded Learn prompt-cache measurements from real OpenRouter turns; `google/gemini-2.5-flash` replaced `google/gemini-3.1-flash-lite` as the Learn default after verified cache writes/reads with preserved tutor output.
