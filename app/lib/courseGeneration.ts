@@ -1,5 +1,5 @@
 import {
-  DEFAULT_OPENROUTER_CHAT_MODEL,
+  DEFAULT_OPENROUTER_LEARN_MODEL,
   extractChatCompletionText,
   getOpenRouterEvaluationReasoning,
   openRouterChatCompletion,
@@ -103,8 +103,8 @@ const MODEL_CONTEXT_WINDOW_TOKENS: Array<{
   pattern: RegExp;
   tokens: number;
 }> = [
-  { pattern: /gemini-(?:1\.5|2(?:\.[05])?|3(?:\.[05])?)-flash/iu, tokens: 1_000_000 },
-  { pattern: /gemini-(?:1\.5|2(?:\.[05])?|3(?:\.[05])?)-pro/iu, tokens: 1_000_000 },
+  { pattern: /gemini-(?:1\.5|2(?:\.[05])?|3(?:\.[015])?)-flash(?:-lite)?/iu, tokens: 1_000_000 },
+  { pattern: /gemini-(?:1\.5|2(?:\.[05])?|3(?:\.[015])?)-pro/iu, tokens: 1_000_000 },
   { pattern: /gpt-4\.1|gpt-5/iu, tokens: 1_000_000 },
   { pattern: /claude-(?:3\.5|3\.7|4|4\.5)/iu, tokens: 200_000 },
 ];
@@ -233,7 +233,7 @@ function resolveContextWindowTokens(model: string | undefined): number | null {
     }
   }
 
-  const modelName = (model ?? DEFAULT_OPENROUTER_CHAT_MODEL).trim();
+  const modelName = (model ?? DEFAULT_OPENROUTER_LEARN_MODEL).trim();
   const matchedContextWindow = MODEL_CONTEXT_WINDOW_TOKENS.find(({ pattern }) =>
     pattern.test(modelName),
   );
@@ -390,7 +390,7 @@ export async function generateCourseIntakeDecision(input: {
       question: compactMessages.at(-1)?.content ?? null,
     },
     body: {
-      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
+      model: input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL,
       response_format: COURSE_JSON_RESPONSE_FORMAT,
       temperature: 0.25,
       max_tokens: 500,
@@ -438,7 +438,7 @@ export async function evaluateCourseChatProgress(input: {
       question: page.title,
     },
     body: {
-      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
+      model: input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL,
       response_format: COURSE_JSON_RESPONSE_FORMAT,
       temperature: 0.15,
       max_tokens: 320,
@@ -601,7 +601,7 @@ export async function generateCourseAnswerDecision(input: {
 
   const { page } = currentCourseMilestone(input.course);
   const answeredWidget = latestAnsweredWidgetContext(input.messages);
-  const model = input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL;
+  const model = input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL;
   const startedAt = Date.now();
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
@@ -709,7 +709,7 @@ export async function generateCourseQuestionAttemptToolResult(input: {
       question: page.title,
     },
     body: {
-      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
+      model: input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL,
       response_format: COURSE_JSON_RESPONSE_FORMAT,
       temperature: 0,
       max_tokens: 700,
@@ -771,6 +771,7 @@ export async function streamCourseChatTurn(input: {
   messages: CourseChatMessage[];
   progressDecision?: CourseProgressDecision | null;
   onTextDelta: (delta: string) => void;
+  onQuestionWidgetToolDelta?: () => void;
 } & CourseCostObserver): Promise<{
   content: string;
   toolCalls: CourseQuestionWidgetToolCall[];
@@ -788,6 +789,7 @@ export async function streamCourseChatTurn(input: {
 
   const { page } = currentCourseMilestone(input.course);
   const startedAt = Date.now();
+  let reportedQuestionWidgetToolDelta = false;
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: true,
@@ -797,8 +799,16 @@ export async function streamCourseChatTurn(input: {
       userId: input.userId,
       question: page.title,
     },
+    onToolCallDelta() {
+      if (reportedQuestionWidgetToolDelta) {
+        return;
+      }
+
+      reportedQuestionWidgetToolDelta = true;
+      input.onQuestionWidgetToolDelta?.();
+    },
     body: {
-      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
+      model: input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL,
       reasoning_effort: "minimal",
       temperature: 0.5,
       max_tokens: COURSE_CHAT_TURN_MAX_TOKENS,
@@ -938,7 +948,7 @@ export async function generateCourseToc(input: {
       question: input.topic,
     },
     body: {
-      model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
+      model: input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL,
       response_format: COURSE_JSON_RESPONSE_FORMAT,
       temperature: 0.4,
       max_tokens: 1_800,

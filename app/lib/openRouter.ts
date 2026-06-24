@@ -55,6 +55,11 @@ type OpenRouterUsage = {
   completion_tokens?: unknown;
   total_tokens?: unknown;
   cost?: unknown;
+  prompt_tokens_details?: unknown;
+  cache_read_tokens?: unknown;
+  cached_tokens?: unknown;
+  cache_write_tokens?: unknown;
+  cache_creation_input_tokens?: unknown;
 };
 
 export type OpenRouterChatResponse = {
@@ -79,6 +84,7 @@ const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 const STREAM_DONE_SENTINEL = "[DONE]";
 const AFFORDABLE_MAX_TOKENS_PATTERN = /can only afford\s+(\d+)/iu;
 export const DEFAULT_OPENROUTER_CHAT_MODEL = "google/gemini-3.5-flash";
+export const DEFAULT_OPENROUTER_LEARN_MODEL = "google/gemini-3.1-flash-lite";
 export const DEFAULT_OPENROUTER_EVALUATION_MODEL = "inception/mercury-2";
 
 type OpenRouterChatConfig =
@@ -108,6 +114,18 @@ export function getOpenRouterChatModel(input: {
   }
 
   return input.requireConfiguredModel ? null : DEFAULT_OPENROUTER_CHAT_MODEL;
+}
+
+export function getOpenRouterLearnModel(input: {
+  requireConfiguredModel?: boolean;
+} = {}): string | null {
+  const model = process.env.LLM_LEARN_MODEL?.trim() ?? "";
+
+  if (model) {
+    return model;
+  }
+
+  return input.requireConfiguredModel ? null : DEFAULT_OPENROUTER_LEARN_MODEL;
 }
 
 export function getOpenRouterEvaluationModel(input: {
@@ -159,6 +177,32 @@ export function getOpenRouterChatConfig(input: {
     return {
       ok: false,
       error: "LLM_MODEL is not configured.",
+    };
+  }
+
+  return { ok: true, apiKey, model };
+}
+
+export function getOpenRouterLearnConfig(input: {
+  requireConfiguredModel?: boolean;
+} = {}): OpenRouterChatConfig {
+  const apiKey = getOpenRouterApiKey();
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      error: "OPENROUTER_API_KEY or LLM_API_KEY is not configured.",
+    };
+  }
+
+  const model = getOpenRouterLearnModel({
+    requireConfiguredModel: input.requireConfiguredModel,
+  });
+
+  if (!model) {
+    return {
+      ok: false,
+      error: "LLM_LEARN_MODEL is not configured.",
     };
   }
 
@@ -409,6 +453,7 @@ async function parseOpenRouterStream(
   response: Response,
   onActivity?: () => void,
   onTextDelta?: (delta: string) => void,
+  onToolCallDelta?: (toolCalls: OpenRouterToolCall[]) => void,
 ): Promise<OpenRouterChatResponse> {
   if (!response.body) {
     return (await parseOpenRouterJson(response)) as OpenRouterChatResponse;
@@ -446,10 +491,13 @@ async function parseOpenRouterStream(
 
       finalChunk = parsed;
       usage = parsed.usage ?? usage;
-      mergeStreamingToolCallDeltas(
-        streamedToolCalls,
-        extractStreamingToolCallDeltas(parsed),
-      );
+      const toolCallDeltas = extractStreamingToolCallDeltas(parsed);
+      mergeStreamingToolCallDeltas(streamedToolCalls, toolCallDeltas);
+
+      if (toolCallDeltas.length > 0) {
+        onToolCallDelta?.(toolCallDeltas);
+        onActivity?.();
+      }
 
       const deltaText = extractStreamingDeltaText(parsed);
 
@@ -539,6 +587,7 @@ export async function openRouterChatCompletion(input: {
   stream?: boolean;
   onActivity?: () => void;
   onTextDelta?: (delta: string) => void;
+  onToolCallDelta?: (toolCalls: OpenRouterToolCall[]) => void;
 }): Promise<{ response: Response; body: OpenRouterChatResponse }> {
   const traceId = input.trace.traceId ?? crypto.randomUUID();
   const trace = {
@@ -577,6 +626,7 @@ export async function openRouterChatCompletion(input: {
             response,
             input.onActivity,
             input.onTextDelta,
+            input.onToolCallDelta,
           )
         : ((await parseOpenRouterJson(response)) as OpenRouterChatResponse);
 
