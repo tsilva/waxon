@@ -1361,6 +1361,17 @@ export function AdminPageClient({
   }, [selectedResponsePayload]);
 
   useEffect(() => {
+    if (!selectedCallId) {
+      return;
+    }
+
+    setRequestPayloadViewMode(
+      selectedRequestMarkdownMessages.length > 0 ? "markdown" : "json",
+    );
+    setResponsePayloadViewMode("json");
+  }, [selectedCallId, selectedRequestMarkdownMessages.length]);
+
+  useEffect(() => {
     setTraceInteractions((current) =>
       mergeTraceInteractions(
         current,
@@ -1391,8 +1402,6 @@ export function AdminPageClient({
     }
 
     setSelectedCallId(selectedTraceId);
-    setRequestPayloadViewMode("json");
-    setResponsePayloadViewMode("json");
   }, [selectedTraceId]);
 
   useEffect(() => {
@@ -1747,6 +1756,10 @@ export function AdminPageClient({
 
             <div className="admin-call-modal-meta" aria-label="LLM call metadata">
               <div>
+                <span>Status</span>
+                <StatusPill status={selectedCallContext.call.status} />
+              </div>
+              <div>
                 <span>Model</span>
                 <strong>{selectedCallContext.call.model}</strong>
               </div>
@@ -1770,10 +1783,6 @@ export function AdminPageClient({
                 <strong>
                   {(selectedCallContext.call.latencyMs / 1000).toFixed(1)}s
                 </strong>
-              </div>
-              <div>
-                <span>Status</span>
-                <StatusPill status={selectedCallContext.call.status} />
               </div>
             </div>
 

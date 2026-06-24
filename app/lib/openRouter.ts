@@ -13,6 +13,18 @@ export type OpenRouterTraceContext = {
 export type OpenRouterMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: unknown;
+  tool_calls?: OpenRouterToolCall[];
+  tool_call_id?: string;
+  name?: string;
+};
+
+export type OpenRouterToolCall = {
+  id?: string;
+  type?: string;
+  function?: {
+    name?: string;
+    arguments?: string;
+  };
 };
 
 export type OpenRouterChatRequest = {
@@ -20,11 +32,15 @@ export type OpenRouterChatRequest = {
   messages: OpenRouterMessage[];
   response_format?: unknown;
   reasoning?: unknown;
+  reasoning_effort?: string;
   temperature?: number;
   max_tokens?: number;
   user?: string;
   stream?: boolean;
   stream_options?: unknown;
+  tools?: unknown;
+  tool_choice?: unknown;
+  parallel_tool_calls?: boolean;
 };
 
 export type OpenRouterEmbeddingRequest = {
@@ -44,7 +60,10 @@ type OpenRouterUsage = {
 export type OpenRouterChatResponse = {
   id?: string;
   model?: string;
-  choices?: Array<{ message?: { content?: unknown } }>;
+  choices?: Array<{
+    delta?: { content?: unknown; tool_calls?: OpenRouterToolCall[] };
+    message?: { content?: unknown; tool_calls?: OpenRouterToolCall[] };
+  }>;
   usage?: OpenRouterUsage & Record<string, unknown>;
 };
 
@@ -289,6 +308,83 @@ function extractStreamingDeltaText(chunk: unknown): string {
   return "";
 }
 
+function extractStreamingToolCallDeltas(chunk: unknown): OpenRouterToolCall[] {
+  const body = chunk as {
+    choices?: Array<{
+      delta?: {
+        tool_calls?: unknown;
+      };
+      message?: {
+        tool_calls?: unknown;
+      };
+    }>;
+  };
+  const toolCalls =
+    body.choices?.[0]?.delta?.tool_calls ?? body.choices?.[0]?.message?.tool_calls;
+
+  return Array.isArray(toolCalls) ? (toolCalls as OpenRouterToolCall[]) : [];
+}
+
+function mergeStreamingToolCallDeltas(
+  toolCalls: Array<OpenRouterToolCall & { index?: number }>,
+  deltas: OpenRouterToolCall[],
+) {
+  for (const [fallbackIndex, delta] of deltas.entries()) {
+    const deltaWithIndex = delta as OpenRouterToolCall & { index?: unknown };
+    const index =
+      typeof deltaWithIndex.index === "number" &&
+      Number.isFinite(deltaWithIndex.index) &&
+      deltaWithIndex.index >= 0
+        ? Math.round(deltaWithIndex.index)
+        : fallbackIndex;
+    const existing =
+      toolCalls[index] ??
+      ({
+        function: {
+          arguments: "",
+        },
+      } as OpenRouterToolCall & { index?: number });
+
+    existing.index = index;
+    existing.id = delta.id ?? existing.id;
+    existing.type = delta.type ?? existing.type;
+
+    if (delta.function) {
+      existing.function = {
+        name: delta.function.name ?? existing.function?.name,
+        arguments:
+          (existing.function?.arguments ?? "") +
+          (typeof delta.function.arguments === "string"
+            ? delta.function.arguments
+            : ""),
+      };
+    }
+
+    toolCalls[index] = existing;
+  }
+}
+
+function finalizeStreamingToolCalls(
+  toolCalls: Array<OpenRouterToolCall & { index?: number }>,
+): OpenRouterToolCall[] {
+  return toolCalls.flatMap((toolCall) => {
+    if (!toolCall.function?.name) {
+      return [];
+    }
+
+    return [
+      {
+        id: toolCall.id,
+        type: toolCall.type ?? "function",
+        function: {
+          name: toolCall.function.name,
+          arguments: toolCall.function.arguments ?? "",
+        },
+      },
+    ];
+  });
+}
+
 function findStreamingEventBoundary(buffer: string):
   | {
       index: number;
@@ -325,6 +421,7 @@ async function parseOpenRouterStream(
   let content = "";
   let finalChunk: OpenRouterChatResponse | null = null;
   let usage: OpenRouterUsage | undefined;
+  const streamedToolCalls: Array<OpenRouterToolCall & { index?: number }> = [];
 
   const parseEvent = (eventText: string) => {
     const payloads = eventText
@@ -349,6 +446,10 @@ async function parseOpenRouterStream(
 
       finalChunk = parsed;
       usage = parsed.usage ?? usage;
+      mergeStreamingToolCallDeltas(
+        streamedToolCalls,
+        extractStreamingToolCallDeltas(parsed),
+      );
 
       const deltaText = extractStreamingDeltaText(parsed);
 
@@ -410,6 +511,8 @@ async function parseOpenRouterStream(
     }
   }
 
+  const toolCalls = finalizeStreamingToolCalls(streamedToolCalls);
+
   return {
     id: finalResponseChunk?.id,
     model: finalResponseChunk?.model,
@@ -417,6 +520,10 @@ async function parseOpenRouterStream(
       {
         message: {
           content,
+          tool_calls:
+            toolCalls.length > 0
+              ? toolCalls
+              : finalResponseChunk?.choices?.[0]?.message?.tool_calls,
         },
       },
     ],

@@ -20,6 +20,10 @@ import {
   upsertDueQuestions,
 } from "./postgresStore";
 import { reformatMultipleChoiceQuestionForReview } from "./courseQuestionAttemptParsing";
+import {
+  normalizeCourseQuestionWidgetToolCalls,
+  type CourseQuestionWidgetToolCall,
+} from "./courseQuestionWidget";
 
 export type CourseStatus = "active" | "completed";
 
@@ -47,6 +51,7 @@ export type CourseChatMessageRecord = {
   courseId: string;
   role: "assistant" | "user";
   content: string;
+  toolCalls: CourseQuestionWidgetToolCall[];
   sequence: number;
   createdAt: number;
   updatedAt: number;
@@ -121,6 +126,7 @@ function toCourseChatMessage(row: {
   courseId: string;
   role: string;
   content: string;
+  toolCalls: unknown;
   sequence: number;
   createdAt: number;
   updatedAt: number;
@@ -130,6 +136,7 @@ function toCourseChatMessage(row: {
     courseId: row.courseId,
     role: toCourseChatRole(row.role),
     content: row.content,
+    toolCalls: normalizeCourseQuestionWidgetToolCalls(row.toolCalls),
     sequence: row.sequence,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -384,6 +391,7 @@ export async function replaceCourseChatMessages(input: {
   messages: Array<{
     role: "assistant" | "user";
     content: string;
+    toolCalls?: CourseQuestionWidgetToolCall[];
   }>;
 }): Promise<CourseChatMessageRecord[]> {
   const course = await getCourse(input.courseId);
@@ -397,6 +405,10 @@ export async function replaceCourseChatMessages(input: {
     .map((message) => ({
       role: message.role === "assistant" ? "assistant" : "user",
       content: message.content.trim(),
+      toolCalls:
+        message.role === "assistant"
+          ? normalizeCourseQuestionWidgetToolCalls(message.toolCalls)
+          : [],
     }))
     .filter((message) => message.content);
 
@@ -421,6 +433,7 @@ export async function replaceCourseChatMessages(input: {
           courseId: course.id,
           role: message.role,
           content: message.content,
+          toolCalls: message.toolCalls,
           sequence: index,
           createdAt: now + index,
           updatedAt: now + index,

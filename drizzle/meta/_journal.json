@@ -176,6 +176,13 @@
       "when": 1781481700000,
       "tag": "0025_user_scoped_question_data",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1782306600000,
+      "tag": "0026_course_chat_tool_calls",
+      "breakpoints": true
     }
   ]
 }
