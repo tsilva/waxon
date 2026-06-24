@@ -899,8 +899,10 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
     });
 
     assert.ok(requestBody);
+    const capturedBody = requestBody as Record<string, unknown>;
+    assert.equal(capturedBody.session_id, "learn:user_1:course_1");
     assert.deepEqual(
-      (requestBody as { tools?: unknown[] }).tools?.[0],
+      (capturedBody as { tools?: unknown[] }).tools?.[0],
       {
         type: "function",
         function: {
@@ -953,6 +955,22 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
         },
       },
     );
+    const requestMessages = capturedBody.messages as Array<{
+      role: string;
+      content: unknown;
+    }>;
+    const systemContent = requestMessages[0]?.content as Array<
+      Record<string, unknown>
+    >;
+    const userContent = requestMessages[1]?.content as Array<
+      Record<string, unknown>
+    >;
+
+    assert.deepEqual(systemContent[0]?.cache_control, { type: "ephemeral" });
+    assert.deepEqual(userContent[0]?.cache_control, { type: "ephemeral" });
+    assert.match(String(userContent[0]?.text), /Course title: PPO/u);
+    assert.doesNotMatch(String(userContent[0]?.text), /Recent conversation JSON/u);
+    assert.match(String(userContent[1]?.text), /Recent conversation JSON/u);
     assert.equal((requestBody as { tool_choice?: unknown }).tool_choice, "auto");
     assert.equal(
       (requestBody as { parallel_tool_calls?: unknown }).parallel_tool_calls,

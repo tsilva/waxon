@@ -42,6 +42,7 @@ Use this skill to run a tight product-quality loop over Waxon's Learn experience
 4. Measure latency from the user's perspective.
    - Capture `answer_decision_ms`, `time_to_first_delta_ms`, and `chat_stream_ms` from the course chat SSE `done` payload or stored trace surfaces.
    - Capture prompt-cache usage from course message metrics when provider usage reports it: cached prompt tokens, uncached prompt tokens, cache-write tokens, and cache-hit percentage.
+   - For OpenRouter/Gemini cache debugging, inspect the serialized request for explicit `cache_control` breakpoints and a stable course/conversation `session_id`; stable prompt ordering alone is not enough to enable cache reads.
    - Also record perceived wait from answer submission to first visible next-material token.
    - Separate fixed overhead from token throughput: high `tok/s` does not imply a snappy answer-to-next-turn transition.
 

@@ -30,6 +30,7 @@ export type OpenRouterToolCall = {
 export type OpenRouterChatRequest = {
   model: string;
   messages: OpenRouterMessage[];
+  session_id?: string;
   response_format?: unknown;
   reasoning?: unknown;
   reasoning_effort?: string;
@@ -38,6 +39,7 @@ export type OpenRouterChatRequest = {
   user?: string;
   stream?: boolean;
   stream_options?: unknown;
+  cache_control?: unknown;
   tools?: unknown;
   tool_choice?: unknown;
   parallel_tool_calls?: boolean;
@@ -602,7 +604,7 @@ export async function openRouterChatCompletion(input: {
       input.body.stream_options ??
       (shouldStream ? { include_usage: true } : undefined),
     user: input.body.user ?? trace.userId ?? undefined,
-    session_id: trace.userId ?? undefined,
+    session_id: input.body.session_id ?? trace.userId ?? undefined,
     trace: buildTraceMetadata(trace, traceId),
   };
   const pendingTrace = beginLlmTrace({
