@@ -3,15 +3,20 @@ import {
   serializeCourseQuestionWidget,
 } from "./courseQuestionWidget.ts";
 
+const PARTIAL_QUESTION_WIDGET_PATTERN =
+  /<!--\s*waxon:question-widget\b[\s\S]*$/u;
+
 export function ensureCourseChatTurnHasLearnerQuestion(input: {
   text: string;
   pageTitle: string;
   pageObjective: string;
+  stripTrailingPartialContent?: boolean;
 }): {
   text: string;
   appendedText: string;
 } {
   const generatedText = input.text.trim();
+  const parsedGeneratedTurn = parseCourseQuestionWidgets(generatedText);
   const hasLearnerQuestion = isCourseChatTurnComplete(generatedText);
   const fallbackWidget = serializeCourseQuestionWidget({
     type: "free_text",
@@ -19,6 +24,23 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     question: "What is the main idea of this milestone in your own words?",
     placeholder: "Explain the idea in your own words...",
   });
+
+  if (parsedGeneratedTurn.widgets.length > 0) {
+    const cleanedVisibleContent = stripInvalidRepairParagraphs(
+      parsedGeneratedTurn.content.trim(),
+    );
+    const sanitizedVisibleContent =
+      stripDanglingTailIfNeeded(cleanedVisibleContent) ||
+      `This milestone is about ${input.pageObjective}`;
+    const widgetText = parsedGeneratedTurn.widgets
+      .map((widget) => serializeCourseQuestionWidget(widget))
+      .join("\n\n");
+
+    return {
+      text: [sanitizedVisibleContent, widgetText].join("\n\n"),
+      appendedText: "",
+    };
+  }
 
   if (hasLearnerQuestion) {
     return {
@@ -40,7 +62,28 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     };
   }
 
-  const separator = /[.!?)]\s*$/u.test(generatedText) ? "\n\n" : ".\n\n";
+  const parsedRepairContent = stripInvalidRepairParagraphs(
+    parsedGeneratedTurn.content.trim(),
+  );
+  const shouldStripTrailingPartialContent =
+    input.stripTrailingPartialContent === true &&
+    !PARTIAL_QUESTION_WIDGET_PATTERN.test(generatedText);
+  const shouldStripDanglingTail =
+    !shouldStripTrailingPartialContent &&
+    !PARTIAL_QUESTION_WIDGET_PATTERN.test(generatedText) &&
+    !/[.!?)]\s*$/u.test(parsedRepairContent);
+  const strippedRepairContent = shouldStripTrailingPartialContent
+    ? stripTrailingPartialRepairContent(parsedRepairContent)
+    : shouldStripDanglingTail
+      ? stripDanglingTrailingRepairContent(parsedRepairContent)
+      : parsedRepairContent;
+  const repairBaseText =
+    strippedRepairContent ||
+    (shouldStripTrailingPartialContent || shouldStripDanglingTail
+      ? ""
+      : parsedRepairContent) ||
+    `This milestone is about ${input.pageObjective}`;
+  const separator = /[.!?)]\s*$/u.test(repairBaseText) ? "\n\n" : ".\n\n";
   const fallbackQuestion = [
     separator.trimEnd(),
     `Focus on this milestone: ${input.pageObjective}`,
@@ -48,9 +91,107 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
   ].join("\n\n");
 
   return {
-    text: `${generatedText}${fallbackQuestion}`,
+    text: `${repairBaseText}${fallbackQuestion}`,
     appendedText: fallbackQuestion,
   };
+}
+
+function stripInvalidRepairParagraphs(text: string): string {
+  return text
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(
+      (paragraph) =>
+        !isLeakedWidgetJsonParagraph(paragraph) &&
+        !isLeakedTutorMetaParagraph(paragraph),
+    )
+    .join("\n\n")
+    .trim();
+}
+
+function isLeakedWidgetJsonParagraph(paragraph: string): boolean {
+  return /\\?"(?:type|id|question|choices|placeholder)\\?"\s*:/u.test(
+    paragraph,
+  );
+}
+
+function isLeakedTutorMetaParagraph(paragraph: string): boolean {
+  return (
+    /^(?:total\s+words?|word\s+count)\s*:/iu.test(paragraph) ||
+    /^(?:perfect\.?\s+)?fits\s+the\s+\d+\s*[-–]\s*\d+\s+(?:word\s+)?range/iu.test(
+      paragraph,
+    ) ||
+    /^goal\s*:/iu.test(paragraph) ||
+    /^question\s*:/iu.test(paragraph) ||
+    /^let'?s\s+(?:ask|use)\s+(?:a\s+)?(?:multiple-choice|free-text|question)/iu.test(
+      paragraph,
+    ) ||
+    /^:\*\*$/u.test(paragraph) ||
+    /^\*\*[,.:;]/u.test(paragraph) ||
+    isUnmatchedClosingFragment(paragraph)
+  );
+}
+
+function isUnmatchedClosingFragment(paragraph: string): boolean {
+  const openingCount = (paragraph.match(/\(/gu) ?? []).length;
+  const closingCount = (paragraph.match(/\)/gu) ?? []).length;
+
+  return (
+    closingCount > openingCount &&
+    paragraph.length < 140 &&
+    /^[a-z]/u.test(paragraph)
+  );
+}
+
+function stripTrailingPartialRepairContent(text: string): string {
+  const paragraphs = text
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  if (paragraphs.length < 2) {
+    return stripFinalSentence(text);
+  }
+
+  return paragraphs.slice(0, -1).join("\n\n").trim() || text;
+}
+
+function stripDanglingTrailingRepairContent(text: string): string {
+  const paragraphs = text
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  if (paragraphs.length > 1) {
+    return paragraphs.slice(0, -1).join("\n\n").trim();
+  }
+
+  return keepCompleteSentences(text);
+}
+
+function stripDanglingTailIfNeeded(text: string): string {
+  return /[.!?)]\s*$/u.test(text) ? text : stripDanglingTrailingRepairContent(text);
+}
+
+function stripFinalSentence(text: string): string {
+  const sentences =
+    text.match(/[^.!?]+[.!?]+(?:\s+|$)/gu)?.map((sentence) => sentence.trim()) ??
+    [];
+
+  if (sentences.length < 2) {
+    return "";
+  }
+
+  return sentences.slice(0, -1).join(" ").trim() || text;
+}
+
+function keepCompleteSentences(text: string): string {
+  return (
+    text.match(/[^.!?]+[.!?]+(?:\s+|$)/gu)?.map((sentence) => sentence.trim()) ??
+    []
+  )
+    .join(" ")
+    .trim();
 }
 
 export function excerptCourseMessageForPrompt(

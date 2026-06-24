@@ -38,6 +38,7 @@ import type { CourseProgressDecision } from "./courseProgress.ts";
 const COURSE_JSON_RESPONSE_FORMAT = { type: "json_object" };
 const MAX_INTAKE_MESSAGE_CHARS = 500;
 const MAX_INTAKE_TOPIC_CHARS = 800;
+const COURSE_CHAT_TURN_MAX_TOKENS = 900;
 const QUESTION_EVALUATION_SNIPPET_PATTERN =
   /^<!--\s*waxon:evaluation-snippet score=\d{1,2}\s*-->\s*/u;
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
@@ -119,6 +120,28 @@ function reportResponseMetrics(
   if (metrics) {
     input.onMetrics?.(metrics);
   }
+}
+
+function didReachMaxCompletionTokens(
+  usage:
+    | {
+        completion_tokens?: unknown;
+      }
+    | undefined,
+  maxTokens: number,
+): boolean {
+  const completionTokens =
+    typeof usage?.completion_tokens === "number"
+      ? usage.completion_tokens
+      : typeof usage?.completion_tokens === "string"
+        ? Number.parseFloat(usage.completion_tokens)
+        : null;
+
+  return (
+    completionTokens !== null &&
+    Number.isFinite(completionTokens) &&
+    completionTokens >= maxTokens - 8
+  );
 }
 
 function resolveContextWindowTokens(model: string | undefined): number | null {
@@ -667,7 +690,7 @@ export async function streamCourseChatTurn(input: {
     body: {
       model: input.model ?? DEFAULT_OPENROUTER_CHAT_MODEL,
       temperature: 0.5,
-      max_tokens: 2_200,
+      max_tokens: COURSE_CHAT_TURN_MAX_TOKENS,
       messages: [
         {
           role: "system",
@@ -686,7 +709,11 @@ export async function streamCourseChatTurn(input: {
             "Do not start with a standalone title, header, or status line. Start directly with the teaching sentence, never with lines like 'Same milestone...' or 'CNN vs. fully connected network'.",
             "Prefer this shape: 1-2 explanatory paragraphs, an **Analogy** or **Example** paragraph when helpful, then a tiny bullet list of the key pieces.",
             "Avoid markdown tables.",
-            "Keep each teaching turn focused: usually 160-280 words before the question, and never more than one milestone at a time.",
+            "Keep each teaching turn focused: hard cap the visible teaching content at 120-180 words before the question, and never more than one milestone at a time.",
+            "The entire response, including the hidden widget comment, must fit comfortably under 900 tokens.",
+            "Do not include word counts, token counts, compliance checks, or self-evaluation commentary in the learner-facing response.",
+            "Do not write planning labels such as Goal, Question, or Test; only write the learner-facing lesson and the hidden widget.",
+            "Stop immediately after the hidden widget comment.",
             "Do not ask rhetorical questions inside the teaching snippet.",
             "End every non-completion turn with exactly one Waxon question widget tool call after the explanation.",
             "The widget tool call must be the final block and must use this exact HTML-comment form: <!-- waxon:question-widget ENCODED_JSON -->.",
@@ -730,6 +757,10 @@ export async function streamCourseChatTurn(input: {
     text: extractChatCompletionText(body),
     pageTitle: page.title,
     pageObjective: page.objective,
+    stripTrailingPartialContent: didReachMaxCompletionTokens(
+      body.usage,
+      COURSE_CHAT_TURN_MAX_TOKENS,
+    ),
   });
 
   if (ensuredTurn.appendedText) {

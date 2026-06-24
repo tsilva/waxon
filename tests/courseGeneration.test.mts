@@ -69,7 +69,8 @@ test("ensureCourseChatTurnHasLearnerQuestion repairs dangling learner prompt", (
     pageObjective: "Explain why PPO constrains policy changes.",
   });
 
-  assert.match(result.text, /In your own\.\n\nFocus on this milestone/u);
+  assert.match(result.text, /PPO constrains updates/u);
+  assert.doesNotMatch(result.text, /In your own/u);
   assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
   assert.equal(parseCourseQuestionWidgets(result.appendedText).widgets[0]?.type, "free_text");
 });
@@ -81,8 +82,215 @@ test("ensureCourseChatTurnHasLearnerQuestion repairs mid-word truncation", () =>
     pageObjective: "Review how advantages shape policy updates.",
   });
 
-  assert.match(result.text, /worse than expec\.\n\nFocus on this milestone/u);
+  assert.doesNotMatch(result.text, /expec/u);
+  assert.match(result.text, /This milestone is about/u);
   assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion removes partial widget before fallback", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: [
+      "Flattening an image loses spatial structure.",
+      "",
+      "<!-- waxon:question-widget %7B%22type%22%3A%22multiple_choice%22%2C%22id",
+    ].join("\n"),
+    pageTitle: "Fully Connected Networks and Images",
+    pageObjective: "Explain why flattening images hurts MLPs.",
+  });
+  const parsed = parseCourseQuestionWidgets(result.text);
+
+  assert.equal(parsed.widgets.length, 1);
+  assert.equal(
+    parsed.widgets[0]?.question,
+    "What is the main idea of this milestone in your own words?",
+  );
+  assert.doesNotMatch(result.text, /%7B%22type%22%3A%22multiple_choice/u);
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion trims capped trailing fragments", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: [
+      "Pixels are numbers arranged in a grid.",
+      "",
+      "If the image is 100 pixels wide and 10.",
+    ].join("\n\n"),
+    pageTitle: "How Computers See Images",
+    pageObjective: "Explain how pixels form image grids.",
+    stripTrailingPartialContent: true,
+  });
+
+  assert.match(result.text, /Pixels are numbers arranged in a grid/u);
+  assert.doesNotMatch(result.text, /100 pixels wide and 10/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion trims non-capped dangling sentence fragments", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: "An image is not a smooth picture to a computer, but a giant grid of numbers called a matrix. For a simple black-and-white image, this",
+    pageTitle: "How Computers See Images",
+    pageObjective:
+      "Understand how images are represented as pixel grids and channels.",
+  });
+
+  assert.match(result.text, /giant grid of numbers called a matrix/u);
+  assert.doesNotMatch(result.text, /black-and-white image, this/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion trims capped single-paragraph final sentence", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: "A molded part may have extra material called a tail. A machine cuts it off, but sometimes the blade.",
+    pageTitle: "Tail Trim Challenge",
+    pageObjective: "Explain why tail trim inspection is hard.",
+    stripTrailingPartialContent: true,
+  });
+
+  assert.match(result.text, /extra material called a tail/u);
+  assert.doesNotMatch(result.text, /sometimes the blade/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion uses generic fallback for capped single-sentence fragments", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: "Let's ask a multiple-choice question about what a specific pixel value looks like.",
+    pageTitle: "How Computers See Images",
+    pageObjective:
+      "Understand how images are represented as pixel grids and channels.",
+    stripTrailingPartialContent: true,
+  });
+
+  assert.doesNotMatch(result.text, /Let's ask/u);
+  assert.match(result.text, /This milestone is about/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion keeps pre-widget content when capped", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: [
+      "Flattening an image loses spatial structure.",
+      "",
+      "<!-- waxon:question-widget %7B%22type%22%3A%22multiple_choice%22%2C%22id",
+    ].join("\n"),
+    pageTitle: "Fully Connected Networks and Images",
+    pageObjective: "Explain why flattening images hurts MLPs.",
+    stripTrailingPartialContent: true,
+  });
+
+  assert.match(result.text, /Flattening an image loses spatial structure/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion removes leaked widget JSON fragments", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: '0, what color does the computer display for that pixel?","choices":[{"id":"A","text":"Pure white"},{"id":"B","text":"Pure black.',
+    pageTitle: "How Computers See Images",
+    pageObjective:
+      "Understand how images are represented as pixel grids and channels.",
+    stripTrailingPartialContent: true,
+  });
+
+  assert.doesNotMatch(result.text, /choices/u);
+  assert.match(result.text, /This milestone is about/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion removes leaked tutor meta commentary", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: [
+      "Pixels are tiny squares of color arranged in a grid. RGB channels store separate red, green, and blue values for each pixel.",
+      "",
+      "Total words: ~118 words. Perfect. Fits the 120-180 range well.",
+    ].join("\n\n"),
+    pageTitle: "How Computers See Images",
+    pageObjective:
+      "Understand how images are represented as pixel grids and channels.",
+    stripTrailingPartialContent: true,
+  });
+
+  assert.match(result.text, /Pixels are tiny squares/u);
+  assert.doesNotMatch(result.text, /Total words/u);
+  assert.doesNotMatch(result.text, /Perfect\. Fits/u);
+  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion sanitizes complete widget turns", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: [
+      ":**",
+      "",
+      "Goal: Test the core risk/understanding. Why do we split tables?",
+      "",
+      serializeCourseQuestionWidget({
+        type: "free_text",
+        id: "sql-split-check",
+        question: "Why do databases split related data into multiple tables?",
+      }),
+    ].join("\n"),
+    pageTitle: "The Problem: Why Databases Split Data",
+    pageObjective:
+      "Understand why relational databases use multiple tables and joins.",
+  });
+  const parsed = parseCourseQuestionWidgets(result.text);
+
+  assert.doesNotMatch(result.text, /Goal: Test/u);
+  assert.doesNotMatch(result.text, /:\*\*/u);
+  assert.match(result.text, /This milestone is about/u);
+  assert.equal(parsed.widgets.length, 1);
+  assert.equal(parsed.widgets[0]?.id, "sql-split-check");
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion removes visible widget-planning prose", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: [
+      "redundancy/errors).",
+      "",
+      "Let's use a multiple-choice question to contrast the confusion.",
+      "",
+      'Question: "If an online store repeats customer addresses in every order row, what problem appears?"',
+      "",
+      serializeCourseQuestionWidget({
+        type: "free_text",
+        id: "sql-redundancy-check",
+        question: "Why can repeated table data cause problems?",
+      }),
+    ].join("\n"),
+    pageTitle: "The Problem: Why Databases Split Data",
+    pageObjective:
+      "Understand why relational databases use multiple tables and joins.",
+  });
+  const parsed = parseCourseQuestionWidgets(result.text);
+
+  assert.doesNotMatch(result.text, /redundancy\/errors/u);
+  assert.doesNotMatch(result.text, /Let's use a multiple-choice/u);
+  assert.doesNotMatch(result.text, /Question: "If/u);
+  assert.match(result.text, /This milestone is about/u);
+  assert.equal(parsed.widgets.length, 1);
+  assert.equal(parsed.widgets[0]?.id, "sql-redundancy-check");
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion preserves valid complete widget teaching paragraphs", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: [
+      "A database often splits information into separate tables to avoid repeating the same facts in many rows.",
+      "",
+      "A join brings those related rows back together when a question needs both pieces of data.",
+      "",
+      serializeCourseQuestionWidget({
+        type: "free_text",
+        id: "join-purpose-check",
+        question: "Why do SQL joins matter?",
+      }),
+    ].join("\n"),
+    pageTitle: "The Problem: Why Databases Split Data",
+    pageObjective:
+      "Understand why relational databases use multiple tables and joins.",
+  });
+  const parsed = parseCourseQuestionWidgets(result.text);
+
+  assert.match(result.text, /avoid repeating the same facts/u);
+  assert.match(result.text, /A join brings those related rows back together/u);
+  assert.equal(parsed.widgets.length, 1);
+  assert.equal(parsed.widgets[0]?.id, "join-purpose-check");
 });
 
 test("isCourseChatTurnComplete accepts terminal questions and multiple choice", () => {
@@ -131,6 +339,20 @@ test("parseCourseQuestionWidgets strips trailing partial widget comments during 
     ].join("\n"),
   );
   assert.deepEqual(parsed.widgets, []);
+});
+
+test("parseCourseQuestionWidgets accepts compact raw JSON widget comments", () => {
+  const parsed = parseCourseQuestionWidgets(
+    [
+      "A pixel stores a numeric color value.",
+      "",
+      '<!-- waxon:question-widget {"type":"free_text","id":"pixel-check","question":"What does a pixel store?","placeholder":"Type your answer here..."} -->',
+    ].join("\n"),
+  );
+
+  assert.equal(parsed.content, "A pixel stores a numeric color value.");
+  assert.equal(parsed.widgets[0]?.id, "pixel-check");
+  assert.equal(parsed.widgets[0]?.question, "What does a pixel store?");
 });
 
 test("shouldShowCourseChatInterruptedWarning only flags the latest incomplete tutor turn", () => {
