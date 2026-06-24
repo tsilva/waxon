@@ -1714,6 +1714,7 @@ export default function LearnPageClient({
         .some((value) => value.toLowerCase().includes(normalizedQuery)),
     );
   }, [courseSearchQuery, sortedCourses]);
+  const isCourseChatActive = Boolean(selectedCourse);
 
   return (
     <main className="page page-learn-active">
@@ -1730,7 +1731,9 @@ export default function LearnPageClient({
         />
 
         <section
-          className="learn-stage"
+          className={`learn-stage ${
+            isCourseChatActive ? "learn-stage-course" : ""
+          }`}
           id="learn-panel"
           role="tabpanel"
           aria-labelledby="learn-tab"
@@ -1753,8 +1756,10 @@ export default function LearnPageClient({
           {!isBooting ? (
             <div
               className={`learn-chat-layout ${
-                selectedCourse || draftCourseToc
-                  ? ""
+                selectedCourse
+                  ? "learn-chat-layout-course"
+                  : draftCourseToc
+                    ? ""
                   : showCourseList
                     ? "learn-chat-layout-course-list"
                     : "learn-chat-layout-empty"

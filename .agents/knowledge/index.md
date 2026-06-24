@@ -11,6 +11,7 @@ This is the shared, repo-local OKF knowledge bundle for agents working on Waxon.
 * [Project goal and product boundaries](/codebase/project-goal-and-boundaries.md) - Waxon's durable learning goal and constraints future changes must preserve.
 * [Application architecture overview](/codebase/application-architecture-overview.md) - High-level Next.js, database, auth, queue, and LLM grading flow.
 * [Local development runbook](/runbooks/local-development.md) - Setup, environment variables, commands, and dev-server behavior.
+* [Admin trace purge](/runbooks/admin-trace-purge.md) - Clear persisted admin trace data from Neon while preserving learning history.
 * [Project knowledge bundle decision](/decisions/project-knowledge-bundle.md) - Decision to keep shared agent memory in `.agents/knowledge/`.
 
 ## Directories
