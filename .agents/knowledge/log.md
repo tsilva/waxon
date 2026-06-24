@@ -9,3 +9,7 @@
 ## 2026-06-14
 
 * **Runbook**: Added the verified local audit auth build/start commands and static-first hydration testing note from the Lighthouse optimization pass.
+
+## 2026-06-24
+
+* **Experiment**: Recorded Learn prompt-cache measurements from real OpenRouter turns; `google/gemini-2.5-flash` replaced `google/gemini-3.1-flash-lite` as the Learn default after verified cache writes/reads with preserved tutor output.

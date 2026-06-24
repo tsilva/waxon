@@ -48,10 +48,10 @@ Required for LLM grading:
 ```bash
 OPENROUTER_API_KEY=your-api-key
 LLM_MODEL=google/gemini-3.5-flash
-LLM_LEARN_MODEL=google/gemini-3.1-flash-lite
+LLM_LEARN_MODEL=google/gemini-2.5-flash
 ```
 
-`LLM_MODEL` is optional for generic chat/question generation. `LLM_LEARN_MODEL` is optional and controls Learn course intake, TOC, and tutor turns; it defaults to `google/gemini-3.1-flash-lite` and intentionally does not inherit `LLM_MODEL`. The app also accepts `LLM_API_KEY` if `OPENROUTER_API_KEY` is not set.
+`LLM_MODEL` is optional for generic chat/question generation. `LLM_LEARN_MODEL` is optional and controls Learn course intake, TOC, and tutor turns; it defaults to `google/gemini-2.5-flash` and intentionally does not inherit `LLM_MODEL`. The app also accepts `LLM_API_KEY` if `OPENROUTER_API_KEY` is not set.
 
 For deployed auth, configure Clerk:
 
