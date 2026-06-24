@@ -42,6 +42,10 @@ type LlmCall = {
   callType: CallType;
   inputTokens: number;
   outputTokens: number;
+  cachedPromptTokens?: number;
+  uncachedPromptTokens?: number;
+  cacheWriteTokens?: number;
+  cacheHitPercent?: number | null;
   cost: number;
   latencyMs: number;
   status: TraceStatus;
@@ -101,6 +105,13 @@ type RequestMarkdownMessage = {
   content: string;
 };
 
+type TraceCacheStats = {
+  cachedPromptTokens: number;
+  uncachedPromptTokens: number;
+  cacheWriteTokens: number;
+  cacheHitPercent: number | null;
+};
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MAX_TRACE_INTERACTIONS = 200;
 const adminSkeletonMetricRows = Array.from({ length: 4 }, (_, index) => index);
@@ -144,6 +155,14 @@ function formatCurrency(value: number): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return "0%";
+  }
+
+  return `${value.toFixed(value > 0 && value < 10 ? 1 : 0)}%`;
 }
 
 function formatStartedAt(value: string): string {
@@ -467,6 +486,106 @@ function parseJsonPayload(payload: string): unknown | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  const numberValue =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseFloat(value)
+        : Number.NaN;
+
+  return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function readNumberProperty(source: unknown, key: string): number | null {
+  if (!isRecord(source)) {
+    return null;
+  }
+
+  return toFiniteNumber(source[key]);
+}
+
+function firstFiniteNumber(...values: Array<unknown>): number | null {
+  for (const value of values) {
+    const numberValue = toFiniteNumber(value);
+
+    if (numberValue !== null) {
+      return numberValue;
+    }
+  }
+
+  return null;
+}
+
+function normalizeTokenCount(value: number | null): number | null {
+  return value !== null && value >= 0 ? Math.round(value) : null;
+}
+
+function findUsageRecord(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (isRecord(value.usage)) {
+    return value.usage;
+  }
+
+  if (isRecord(value.body)) {
+    return findUsageRecord(value.body);
+  }
+
+  return null;
+}
+
+function extractUsageFromPayload(payload: string): Record<string, unknown> | null {
+  return findUsageRecord(parseJsonPayload(payload));
+}
+
+function traceCacheStatsForCall(
+  call: LlmCall,
+  responsePayload: string,
+): TraceCacheStats {
+  const usage = extractUsageFromPayload(responsePayload);
+  const promptTokenDetails = usage?.prompt_tokens_details;
+  const promptTokens =
+    normalizeTokenCount(toFiniteNumber(usage?.prompt_tokens)) ?? call.inputTokens;
+  const cachedPromptTokens =
+    normalizeTokenCount(toFiniteNumber(call.cachedPromptTokens)) ??
+    normalizeTokenCount(
+      firstFiniteNumber(
+        readNumberProperty(promptTokenDetails, "cached_tokens"),
+        readNumberProperty(promptTokenDetails, "cache_read_tokens"),
+        usage?.cache_read_tokens,
+        usage?.cached_tokens,
+      ),
+    ) ??
+    0;
+  const cacheWriteTokens =
+    normalizeTokenCount(toFiniteNumber(call.cacheWriteTokens)) ??
+    normalizeTokenCount(
+      firstFiniteNumber(
+        usage?.cache_write_tokens,
+        usage?.cache_creation_input_tokens,
+        readNumberProperty(promptTokenDetails, "cache_write_tokens"),
+        readNumberProperty(promptTokenDetails, "cache_creation_input_tokens"),
+      ),
+    ) ??
+    0;
+  const uncachedPromptTokens =
+    normalizeTokenCount(toFiniteNumber(call.uncachedPromptTokens)) ??
+    Math.max(0, promptTokens - cachedPromptTokens);
+  const cacheHitPercent =
+    toFiniteNumber(call.cacheHitPercent) ??
+    (promptTokens > 0 ? (cachedPromptTokens / promptTokens) * 100 : null);
+
+  return {
+    cachedPromptTokens,
+    uncachedPromptTokens,
+    cacheWriteTokens,
+    cacheHitPercent,
+  };
 }
 
 function normalizeJsonPayload(payload: string): {
@@ -1344,6 +1463,17 @@ export function AdminPageClient({
     );
   }, [selectedCallContext]);
 
+  const selectedCacheStats = useMemo(() => {
+    if (!selectedCallContext) {
+      return null;
+    }
+
+    return traceCacheStatsForCall(
+      selectedCallContext.call,
+      selectedResponsePayload,
+    );
+  }, [selectedCallContext, selectedResponsePayload]);
+
   const selectedRequestMarkdownMessages = useMemo(() => {
     if (!selectedRequestPayload) {
       return [];
@@ -1772,6 +1902,27 @@ export function AdminPageClient({
                 <strong>
                   {formatNumber(selectedCallContext.call.inputTokens)} in ·{" "}
                   {formatNumber(selectedCallContext.call.outputTokens)} out
+                </strong>
+              </div>
+              <div>
+                <span>Cache read</span>
+                <strong>
+                  {formatNumber(selectedCacheStats?.cachedPromptTokens ?? 0)} cached
+                </strong>
+                <small>
+                  {formatNumber(selectedCacheStats?.uncachedPromptTokens ?? 0)} uncached
+                </small>
+              </div>
+              <div>
+                <span>Cache write</span>
+                <strong>
+                  {formatNumber(selectedCacheStats?.cacheWriteTokens ?? 0)} tokens
+                </strong>
+              </div>
+              <div>
+                <span>Cache hit</span>
+                <strong>
+                  {formatPercent(selectedCacheStats?.cacheHitPercent ?? null)}
                 </strong>
               </div>
               <div>

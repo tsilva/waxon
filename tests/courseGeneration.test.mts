@@ -26,6 +26,7 @@ import {
 } from "../app/lib/courseQuestionAttemptParsing.ts";
 import { requireCourseMilestoneMastery } from "../app/lib/courseProgress.ts";
 import { normalizePartialCourseToc } from "../app/lib/courseTocStream.ts";
+import { DEFAULT_OPENROUTER_LEARN_MODEL } from "../app/lib/openRouter.ts";
 
 test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for empty output", () => {
   const result = ensureCourseChatTurnHasLearnerQuestion({
@@ -757,7 +758,6 @@ test("generateCourseToc keeps static instructions before dynamic topic", async (
   try {
     const toc = await generateCourseToc({
       apiKey: "test-key",
-      model: "google/gemini-3.5-flash",
       userId: "user_1",
       topic: "Proximal Policy Optimization (PPO) for beginners",
     });
@@ -766,6 +766,7 @@ test("generateCourseToc keeps static instructions before dynamic topic", async (
     assert.ok(requestBody);
 
     const capturedBody = requestBody as Record<string, unknown>;
+    assert.equal(capturedBody.model, DEFAULT_OPENROUTER_LEARN_MODEL);
     const messages = capturedBody.messages as Array<{
       role: string;
       content: string;
@@ -788,6 +789,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
   const encoder = new TextEncoder();
   let requestBody: Record<string, unknown> | null = null;
   const deltas: string[] = [];
+  let pendingWidgetToolDeltas = 0;
   const course = {
     id: "course_1",
     userId: "user_1",
@@ -891,6 +893,9 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
       onTextDelta(delta) {
         deltas.push(delta);
       },
+      onQuestionWidgetToolDelta() {
+        pendingWidgetToolDeltas += 1;
+      },
     });
 
     assert.ok(requestBody);
@@ -966,6 +971,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
     assert.deepEqual(deltas, [
       "PPO is a policy-gradient method that updates behavior carefully.",
     ]);
+    assert.equal(pendingWidgetToolDeltas, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

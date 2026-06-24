@@ -37,8 +37,8 @@ import {
 } from "@/app/lib/courseQuestionWidget";
 import type { CourseToc } from "@/app/lib/courseContent";
 import {
-  getOpenRouterChatConfig,
   getOpenRouterEvaluationConfig,
+  getOpenRouterLearnConfig,
 } from "@/app/lib/openRouter";
 
 export const runtime = "nodejs";
@@ -243,7 +243,7 @@ export async function POST(request: Request) {
     return topic.response;
   }
 
-  const openRouterConfig = getOpenRouterChatConfig();
+  const openRouterConfig = getOpenRouterLearnConfig();
   const openRouterEvaluationConfig = getOpenRouterEvaluationConfig();
 
   if (!openRouterConfig.ok) {
@@ -290,6 +290,7 @@ export async function POST(request: Request) {
         let intakeDecisionMetrics: CourseMessageMetrics | null = null;
         let answerDecisionMetrics: CourseMessageMetrics | null = null;
         let assistantTurnMetrics: CourseMessageMetrics | null = null;
+        let sentQuestionWidgetPending = false;
         const requestStartedAt = Date.now();
         const latencyMetrics: CourseChatLatencyMetrics = {
           answer_decision_ms: null,
@@ -563,9 +564,20 @@ export async function POST(request: Request) {
                 Date.now() - requestStartedAt;
               send("delta", { delta });
             },
+            onQuestionWidgetToolDelta() {
+              if (sentQuestionWidgetPending) {
+                return;
+              }
+
+              sentQuestionWidgetPending = true;
+              send("question_widget_pending", {});
+            },
           });
           assistantContent = assistantTurn.content;
           assistantToolCalls = assistantTurn.toolCalls;
+          if (assistantToolCalls.length > 0) {
+            send("question_widget", { toolCalls: assistantToolCalls });
+          }
           latencyMetrics.chat_stream_ms = Date.now() - chatStreamStartedAt;
 
           if (finalCoursePromise) {

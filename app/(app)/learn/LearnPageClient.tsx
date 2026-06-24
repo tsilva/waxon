@@ -38,6 +38,7 @@ import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import {
   collectCourseQuestionWidgetAnswers,
   courseQuestionWidgetsFromToolCalls,
+  normalizeCourseQuestionWidgetToolCalls,
   parseCourseQuestionWidgets,
   parseCourseQuestionWidgetAnswer,
   serializeCourseQuestionWidgetAnswer,
@@ -99,6 +100,7 @@ type LearnChatMessage = {
   metrics?: CourseMessageMetrics | null;
   status?: string;
   pendingEvaluation?: boolean;
+  hasPendingQuestionWidget?: boolean;
   widgetAnswerDetails?: LearnWidgetAnswerDetails | null;
   interrupted?: boolean;
   createdAt?: number;
@@ -779,6 +781,30 @@ function LearnLoadingPlaceholders({
   );
 }
 
+function LearnQuestionWidgetPlaceholder() {
+  return (
+    <article
+      className="learn-question-widget learn-question-widget-pending"
+      aria-label="Loading question"
+      aria-busy="true"
+    >
+      <span className="sr-only">Loading question</span>
+      <span className="admin-skeleton-line learn-question-widget-pending-prompt" />
+      <div className="learn-question-choice-grid" aria-hidden="true">
+        {Array.from({ length: 3 }, (_, index) => (
+          <div
+            className="learn-question-choice learn-question-choice-pending"
+            key={index}
+          >
+            <span className="learn-question-choice-pending-label" />
+            <span className="admin-skeleton-line learn-question-choice-pending-text" />
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
 function parseSseEvent(rawEvent: string): { event: string; data: unknown } | null {
   const lines = rawEvent.split("\n");
   const event =
@@ -1101,6 +1127,37 @@ export default function LearnPageClient({
       messages.map((message) =>
         message.id === messageId
           ? { ...message, content: `${message.content}${delta}` }
+          : message,
+      ),
+    );
+  }
+
+  function markAssistantQuestionWidgetPending(messageId: string) {
+    setChatMessages((messages) =>
+      messages.map((message) =>
+        message.id === messageId
+          ? { ...message, hasPendingQuestionWidget: true }
+          : message,
+      ),
+    );
+  }
+
+  function setAssistantQuestionWidgetToolCalls(
+    messageId: string,
+    toolCalls: CourseQuestionWidgetToolCall[],
+  ) {
+    if (toolCalls.length === 0) {
+      return;
+    }
+
+    setChatMessages((messages) =>
+      messages.map((message) =>
+        message.id === messageId
+          ? {
+              ...message,
+              toolCalls,
+              hasPendingQuestionWidget: false,
+            }
           : message,
       ),
     );
@@ -1489,6 +1546,15 @@ export default function LearnPageClient({
             if (typeof data.delta === "string") {
               appendAssistantDelta(assistantMessageId, data.delta);
             }
+          } else if (parsed?.event === "question_widget_pending") {
+            markAssistantQuestionWidgetPending(assistantMessageId);
+          } else if (parsed?.event === "question_widget") {
+            const data = parsed.data as { toolCalls?: unknown };
+            const toolCalls = normalizeCourseQuestionWidgetToolCalls(
+              data.toolCalls,
+            );
+
+            setAssistantQuestionWidgetToolCalls(assistantMessageId, toolCalls);
           } else if (parsed?.event === "evaluation_pending") {
             insertPendingQuestionEvaluation(assistantMessageId);
           } else if (parsed?.event === "evaluation") {
@@ -1880,6 +1946,9 @@ export default function LearnPageClient({
                         ...toolCallWidgets,
                         ...parsedWidgets.widgets,
                       ];
+                      const hasPendingQuestionWidget =
+                        Boolean(message.hasPendingQuestionWidget) &&
+                        questionWidgets.length === 0;
                       const visibleMessageContent = parsedWidgets.content;
                       const messageMetrics =
                         message.metrics ?? parsedMessage.metrics;
@@ -1984,6 +2053,7 @@ export default function LearnPageClient({
                               </div>
                             </div>
                           ) : !shouldShowQuestionWidgets ? (
+                            !hasPendingQuestionWidget &&
                             !isWaitingForQuestionWidgetEvaluation(
                               chatMessages,
                               messageIndex,
@@ -2007,8 +2077,12 @@ export default function LearnPageClient({
                               </span>
                             ) : null
                           ) : null}
-                          {shouldShowQuestionWidgets ? (
+                          {shouldShowQuestionWidgets ||
+                          hasPendingQuestionWidget ? (
                             <div className="learn-question-widget-stack">
+                              {hasPendingQuestionWidget ? (
+                                <LearnQuestionWidgetPlaceholder />
+                              ) : null}
                               {questionWidgets.map((widget) => (
                                 <LearnQuestionWidgetCard
                                   key={`${message.id}-${widget.id}`}

@@ -2767,6 +2767,7 @@ textarea {
 
 .admin-call-modal {
   width: min(1040px, 100%);
+  overflow-x: hidden;
 }
 
 .generator-modal {
@@ -5133,10 +5134,23 @@ textarea {
   white-space: nowrap;
 }
 
+.admin-call-modal-meta small {
+  min-width: 0;
+  color: var(--muted-strong);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 680;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .admin-call-payload-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  min-width: 0;
   padding-top: 16px;
 }
 
@@ -5156,6 +5170,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
   min-height: 44px;
   border-bottom: 1px solid rgb(227 218 196 / 64%);
   padding: 0 13px;
@@ -5171,6 +5186,7 @@ textarea {
 }
 
 .admin-call-payload-heading h3 {
+  min-width: 0;
   margin: 0;
   color: var(--ink);
   font-size: 13px;
@@ -5211,11 +5227,23 @@ textarea {
 }
 
 .admin-call-payload-toggle button:hover,
-.admin-call-payload-toggle button:focus-visible,
-.admin-call-payload-toggle-active {
+.admin-call-payload-toggle button:focus-visible {
   background: var(--accent-soft);
   color: var(--accent-hover);
   outline: 0;
+}
+
+.admin-call-payload-toggle button.admin-call-payload-toggle-active,
+.admin-call-payload-toggle button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fffaf0;
+  box-shadow: 0 1px 2px rgb(86 68 56 / 12%);
+}
+
+.admin-call-payload-toggle button.admin-call-payload-toggle-active:focus-visible,
+.admin-call-payload-toggle button[aria-pressed="true"]:focus-visible {
+  outline: 2px solid rgb(166 124 82 / 36%);
+  outline-offset: 1px;
 }
 
 .admin-call-payload-pre,
@@ -5224,7 +5252,10 @@ textarea {
   max-height: min(430px, 42vh);
   margin: 0;
   padding: 14px;
-  overflow: auto;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
 }
 
 .admin-call-payload-pre {
@@ -5264,6 +5295,7 @@ textarea {
   color: var(--ink-soft);
   font-size: 14px;
   line-height: 1.5;
+  word-break: break-word;
 }
 
 .admin-call-request-markdown {
@@ -5290,6 +5322,7 @@ textarea {
   max-height: none;
   padding: 0;
   overflow: visible;
+  overflow-wrap: anywhere;
 }
 
 .admin-call-markdown .markdown-paragraph {
@@ -5313,13 +5346,16 @@ textarea {
   border: 1px solid rgb(227 218 196 / 70%);
   border-radius: 8px;
   padding: 12px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: rgb(255 255 255 / 48%);
   color: var(--ink-soft);
   font-family: var(--font-ui);
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .admin-loading-stage {
@@ -6283,6 +6319,16 @@ textarea {
   background: rgb(247 242 231 / 78%);
 }
 
+.learn-question-widget-pending {
+  min-height: 218px;
+  pointer-events: none;
+}
+
+.learn-question-widget-pending-prompt {
+  width: min(520px, 84%);
+  height: 15px;
+}
+
 .learn-question-widget-prompt {
   margin: 0;
   color: var(--ink);
@@ -6346,6 +6392,19 @@ textarea {
 .learn-question-choice:disabled {
   cursor: not-allowed;
   opacity: 0.62;
+}
+
+.learn-question-choice-pending {
+  cursor: default;
+}
+
+.learn-question-choice-pending-label {
+  background: rgb(166 124 82 / 10%);
+}
+
+.learn-question-choice-pending-text {
+  width: min(560px, 78%);
+  height: 13px;
 }
 
 .learn-question-widget-answered .learn-question-choice:disabled {

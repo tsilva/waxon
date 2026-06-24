@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
+  DEFAULT_OPENROUTER_LEARN_MODEL,
   extractAffordableOpenRouterMaxTokens,
   getOpenRouterEvaluationModel,
   getOpenRouterEvaluationReasoning,
+  getOpenRouterLearnModel,
   openRouterChatCompletion,
   openRouterEmbeddings,
 } from "../app/lib/openRouter.ts";
@@ -115,6 +117,33 @@ test("getOpenRouterEvaluationModel defaults to Mercury and allows env override",
   }
 });
 
+test("getOpenRouterLearnModel defaults to Gemini Flash Lite and ignores global chat model", () => {
+  const originalChatModel = process.env.LLM_MODEL;
+  const originalLearnModel = process.env.LLM_LEARN_MODEL;
+
+  try {
+    process.env.LLM_MODEL = "openai/gpt-5.5";
+    delete process.env.LLM_LEARN_MODEL;
+
+    assert.equal(getOpenRouterLearnModel(), DEFAULT_OPENROUTER_LEARN_MODEL);
+
+    process.env.LLM_LEARN_MODEL = "google/gemini-3.1-flash-lite";
+    assert.equal(getOpenRouterLearnModel(), "google/gemini-3.1-flash-lite");
+  } finally {
+    if (originalChatModel === undefined) {
+      delete process.env.LLM_MODEL;
+    } else {
+      process.env.LLM_MODEL = originalChatModel;
+    }
+
+    if (originalLearnModel === undefined) {
+      delete process.env.LLM_LEARN_MODEL;
+    } else {
+      process.env.LLM_LEARN_MODEL = originalLearnModel;
+    }
+  }
+});
+
 test("getOpenRouterEvaluationReasoning disables Mercury reasoning", () => {
   assert.deepEqual(getOpenRouterEvaluationReasoning("inception/mercury-2"), {
     effort: "none",
@@ -207,6 +236,10 @@ test("openRouterChatCompletion records actual request and response payloads", as
         choices: [{ message: { content: "{\"score\":10}" } }],
         usage: {
           prompt_tokens: 12,
+          prompt_tokens_details: {
+            cached_tokens: 8,
+            cache_write_tokens: 2,
+          },
           completion_tokens: 4,
           total_tokens: 16,
           cost: 0.001,
@@ -242,6 +275,10 @@ test("openRouterChatCompletion records actual request and response payloads", as
   assert.equal(trace.status, "ok");
   assert.equal(trace.calls[0]?.operation, "evaluate_answer");
   assert.equal(trace.calls[0]?.inputTokens, 12);
+  assert.equal(trace.calls[0]?.cachedPromptTokens, 8);
+  assert.equal(trace.calls[0]?.uncachedPromptTokens, 4);
+  assert.equal(trace.calls[0]?.cacheWriteTokens, 2);
+  assert.equal(trace.calls[0]?.cacheHitPercent, (8 / 12) * 100);
   assert.match(trace.calls[0]?.requestPayload ?? "", /hello/);
   assert.match(trace.calls[0]?.responsePayload ?? "", /prompt_tokens/);
 });
@@ -403,6 +440,7 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
 test("openRouterChatCompletion preserves streamed tool calls", async () => {
   const originalFetch = globalThis.fetch;
   const encoder = new TextEncoder();
+  const streamedToolCallDeltas: unknown[] = [];
 
   globalThis.fetch = async () =>
     new Response(
@@ -479,8 +517,12 @@ test("openRouterChatCompletion preserves streamed tool calls", async () => {
         model: "google/gemini-3.5-flash",
         messages: [{ role: "user", content: "hello" }],
       },
+      onToolCallDelta(toolCalls) {
+        streamedToolCallDeltas.push(toolCalls);
+      },
     });
 
+    assert.equal(streamedToolCallDeltas.length, 2);
     assert.deepEqual(body.choices?.[0]?.message?.tool_calls, [
       {
         id: "call_widget",
