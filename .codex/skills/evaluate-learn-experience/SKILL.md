@@ -10,8 +10,9 @@ Use this skill to run a tight product-quality loop over Waxon's Learn experience
 ## Operating Rules
 
 - Read `.agents/knowledge/index.md`, then the relevant Learn architecture notes before changing code.
+- At the start of every substantive Learn evaluation or tuning run, create a Codex goal for the concrete objective unless an active goal already exists for the same work. Mark the goal complete only after the evaluation, kept changes, verification, knowledge updates, and final report are done; mark it blocked only under the platform's repeated-blocker rule.
 - Use the real app flow, preferably in the browser. Start the dev server with `pnpm dev --port auto` and report the printed URL. If a server is already running, do not kill it.
-- Use the official OpenAI Browser Use plugin for browser testing unless a more specific repo instruction overrides it.
+- Use the native Codex Desktop in-app Browser for browser testing unless a more specific repo instruction overrides it. Load the bundled Browser skill/runtime, initialize `browser-client`, select the `iab` browser, and drive it through its documented Playwright/CUA APIs before using fallbacks.
 - Keep production and live data untouched unless the user explicitly asks for live validation or deploy work.
 - Treat speed and teaching quality as a joint target. Do not accept a faster flow that worsens factual accuracy, beginner clarity, or mastery gating.
 - Make small, reversible prompt/model/flow changes. Preserve existing tests and add targeted tests for durable contracts.
@@ -34,6 +35,7 @@ Use this skill to run a tight product-quality loop over Waxon's Learn experience
    - Start a new course from `/learn`.
    - Answer at least 4 tutor questions per topic.
    - Use the inline question widgets when present; do not bypass the user-facing flow by calling APIs directly unless debugging.
+   - When judging rendered tutor text, wait for the final SSE `done` result or the stored-message replacement after streaming. Transient streamed deltas can include fragments that server repair removes before persistence.
    - Save screenshots or concise notes only when they reveal a concrete UX, teaching, or latency issue.
 
 4. Measure latency from the user's perspective.
