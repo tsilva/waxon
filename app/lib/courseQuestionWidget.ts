@@ -17,6 +17,12 @@ export type CourseQuestionWidget =
       choices: CourseQuestionWidgetChoice[];
     };
 
+export type CourseQuestionWidgetAnswerDetails = {
+  question: string | null;
+  widgetId: string | null;
+  answer: string;
+};
+
 const QUESTION_WIDGET_COMMENT_PATTERN =
   /<!--\s*waxon:question-widget\s+([\s\S]*?)\s*-->/gu;
 const TRAILING_PARTIAL_QUESTION_WIDGET_COMMENT_PATTERN =
@@ -176,6 +182,16 @@ export function parseCourseQuestionWidgetAnswer(content: string): {
     widgetId,
     answer,
   };
+}
+
+export function collectCourseQuestionWidgetAnswers(
+  messages: Array<{ content: string }>,
+): CourseQuestionWidgetAnswerDetails[] {
+  return messages.flatMap((message) => {
+    const parsedAnswer = parseCourseQuestionWidgetAnswer(message.content);
+
+    return parsedAnswer?.answer ? [parsedAnswer] : [];
+  });
 }
 
 function sanitizeCommentText(value: string): string {

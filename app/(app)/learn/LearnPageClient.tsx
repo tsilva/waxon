@@ -35,10 +35,12 @@ import {
 import { shouldShowCourseChatInterruptedWarning } from "@/app/lib/courseChatTurn";
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import {
+  collectCourseQuestionWidgetAnswers,
   parseCourseQuestionWidgets,
   parseCourseQuestionWidgetAnswer,
   serializeCourseQuestionWidgetAnswer,
   stripAnsweredQuestionMetadata,
+  type CourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidget,
 } from "@/app/lib/courseQuestionWidget";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
@@ -254,19 +256,34 @@ function LearnPendingEvaluationCard({
 function LearnQuestionWidgetCard({
   widget,
   disabled,
+  answeredDetails,
   onSubmit,
 }: {
   widget: CourseQuestionWidget;
   disabled: boolean;
+  answeredDetails?: CourseQuestionWidgetAnswerDetails | null;
   onSubmit: (widget: CourseQuestionWidget, answer: string) => void;
 }) {
   const [answer, setAnswer] = useState("");
-  const canSubmit = answer.trim().length > 0 && !disabled;
+  const isAnswered = Boolean(answeredDetails?.answer);
+  const canSubmit = answer.trim().length > 0 && !disabled && !isAnswered;
+  const cardClassName = `learn-question-widget${isAnswered ? " learn-question-widget-answered" : ""}`;
+  const answeredAnswer = answeredDetails?.answer?.trim() ?? "";
+  const answeredAnswerBlock = answeredAnswer ? (
+    <div className="learn-question-widget-answer">
+      <span className="previous-field-label">Your answer</span>
+      <MarkdownContent
+        className="previous-answer"
+        enableMath
+        text={answeredAnswer}
+      />
+    </div>
+  ) : null;
 
   if (widget.type === "multiple_choice") {
     return (
       <section
-        className="learn-question-widget learn-question-widget-choice"
+        className={`${cardClassName} learn-question-widget-choice`}
         aria-label={widget.question}
       >
         <MarkdownInline
@@ -279,7 +296,7 @@ function LearnQuestionWidgetCard({
           {widget.choices.map((choice) => (
             <button
               className="learn-question-choice"
-              disabled={disabled}
+              disabled={disabled || isAnswered}
               key={`${widget.id}-${choice.id}`}
               type="button"
               onClick={() => {
@@ -296,6 +313,7 @@ function LearnQuestionWidgetCard({
             </button>
           ))}
         </div>
+        {answeredAnswerBlock}
       </section>
     );
   }
@@ -313,7 +331,7 @@ function LearnQuestionWidgetCard({
 
   return (
     <form
-      className="learn-question-widget learn-question-widget-free-text"
+      className={`${cardClassName} learn-question-widget-free-text`}
       aria-label={widget.question}
       onSubmit={handleSubmit}
     >
@@ -329,7 +347,7 @@ function LearnQuestionWidgetCard({
           value={answer}
           placeholder={widget.placeholder ?? "Type your answer here..."}
           rows={3}
-          disabled={disabled}
+          disabled={disabled || isAnswered}
           aria-label="Answer question"
           onChange={(event) => setAnswer(event.currentTarget.value)}
           onKeyDown={(event) => {
@@ -354,6 +372,7 @@ function LearnQuestionWidgetCard({
           <ArrowUp aria-hidden="true" />
         </button>
       </div>
+      {answeredAnswerBlock}
     </form>
   );
 }
@@ -433,11 +452,42 @@ function findPreviousWidgetAnswer(
   return null;
 }
 
+function findLaterWidgetAnswers(
+  messages: LearnChatMessage[],
+  messageIndex: number,
+) {
+  const answerWindow: LearnChatMessage[] = [];
+
+  for (const laterMessage of messages.slice(messageIndex + 1)) {
+    if (
+      laterMessage.role === "assistant" &&
+      !laterMessage.pendingEvaluation &&
+      !isQuestionEvaluationSnippet(laterMessage.content)
+    ) {
+      break;
+    }
+
+    answerWindow.push(laterMessage);
+  }
+
+  const answers = collectCourseQuestionWidgetAnswers(answerWindow);
+  const answersByWidgetId = new Map<string, CourseQuestionWidgetAnswerDetails>();
+
+  for (const answer of answers) {
+    if (answer.widgetId) {
+      answersByWidgetId.set(answer.widgetId, answer);
+    }
+  }
+
+  return answersByWidgetId;
+}
+
 function shouldShowLearnQuestionWidgets(input: {
   messages: LearnChatMessage[];
   message: LearnChatMessage;
   messageIndex: number;
   widgetCount: number;
+  answeredWidgetCount: number;
   hasEvaluationSnippet: boolean;
 }) {
   if (
@@ -446,6 +496,10 @@ function shouldShowLearnQuestionWidgets(input: {
     input.hasEvaluationSnippet
   ) {
     return false;
+  }
+
+  if (input.answeredWidgetCount > 0) {
+    return true;
   }
 
   return !input.messages
@@ -1737,6 +1791,14 @@ export default function LearnPageClient({
                           : null;
                       const messageContent =
                         evaluationSnippet?.content ?? visibleMessageContent;
+                      const laterWidgetAnswers =
+                        message.role === "assistant" &&
+                        parsedWidgets.widgets.length > 0
+                          ? findLaterWidgetAnswers(chatMessages, messageIndex)
+                          : new Map<
+                              string,
+                              CourseQuestionWidgetAnswerDetails
+                            >();
                       if (evaluationSnippet) {
                         const fallbackQuestion = findPreviousLearnerQuestion(
                           chatMessages,
@@ -1784,6 +1846,9 @@ export default function LearnPageClient({
                           message,
                           messageIndex,
                           widgetCount: parsedWidgets.widgets.length,
+                          answeredWidgetCount: parsedWidgets.widgets.filter(
+                            (widget) => laterWidgetAnswers.has(widget.id),
+                          ).length,
                           hasEvaluationSnippet: Boolean(evaluationSnippet),
                         });
 
@@ -1848,7 +1913,13 @@ export default function LearnPageClient({
                                 <LearnQuestionWidgetCard
                                   key={`${message.id}-${widget.id}`}
                                   widget={widget}
-                                  disabled={isStreaming}
+                                  disabled={
+                                    isStreaming ||
+                                    laterWidgetAnswers.has(widget.id)
+                                  }
+                                  answeredDetails={laterWidgetAnswers.get(
+                                    widget.id,
+                                  )}
                                   onSubmit={submitQuestionWidget}
                                 />
                               ))}

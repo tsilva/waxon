@@ -8,6 +8,7 @@ import {
 } from "../app/lib/courseChatTurn.ts";
 import { generateCourseAnswerDecision } from "../app/lib/courseGeneration.ts";
 import {
+  collectCourseQuestionWidgetAnswers,
   parseCourseQuestionWidgetAnswer,
   parseCourseQuestionWidgets,
   serializeCourseQuestionWidget,
@@ -883,6 +884,34 @@ test("parseCourseQuestionWidgetAnswer reads hidden question metadata", () => {
     answer:
       "B) The model explains about 80% of the variation in the outcome values.",
   });
+});
+
+test("collectCourseQuestionWidgetAnswers keeps answered widget IDs for Learn history", () => {
+  const widget = {
+    type: "free_text" as const,
+    id: "ppo-loop-check",
+    question: "What role does reward play in the agent-environment loop?",
+    placeholder: "Type your answer here...",
+  };
+  const answers = collectCourseQuestionWidgetAnswers([
+    {
+      content: "Ordinary chat message",
+    },
+    {
+      content: serializeCourseQuestionWidgetAnswer({
+        widget,
+        answer: "Reward is the feedback signal after an action.",
+      }),
+    },
+  ]);
+
+  assert.deepEqual(answers, [
+    {
+      question: widget.question,
+      widgetId: widget.id,
+      answer: "Reward is the feedback signal after an action.",
+    },
+  ]);
 });
 
 test("parseCourseQuestionAttemptToolResult preserves inline markdown from tutor question", () => {
