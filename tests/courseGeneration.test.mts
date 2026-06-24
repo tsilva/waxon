@@ -692,7 +692,7 @@ test("generateCourseAnswerDecision sends compact widget prompt", async () => {
     assert.equal(capturedBody.max_tokens, 320);
     assert.equal(
       capturedBody.session_id,
-      "learn:user_1:course-answer-decision-v1",
+      "learn:user_1:course-answer-decision-v2",
     );
 
     const messages = capturedBody.messages as Array<{
@@ -920,7 +920,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
 
     assert.ok(requestBody);
     const capturedBody = requestBody as Record<string, unknown>;
-    assert.equal(capturedBody.session_id, "learn:user_1:course-chat-v2");
+    assert.equal(capturedBody.session_id, "learn:user_1:course-chat-v8");
     assert.deepEqual(
       (capturedBody as { tools?: unknown[] }).tools?.[0],
       {
@@ -995,7 +995,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
       String(userContent[0]?.text),
       /End every non-completion turn by calling render_question_widget/u,
     );
-    assert.ok(String(userContent[0]?.text).length > 3_500);
+    assert.ok(String(userContent[0]?.text).length > 21_000);
     assert.doesNotMatch(String(userContent[0]?.text), /Course title: PPO/u);
     assert.doesNotMatch(String(userContent[0]?.text), /Recent conversation JSON/u);
     assert.match(String(userContent[1]?.text), /Course title: PPO/u);
@@ -1024,7 +1024,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
   }
 });
 
-test("streamCourseChatTurn keeps the same Gemini session key across Learn courses", async () => {
+test("streamCourseChatTurn keeps the same cache-capable session key across Learn courses", async () => {
   const originalFetch = globalThis.fetch;
   const encoder = new TextEncoder();
   const sessionIds: string[] = [];
@@ -1113,7 +1113,7 @@ test("streamCourseChatTurn keeps the same Gemini session key across Learn course
 
     assert.equal(sessionIds.length, 2);
     assert.equal(sessionIds[0], sessionIds[1]);
-    assert.equal(sessionIds[0], "learn:user_1:course-chat-v2");
+    assert.equal(sessionIds[0], "learn:user_1:course-chat-v8");
   } finally {
     globalThis.fetch = originalFetch;
   }

@@ -129,7 +129,7 @@ test("extractAffordableOpenRouterMaxTokens ignores unrelated errors", () => {
   );
 });
 
-test("getOpenRouterChatModel defaults to Gemini 3.1 Flash Lite and allows env override", () => {
+test("getOpenRouterChatModel defaults to Claude Haiku and allows env override", () => {
   const originalModel = process.env.LLM_MODEL;
 
   try {
@@ -147,7 +147,7 @@ test("getOpenRouterChatModel defaults to Gemini 3.1 Flash Lite and allows env ov
   }
 });
 
-test("getOpenRouterEvaluationModel defaults to Gemini 3.1 Flash Lite and allows env override", () => {
+test("getOpenRouterEvaluationModel defaults to Mercury and allows env override", () => {
   const originalModel = process.env.LLM_EVALUATION_MODEL;
 
   try {
@@ -168,7 +168,7 @@ test("getOpenRouterEvaluationModel defaults to Gemini 3.1 Flash Lite and allows 
   }
 });
 
-test("getOpenRouterLearnModel defaults to Gemini 3.1 Flash Lite and ignores global chat model", () => {
+test("getOpenRouterLearnModel defaults to Claude Haiku and ignores global chat model", () => {
   const originalChatModel = process.env.LLM_MODEL;
   const originalLearnModel = process.env.LLM_LEARN_MODEL;
 
@@ -178,8 +178,8 @@ test("getOpenRouterLearnModel defaults to Gemini 3.1 Flash Lite and ignores glob
 
     assert.equal(getOpenRouterLearnModel(), DEFAULT_OPENROUTER_LEARN_MODEL);
 
-    process.env.LLM_LEARN_MODEL = "google/gemini-2.5-flash";
-    assert.equal(getOpenRouterLearnModel(), "google/gemini-2.5-flash");
+    process.env.LLM_LEARN_MODEL = "google/gemini-3.1-flash-lite";
+    assert.equal(getOpenRouterLearnModel(), "google/gemini-3.1-flash-lite");
   } finally {
     if (originalChatModel === undefined) {
       delete process.env.LLM_MODEL;
