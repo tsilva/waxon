@@ -392,7 +392,9 @@ function openRouterPromptContent(input: {
     return input.text;
   }
 
-  return input.cacheable ? [cacheableTextBlock(input.text)] : [textBlock(input.text)];
+  return input.cacheable
+    ? [cacheableTextBlock(input.text)]
+    : [textBlock(input.text)];
 }
 
 function openRouterPromptParts(input: {
@@ -416,6 +418,29 @@ function courseChatSessionId(input: {
 }): string {
   void input.course;
   return `learn:${input.userId}:course-chat-v2`.slice(0, 256);
+}
+
+function courseAnswerDecisionSessionId(input: { userId: string }): string {
+  return `learn:${input.userId}:course-answer-decision-v1`.slice(0, 256);
+}
+
+function courseAnswerDecisionSupportsCacheControl(model: string): boolean {
+  return (
+    supportsExplicitOpenRouterPromptCaching(model) ||
+    model.trim().toLowerCase() === "inception/mercury-2"
+  );
+}
+
+function courseAnswerDecisionPromptContent(input: {
+  model: string;
+  text: string;
+  cacheable?: boolean;
+}): string | OpenRouterTextContentBlock[] {
+  if (!courseAnswerDecisionSupportsCacheControl(input.model)) {
+    return input.text;
+  }
+
+  return input.cacheable ? [cacheableTextBlock(input.text)] : [textBlock(input.text)];
 }
 
 export function buildFallbackCourseToc(topic: string): CourseToc {
@@ -678,6 +703,16 @@ export async function generateCourseAnswerDecision(input: {
   const { page } = currentCourseMilestone(input.course);
   const answeredWidget = latestAnsweredWidgetContext(input.messages);
   const model = input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL;
+  const systemPrompt = [
+    "You are Waxon's fast answer grader.",
+    "Return strict compact JSON only.",
+    "If widget/question evidence is present, grade that answered question.",
+    "Make questionAttempt.question a self-contained recall prompt, not multiple-choice wording.",
+    "Score 0-10. Use mark_milestone_done only for clear transferable mastery of the milestone.",
+    "Keep answerSummary, conciseAnswer, correctAnswer, justification, and reason under 16 words each.",
+    "Record shape: {\"questionAttempt\":{\"toolCall\":\"record_course_question_attempt\",\"question\":\"...\",\"answer\":\"...\",\"answerSummary\":\"...\",\"conciseAnswer\":\"...\",\"correctAnswer\":\"...\",\"justification\":\"...\",\"score\":number},\"progressDecision\":{\"toolCall\":\"mark_milestone_done\"|\"continue_current_milestone\",\"reason\":\"...\"}}.",
+    "Skip shape: {\"questionAttempt\":{\"toolCall\":\"skip_course_question_attempt\",\"reason\":\"...\"},\"progressDecision\":{\"toolCall\":\"continue_current_milestone\",\"reason\":\"...\"}}.",
+  ].join(" ");
   const startedAt = Date.now();
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
@@ -689,32 +724,31 @@ export async function generateCourseAnswerDecision(input: {
     },
     body: {
       model,
+      session_id: courseAnswerDecisionSessionId({ userId: input.userId }),
       response_format: COURSE_JSON_RESPONSE_FORMAT,
       reasoning: getOpenRouterEvaluationReasoning(model),
       temperature: 0,
-      max_tokens: 450,
+      max_tokens: 320,
       messages: [
         {
           role: "system",
-          content: [
-            "You are Waxon's fast answer grader.",
-            "Return strict compact JSON only.",
-            "If widget/question evidence is present, grade that answered question.",
-            "Make questionAttempt.question a self-contained recall prompt, not multiple-choice wording.",
-            "Score 0-10. Use mark_milestone_done only for clear transferable mastery of the milestone.",
-            "Keep answerSummary, conciseAnswer, correctAnswer, justification, and reason under 16 words each.",
-            "Record shape: {\"questionAttempt\":{\"toolCall\":\"record_course_question_attempt\",\"question\":\"...\",\"answer\":\"...\",\"answerSummary\":\"...\",\"conciseAnswer\":\"...\",\"correctAnswer\":\"...\",\"justification\":\"...\",\"score\":number},\"progressDecision\":{\"toolCall\":\"mark_milestone_done\"|\"continue_current_milestone\",\"reason\":\"...\"}}.",
-            "Skip shape: {\"questionAttempt\":{\"toolCall\":\"skip_course_question_attempt\",\"reason\":\"...\"},\"progressDecision\":{\"toolCall\":\"continue_current_milestone\",\"reason\":\"...\"}}.",
-          ].join(" "),
+          content: courseAnswerDecisionPromptContent({
+            model,
+            text: systemPrompt,
+            cacheable: true,
+          }),
         },
         {
           role: "user",
-          content: buildCourseAnswerDecisionUserPrompt({
-            course: input.course,
-            page,
-            previousAssistantContent: previousAssistantMessage.content,
-            latestUserContent: latestUserMessage.content,
-            answeredWidget,
+          content: courseAnswerDecisionPromptContent({
+            model,
+            text: buildCourseAnswerDecisionUserPrompt({
+              course: input.course,
+              page,
+              previousAssistantContent: previousAssistantMessage.content,
+              latestUserContent: latestUserMessage.content,
+              answeredWidget,
+            }),
           }),
         },
       ],
