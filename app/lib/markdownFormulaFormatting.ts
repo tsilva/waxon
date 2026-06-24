@@ -22,6 +22,10 @@ function wrapFormula(formula: string, style: FormulaMarkdownStyle): string {
   return style === "math" ? `$${formula}$` : `\`${formula}\``;
 }
 
+function isPlainHyphenatedTerm(value: string): boolean {
+  return /^[A-Za-z]{2,}(?:-[A-Za-z]{2,})+$/u.test(value.trim());
+}
+
 function isMathLikeInlineCode(value: string): boolean {
   if (/[`$]/u.test(value) || /[@[\].]/u.test(value)) {
     return false;
@@ -76,7 +80,7 @@ function formatPlainFormulaSegment(
   const formatted = segment.replace(MATH_FORMULA_PATTERN, (match) => {
     const trimmed = match.trim();
 
-    if (!trimmed || trimmed.includes("`")) {
+    if (!trimmed || trimmed.includes("`") || isPlainHyphenatedTerm(trimmed)) {
       return match;
     }
 

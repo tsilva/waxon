@@ -36,12 +36,14 @@ import { shouldShowCourseChatInterruptedWarning } from "@/app/lib/courseChatTurn
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import {
   collectCourseQuestionWidgetAnswers,
+  courseQuestionWidgetsFromToolCalls,
   parseCourseQuestionWidgets,
   parseCourseQuestionWidgetAnswer,
   serializeCourseQuestionWidgetAnswer,
   stripAnsweredQuestionMetadata,
   type CourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidget,
+  type CourseQuestionWidgetToolCall,
 } from "@/app/lib/courseQuestionWidget";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
@@ -77,6 +79,7 @@ type StoredCourseChatMessage = {
   id?: string;
   role: "assistant" | "user";
   content: string;
+  toolCalls?: CourseQuestionWidgetToolCall[];
   createdAt?: number;
 };
 
@@ -90,6 +93,7 @@ type LearnChatMessage = {
   id: string;
   role: "assistant" | "user";
   content: string;
+  toolCalls?: CourseQuestionWidgetToolCall[];
   metrics?: CourseMessageMetrics | null;
   status?: string;
   pendingEvaluation?: boolean;
@@ -416,7 +420,9 @@ function findPreviousLearnerQuestion(
 
     const parsedMetrics = parseCourseMessageMetrics(message.content);
     const parsedWidgets = parseCourseQuestionWidgets(parsedMetrics.content);
-    const widgetQuestion = parsedWidgets.widgets.at(-1)?.question;
+    const toolWidgets = courseQuestionWidgetsFromToolCalls(message.toolCalls);
+    const widgetQuestion =
+      toolWidgets.at(-1)?.question ?? parsedWidgets.widgets.at(-1)?.question;
     const question =
       widgetQuestion ?? extractFinalLearnerQuestion(parsedWidgets.content);
 
@@ -532,6 +538,8 @@ function storedMessageToLearnMessage(
   messages: StoredCourseChatMessage[] = [message],
 ): LearnChatMessage {
   const parsedMetrics = parseCourseMessageMetrics(message.content);
+  const hasStructuredQuestionWidget =
+    courseQuestionWidgetsFromToolCalls(message.toolCalls).length > 0;
   const isEvaluationSnippet =
     message.role === "assistant" &&
     isQuestionEvaluationSnippet(parsedMetrics.content);
@@ -544,14 +552,17 @@ function storedMessageToLearnMessage(
     id,
     role: message.role,
     content: message.content,
+    toolCalls: message.toolCalls,
     metrics: parsedMetrics.metrics,
     createdAt: message.createdAt,
-    interrupted: shouldShowCourseChatInterruptedWarning({
-      role: message.role,
-      content: parsedMetrics.content,
-      isEvaluationSnippet,
-      hasLaterStoredMessage: index < messages.length - 1,
-    }),
+    interrupted: hasStructuredQuestionWidget
+      ? false
+      : shouldShowCourseChatInterruptedWarning({
+          role: message.role,
+          content: parsedMetrics.content,
+          isEvaluationSnippet,
+          hasLaterStoredMessage: index < messages.length - 1,
+        }),
   };
 }
 
@@ -593,6 +604,40 @@ function formatTokensPerSecond(
   return `${tokensPerSecond.toFixed(tokensPerSecond < 10 ? 1 : 0)} tok/s`;
 }
 
+function formatCompactTokenCount(tokens: number | null | undefined): string | null {
+  if (tokens === null || tokens === undefined || !Number.isFinite(tokens)) {
+    return null;
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: tokens < 1000 ? 0 : 1,
+  }).format(tokens);
+}
+
+function formatPromptCacheRead(metrics: CourseMessageMetrics): string | null {
+  if (
+    metrics.cacheHitPercent !== null &&
+    metrics.cacheHitPercent !== undefined &&
+    Number.isFinite(metrics.cacheHitPercent) &&
+    metrics.cacheHitPercent > 0
+  ) {
+    return `${metrics.cacheHitPercent.toFixed(
+      metrics.cacheHitPercent < 10 ? 1 : 0,
+    )}% cached`;
+  }
+
+  const cachedPromptTokens = formatCompactTokenCount(metrics.cachedPromptTokens);
+
+  return cachedPromptTokens ? `${cachedPromptTokens} cached` : null;
+}
+
+function formatPromptCacheWrite(metrics: CourseMessageMetrics): string | null {
+  const cacheWriteTokens = formatCompactTokenCount(metrics.cacheWriteTokens);
+
+  return cacheWriteTokens ? `${cacheWriteTokens} cache write` : null;
+}
+
 function LearnChatMessageMetrics({
   metrics,
 }: {
@@ -600,7 +645,9 @@ function LearnChatMessageMetrics({
 }) {
   const price = formatMessagePrice(metrics?.cost);
   const tokensPerSecond = formatTokensPerSecond(metrics?.tokensPerSecond);
-  const items = [price, tokensPerSecond].filter(
+  const cacheRead = metrics ? formatPromptCacheRead(metrics) : null;
+  const cacheWrite = metrics ? formatPromptCacheWrite(metrics) : null;
+  const items = [price, tokensPerSecond, cacheRead, cacheWrite].filter(
     (item): item is string => Boolean(item),
   );
 
@@ -615,6 +662,8 @@ function LearnChatMessageMetrics({
     >
       {price ? <span>{price}</span> : null}
       {tokensPerSecond ? <span>{tokensPerSecond}</span> : null}
+      {cacheRead ? <span>{cacheRead}</span> : null}
+      {cacheWrite ? <span>{cacheWrite}</span> : null}
     </p>
   );
 }
@@ -1313,6 +1362,7 @@ export default function LearnPageClient({
           messages: nextMessages.map((message) => ({
             role: message.role,
             content: message.content,
+            toolCalls: message.toolCalls,
           })),
         }),
       });
@@ -1780,6 +1830,14 @@ export default function LearnPageClient({
                         message.role === "assistant"
                           ? parseCourseQuestionWidgets(metadataStrippedContent)
                           : { content: metadataStrippedContent, widgets: [] };
+                      const toolCallWidgets =
+                        message.role === "assistant"
+                          ? courseQuestionWidgetsFromToolCalls(message.toolCalls)
+                          : [];
+                      const questionWidgets = [
+                        ...toolCallWidgets,
+                        ...parsedWidgets.widgets,
+                      ];
                       const visibleMessageContent = parsedWidgets.content;
                       const messageMetrics =
                         message.metrics ?? parsedMessage.metrics;
@@ -1793,7 +1851,7 @@ export default function LearnPageClient({
                         evaluationSnippet?.content ?? visibleMessageContent;
                       const laterWidgetAnswers =
                         message.role === "assistant" &&
-                        parsedWidgets.widgets.length > 0
+                        questionWidgets.length > 0
                           ? findLaterWidgetAnswers(chatMessages, messageIndex)
                           : new Map<
                               string,
@@ -1845,8 +1903,8 @@ export default function LearnPageClient({
                           messages: chatMessages,
                           message,
                           messageIndex,
-                          widgetCount: parsedWidgets.widgets.length,
-                          answeredWidgetCount: parsedWidgets.widgets.filter(
+                          widgetCount: questionWidgets.length,
+                          answeredWidgetCount: questionWidgets.filter(
                             (widget) => laterWidgetAnswers.has(widget.id),
                           ).length,
                           hasEvaluationSnippet: Boolean(evaluationSnippet),
@@ -1909,7 +1967,7 @@ export default function LearnPageClient({
                           ) : null}
                           {shouldShowQuestionWidgets ? (
                             <div className="learn-question-widget-stack">
-                              {parsedWidgets.widgets.map((widget) => (
+                              {questionWidgets.map((widget) => (
                                 <LearnQuestionWidgetCard
                                   key={`${message.id}-${widget.id}`}
                                   widget={widget}

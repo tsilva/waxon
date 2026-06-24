@@ -6,7 +6,11 @@ import {
   isCourseChatTurnComplete,
   shouldShowCourseChatInterruptedWarning,
 } from "../app/lib/courseChatTurn.ts";
-import { generateCourseAnswerDecision } from "../app/lib/courseGeneration.ts";
+import {
+  generateCourseAnswerDecision,
+  generateCourseToc,
+  streamCourseChatTurn,
+} from "../app/lib/courseGeneration.ts";
 import {
   collectCourseQuestionWidgetAnswers,
   parseCourseQuestionWidgetAnswer,
@@ -691,10 +695,277 @@ test("generateCourseAnswerDecision sends compact widget prompt", async () => {
     const userPrompt = messages[1]?.content ?? "";
 
     assert.match(systemPrompt, /under 16 words/u);
+    assert.match(
+      userPrompt,
+      /^Grade the latest learner answer using the dynamic Learn context below\./u,
+    );
     assert.match(userPrompt, /Answered widget JSON/u);
     assert.match(userPrompt, /Learner answer: They detect local patterns/u);
     assert.doesNotMatch(userPrompt, /Recent conversation JSON/u);
     assert.ok(userPrompt.length < 1_900);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("generateCourseToc keeps static instructions before dynamic topic", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> | null = null;
+
+  globalThis.fetch = async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<
+      string,
+      unknown
+    >;
+
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                title: "PPO for Beginners",
+                description: "Learn PPO from first principles.",
+                pages: [
+                  {
+                    title: "What PPO Optimizes",
+                    objective: "Explain PPO's policy optimization goal.",
+                  },
+                  {
+                    title: "Why Clipping Helps",
+                    objective: "Explain why PPO limits policy updates.",
+                  },
+                ],
+              }),
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 180,
+          completion_tokens: 80,
+          total_tokens: 260,
+          cost: 0.0001,
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  };
+
+  try {
+    const toc = await generateCourseToc({
+      apiKey: "test-key",
+      model: "google/gemini-3.5-flash",
+      userId: "user_1",
+      topic: "Proximal Policy Optimization (PPO) for beginners",
+    });
+
+    assert.equal(toc.title, "PPO for Beginners");
+    assert.ok(requestBody);
+
+    const capturedBody = requestBody as Record<string, unknown>;
+    const messages = capturedBody.messages as Array<{
+      role: string;
+      content: string;
+    }>;
+    const userPrompt = messages[1]?.content ?? "";
+    const topicIndex = userPrompt.indexOf("Topic: Proximal Policy Optimization");
+
+    assert.equal(messages[0]?.role, "system");
+    assert.equal(messages[1]?.role, "user");
+    assert.match(userPrompt, /^Create a mini-course table of contents\./u);
+    assert.ok(topicIndex > userPrompt.indexOf("Keep titles specific"));
+    assert.ok(userPrompt.trim().endsWith("Topic: Proximal Policy Optimization (PPO) for beginners"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("streamCourseChatTurn uses structured widget tool calls", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  let requestBody: Record<string, unknown> | null = null;
+  const deltas: string[] = [];
+  const course = {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt: "Learn PPO",
+    title: "PPO",
+    description: "Learn Proximal Policy Optimization.",
+    toc: {
+      title: "PPO",
+      description: "Learn Proximal Policy Optimization.",
+      pages: [
+        {
+          title: "PPO Purpose",
+          objective: "Explain what PPO is used for.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: 1,
+    generatedPages: 1,
+    chatMessageCount: 0,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+
+  globalThis.fetch = async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<
+      string,
+      unknown
+    >;
+
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      content:
+                        "PPO is a policy-gradient method that updates behavior carefully.",
+                    },
+                  },
+                ],
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: "call_ppo",
+                          type: "function",
+                          function: {
+                            name: "render_question_widget",
+                            arguments:
+                              "{\"type\":\"free_text\",\"id\":\"ppo-purpose\",\"question\":\"What is PPO used for?\"}",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+                usage: {
+                  prompt_tokens: 300,
+                  completion_tokens: 80,
+                  total_tokens: 380,
+                  cost: 0.001,
+                },
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      },
+    );
+  };
+
+  try {
+    const result = await streamCourseChatTurn({
+      apiKey: "test-key",
+      model: "google/gemini-3.5-flash",
+      userId: "user_1",
+      course,
+      messages: [],
+      onTextDelta(delta) {
+        deltas.push(delta);
+      },
+    });
+
+    assert.ok(requestBody);
+    assert.deepEqual(
+      (requestBody as { tools?: unknown[] }).tools?.[0],
+      {
+        type: "function",
+        function: {
+          name: "render_question_widget",
+          description:
+            "Render one learner-facing Waxon question widget after the tutor explanation.",
+          parameters: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              type: {
+                type: "string",
+                enum: ["free_text", "multiple_choice"],
+              },
+              id: {
+                type: "string",
+                description: "Short stable identifier for this question.",
+              },
+              question: {
+                type: "string",
+                description: "Self-contained learner-facing question.",
+              },
+              placeholder: {
+                type: "string",
+                description: "Placeholder text for free-text widgets.",
+              },
+              choices: {
+                type: "array",
+                description:
+                  "Answer choices for multiple-choice widgets. Use A, B, C, D ids.",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    id: {
+                      type: "string",
+                      description: "Choice id such as A, B, C, or D.",
+                    },
+                    text: {
+                      type: "string",
+                      description: "Choice text.",
+                    },
+                  },
+                  required: ["id", "text"],
+                },
+              },
+            },
+            required: ["type", "id", "question"],
+          },
+        },
+      },
+    );
+    assert.equal((requestBody as { tool_choice?: unknown }).tool_choice, "auto");
+    assert.equal(
+      (requestBody as { parallel_tool_calls?: unknown }).parallel_tool_calls,
+      false,
+    );
+    assert.equal(
+      (requestBody as { reasoning_effort?: unknown }).reasoning_effort,
+      "minimal",
+    );
+    assert.equal(
+      result.content,
+      "PPO is a policy-gradient method that updates behavior carefully.",
+    );
+    assert.equal(result.toolCalls[0]?.function.arguments.id, "ppo-purpose");
+    assert.equal(result.toolCalls[0]?.function.arguments.question, "What is PPO used for?");
+    assert.deepEqual(deltas, [
+      "PPO is a policy-gradient method that updates behavior carefully.",
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }

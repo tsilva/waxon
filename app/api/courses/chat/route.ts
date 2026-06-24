@@ -31,6 +31,10 @@ import {
   stripCourseMessageMetrics,
   type CourseMessageMetrics,
 } from "@/app/lib/courseMessageMetrics";
+import {
+  normalizeCourseQuestionWidgetToolCalls,
+  type CourseQuestionWidgetToolCall,
+} from "@/app/lib/courseQuestionWidget";
 import type { CourseToc } from "@/app/lib/courseContent";
 import {
   getOpenRouterChatConfig,
@@ -110,7 +114,12 @@ function normalizeStoredMessages(value: unknown): CourseChatMessage[] {
         ? record.content.trim().slice(0, MAX_CHAT_MESSAGE_CHARS)
         : "";
 
-    return content ? [{ role, content }] : [];
+    const toolCalls =
+      role === "assistant"
+        ? normalizeCourseQuestionWidgetToolCalls(record.toolCalls)
+        : [];
+
+    return content ? [{ role, content, toolCalls }] : [];
   });
 }
 
@@ -276,6 +285,7 @@ export async function POST(request: Request) {
         let course: CourseDetail | null = null;
         let progressDecision: CourseProgressDecision | null = null;
         let assistantContent = "";
+        let assistantToolCalls: CourseQuestionWidgetToolCall[] = [];
         let turnCost = 0;
         let intakeDecisionMetrics: CourseMessageMetrics | null = null;
         let answerDecisionMetrics: CourseMessageMetrics | null = null;
@@ -536,7 +546,7 @@ export async function POST(request: Request) {
 
           send("status", { status: "Writing lesson" });
           const chatStreamStartedAt = Date.now();
-          assistantContent = await streamCourseChatTurn({
+          const assistantTurn = await streamCourseChatTurn({
             apiKey: openRouterConfig.apiKey,
             model: openRouterConfig.model,
             userId: user.id,
@@ -554,6 +564,8 @@ export async function POST(request: Request) {
               send("delta", { delta });
             },
           });
+          assistantContent = assistantTurn.content;
+          assistantToolCalls = assistantTurn.toolCalls;
           latencyMetrics.chat_stream_ms = Date.now() - chatStreamStartedAt;
 
           if (finalCoursePromise) {
@@ -573,6 +585,7 @@ export async function POST(request: Request) {
                   assistantContent,
                   assistantTurnMetrics,
                 ),
+                toolCalls: assistantToolCalls,
               },
             ],
           });

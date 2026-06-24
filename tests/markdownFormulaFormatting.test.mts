@@ -34,6 +34,16 @@ test("formatFormulaMarkdown can render math-style correct answers", () => {
   );
 });
 
+test("formatFormulaMarkdown does not treat hyphenated prose terms as formulas", () => {
+  assert.equal(
+    formatFormulaMarkdown(
+      "Value-based methods estimate state-action values; policy-based methods learn probabilities.",
+      { style: "math" },
+    ),
+    "Value-based methods estimate state-action values; policy-based methods learn probabilities.",
+  );
+});
+
 test("formatFormulaMarkdown converts math-like code spans in math style", () => {
   assert.equal(
     formatFormulaMarkdown("`x^{-7}` (or `1/x^7`)", { style: "math" }),

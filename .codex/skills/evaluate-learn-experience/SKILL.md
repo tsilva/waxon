@@ -41,6 +41,7 @@ Use this skill to run a tight product-quality loop over Waxon's Learn experience
 
 4. Measure latency from the user's perspective.
    - Capture `answer_decision_ms`, `time_to_first_delta_ms`, and `chat_stream_ms` from the course chat SSE `done` payload or stored trace surfaces.
+   - Capture prompt-cache usage from course message metrics when provider usage reports it: cached prompt tokens, uncached prompt tokens, cache-write tokens, and cache-hit percentage.
    - Also record perceived wait from answer submission to first visible next-material token.
    - Separate fixed overhead from token throughput: high `tok/s` does not imply a snappy answer-to-next-turn transition.
 
@@ -53,6 +54,7 @@ Use this skill to run a tight product-quality loop over Waxon's Learn experience
    - If `answer_decision_ms` dominates, tune the evaluator prompt, evaluator model, response size, JSON shape, or local deterministic handling.
    - If `time_to_first_delta_ms` dominates, tune the tutor model, request size, streaming start path, or whether noncritical work can move after first token.
    - If `chat_stream_ms` dominates, tune lesson length, model choice, or max token budget.
+   - When tuning Learn prompts for cache efficiency, keep immutable instructions and stable context before dynamic topic, course, milestone, progress, answer, or conversation fields.
    - If teaching quality is weak, tune the tutor prompt and examples before touching latency.
    - If progress decisions are wrong, tune the evaluator or local mastery gate without weakening `requireCourseMilestoneMastery()`.
 

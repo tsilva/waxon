@@ -399,3 +399,100 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("openRouterChatCompletion preserves streamed tool calls", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+
+  globalThis.fetch = async () =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: "call_widget",
+                          type: "function",
+                          function: {
+                            name: "render_question_widget",
+                            arguments: "{\"type\":\"free_text\",",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          function: {
+                            arguments:
+                              "\"id\":\"check\",\"question\":\"What is PPO?\"}",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+                usage: {
+                  prompt_tokens: 8,
+                  completion_tokens: 4,
+                  total_tokens: 12,
+                },
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+        },
+      },
+    );
+
+  try {
+    const { body } = await openRouterChatCompletion({
+      apiKey: "test-key",
+      trace: {
+        operation: "test_streaming_tools",
+      },
+      body: {
+        model: "google/gemini-3.5-flash",
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+
+    assert.deepEqual(body.choices?.[0]?.message?.tool_calls, [
+      {
+        id: "call_widget",
+        type: "function",
+        function: {
+          name: "render_question_widget",
+          arguments:
+            "{\"type\":\"free_text\",\"id\":\"check\",\"question\":\"What is PPO?\"}",
+        },
+      },
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

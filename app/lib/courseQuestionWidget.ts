@@ -17,6 +17,17 @@ export type CourseQuestionWidget =
       choices: CourseQuestionWidgetChoice[];
     };
 
+export const COURSE_QUESTION_WIDGET_TOOL_NAME = "render_question_widget";
+
+export type CourseQuestionWidgetToolCall = {
+  id: string;
+  type: "function";
+  function: {
+    name: typeof COURSE_QUESTION_WIDGET_TOOL_NAME;
+    arguments: CourseQuestionWidget;
+  };
+};
+
 export type CourseQuestionWidgetAnswerDetails = {
   question: string | null;
   widgetId: string | null;
@@ -41,7 +52,9 @@ function normalizeText(value: unknown, maxLength: number): string {
     : "";
 }
 
-function normalizeQuestionWidget(value: unknown): CourseQuestionWidget | null {
+export function normalizeCourseQuestionWidget(
+  value: unknown,
+): CourseQuestionWidget | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
@@ -101,10 +114,10 @@ function parseEncodedWidget(source: string): CourseQuestionWidget | null {
   }
 
   try {
-    return normalizeQuestionWidget(JSON.parse(decodeURIComponent(encoded)));
+    return normalizeCourseQuestionWidget(JSON.parse(decodeURIComponent(encoded)));
   } catch {
     try {
-      return normalizeQuestionWidget(JSON.parse(encoded));
+      return normalizeCourseQuestionWidget(JSON.parse(encoded));
     } catch {
       return null;
     }
@@ -141,6 +154,88 @@ export function parseCourseQuestionWidgets(content: string): {
     content: strippedContent.trim(),
     widgets,
   };
+}
+
+function normalizeToolCallArguments(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeCourseQuestionWidgetToolCalls(
+  value: unknown,
+): CourseQuestionWidgetToolCall[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((candidate, index) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return [];
+    }
+
+    const record = candidate as Record<string, unknown>;
+    const rawFunction = record.function;
+
+    if (!rawFunction || typeof rawFunction !== "object" || Array.isArray(rawFunction)) {
+      return [];
+    }
+
+    const functionRecord = rawFunction as Record<string, unknown>;
+
+    if (functionRecord.name !== COURSE_QUESTION_WIDGET_TOOL_NAME) {
+      return [];
+    }
+
+    const widget = normalizeCourseQuestionWidget(
+      normalizeToolCallArguments(functionRecord.arguments),
+    );
+
+    if (!widget) {
+      return [];
+    }
+
+    const rawId = normalizeText(record.id, MAX_WIDGET_ID_CHARS);
+
+    return [
+      {
+        id: rawId || `widget-call-${index + 1}`,
+        type: "function" as const,
+        function: {
+          name: COURSE_QUESTION_WIDGET_TOOL_NAME,
+          arguments: widget,
+        },
+      },
+    ];
+  });
+}
+
+export function courseQuestionWidgetToolCallFromWidget(
+  widget: CourseQuestionWidget,
+  id = `widget-call-${widget.id}`,
+): CourseQuestionWidgetToolCall {
+  return {
+    id,
+    type: "function",
+    function: {
+      name: COURSE_QUESTION_WIDGET_TOOL_NAME,
+      arguments: widget,
+    },
+  };
+}
+
+export function courseQuestionWidgetsFromToolCalls(
+  toolCalls: unknown,
+): CourseQuestionWidget[] {
+  return normalizeCourseQuestionWidgetToolCalls(toolCalls).map(
+    (toolCall) => toolCall.function.arguments,
+  );
 }
 
 export function stripAnsweredQuestionMetadata(content: string): string {

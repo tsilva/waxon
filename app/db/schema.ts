@@ -394,6 +394,7 @@ export const courseChatMessages = pgTable(
       .references(() => courses.id, { onDelete: "cascade" }),
     role: text("role").notNull(),
     content: text("content").notNull(),
+    toolCalls: jsonb("tool_calls").notNull().default(sql`'[]'::jsonb`),
     sequence: integer("sequence").notNull(),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
