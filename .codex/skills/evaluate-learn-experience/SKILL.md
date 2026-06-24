@@ -54,6 +54,7 @@ Use this skill to run a tight product-quality loop over Waxon's Learn experience
 
 6. Tune only the bottleneck.
    - If `answer_decision_ms` dominates, tune the evaluator prompt, evaluator model, response size, JSON shape, or local deterministic handling.
+   - For compact answer-evaluator prompts, do not pad stable instructions solely to cross a provider cache threshold unless real Learn turns show better wall-clock latency and preserved grading quality than the compact fast evaluator.
    - If `time_to_first_delta_ms` dominates, tune the tutor model, request size, streaming start path, or whether noncritical work can move after first token.
    - If `chat_stream_ms` dominates, tune lesson length, model choice, or max token budget.
    - When tuning Learn prompts for cache efficiency, keep immutable instructions and stable context before dynamic topic, course, milestone, progress, answer, or conversation fields.

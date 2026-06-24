@@ -689,13 +689,33 @@ test("generateCourseAnswerDecision sends compact widget prompt", async () => {
     assert.equal(result.questionAttempt.toolCall, "record_course_question_attempt");
     assert.ok(requestBody);
     const capturedBody = requestBody as Record<string, unknown>;
-    assert.equal(capturedBody.max_tokens, 450);
+    assert.equal(capturedBody.max_tokens, 320);
+    assert.equal(
+      capturedBody.session_id,
+      "learn:user_1:course-answer-decision-v1",
+    );
 
-    const messages = capturedBody.messages as Array<{ content: string }>;
-    const systemPrompt = messages[0]?.content ?? "";
-    const userPrompt = messages[1]?.content ?? "";
+    const messages = capturedBody.messages as Array<{
+      content:
+        | string
+        | Array<{
+            type?: string;
+            text?: string;
+            cache_control?: { type?: string };
+          }>;
+    }>;
+    const systemContent = messages[0]?.content;
+    assert.ok(Array.isArray(systemContent));
+    assert.equal(systemContent[0]?.cache_control?.type, "ephemeral");
+    const systemPrompt = systemContent[0]?.text ?? "";
+    const userContent = messages[1]?.content;
+    assert.ok(Array.isArray(userContent));
+    assert.equal(userContent[0]?.cache_control, undefined);
+    const userPrompt = userContent[0]?.text ?? "";
 
     assert.match(systemPrompt, /under 16 words/u);
+    assert.doesNotMatch(systemPrompt, /Course title:/u);
+    assert.doesNotMatch(systemPrompt, /Learner answer:/u);
     assert.match(
       userPrompt,
       /^Grade the latest learner answer using the dynamic Learn context below\./u,
