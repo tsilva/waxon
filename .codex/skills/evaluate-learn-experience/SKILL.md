@@ -35,6 +35,7 @@ Use this skill to run a tight product-quality loop over Waxon's Learn experience
    - Start a new course from `/learn`.
    - Answer at least 4 tutor questions per topic.
    - Use the inline question widgets when present; do not bypass the user-facing flow by calling APIs directly unless debugging.
+   - After submitting a widget answer and receiving the final response, verify the answered widget remains visible as read-only history with the learner's answer, and the newest unanswered widget remains enabled. This catches regressions where hidden-widget-only questions disappear after evaluation or repeated fallback widget IDs disable the next question.
    - When judging rendered tutor text, wait for the final SSE `done` result or the stored-message replacement after streaming. Transient streamed deltas can include fragments that server repair removes before persistence.
    - Save screenshots or concise notes only when they reveal a concrete UX, teaching, or latency issue.
 
