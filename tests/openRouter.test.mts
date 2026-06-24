@@ -56,6 +56,37 @@ test("openRouterChatCompletion sends user trace identifiers", async () => {
   assert.equal(trace?.question_preview, "What should traces include?");
 });
 
+test("openRouterChatCompletion preserves an explicit session id", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Record<string, unknown>[] = [];
+
+  globalThis.fetch = async (_url, init) => {
+    requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(JSON.stringify({ choices: [] }), { status: 200 });
+  };
+
+  try {
+    await openRouterChatCompletion({
+      apiKey: "test-key",
+      stream: false,
+      trace: {
+        operation: "test_operation",
+        userId: "user-123",
+      },
+      body: {
+        model: "google/gemini-3.5-flash",
+        session_id: "learn:user-123:course-456",
+        messages: [{ role: "user", content: "hello" }],
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestBodies[0]?.user, "user-123");
+  assert.equal(requestBodies[0]?.session_id, "learn:user-123:course-456");
+});
+
 test("classifyLlmInteractionKind uses explicit non-answer trace kinds", () => {
   assert.equal(classifyLlmInteractionKind("evaluate_answer"), "Answer evaluation");
   assert.equal(classifyLlmInteractionKind("add_questions_gate"), "Quality gate");

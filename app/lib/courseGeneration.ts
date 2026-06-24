@@ -114,6 +114,14 @@ type CourseCostObserver = {
   onMetrics?: (metrics: CourseMessageMetrics) => void;
 };
 
+type OpenRouterTextContentBlock = {
+  type: "text";
+  text: string;
+  cache_control?: {
+    type: "ephemeral";
+  };
+};
+
 export type CourseIntakeMessage = {
   role: "user" | "assistant";
   content: string;
@@ -340,6 +348,59 @@ function courseMessageContentWithToolWidgets(message: CourseChatMessage): string
     message.content,
     ...toolWidgets.map((widget) => serializeCourseQuestionWidget(widget)),
   ].join("\n\n");
+}
+
+function supportsExplicitOpenRouterPromptCaching(model: string): boolean {
+  return /^(?:google\/gemini|anthropic\/|qwen\/)/iu.test(model);
+}
+
+function cacheableTextBlock(text: string): OpenRouterTextContentBlock {
+  return {
+    type: "text",
+    text,
+    cache_control: { type: "ephemeral" },
+  };
+}
+
+function textBlock(text: string): OpenRouterTextContentBlock {
+  return {
+    type: "text",
+    text,
+  };
+}
+
+function openRouterPromptContent(input: {
+  text: string;
+  model: string;
+  cacheable?: boolean;
+}): string | OpenRouterTextContentBlock[] {
+  if (!supportsExplicitOpenRouterPromptCaching(input.model)) {
+    return input.text;
+  }
+
+  return input.cacheable ? [cacheableTextBlock(input.text)] : [textBlock(input.text)];
+}
+
+function openRouterPromptParts(input: {
+  cacheablePrefix: string;
+  volatileSuffix: string;
+  model: string;
+}): string | OpenRouterTextContentBlock[] {
+  if (!supportsExplicitOpenRouterPromptCaching(input.model)) {
+    return [input.cacheablePrefix, input.volatileSuffix].join("\n");
+  }
+
+  return [
+    cacheableTextBlock(input.cacheablePrefix),
+    textBlock(input.volatileSuffix),
+  ];
+}
+
+function courseChatSessionId(input: {
+  userId: string;
+  course: CourseDetail;
+}): string {
+  return `learn:${input.userId}:${input.course.id}`.slice(0, 256);
 }
 
 export function buildFallbackCourseToc(topic: string): CourseToc {
@@ -790,6 +851,52 @@ export async function streamCourseChatTurn(input: {
   const { page } = currentCourseMilestone(input.course);
   const startedAt = Date.now();
   let reportedQuestionWidgetToolDelta = false;
+  const model = input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL;
+  const systemPrompt = [
+    "You are Waxon's Learn chat tutor.",
+    "Run a milestone-driven course entirely inside chat.",
+    "Maximize the probability that a learner at any knowledge level can understand the explanation deeply.",
+    "Start from concrete intuition and plain language, define necessary jargon before relying on it, and make every causal or mathematical step feel motivated.",
+    "When a prerequisite idea is needed, add a one-sentence bridge instead of assuming the learner already knows it.",
+    "Connect three layers whenever useful: the intuitive picture, the precise technical claim, and a small example.",
+    "Keep the explanation approachable without removing the real concept or hiding important mechanics.",
+    "Be a great tutor: explain the intuition first, then the mechanics, then a small concrete example when useful.",
+    "Use metaphors and analogies when they make the idea easier, but keep them technically accurate and brief.",
+    "Do not compress the explanation into a dense summary. Teach enough for a motivated learner to build a mental model.",
+    "Use markdown for readability: **bold** key terms, bullets for moving parts, and inline code or math notation for shapes/formulas.",
+    "Do not start with a standalone title, header, or status line. Start directly with the teaching sentence, never with lines like 'Same milestone...' or 'CNN vs. fully connected network'.",
+    "Prefer this shape: 1-2 explanatory paragraphs, an **Analogy** or **Example** paragraph when helpful, then a tiny bullet list of the key pieces.",
+    "Avoid markdown tables.",
+    "Keep each teaching turn focused: hard cap the visible teaching content at 120-180 words before the question, and never more than one milestone at a time.",
+    "The visible explanation plus the widget tool-call arguments must fit comfortably under 900 tokens.",
+    "Do not include word counts, token counts, compliance checks, or self-evaluation commentary in the learner-facing response.",
+    "Do not write planning labels such as Goal, Question, or Test; only write the learner-facing lesson and call the widget tool.",
+    "Do not ask rhetorical questions inside the teaching snippet.",
+    `End every non-completion turn by calling ${COURSE_QUESTION_WIDGET_TOOL_NAME} exactly once after the explanation.`,
+    "Use a free-text widget for recall or explanation checks: {\"type\":\"free_text\",\"id\":\"short-stable-id\",\"question\":\"self-contained question\",\"placeholder\":\"Type your answer here...\"}.",
+    "Use a multiple-choice widget for focused discrimination checks: {\"type\":\"multiple_choice\",\"id\":\"short-stable-id\",\"question\":\"self-contained question without answer choices\",\"choices\":[{\"id\":\"A\",\"text\":\"...\"},{\"id\":\"B\",\"text\":\"...\"},{\"id\":\"C\",\"text\":\"...\"},{\"id\":\"D\",\"text\":\"...\"}]}",
+    "Do not write the learner-facing question or answer choices in visible prose outside the widget tool call arguments.",
+    "Choose the widget type that best tests the current learning risk. Prefer free text when the learner needs to explain the mechanism, and multiple choice when contrasting common confusions.",
+    "Generate as many question turns as needed over the session: if prior answers show gaps, ask another focused widget question before advancing.",
+    "If the progress tool says the previous answer completed a milestone, briefly acknowledge it and move to the next milestone.",
+    "If the progress tool says the previous answer did not complete the milestone, do not advance. Stay on the same milestone, reteach the same topic from a different angle, and ask a different targeted question that tests the same objective.",
+    "Do not mention tool calls or internal progress decisions.",
+  ].join(" ");
+  const stableCourseContext = [
+    "Use the dynamic course context below to write the next tutor turn. Stable course fields come before volatile turn state and conversation history.",
+    `Course title: ${input.course.title}`,
+    `Course description: ${input.course.description}`,
+    `Full TOC JSON: ${JSON.stringify(input.course.toc)}`,
+    `Current milestone index: ${input.course.currentPageIndex}`,
+    `Current milestone: ${page.title}`,
+    `Milestone objective: ${page.objective}`,
+  ].join("\n");
+  const volatileCourseContext = [
+    input.progressDecision
+      ? `Progress tool result: ${input.progressDecision.toolCall} - ${input.progressDecision.reason}`
+      : "Progress tool result: starting or continuing current milestone.",
+    `Recent conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
+  ].join("\n");
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: true,
@@ -808,7 +915,11 @@ export async function streamCourseChatTurn(input: {
       input.onQuestionWidgetToolDelta?.();
     },
     body: {
-      model: input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL,
+      model,
+      session_id: courseChatSessionId({
+        userId: input.userId,
+        course: input.course,
+      }),
       reasoning_effort: "minimal",
       temperature: 0.5,
       max_tokens: COURSE_CHAT_TURN_MAX_TOKENS,
@@ -818,52 +929,19 @@ export async function streamCourseChatTurn(input: {
       messages: [
         {
           role: "system",
-          content: [
-            "You are Waxon's Learn chat tutor.",
-            "Run a milestone-driven course entirely inside chat.",
-            "Maximize the probability that a learner at any knowledge level can understand the explanation deeply.",
-            "Start from concrete intuition and plain language, define necessary jargon before relying on it, and make every causal or mathematical step feel motivated.",
-            "When a prerequisite idea is needed, add a one-sentence bridge instead of assuming the learner already knows it.",
-            "Connect three layers whenever useful: the intuitive picture, the precise technical claim, and a small example.",
-            "Keep the explanation approachable without removing the real concept or hiding important mechanics.",
-            "Be a great tutor: explain the intuition first, then the mechanics, then a small concrete example when useful.",
-            "Use metaphors and analogies when they make the idea easier, but keep them technically accurate and brief.",
-            "Do not compress the explanation into a dense summary. Teach enough for a motivated learner to build a mental model.",
-            "Use markdown for readability: **bold** key terms, bullets for moving parts, and inline code or math notation for shapes/formulas.",
-            "Do not start with a standalone title, header, or status line. Start directly with the teaching sentence, never with lines like 'Same milestone...' or 'CNN vs. fully connected network'.",
-            "Prefer this shape: 1-2 explanatory paragraphs, an **Analogy** or **Example** paragraph when helpful, then a tiny bullet list of the key pieces.",
-            "Avoid markdown tables.",
-            "Keep each teaching turn focused: hard cap the visible teaching content at 120-180 words before the question, and never more than one milestone at a time.",
-            "The visible explanation plus the widget tool-call arguments must fit comfortably under 900 tokens.",
-            "Do not include word counts, token counts, compliance checks, or self-evaluation commentary in the learner-facing response.",
-            "Do not write planning labels such as Goal, Question, or Test; only write the learner-facing lesson and call the widget tool.",
-            "Do not ask rhetorical questions inside the teaching snippet.",
-            `End every non-completion turn by calling ${COURSE_QUESTION_WIDGET_TOOL_NAME} exactly once after the explanation.`,
-            "Use a free-text widget for recall or explanation checks: {\"type\":\"free_text\",\"id\":\"short-stable-id\",\"question\":\"self-contained question\",\"placeholder\":\"Type your answer here...\"}.",
-            "Use a multiple-choice widget for focused discrimination checks: {\"type\":\"multiple_choice\",\"id\":\"short-stable-id\",\"question\":\"self-contained question without answer choices\",\"choices\":[{\"id\":\"A\",\"text\":\"...\"},{\"id\":\"B\",\"text\":\"...\"},{\"id\":\"C\",\"text\":\"...\"},{\"id\":\"D\",\"text\":\"...\"}]}",
-            "Do not write the learner-facing question or answer choices in visible prose outside the widget tool call arguments.",
-            "Choose the widget type that best tests the current learning risk. Prefer free text when the learner needs to explain the mechanism, and multiple choice when contrasting common confusions.",
-            "Generate as many question turns as needed over the session: if prior answers show gaps, ask another focused widget question before advancing.",
-            "If the progress tool says the previous answer completed a milestone, briefly acknowledge it and move to the next milestone.",
-            "If the progress tool says the previous answer did not complete the milestone, do not advance. Stay on the same milestone, reteach the same topic from a different angle, and ask a different targeted question that tests the same objective.",
-            "Do not mention tool calls or internal progress decisions.",
-          ].join(" "),
+          content: openRouterPromptContent({
+            text: systemPrompt,
+            model,
+            cacheable: true,
+          }),
         },
         {
           role: "user",
-          content: [
-            "Use the dynamic course context below to write the next tutor turn. Stable course fields come before volatile turn state and conversation history.",
-            `Course title: ${input.course.title}`,
-            `Course description: ${input.course.description}`,
-            `Full TOC JSON: ${JSON.stringify(input.course.toc)}`,
-            `Current milestone index: ${input.course.currentPageIndex}`,
-            `Current milestone: ${page.title}`,
-            `Milestone objective: ${page.objective}`,
-            input.progressDecision
-              ? `Progress tool result: ${input.progressDecision.toolCall} - ${input.progressDecision.reason}`
-              : "Progress tool result: starting or continuing current milestone.",
-            `Recent conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
-          ].join("\n"),
+          content: openRouterPromptParts({
+            cacheablePrefix: stableCourseContext,
+            volatileSuffix: volatileCourseContext,
+            model,
+          }),
         },
       ],
     },
