@@ -96,6 +96,16 @@ const COURSE_QUESTION_WIDGET_TOOL = {
 const MAX_INTAKE_MESSAGE_CHARS = 500;
 const MAX_INTAKE_TOPIC_CHARS = 800;
 const COURSE_CHAT_TURN_MAX_TOKENS = 900;
+const COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC = [
+  "Stable teaching rubric for every tutor turn:",
+  "A strong turn starts with the plain-language purpose of the idea, then names the technical concept, then gives one small concrete example. Define every new term the first time it matters. Prefer short sentences and avoid stacking multiple abstractions in the same sentence.",
+  "When the learner is partly correct, acknowledge the useful part, repair exactly one missing piece, and ask a question that targets that missing piece. When the learner is confused or wrong, avoid saying only that it is incorrect; replace the misconception with a simpler model and test that model.",
+  "Good free-text checks ask for a mechanism in the learner's own words. Good multiple-choice checks contrast common confusions with one clearly correct answer. The widget question must be answerable from the visible lesson but should still require recall, not copy-paste.",
+  "Keep milestone progress conservative: do not advance because the learner used the right vocabulary once. Advance only when the answer shows the milestone objective in a usable, transferable form.",
+  "Use this reusable lesson pattern when the milestone is abstract: first state what problem the concept solves, then identify the smallest moving parts, then walk through a concrete toy case with names or numbers. Use this reusable repair pattern when the answer misses the target: separate the learner's correct fragment from the missing concept, explain the missing concept in one paragraph, then ask for that concept directly.",
+  "For math, statistics, programming, and science topics, prefer precise ordinary language over ornamental analogies. If notation appears, read it aloud in words and explain every symbol that affects meaning. If an example uses a table, formula, array, image, or code shape, describe the shape explicitly so the learner can answer without needing hidden context.",
+  "Reusable example checks: ask a statistics learner to explain what changes after new evidence; ask a programming learner to predict what a tiny input produces; ask a database learner which key links two rows; ask an ML learner what signal updates a model parameter. In each case, the expected answer should be short enough to grade fairly and specific enough to reveal the misconception.",
+].join(" ");
 const QUESTION_EVALUATION_SNIPPET_PATTERN =
   /^<!--\s*waxon:evaluation-snippet score=\d{1,2}\s*-->\s*/u;
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
@@ -354,6 +364,10 @@ function supportsExplicitOpenRouterPromptCaching(model: string): boolean {
   return /^(?:google\/gemini|anthropic\/|qwen\/)/iu.test(model);
 }
 
+function isGeminiModel(model: string): boolean {
+  return /^google\/gemini/iu.test(model);
+}
+
 function cacheableTextBlock(text: string): OpenRouterTextContentBlock {
   return {
     type: "text",
@@ -400,7 +414,8 @@ function courseChatSessionId(input: {
   userId: string;
   course: CourseDetail;
 }): string {
-  return `learn:${input.userId}:${input.course.id}`.slice(0, 256);
+  void input.course;
+  return `learn:${input.userId}:course-chat-v2`.slice(0, 256);
 }
 
 export function buildFallbackCourseToc(topic: string): CourseToc {
@@ -897,6 +912,17 @@ export async function streamCourseChatTurn(input: {
       : "Progress tool result: starting or continuing current milestone.",
     `Recent conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
   ].join("\n");
+  const useGeminiCacheShape = isGeminiModel(model);
+  const stableGeminiTutorContext = [
+    "Stable tutor instructions:",
+    systemPrompt,
+    "",
+    COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC,
+  ].join("\n");
+  const dynamicGeminiTutorContext = [
+    stableCourseContext,
+    volatileCourseContext,
+  ].join("\n");
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: true,
@@ -926,24 +952,40 @@ export async function streamCourseChatTurn(input: {
       tools: [COURSE_QUESTION_WIDGET_TOOL],
       tool_choice: "auto",
       parallel_tool_calls: false,
-      messages: [
-        {
-          role: "system",
-          content: openRouterPromptContent({
-            text: systemPrompt,
-            model,
-            cacheable: true,
-          }),
-        },
-        {
-          role: "user",
-          content: openRouterPromptParts({
-            cacheablePrefix: stableCourseContext,
-            volatileSuffix: volatileCourseContext,
-            model,
-          }),
-        },
-      ],
+      messages: useGeminiCacheShape
+        ? [
+            {
+              role: "system",
+              content:
+                "You are Waxon's Learn chat tutor. Follow the stable tutor instructions and dynamic course state in the user message.",
+            },
+            {
+              role: "user",
+              content: openRouterPromptParts({
+                cacheablePrefix: stableGeminiTutorContext,
+                volatileSuffix: dynamicGeminiTutorContext,
+                model,
+              }),
+            },
+          ]
+        : [
+            {
+              role: "system",
+              content: openRouterPromptContent({
+                text: systemPrompt,
+                model,
+                cacheable: true,
+              }),
+            },
+            {
+              role: "user",
+              content: openRouterPromptParts({
+                cacheablePrefix: stableCourseContext,
+                volatileSuffix: volatileCourseContext,
+                model,
+              }),
+            },
+          ],
     },
   });
 

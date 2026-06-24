@@ -900,7 +900,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
 
     assert.ok(requestBody);
     const capturedBody = requestBody as Record<string, unknown>;
-    assert.equal(capturedBody.session_id, "learn:user_1:course_1");
+    assert.equal(capturedBody.session_id, "learn:user_1:course-chat-v2");
     assert.deepEqual(
       (capturedBody as { tools?: unknown[] }).tools?.[0],
       {
@@ -959,17 +959,26 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
       role: string;
       content: unknown;
     }>;
-    const systemContent = requestMessages[0]?.content as Array<
-      Record<string, unknown>
-    >;
+    const systemContent = requestMessages[0]?.content;
     const userContent = requestMessages[1]?.content as Array<
       Record<string, unknown>
     >;
 
-    assert.deepEqual(systemContent[0]?.cache_control, { type: "ephemeral" });
+    assert.equal(typeof systemContent, "string");
     assert.deepEqual(userContent[0]?.cache_control, { type: "ephemeral" });
-    assert.match(String(userContent[0]?.text), /Course title: PPO/u);
+    assert.equal(
+      JSON.stringify(capturedBody).match(/cache_control/gu)?.length,
+      1,
+    );
+    assert.match(String(userContent[0]?.text), /Stable tutor instructions/u);
+    assert.match(
+      String(userContent[0]?.text),
+      /End every non-completion turn by calling render_question_widget/u,
+    );
+    assert.ok(String(userContent[0]?.text).length > 3_500);
+    assert.doesNotMatch(String(userContent[0]?.text), /Course title: PPO/u);
     assert.doesNotMatch(String(userContent[0]?.text), /Recent conversation JSON/u);
+    assert.match(String(userContent[1]?.text), /Course title: PPO/u);
     assert.match(String(userContent[1]?.text), /Recent conversation JSON/u);
     assert.equal((requestBody as { tool_choice?: unknown }).tool_choice, "auto");
     assert.equal(
@@ -990,6 +999,101 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
       "PPO is a policy-gradient method that updates behavior carefully.",
     ]);
     assert.equal(pendingWidgetToolDeltas, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("streamCourseChatTurn keeps the same Gemini session key across Learn courses", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const sessionIds: string[] = [];
+  const baseCourse = {
+    id: "draft-course",
+    userId: "user_1",
+    topicPrompt: "Learn PPO",
+    title: "PPO",
+    description: "Learn Proximal Policy Optimization.",
+    toc: {
+      title: "PPO",
+      description: "Learn Proximal Policy Optimization.",
+      pages: [
+        {
+          title: "PPO Purpose",
+          objective: "Explain what PPO is used for.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: 1,
+    generatedPages: 1,
+    chatMessageCount: 0,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+
+  globalThis.fetch = async (_url, init) => {
+    const requestBody = JSON.parse(String(init?.body ?? "{}")) as {
+      session_id?: string;
+    };
+    sessionIds.push(requestBody.session_id ?? "");
+
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      content: "PPO keeps policy updates conservative.",
+                    },
+                  },
+                ],
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      },
+    );
+  };
+
+  try {
+    await streamCourseChatTurn({
+      apiKey: "test-key",
+      model: "google/gemini-3.5-flash",
+      userId: "user_1",
+      course: baseCourse,
+      messages: [],
+      onTextDelta() {},
+    });
+    await streamCourseChatTurn({
+      apiKey: "test-key",
+      model: "google/gemini-3.5-flash",
+      userId: "user_1",
+      course: {
+        ...baseCourse,
+        id: "persisted-course-1",
+      },
+      messages: [],
+      onTextDelta() {},
+    });
+
+    assert.equal(sessionIds.length, 2);
+    assert.equal(sessionIds[0], sessionIds[1]);
+    assert.equal(sessionIds[0], "learn:user_1:course-chat-v2");
   } finally {
     globalThis.fetch = originalFetch;
   }

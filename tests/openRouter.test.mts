@@ -148,7 +148,7 @@ test("getOpenRouterEvaluationModel defaults to Mercury and allows env override",
   }
 });
 
-test("getOpenRouterLearnModel defaults to Gemini Flash Lite and ignores global chat model", () => {
+test("getOpenRouterLearnModel defaults to Gemini 2.5 Flash and ignores global chat model", () => {
   const originalChatModel = process.env.LLM_MODEL;
   const originalLearnModel = process.env.LLM_LEARN_MODEL;
 
