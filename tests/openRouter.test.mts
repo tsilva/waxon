@@ -129,7 +129,7 @@ test("extractAffordableOpenRouterMaxTokens ignores unrelated errors", () => {
   );
 });
 
-test("getOpenRouterChatModel defaults to Gemini flash-lite and allows env override", () => {
+test("getOpenRouterChatModel defaults to the configured chat model and allows env override", () => {
   const originalModel = process.env.LLM_MODEL;
 
   try {
@@ -147,7 +147,7 @@ test("getOpenRouterChatModel defaults to Gemini flash-lite and allows env overri
   }
 });
 
-test("getOpenRouterEvaluationModel defaults to Gemini flash-lite and allows env override", () => {
+test("getOpenRouterEvaluationModel defaults to the configured evaluation model and allows env override", () => {
   const originalModel = process.env.LLM_EVALUATION_MODEL;
 
   try {
@@ -168,7 +168,7 @@ test("getOpenRouterEvaluationModel defaults to Gemini flash-lite and allows env 
   }
 });
 
-test("getOpenRouterLearnModel defaults to Gemini flash-lite and ignores global chat model", () => {
+test("getOpenRouterLearnModel defaults to the configured Learn model and ignores global chat model", () => {
   const originalChatModel = process.env.LLM_MODEL;
   const originalLearnModel = process.env.LLM_LEARN_MODEL;
 

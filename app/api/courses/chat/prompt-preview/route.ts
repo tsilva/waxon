@@ -105,12 +105,49 @@ function normalizeCourseWidgetAnswer(
   };
 }
 
-function normalizeStoredMessages(value: unknown): CourseChatMessage[] {
+function normalizeIndexedWidgetAnswers(
+  value: unknown,
+): Map<number, CourseQuestionWidgetAnswerDetails> {
+  const indexedAnswers = new Map<number, CourseQuestionWidgetAnswerDetails>();
+
+  if (!Array.isArray(value)) {
+    return indexedAnswers;
+  }
+
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      continue;
+    }
+
+    const record = item as Record<string, unknown>;
+    const messageIndex =
+      typeof record.messageIndex === "number" &&
+      Number.isInteger(record.messageIndex) &&
+      record.messageIndex >= 0
+        ? record.messageIndex
+        : null;
+    const widgetAnswer = normalizeCourseWidgetAnswer(record);
+
+    if (messageIndex !== null && widgetAnswer) {
+      indexedAnswers.set(messageIndex, widgetAnswer);
+    }
+  }
+
+  return indexedAnswers;
+}
+
+function normalizeStoredMessages(
+  value: unknown,
+  widgetAnswers = new Map<number, CourseQuestionWidgetAnswerDetails>(),
+): CourseChatMessage[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  return value.slice(-MAX_CHAT_MESSAGES).flatMap((item) => {
+  const retainedMessages = value.slice(-MAX_CHAT_MESSAGES);
+  const messageIndexOffset = value.length - retainedMessages.length;
+
+  return retainedMessages.flatMap((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) {
       return [];
     }
@@ -132,8 +169,12 @@ function normalizeStoredMessages(value: unknown): CourseChatMessage[] {
       role === "assistant"
         ? normalizeCourseChatEvaluation(record.evaluation)
         : null;
+    const indexedWidgetAnswer = widgetAnswers.get(messageIndexOffset + index);
     const widgetAnswer =
-      role === "user" ? normalizeCourseWidgetAnswer(record.widgetAnswer) : null;
+      role === "user"
+        ? (indexedWidgetAnswer ??
+          normalizeCourseWidgetAnswer(record.widgetAnswer))
+        : null;
 
     return content
       ? [{ role, content, toolCalls, metrics, evaluation, widgetAnswer }]
@@ -157,7 +198,10 @@ export async function POST(request: Request) {
       : {};
   const courseId =
     typeof payload.courseId === "string" ? payload.courseId.trim() : "";
-  const messages = normalizeStoredMessages(payload.messages);
+  const messages = normalizeStoredMessages(
+    payload.messages,
+    normalizeIndexedWidgetAnswers(payload.widgetAnswers),
+  );
 
   if (!courseId) {
     return Response.json(
