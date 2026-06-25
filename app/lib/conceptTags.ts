@@ -17,6 +17,10 @@ import {
   openRouterChatCompletion,
   openRouterEmbeddings,
 } from "./openRouter";
+import {
+  loadPromptTemplate,
+  renderPromptTemplate,
+} from "./promptTemplates.ts";
 import { vectorLiteral } from "./vectorLiteral";
 export {
   fallbackConceptSlug,
@@ -217,16 +221,8 @@ function buildConceptTaggingPrompt(input: {
   questions: ConceptTaggedQuestion[];
   relevantTagsByQuestionId: Map<string, RelevantConceptTag[]>;
 }) {
-  return [
-    "Assign concept slugs to saved review questions.",
-    "Use 1-3 lowercase kebab-case slugs per question.",
-    "Prefer existingSlugs when they accurately describe the tested concept.",
-    "Create a new slug only when no existing slug fits.",
-    "Slugs must be full, self-disambiguating concept phrases.",
-    "Do not use acronym-only slugs such as ppo, rl, cnn, or kl unless the acronym is globally unambiguous.",
-    "Do not use source, course, lesson, or container labels as concept slugs.",
-    "Return strict JSON only: {\"assignments\":[{\"questionId\":\"...\",\"conceptSlugs\":[\"...\"]}]}",
-    JSON.stringify({
+  return renderPromptTemplate(loadPromptTemplate("concept-tagging-user.md"), {
+    questionsJson: JSON.stringify({
       questions: input.questions.map((question) => ({
         questionId: question.questionId,
         context: buildTaggingContext(question),
@@ -239,7 +235,7 @@ function buildConceptTaggingPrompt(input: {
             ?.map((tag) => tag.slug) ?? [],
       })),
     }),
-  ].join("\n\n");
+  });
 }
 
 function parseConceptAssignments(input: {
@@ -312,8 +308,7 @@ async function assignWithLlm(input: {
       messages: [
         {
           role: "system",
-          content:
-            "You assign compact concept slugs for a spaced-repetition question bank.",
+          content: loadPromptTemplate("concept-tagging-system.md"),
         },
         {
           role: "user",

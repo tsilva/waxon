@@ -13,6 +13,10 @@ import {
   readQuestions,
   type QuestionInput,
 } from "./postgresStore";
+import {
+  loadPromptTemplate,
+  renderPromptTemplate,
+} from "./promptTemplates.ts";
 import { getQuestionQualityReference } from "./questionQualityReference";
 import { extractCompleteJsonObjectsFromArrayProperty } from "./streamedJsonArray";
 
@@ -77,17 +81,10 @@ function buildGenerationMemoryContext(memory: string): string {
 }
 
 function buildGenerationSystemPrompt(questionQualityReference: string): string {
-  return [
-    "You generate bulk learning questions that continue learning when a review rotation has no due questions.",
-    "Use the memory excerpts as durable curriculum state. Generate from the first useful Frontier Queue and Target Ledger todo/weak/planned targets in learner order.",
-    "Earlier questions must support later dependent questions. Introduce uncovered targets or repair weak/partial targets; no review, recap, or practice duplicates.",
-    "Never reveal the answer in the question text. Return compact keys: q=question, a=concise expected answer, p=why this target is next, c=concept slug.",
-    "The c value must be one full self-disambiguating lowercase kebab-case concept slug, not an acronym-only tag.",
-    "Return strict JSON only:",
-    '{"questions":[{"q":"...","a":"short expected answer","p":"why now","c":"concept-slug"}]}',
-    "Shared question-quality reference:",
-    questionQualityReference,
-  ].join("\n\n");
+  return renderPromptTemplate(
+    loadPromptTemplate("bulk-question-generation-system.md"),
+    { questionQualityReference },
+  );
 }
 
 export function normalizeGeneratedQuestions(
@@ -216,35 +213,34 @@ export async function generateBulkQuestionsFromMemory(input: {
       },
       {
         role: "user" as const,
-        content: [
-          `Generate up to ${input.count} new questions.`,
-          "Knowledge base:",
-          JSON.stringify({
-            name: input.knowledgeBase.name,
-            goal: input.knowledgeBase.goal,
-            cardCount: input.knowledgeBase.cardCount,
-            dueCount: input.knowledgeBase.dueCount,
-          }),
-          "Memory excerpts:",
-          buildGenerationMemoryContext(input.memory),
-          "Existing questions to avoid:",
-          JSON.stringify(
-            existingQuestions
-              .slice(0, MAX_EXISTING_QUESTION_CONTEXT)
-              .map((question) => ({
-                q: question.question,
-                a: question.concise_answer,
+        content: renderPromptTemplate(
+          loadPromptTemplate("bulk-question-generation-user.md"),
+          {
+            count: input.count,
+            knowledgeBaseJson: JSON.stringify({
+              name: input.knowledgeBase.name,
+              goal: input.knowledgeBase.goal,
+              cardCount: input.knowledgeBase.cardCount,
+              dueCount: input.knowledgeBase.dueCount,
+            }),
+            memoryExcerpts: buildGenerationMemoryContext(input.memory),
+            existingQuestionsJson: JSON.stringify(
+              existingQuestions
+                .slice(0, MAX_EXISTING_QUESTION_CONTEXT)
+                .map((question) => ({
+                  q: question.question,
+                  a: question.concise_answer,
+                })),
+            ),
+            recentAttemptsJson: JSON.stringify(
+              recentAttempts.map((attempt) => ({
+                q: attempt.question,
+                answer: attempt.answerSummary || attempt.rawAnswer,
+                score: attempt.score,
               })),
-          ),
-          "Recent answer attempts:",
-          JSON.stringify(
-            recentAttempts.map((attempt) => ({
-              q: attempt.question,
-              answer: attempt.answerSummary || attempt.rawAnswer,
-              score: attempt.score,
-            })),
-          ),
-        ].join("\n\n"),
+            ),
+          },
+        ),
       },
     ],
   };
