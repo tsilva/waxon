@@ -6245,8 +6245,8 @@ textarea {
 
 .learn-chat-panel-toolbar {
   display: flex;
-  justify-content: flex-start;
-  width: min(780px, 100%);
+  justify-content: flex-end;
+  width: min(900px, 100%);
   margin: 0;
 }
 
@@ -6256,7 +6256,7 @@ textarea {
   overflow: hidden;
   border: 1px solid rgb(166 124 82 / 24%);
   border-radius: 8px;
-  background: rgb(255 252 245 / 88%);
+  background: rgb(239 229 213 / 58%);
   box-shadow: 0 8px 20px rgb(42 24 22 / 3%);
 }
 
@@ -6280,8 +6280,9 @@ textarea {
 }
 
 .learn-chat-view-button[aria-pressed="true"] {
-  background: rgb(166 124 82 / 16%);
+  background: rgb(255 252 245 / 96%);
   color: var(--accent);
+  box-shadow: 0 1px 2px rgb(86 68 56 / 12%);
 }
 
 .learn-chat-view-button:hover,
@@ -7840,7 +7841,7 @@ textarea {
   }
 
   .learn-chat-panel-toolbar {
-    justify-content: flex-start;
+    justify-content: flex-end;
     padding-right: 6px;
   }
 
