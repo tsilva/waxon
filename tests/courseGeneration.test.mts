@@ -36,7 +36,9 @@ test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for
   assert.doesNotMatch(result.text, /^#{1,6}\s+/u);
   assert.doesNotMatch(result.text, /Why PPO Needs an Entropy Term/u);
   assert.match(result.text, /Explain why entropy/u);
-  assert.equal(result.widgets[0]?.question, "What is the main idea of this milestone in your own words?");
+  assert.doesNotMatch(result.text, /\bmilestone\b/iu);
+  assert.equal(result.widgets[0]?.id, "fallback-understanding-check");
+  assert.equal(result.widgets[0]?.question, "What is the main idea in your own words?");
   assert.equal(result.appendedText, result.text);
 });
 
@@ -48,8 +50,9 @@ test("ensureCourseChatTurnHasLearnerQuestion appends checkpoint to lesson withou
   });
 
   assert.match(result.text, /Entropy regularization rewards/u);
+  assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(result.widgets[0]?.type, "free_text");
-  assert.equal(result.widgets[0]?.question, "What is the main idea of this milestone in your own words?");
+  assert.equal(result.widgets[0]?.question, "What is the main idea in your own words?");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion preserves a complete learner question", () => {
@@ -75,7 +78,8 @@ test("ensureCourseChatTurnHasLearnerQuestion repairs dangling learner prompt", (
 
   assert.match(result.text, /PPO constrains updates/u);
   assert.doesNotMatch(result.text, /In your own/u);
-  assert.equal(result.widgets[0]?.question, "What is the main idea of this milestone in your own words?");
+  assert.doesNotMatch(result.text, /\bmilestone\b/iu);
+  assert.equal(result.widgets[0]?.question, "What is the main idea in your own words?");
   assert.equal(result.widgets[0]?.type, "free_text");
 });
 
@@ -87,8 +91,9 @@ test("ensureCourseChatTurnHasLearnerQuestion repairs mid-word truncation", () =>
   });
 
   assert.doesNotMatch(result.text, /expec/u);
-  assert.match(result.text, /This milestone is about/u);
-  assert.equal(result.widgets[0]?.question, "What is the main idea of this milestone in your own words?");
+  assert.match(result.text, /This section is about/u);
+  assert.doesNotMatch(result.text, /\bmilestone\b/iu);
+  assert.equal(result.widgets[0]?.question, "What is the main idea in your own words?");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion removes partial widget before fallback", () => {
@@ -105,9 +110,10 @@ test("ensureCourseChatTurnHasLearnerQuestion removes partial widget before fallb
   assert.equal(result.widgets.length, 1);
   assert.equal(
     result.widgets[0]?.question,
-    "What is the main idea of this milestone in your own words?",
+    "What is the main idea in your own words?",
   );
   assert.doesNotMatch(result.text, /multiple_choice/u);
+  assert.doesNotMatch(result.text, /\bmilestone\b/iu);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion trims capped trailing fragments", () => {
@@ -163,7 +169,8 @@ test("ensureCourseChatTurnHasLearnerQuestion uses generic fallback for capped si
   });
 
   assert.doesNotMatch(result.text, /Let's ask/u);
-  assert.match(result.text, /This milestone is about/u);
+  assert.match(result.text, /This section is about/u);
+  assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(result.widgets.length, 1);
 });
 
@@ -193,7 +200,8 @@ test("ensureCourseChatTurnHasLearnerQuestion removes leaked widget JSON fragment
   });
 
   assert.doesNotMatch(result.text, /choices/u);
-  assert.match(result.text, /This milestone is about/u);
+  assert.match(result.text, /This section is about/u);
+  assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(result.widgets.length, 1);
 });
 
@@ -236,7 +244,8 @@ test("ensureCourseChatTurnHasLearnerQuestion sanitizes complete widget turns", (
 
   assert.doesNotMatch(result.text, /Goal: Test/u);
   assert.doesNotMatch(result.text, /:\*\*/u);
-  assert.match(result.text, /This milestone is about/u);
+  assert.match(result.text, /This section is about/u);
+  assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(result.widgets.length, 1);
   assert.equal(result.widgets[0]?.id, "sql-split-check");
 });
@@ -264,9 +273,39 @@ test("ensureCourseChatTurnHasLearnerQuestion removes visible widget-planning pro
   assert.doesNotMatch(result.text, /redundancy\/errors/u);
   assert.doesNotMatch(result.text, /Let's use a multiple-choice/u);
   assert.doesNotMatch(result.text, /Question: "If/u);
-  assert.match(result.text, /This milestone is about/u);
+  assert.match(result.text, /This section is about/u);
+  assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(result.widgets.length, 1);
   assert.equal(result.widgets[0]?.id, "sql-redundancy-check");
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion removes internal milestone wording from generated lesson and widget", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: "Focus on this milestone: understand why PPO clips updates.",
+    widgets: [
+      {
+        type: "free_text",
+        id: "fallback-milestone-check",
+        question: "What is the main idea of this milestone in your own words?",
+        placeholder: "Explain this milestone...",
+      },
+    ],
+    pageTitle: "The Clipping Mechanism Explained",
+    pageObjective: "Explain why clipping limits PPO policy changes.",
+  });
+
+  assert.equal(
+    result.text,
+    "Focus on this idea: understand why PPO clips updates.",
+  );
+  assert.equal(result.widgets[0]?.type, "free_text");
+  assert.equal(result.widgets[0]?.id, "fallback-understanding-check");
+  assert.equal(result.widgets[0]?.question, "What is the main idea in your own words?");
+  assert.equal(
+    result.widgets[0]?.type === "free_text" ? result.widgets[0].placeholder : "",
+    "Explain this topic...",
+  );
+  assert.doesNotMatch(result.text, /\bmilestone\b/iu);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion preserves valid complete widget teaching paragraphs", () => {

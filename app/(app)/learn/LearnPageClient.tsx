@@ -151,6 +151,11 @@ type LearnWidgetAnswerDetails = {
 };
 
 type LearnConversationViewMode = "chat" | "raw";
+type LearnRawPromptPreview = {
+  ok?: boolean;
+  modelRequest?: unknown;
+  error?: string;
+};
 
 const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
   id: "learn-chat-intro",
@@ -882,10 +887,23 @@ function LearnQuestionWidgetPlaceholder() {
 function rawLearnConversationJson(input: {
   course: Course | null;
   messages: LearnChatMessage[];
+  promptPreview: LearnRawPromptPreview | null;
+  promptPreviewError: string | null;
+  isLoadingPromptPreview: boolean;
 }) {
   return JSON.stringify(
     {
-      course: input.course
+      nextModelRequest: input.promptPreview?.modelRequest ?? null,
+      promptPreviewStatus: input.promptPreview?.modelRequest
+        ? "ready"
+        : input.isLoadingPromptPreview
+          ? "loading"
+          : input.promptPreviewError
+            ? "error"
+            : "unavailable",
+      promptPreviewError: input.promptPreviewError,
+      storedConversation: {
+        course: input.course
         ? {
             id: input.course.id,
             title: input.course.title,
@@ -899,22 +917,23 @@ function rawLearnConversationJson(input: {
             updatedAt: input.course.updatedAt,
           }
         : null,
-      messages: input.messages.map((message, index) => ({
-        index,
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        toolCalls: message.toolCalls ?? [],
-        metrics: message.metrics ?? null,
-        evaluation: message.evaluation ?? null,
-        status: message.status ?? null,
-        pendingEvaluation: Boolean(message.pendingEvaluation),
-        hasPendingQuestionWidget: Boolean(message.hasPendingQuestionWidget),
-        widgetAnswer: message.widgetAnswer ?? null,
-        widgetAnswerDetails: message.widgetAnswerDetails ?? null,
-        interrupted: Boolean(message.interrupted),
-        createdAt: message.createdAt ?? null,
-      })),
+        messages: input.messages.map((message, index) => ({
+          index,
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          toolCalls: message.toolCalls ?? [],
+          metrics: message.metrics ?? null,
+          evaluation: message.evaluation ?? null,
+          status: message.status ?? null,
+          pendingEvaluation: Boolean(message.pendingEvaluation),
+          hasPendingQuestionWidget: Boolean(message.hasPendingQuestionWidget),
+          widgetAnswer: message.widgetAnswer ?? null,
+          widgetAnswerDetails: message.widgetAnswerDetails ?? null,
+          interrupted: Boolean(message.interrupted),
+          createdAt: message.createdAt ?? null,
+        })),
+      },
     },
     null,
     2,
@@ -987,6 +1006,12 @@ export default function LearnPageClient({
   );
   const [conversationViewMode, setConversationViewMode] =
     useState<LearnConversationViewMode>("chat");
+  const [rawPromptPreview, setRawPromptPreview] =
+    useState<LearnRawPromptPreview | null>(null);
+  const [isLoadingRawPromptPreview, setIsLoadingRawPromptPreview] =
+    useState(false);
+  const [rawPromptPreviewError, setRawPromptPreviewError] =
+    useState<string | null>(null);
   const [draftCourseToc, setDraftCourseToc] = useState<CourseToc | null>(null);
   const [isStartingNewCourse, setIsStartingNewCourse] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(
@@ -1035,9 +1060,89 @@ export default function LearnPageClient({
       rawLearnConversationJson({
         course: selectedCourse,
         messages: chatMessages,
+        promptPreview: rawPromptPreview,
+        promptPreviewError: rawPromptPreviewError,
+        isLoadingPromptPreview: isLoadingRawPromptPreview,
       }),
-    [chatMessages, selectedCourse],
+    [
+      chatMessages,
+      isLoadingRawPromptPreview,
+      rawPromptPreview,
+      rawPromptPreviewError,
+      selectedCourse,
+    ],
   );
+
+  useEffect(() => {
+    if (conversationViewMode !== "raw" || !selectedCourse) {
+      return;
+    }
+
+    if (isStreaming) {
+      setRawPromptPreview(null);
+      setRawPromptPreviewError("Prompt preview updates after streaming finishes.");
+      setIsLoadingRawPromptPreview(false);
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    setRawPromptPreview(null);
+    setRawPromptPreviewError(null);
+    setIsLoadingRawPromptPreview(true);
+
+    void fetch("/api/courses/chat/prompt-preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: abortController.signal,
+      body: JSON.stringify({
+        courseId: selectedCourse.id,
+        messages: chatMessages.map((message) => ({
+          role: message.role,
+          content: message.content,
+          toolCalls: message.toolCalls,
+          metrics: message.metrics,
+          evaluation: message.evaluation,
+          widgetAnswer: message.widgetAnswer,
+        })),
+      }),
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as
+          | LearnRawPromptPreview
+          | null;
+
+        if (!response.ok || !data?.modelRequest) {
+          throw new Error(
+            data?.error ?? "Could not load model request preview.",
+          );
+        }
+
+        setRawPromptPreview(data);
+        setRawPromptPreviewError(null);
+      })
+      .catch((previewError: unknown) => {
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        setRawPromptPreview(null);
+        setRawPromptPreviewError(
+          previewError instanceof Error
+            ? previewError.message
+            : "Could not load model request preview.",
+        );
+      })
+      .finally(() => {
+        if (!abortController.signal.aborted) {
+          setIsLoadingRawPromptPreview(false);
+        }
+      });
+
+    return () => {
+      abortController.abort();
+    };
+  }, [chatMessages, conversationViewMode, isStreaming, selectedCourse]);
 
   usePageScrollLock(Boolean(courseSettingsCourse || selectedEvaluationDetails));
 

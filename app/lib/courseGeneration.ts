@@ -4,6 +4,7 @@ import {
   getOpenRouterEvaluationReasoning,
   openRouterChatCompletion,
   type OpenRouterChatResponse,
+  type OpenRouterChatRequest,
   type OpenRouterToolCall,
 } from "./openRouter.ts";
 import { extractJsonObject } from "./jsonObject.ts";
@@ -1199,6 +1200,7 @@ function buildCourseTutorSystemPrompt(input: {
     "Do not include word counts, token counts, compliance checks, or self-evaluation commentary in the learner-facing response.",
     "Do not write planning labels such as Goal, Question, or Test; only write the learner-facing lesson and call the widget tool.",
     "Do not ask rhetorical questions inside the teaching snippet.",
+    "Treat milestone as hidden course-state terminology. Never write the word milestone in visible learner-facing prose or widget questions; say topic, idea, or next idea instead.",
     input.answerDecisionTool
       ? [
           `Use both Learn tools in this same assistant response without waiting for tool results: call ${COURSE_ANSWER_DECISION_TOOL_NAME} exactly once for the learner's latest answer, then call ${COURSE_QUESTION_WIDGET_TOOL_NAME} exactly once after the visible lesson text unless the course is complete.`,
@@ -1222,23 +1224,50 @@ function buildCourseTutorSystemPrompt(input: {
     .join(" ");
 }
 
-export async function streamCourseAnswerContinuation(input: {
-  apiKey: string;
-  model?: string;
+export type CourseChatModelRequestPreview =
+  | {
+      kind: "course_chat_turn";
+      model: string;
+      pageTitle: string;
+      requestBody: OpenRouterChatRequest;
+    }
+  | {
+      kind: "course_answer_continuation";
+      model: string;
+      pageTitle: string;
+      nextPageTitle: string | null;
+      requestBody: OpenRouterChatRequest;
+    };
+
+export function shouldUseCourseAnswerContinuationRequest(
+  messages: CourseChatMessage[],
+): boolean {
+  const previousAssistantMessage = [...messages]
+    .reverse()
+    .find((message) => message.role === "assistant" && !message.evaluation);
+  const previousAssistantText = (previousAssistantMessage?.content ?? "")
+    .trim()
+    .toLowerCase();
+
+  return Boolean(
+    previousAssistantText &&
+      previousAssistantText !== "what do you want to learn?",
+  );
+}
+
+export function buildCourseAnswerContinuationModelRequest(input: {
   userId: string;
   course: CourseDetail;
   messages: CourseChatMessage[];
   retryInstruction?: string | null;
-  onTextDelta: (delta: string) => void;
-  onQuestionWidgetToolDelta?: () => void;
-  onAnswerDecision?: (
-    decision: CourseAnswerDecisionToolResult,
-  ) => void | Promise<void>;
-} & CourseCostObserver): Promise<{
-  content: string;
-  toolCalls: CourseQuestionWidgetToolCall[];
-  answerDecision: CourseAnswerDecisionToolResult;
-}> {
+  model?: string;
+}): CourseChatModelRequestPreview & {
+  latestUserMessage: CourseChatMessage;
+  previousAssistantMessage: CourseChatMessage;
+  answeredWidget: ReturnType<typeof latestAnsweredWidgetContext>;
+  page: CourseToc["pages"][number];
+  nextPage: CourseToc["pages"][number] | undefined;
+} {
   const latestUserMessage = [...input.messages]
     .reverse()
     .find((message) => message.role === "user");
@@ -1253,7 +1282,6 @@ export async function streamCourseAnswerContinuation(input: {
   const { page } = currentCourseMilestone(input.course);
   const nextPage = input.course.toc.pages[input.course.currentPageIndex + 1];
   const answeredWidget = latestAnsweredWidgetContext(input.messages);
-  const startedAt = Date.now();
   const model = input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL;
   const systemPrompt = buildCourseTutorSystemPrompt({
     answerDecisionTool: true,
@@ -1291,6 +1319,180 @@ export async function streamCourseAnswerContinuation(input: {
   ]
     .filter(Boolean)
     .join("\n\n");
+
+  return {
+    kind: "course_answer_continuation",
+    model,
+    pageTitle: page.title,
+    nextPageTitle: nextPage?.title ?? null,
+    page,
+    nextPage,
+    latestUserMessage,
+    previousAssistantMessage,
+    answeredWidget,
+    requestBody: {
+      model,
+      session_id: courseChatSessionId({
+        userId: input.userId,
+        course: input.course,
+      }),
+      reasoning_effort: "minimal",
+      temperature: 0.4,
+      max_tokens: COURSE_CHAT_TURN_MAX_TOKENS,
+      tools: [COURSE_ANSWER_DECISION_TOOL, COURSE_QUESTION_WIDGET_TOOL],
+      tool_choice: "auto",
+      parallel_tool_calls: true,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are Waxon's Learn chat tutor. Follow the stable tutor instructions and dynamic course state in the user message.",
+        },
+        {
+          role: "user",
+          content: openRouterPromptParts({
+            cacheablePrefix: stableTutorContext,
+            volatileSuffix: [stableCourseContext, volatileCourseContext].join(
+              "\n\n",
+            ),
+            model,
+          }),
+        },
+      ],
+    },
+  };
+}
+
+export function buildCourseChatTurnModelRequest(input: {
+  userId: string;
+  course: CourseDetail;
+  messages: CourseChatMessage[];
+  progressDecision?: CourseProgressDecision | null;
+  model?: string;
+}): CourseChatModelRequestPreview & {
+  page: CourseToc["pages"][number];
+} {
+  const { page } = currentCourseMilestone(input.course);
+  const model = input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL;
+  const systemPrompt = buildCourseTutorSystemPrompt({
+    answerDecisionTool: false,
+  });
+  const stableCourseContext = [
+    "Use the dynamic course context below to write the next tutor turn. Stable course fields come before volatile turn state and conversation history.",
+    `Course title: ${input.course.title}`,
+    `Course description: ${input.course.description}`,
+    `Full TOC JSON: ${JSON.stringify(input.course.toc)}`,
+    `Current milestone index: ${input.course.currentPageIndex}`,
+    `Current milestone: ${page.title}`,
+    `Milestone objective: ${page.objective}`,
+  ].join("\n");
+  const volatileCourseContext = [
+    input.progressDecision
+      ? `Progress tool result: ${input.progressDecision.toolCall} - ${input.progressDecision.reason}`
+      : "Progress tool result: starting or continuing current milestone.",
+    `Recent conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
+  ].join("\n");
+  const useExplicitTutorCacheShape =
+    supportsExplicitOpenRouterPromptCaching(model);
+  const stableTutorContext = [
+    "Stable tutor instructions:",
+    systemPrompt,
+    "",
+    COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC,
+  ].join("\n");
+  const dynamicTutorContext = [
+    stableCourseContext,
+    volatileCourseContext,
+  ].join("\n");
+
+  return {
+    kind: "course_chat_turn",
+    model,
+    pageTitle: page.title,
+    page,
+    requestBody: {
+      model,
+      session_id: courseChatSessionId({
+        userId: input.userId,
+        course: input.course,
+      }),
+      reasoning_effort: "minimal",
+      temperature: 0.5,
+      max_tokens: COURSE_CHAT_TURN_MAX_TOKENS,
+      tools: [COURSE_QUESTION_WIDGET_TOOL],
+      tool_choice: "auto",
+      parallel_tool_calls: false,
+      messages: useExplicitTutorCacheShape
+        ? [
+            {
+              role: "system",
+              content:
+                "You are Waxon's Learn chat tutor. Follow the stable tutor instructions and dynamic course state in the user message.",
+            },
+            {
+              role: "user",
+              content: openRouterPromptParts({
+                cacheablePrefix: stableTutorContext,
+                volatileSuffix: dynamicTutorContext,
+                model,
+              }),
+            },
+          ]
+        : [
+            {
+              role: "system",
+              content: openRouterPromptContent({
+                text: stableTutorContext,
+                model,
+                cacheable: true,
+              }),
+            },
+            {
+              role: "user",
+              content: openRouterPromptParts({
+                cacheablePrefix: stableCourseContext,
+                volatileSuffix: volatileCourseContext,
+                model,
+              }),
+            },
+          ],
+    },
+  };
+}
+
+export async function streamCourseAnswerContinuation(input: {
+  apiKey: string;
+  model?: string;
+  userId: string;
+  course: CourseDetail;
+  messages: CourseChatMessage[];
+  retryInstruction?: string | null;
+  onTextDelta: (delta: string) => void;
+  onQuestionWidgetToolDelta?: () => void;
+  onAnswerDecision?: (
+    decision: CourseAnswerDecisionToolResult,
+  ) => void | Promise<void>;
+} & CourseCostObserver): Promise<{
+  content: string;
+  toolCalls: CourseQuestionWidgetToolCall[];
+  answerDecision: CourseAnswerDecisionToolResult;
+}> {
+  const startedAt = Date.now();
+  const request = buildCourseAnswerContinuationModelRequest({
+    userId: input.userId,
+    course: input.course,
+    messages: input.messages,
+    retryInstruction: input.retryInstruction,
+    model: input.model,
+  });
+  const {
+    answeredWidget,
+    latestUserMessage,
+    nextPage,
+    page,
+    previousAssistantMessage,
+  } = request;
+  const model = request.model;
   const streamedToolCalls: Array<OpenRouterToolCall & { index?: number }> = [];
   let reportedQuestionWidgetToolDelta = false;
   const acceptedAnswerDecisionRef: {
@@ -1352,36 +1554,7 @@ export async function streamCourseAnswerContinuation(input: {
         }
       }
     },
-    body: {
-      model,
-      session_id: courseChatSessionId({
-        userId: input.userId,
-        course: input.course,
-      }),
-      reasoning_effort: "minimal",
-      temperature: 0.4,
-      max_tokens: COURSE_CHAT_TURN_MAX_TOKENS,
-      tools: [COURSE_ANSWER_DECISION_TOOL, COURSE_QUESTION_WIDGET_TOOL],
-      tool_choice: "auto",
-      parallel_tool_calls: true,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Waxon's Learn chat tutor. Follow the stable tutor instructions and dynamic course state in the user message.",
-        },
-        {
-          role: "user",
-          content: openRouterPromptParts({
-            cacheablePrefix: stableTutorContext,
-            volatileSuffix: [stableCourseContext, volatileCourseContext].join(
-              "\n\n",
-            ),
-            model,
-          }),
-        },
-      ],
-    },
+    body: request.requestBody,
   });
 
   if (!response.ok) {
@@ -1479,40 +1652,17 @@ export async function streamCourseChatTurn(input: {
     };
   }
 
-  const { page } = currentCourseMilestone(input.course);
   const startedAt = Date.now();
   let reportedQuestionWidgetToolDelta = false;
-  const model = input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL;
-  const systemPrompt = buildCourseTutorSystemPrompt({
-    answerDecisionTool: false,
+  const request = buildCourseChatTurnModelRequest({
+    userId: input.userId,
+    course: input.course,
+    messages: input.messages,
+    progressDecision: input.progressDecision,
+    model: input.model,
   });
-  const stableCourseContext = [
-    "Use the dynamic course context below to write the next tutor turn. Stable course fields come before volatile turn state and conversation history.",
-    `Course title: ${input.course.title}`,
-    `Course description: ${input.course.description}`,
-    `Full TOC JSON: ${JSON.stringify(input.course.toc)}`,
-    `Current milestone index: ${input.course.currentPageIndex}`,
-    `Current milestone: ${page.title}`,
-    `Milestone objective: ${page.objective}`,
-  ].join("\n");
-  const volatileCourseContext = [
-    input.progressDecision
-      ? `Progress tool result: ${input.progressDecision.toolCall} - ${input.progressDecision.reason}`
-      : "Progress tool result: starting or continuing current milestone.",
-    `Recent conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
-  ].join("\n");
-  const useExplicitTutorCacheShape =
-    supportsExplicitOpenRouterPromptCaching(model);
-  const stableTutorContext = [
-    "Stable tutor instructions:",
-    systemPrompt,
-    "",
-    COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC,
-  ].join("\n");
-  const dynamicTutorContext = [
-    stableCourseContext,
-    volatileCourseContext,
-  ].join("\n");
+  const { page } = request;
+  const model = request.model;
   const { body, response } = await openRouterChatCompletion({
     apiKey: input.apiKey,
     stream: true,
@@ -1530,60 +1680,14 @@ export async function streamCourseChatTurn(input: {
       reportedQuestionWidgetToolDelta = true;
       input.onQuestionWidgetToolDelta?.();
     },
-    body: {
-      model,
-      session_id: courseChatSessionId({
-        userId: input.userId,
-        course: input.course,
-      }),
-      reasoning_effort: "minimal",
-      temperature: 0.5,
-      max_tokens: COURSE_CHAT_TURN_MAX_TOKENS,
-      tools: [COURSE_QUESTION_WIDGET_TOOL],
-      tool_choice: "auto",
-      parallel_tool_calls: false,
-      messages: useExplicitTutorCacheShape
-        ? [
-            {
-              role: "system",
-              content:
-                "You are Waxon's Learn chat tutor. Follow the stable tutor instructions and dynamic course state in the user message.",
-            },
-            {
-              role: "user",
-              content: openRouterPromptParts({
-                cacheablePrefix: stableTutorContext,
-                volatileSuffix: dynamicTutorContext,
-                model,
-              }),
-            },
-          ]
-        : [
-            {
-              role: "system",
-              content: openRouterPromptContent({
-                text: stableTutorContext,
-                model,
-                cacheable: true,
-              }),
-            },
-            {
-              role: "user",
-              content: openRouterPromptParts({
-                cacheablePrefix: stableCourseContext,
-                volatileSuffix: volatileCourseContext,
-                model,
-              }),
-            },
-          ],
-    },
+    body: request.requestBody,
   });
 
   if (!response.ok) {
     throw new Error("Course chat generation failed.");
   }
 
-  reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt, model);
 
   const responseText = extractChatCompletionText(body);
   const responseToolCalls = extractChatCompletionWidgetToolCalls(body);
