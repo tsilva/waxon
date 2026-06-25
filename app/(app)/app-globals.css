@@ -5315,26 +5315,23 @@ textarea {
 }
 
 .admin-json-line {
-  display: grid;
-  grid-template-columns: 20px max-content;
-  column-gap: 5px;
-  align-items: start;
+  display: flex;
+  align-items: flex-start;
+  width: max-content;
   min-height: 1.55em;
 }
 
 .admin-json-branch-gutter {
-  position: sticky;
-  left: 0;
-  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
+  width: 22px;
   min-height: 1.55em;
-  background: rgb(255 252 245 / 94%);
+  flex: 0 0 22px;
 }
 
 .admin-json-code-content {
+  display: inline-block;
   min-width: max-content;
 }
 
