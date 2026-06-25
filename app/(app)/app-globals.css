@@ -5315,8 +5315,27 @@ textarea {
 }
 
 .admin-json-line {
-  display: block;
+  display: grid;
+  grid-template-columns: 20px max-content;
+  column-gap: 5px;
+  align-items: start;
   min-height: 1.55em;
+}
+
+.admin-json-branch-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  min-height: 1.55em;
+  background: rgb(255 252 245 / 94%);
+}
+
+.admin-json-code-content {
+  min-width: max-content;
 }
 
 .admin-json-indent {
@@ -5330,7 +5349,6 @@ textarea {
   justify-content: center;
   width: 18px;
   height: 18px;
-  margin: 0 4px 0 0;
   vertical-align: -4px;
   border: 1px solid rgb(227 218 196 / 78%);
   border-radius: 6px;
@@ -6214,7 +6232,7 @@ textarea {
 
 .learn-chat-panel-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: flex-start;
   width: min(780px, 100%);
   margin: 0;
 }

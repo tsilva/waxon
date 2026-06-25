@@ -161,6 +161,21 @@ function renderJsonPrimitive(
   );
 }
 
+function renderJsonLine(input: {
+  children: ReactNode;
+  key: string;
+  toggle?: ReactNode;
+}): ReactNode {
+  return (
+    <span className="admin-json-line" key={input.key}>
+      <span className="admin-json-branch-gutter">
+        {input.toggle ?? null}
+      </span>
+      <span className="admin-json-code-content">{input.children}</span>
+    </span>
+  );
+}
+
 export function JsonSyntaxBlock({
   payload,
   className,
@@ -223,20 +238,25 @@ export function JsonSyntaxBlock({
 
     if (!isCollapsibleJsonValue(value)) {
       return [
-        <span className="admin-json-line" key={path}>
-          {renderIndent(depth)}
-          {keyName === undefined ? null : renderJsonKey(keyName)}
-          {renderJsonPrimitive(value, {
-            keyName,
-            onPreviewString: setStringPreview,
-            path,
-          })}
-          {trailingComma ? (
-            <span className="admin-json-token admin-json-token-punctuation">
-              ,
-            </span>
-          ) : null}
-        </span>,
+        renderJsonLine({
+          key: path,
+          children: (
+            <>
+              {renderIndent(depth)}
+              {keyName === undefined ? null : renderJsonKey(keyName)}
+              {renderJsonPrimitive(value, {
+                keyName,
+                onPreviewString: setStringPreview,
+                path,
+              })}
+              {trailingComma ? (
+                <span className="admin-json-token admin-json-token-punctuation">
+                  ,
+                </span>
+              ) : null}
+            </>
+          ),
+        }),
       ];
     }
 
@@ -248,42 +268,49 @@ export function JsonSyntaxBlock({
     const openToken = isArray ? "[" : "{";
     const closeToken = isArray ? "]" : "}";
     const lines: ReactNode[] = [
-      <span className="admin-json-line" key={`${path}:open`}>
-        {renderIndent(depth)}
-        {keyName === undefined ? null : renderJsonKey(keyName)}
-        <button
-          className="admin-json-branch-toggle"
-          type="button"
-          aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${
-            keyName ?? "root"
-          } branch`}
-          aria-expanded={!isCollapsed}
-          title={isCollapsed ? "Expand branch" : "Collapse branch"}
-          onClick={() => togglePath(path)}
-        >
-          {isCollapsed ? (
-            <ChevronRight aria-hidden="true" />
-          ) : (
-            <ChevronDown aria-hidden="true" />
-          )}
-        </button>
-        <span className="admin-json-token admin-json-token-punctuation">
-          {openToken}
-        </span>
-        {isCollapsed ? (
+      renderJsonLine({
+        key: `${path}:open`,
+        toggle: (
+          <button
+            className="admin-json-branch-toggle"
+            type="button"
+            aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${
+              keyName ?? "root"
+            } branch`}
+            aria-expanded={!isCollapsed}
+            title={isCollapsed ? "Expand branch" : "Collapse branch"}
+            onClick={() => togglePath(path)}
+          >
+            {isCollapsed ? (
+              <ChevronRight aria-hidden="true" />
+            ) : (
+              <ChevronDown aria-hidden="true" />
+            )}
+          </button>
+        ),
+        children: (
           <>
-            <span className="admin-json-branch-summary">
-              {" "}
-              {branchSummary(value)}
-              {" "}
-            </span>
+            {renderIndent(depth)}
+            {keyName === undefined ? null : renderJsonKey(keyName)}
             <span className="admin-json-token admin-json-token-punctuation">
-              {closeToken}
-              {trailingComma ? "," : ""}
+              {openToken}
             </span>
+            {isCollapsed ? (
+              <>
+                <span className="admin-json-branch-summary">
+                  {" "}
+                  {branchSummary(value)}
+                  {" "}
+                </span>
+                <span className="admin-json-token admin-json-token-punctuation">
+                  {closeToken}
+                  {trailingComma ? "," : ""}
+                </span>
+              </>
+            ) : null}
           </>
-        ) : null}
-      </span>,
+        ),
+      }),
     ];
 
     if (isCollapsed) {
@@ -303,13 +330,18 @@ export function JsonSyntaxBlock({
     });
 
     lines.push(
-      <span className="admin-json-line" key={`${path}:close`}>
-        {renderIndent(depth)}
-        <span className="admin-json-token admin-json-token-punctuation">
-          {closeToken}
-          {trailingComma ? "," : ""}
-        </span>
-      </span>,
+      renderJsonLine({
+        key: `${path}:close`,
+        children: (
+          <>
+            {renderIndent(depth)}
+            <span className="admin-json-token admin-json-token-punctuation">
+              {closeToken}
+              {trailingComma ? "," : ""}
+            </span>
+          </>
+        ),
+      }),
     );
 
     return lines;
