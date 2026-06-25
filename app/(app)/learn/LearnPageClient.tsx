@@ -129,6 +129,8 @@ type LearnWidgetAnswerDetails = {
   answer: string;
 };
 
+type LearnConversationViewMode = "chat" | "raw";
+
 const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
   id: "learn-chat-intro",
   role: "assistant",
@@ -805,6 +807,46 @@ function LearnQuestionWidgetPlaceholder() {
   );
 }
 
+function rawLearnConversationJson(input: {
+  course: Course | null;
+  messages: LearnChatMessage[];
+}) {
+  return JSON.stringify(
+    {
+      course: input.course
+        ? {
+            id: input.course.id,
+            title: input.course.title,
+            topicPrompt: input.course.topicPrompt,
+            status: input.course.status,
+            currentPageIndex: input.course.currentPageIndex,
+            totalPages: input.course.totalPages,
+            generatedPages: input.course.generatedPages,
+            chatMessageCount: input.course.chatMessageCount,
+            conversationCost: input.course.conversationCost,
+            updatedAt: input.course.updatedAt,
+          }
+        : null,
+      messages: input.messages.map((message, index) => ({
+        index,
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        toolCalls: message.toolCalls ?? [],
+        metrics: message.metrics ?? null,
+        status: message.status ?? null,
+        pendingEvaluation: Boolean(message.pendingEvaluation),
+        hasPendingQuestionWidget: Boolean(message.hasPendingQuestionWidget),
+        widgetAnswerDetails: message.widgetAnswerDetails ?? null,
+        interrupted: Boolean(message.interrupted),
+        createdAt: message.createdAt ?? null,
+      })),
+    },
+    null,
+    2,
+  );
+}
+
 function parseSseEvent(rawEvent: string): { event: string; data: unknown } | null {
   const lines = rawEvent.split("\n");
   const event =
@@ -864,6 +906,8 @@ export default function LearnPageClient({
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(
     initialSelectedCourse ?? null,
   );
+  const [conversationViewMode, setConversationViewMode] =
+    useState<LearnConversationViewMode>("chat");
   const [draftCourseToc, setDraftCourseToc] = useState<CourseToc | null>(null);
   const [isStartingNewCourse, setIsStartingNewCourse] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(
@@ -904,6 +948,14 @@ export default function LearnPageClient({
     () => courses.find((course) => course.id === courseSettingsId) ?? null,
     [courseSettingsId, courses],
   );
+  const rawConversationJson = useMemo(
+    () =>
+      rawLearnConversationJson({
+        course: selectedCourse,
+        messages: chatMessages,
+      }),
+    [chatMessages, selectedCourse],
+  );
 
   usePageScrollLock(Boolean(courseSettingsCourse || selectedEvaluationDetails));
 
@@ -923,6 +975,7 @@ export default function LearnPageClient({
     setDraftCourseToc(null);
     setIsStartingNewCourse(false);
     setExpandedLearnEvaluationIds(new Set());
+    setConversationViewMode("chat");
     syncCourse(course);
     setChatMessages(
       course.chatMessages?.length
@@ -931,6 +984,12 @@ export default function LearnPageClient({
     );
     setTopic("");
   }, [syncCourse]);
+
+  useEffect(() => {
+    if (!selectedCourse) {
+      setConversationViewMode("chat");
+    }
+  }, [selectedCourse]);
 
   useEffect(() => {
     if (initialCourses) {
@@ -1920,6 +1979,8 @@ export default function LearnPageClient({
                 <section
                   className={`learn-chat-panel ${
                     isStartingNewCourse ? "learn-chat-panel-new-course" : ""
+                  } ${
+                    selectedCourse ? "learn-chat-panel-with-toolbar" : ""
                   }`}
                   aria-label={
                     selectedCourse ? "Learn chat" : "Learn something new"
@@ -1938,8 +1999,42 @@ export default function LearnPageClient({
                       </button>
                     </div>
                   ) : null}
-                  <div className="learn-chat-thread" ref={chatThreadRef}>
-                    {chatMessages.map((message, messageIndex) => {
+                  {selectedCourse ? (
+                    <div className="learn-chat-panel-toolbar">
+                      <div
+                        className="learn-chat-view-toggle"
+                        aria-label="Conversation view"
+                      >
+                        <button
+                          className="learn-chat-view-button"
+                          type="button"
+                          aria-pressed={conversationViewMode === "chat"}
+                          onClick={() => setConversationViewMode("chat")}
+                        >
+                          Chat
+                        </button>
+                        <button
+                          className="learn-chat-view-button"
+                          type="button"
+                          aria-pressed={conversationViewMode === "raw"}
+                          onClick={() => setConversationViewMode("raw")}
+                        >
+                          Raw
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {conversationViewMode === "raw" && selectedCourse ? (
+                    <div
+                      className="learn-raw-conversation"
+                      ref={chatThreadRef}
+                      tabIndex={0}
+                    >
+                      <pre>{rawConversationJson}</pre>
+                    </div>
+                  ) : (
+                    <div className="learn-chat-thread" ref={chatThreadRef}>
+                      {chatMessages.map((message, messageIndex) => {
                       if (message.pendingEvaluation) {
                         const answerDetails =
                           message.widgetAnswerDetails ??
@@ -2139,9 +2234,10 @@ export default function LearnPageClient({
                           ) : null}
                         </Fragment>
                       );
-                    })}
-                    <div className="learn-chat-end" />
-                  </div>
+                      })}
+                      <div className="learn-chat-end" />
+                    </div>
+                  )}
                   {!selectedCourse ? (
                     <AnswerComposer
                       id="learn-topic-input"
