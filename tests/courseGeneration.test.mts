@@ -13,12 +13,8 @@ import {
   streamCourseChatTurn,
 } from "../app/lib/courseGeneration.ts";
 import {
-  collectCourseQuestionWidgetAnswers,
   courseQuestionWidgetToolCallFromWidget,
-  parseCourseQuestionWidgetAnswer,
-  parseCourseQuestionWidgets,
-  serializeCourseQuestionWidget,
-  serializeCourseQuestionWidgetAnswer,
+  formatCourseQuestionWidgetForPrompt,
 } from "../app/lib/courseQuestionWidget.ts";
 import {
   parseCourseAnswerDecisionToolResult,
@@ -40,7 +36,7 @@ test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for
   assert.doesNotMatch(result.text, /^#{1,6}\s+/u);
   assert.doesNotMatch(result.text, /Why PPO Needs an Entropy Term/u);
   assert.match(result.text, /Explain why entropy/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
+  assert.equal(result.widgets[0]?.question, "What is the main idea of this milestone in your own words?");
   assert.equal(result.appendedText, result.text);
 });
 
@@ -52,8 +48,8 @@ test("ensureCourseChatTurnHasLearnerQuestion appends checkpoint to lesson withou
   });
 
   assert.match(result.text, /Entropy regularization rewards/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.type, "free_text");
-  assert.equal(parseCourseQuestionWidgets(result.appendedText).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
+  assert.equal(result.widgets[0]?.type, "free_text");
+  assert.equal(result.widgets[0]?.question, "What is the main idea of this milestone in your own words?");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion preserves a complete learner question", () => {
@@ -79,8 +75,8 @@ test("ensureCourseChatTurnHasLearnerQuestion repairs dangling learner prompt", (
 
   assert.match(result.text, /PPO constrains updates/u);
   assert.doesNotMatch(result.text, /In your own/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
-  assert.equal(parseCourseQuestionWidgets(result.appendedText).widgets[0]?.type, "free_text");
+  assert.equal(result.widgets[0]?.question, "What is the main idea of this milestone in your own words?");
+  assert.equal(result.widgets[0]?.type, "free_text");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion repairs mid-word truncation", () => {
@@ -92,7 +88,7 @@ test("ensureCourseChatTurnHasLearnerQuestion repairs mid-word truncation", () =>
 
   assert.doesNotMatch(result.text, /expec/u);
   assert.match(result.text, /This milestone is about/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets[0]?.question, "What is the main idea of this milestone in your own words?");
+  assert.equal(result.widgets[0]?.question, "What is the main idea of this milestone in your own words?");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion removes partial widget before fallback", () => {
@@ -100,19 +96,18 @@ test("ensureCourseChatTurnHasLearnerQuestion removes partial widget before fallb
     text: [
       "Flattening an image loses spatial structure.",
       "",
-      "<!-- waxon:question-widget %7B%22type%22%3A%22multiple_choice%22%2C%22id",
+      '{"type":"multiple_choice","id"',
     ].join("\n"),
     pageTitle: "Fully Connected Networks and Images",
     pageObjective: "Explain why flattening images hurts MLPs.",
   });
-  const parsed = parseCourseQuestionWidgets(result.text);
 
-  assert.equal(parsed.widgets.length, 1);
+  assert.equal(result.widgets.length, 1);
   assert.equal(
-    parsed.widgets[0]?.question,
+    result.widgets[0]?.question,
     "What is the main idea of this milestone in your own words?",
   );
-  assert.doesNotMatch(result.text, /%7B%22type%22%3A%22multiple_choice/u);
+  assert.doesNotMatch(result.text, /multiple_choice/u);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion trims capped trailing fragments", () => {
@@ -129,7 +124,7 @@ test("ensureCourseChatTurnHasLearnerQuestion trims capped trailing fragments", (
 
   assert.match(result.text, /Pixels are numbers arranged in a grid/u);
   assert.doesNotMatch(result.text, /100 pixels wide and 10/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+  assert.equal(result.widgets.length, 1);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion trims non-capped dangling sentence fragments", () => {
@@ -142,7 +137,7 @@ test("ensureCourseChatTurnHasLearnerQuestion trims non-capped dangling sentence 
 
   assert.match(result.text, /giant grid of numbers called a matrix/u);
   assert.doesNotMatch(result.text, /black-and-white image, this/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+  assert.equal(result.widgets.length, 1);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion trims capped single-paragraph final sentence", () => {
@@ -155,7 +150,7 @@ test("ensureCourseChatTurnHasLearnerQuestion trims capped single-paragraph final
 
   assert.match(result.text, /extra material called a tail/u);
   assert.doesNotMatch(result.text, /sometimes the blade/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+  assert.equal(result.widgets.length, 1);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion uses generic fallback for capped single-sentence fragments", () => {
@@ -169,7 +164,7 @@ test("ensureCourseChatTurnHasLearnerQuestion uses generic fallback for capped si
 
   assert.doesNotMatch(result.text, /Let's ask/u);
   assert.match(result.text, /This milestone is about/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+  assert.equal(result.widgets.length, 1);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion keeps pre-widget content when capped", () => {
@@ -177,7 +172,7 @@ test("ensureCourseChatTurnHasLearnerQuestion keeps pre-widget content when cappe
     text: [
       "Flattening an image loses spatial structure.",
       "",
-      "<!-- waxon:question-widget %7B%22type%22%3A%22multiple_choice%22%2C%22id",
+      '{"type":"multiple_choice","id"',
     ].join("\n"),
     pageTitle: "Fully Connected Networks and Images",
     pageObjective: "Explain why flattening images hurts MLPs.",
@@ -185,7 +180,7 @@ test("ensureCourseChatTurnHasLearnerQuestion keeps pre-widget content when cappe
   });
 
   assert.match(result.text, /Flattening an image loses spatial structure/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+  assert.equal(result.widgets.length, 1);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion removes leaked widget JSON fragments", () => {
@@ -199,7 +194,7 @@ test("ensureCourseChatTurnHasLearnerQuestion removes leaked widget JSON fragment
 
   assert.doesNotMatch(result.text, /choices/u);
   assert.match(result.text, /This milestone is about/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+  assert.equal(result.widgets.length, 1);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion removes leaked tutor meta commentary", () => {
@@ -218,36 +213,40 @@ test("ensureCourseChatTurnHasLearnerQuestion removes leaked tutor meta commentar
   assert.match(result.text, /Pixels are tiny squares/u);
   assert.doesNotMatch(result.text, /Total words/u);
   assert.doesNotMatch(result.text, /Perfect\. Fits/u);
-  assert.equal(parseCourseQuestionWidgets(result.text).widgets.length, 1);
+  assert.equal(result.widgets.length, 1);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion sanitizes complete widget turns", () => {
+  const widget = {
+    type: "free_text" as const,
+    id: "sql-split-check",
+    question: "Why do databases split related data into multiple tables?",
+  };
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: [
       ":**",
       "",
       "Goal: Test the core risk/understanding. Why do we split tables?",
-      "",
-      serializeCourseQuestionWidget({
-        type: "free_text",
-        id: "sql-split-check",
-        question: "Why do databases split related data into multiple tables?",
-      }),
     ].join("\n"),
+    widgets: [widget],
     pageTitle: "The Problem: Why Databases Split Data",
     pageObjective:
       "Understand why relational databases use multiple tables and joins.",
   });
-  const parsed = parseCourseQuestionWidgets(result.text);
 
   assert.doesNotMatch(result.text, /Goal: Test/u);
   assert.doesNotMatch(result.text, /:\*\*/u);
   assert.match(result.text, /This milestone is about/u);
-  assert.equal(parsed.widgets.length, 1);
-  assert.equal(parsed.widgets[0]?.id, "sql-split-check");
+  assert.equal(result.widgets.length, 1);
+  assert.equal(result.widgets[0]?.id, "sql-split-check");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion removes visible widget-planning prose", () => {
+  const widget = {
+    type: "free_text" as const,
+    id: "sql-redundancy-check",
+    question: "Why can repeated table data cause problems?",
+  };
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: [
       "redundancy/errors).",
@@ -255,64 +254,57 @@ test("ensureCourseChatTurnHasLearnerQuestion removes visible widget-planning pro
       "Let's use a multiple-choice question to contrast the confusion.",
       "",
       'Question: "If an online store repeats customer addresses in every order row, what problem appears?"',
-      "",
-      serializeCourseQuestionWidget({
-        type: "free_text",
-        id: "sql-redundancy-check",
-        question: "Why can repeated table data cause problems?",
-      }),
     ].join("\n"),
+    widgets: [widget],
     pageTitle: "The Problem: Why Databases Split Data",
     pageObjective:
       "Understand why relational databases use multiple tables and joins.",
   });
-  const parsed = parseCourseQuestionWidgets(result.text);
 
   assert.doesNotMatch(result.text, /redundancy\/errors/u);
   assert.doesNotMatch(result.text, /Let's use a multiple-choice/u);
   assert.doesNotMatch(result.text, /Question: "If/u);
   assert.match(result.text, /This milestone is about/u);
-  assert.equal(parsed.widgets.length, 1);
-  assert.equal(parsed.widgets[0]?.id, "sql-redundancy-check");
+  assert.equal(result.widgets.length, 1);
+  assert.equal(result.widgets[0]?.id, "sql-redundancy-check");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion preserves valid complete widget teaching paragraphs", () => {
+  const widget = {
+    type: "free_text" as const,
+    id: "join-purpose-check",
+    question: "Why do SQL joins matter?",
+  };
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: [
       "A database often splits information into separate tables to avoid repeating the same facts in many rows.",
       "",
       "A join brings those related rows back together when a question needs both pieces of data.",
-      "",
-      serializeCourseQuestionWidget({
-        type: "free_text",
-        id: "join-purpose-check",
-        question: "Why do SQL joins matter?",
-      }),
     ].join("\n"),
+    widgets: [widget],
     pageTitle: "The Problem: Why Databases Split Data",
     pageObjective:
       "Understand why relational databases use multiple tables and joins.",
   });
-  const parsed = parseCourseQuestionWidgets(result.text);
 
   assert.match(result.text, /avoid repeating the same facts/u);
   assert.match(result.text, /A join brings those related rows back together/u);
-  assert.equal(parsed.widgets.length, 1);
-  assert.equal(parsed.widgets[0]?.id, "join-purpose-check");
+  assert.equal(result.widgets.length, 1);
+  assert.equal(result.widgets[0]?.id, "join-purpose-check");
 });
 
 test("isCourseChatTurnComplete accepts terminal questions and multiple choice", () => {
   assert.equal(isCourseChatTurnComplete("Why does that matter for PPO?"), true);
   assert.equal(
     isCourseChatTurnComplete(
+      "Entropy keeps the policy exploratory.",
       [
-        "Entropy keeps the policy exploratory.",
-        serializeCourseQuestionWidget({
+        {
           type: "free_text",
           id: "entropy-check",
           question: "Why does entropy matter for PPO exploration?",
-        }),
-      ].join("\n\n"),
+        },
+      ],
     ),
     true,
   );
@@ -323,44 +315,6 @@ test("isCourseChatTurnComplete accepts terminal questions and multiple choice", 
     true,
   );
   assert.equal(isCourseChatTurnComplete("In your own"), false);
-});
-
-test("parseCourseQuestionWidgets strips trailing partial widget comments during streaming", () => {
-  const parsed = parseCourseQuestionWidgets(
-    [
-      "Key distinction:",
-      "",
-      "- Total variation: actual price vs. average price.",
-      "- Residual variation: actual price vs. predicted price.",
-      "",
-      "<!-- waxon:question-widget %7B%22type%22%3A%22multiple_choice%22%2C%22id",
-    ].join("\n"),
-  );
-
-  assert.equal(
-    parsed.content,
-    [
-      "Key distinction:",
-      "",
-      "- Total variation: actual price vs. average price.",
-      "- Residual variation: actual price vs. predicted price.",
-    ].join("\n"),
-  );
-  assert.deepEqual(parsed.widgets, []);
-});
-
-test("parseCourseQuestionWidgets accepts compact raw JSON widget comments", () => {
-  const parsed = parseCourseQuestionWidgets(
-    [
-      "A pixel stores a numeric color value.",
-      "",
-      '<!-- waxon:question-widget {"type":"free_text","id":"pixel-check","question":"What does a pixel store?","placeholder":"Type your answer here..."} -->',
-    ].join("\n"),
-  );
-
-  assert.equal(parsed.content, "A pixel stores a numeric color value.");
-  assert.equal(parsed.widgets[0]?.id, "pixel-check");
-  assert.equal(parsed.widgets[0]?.question, "What does a pixel store?");
 });
 
 test("shouldShowCourseChatInterruptedWarning only flags the latest incomplete tutor turn", () => {
@@ -553,7 +507,7 @@ test("parseCourseAnswerDecisionToolResult maps deterministic widget choices", ()
       },
     }),
     "B",
-    serializeCourseQuestionWidget({
+    formatCourseQuestionWidgetForPrompt({
       type: "multiple_choice",
       id: "ratio-check",
       question: "What does a PPO ratio r = 0.5 mean?",
@@ -678,12 +632,17 @@ test("generateCourseAnswerDecision sends compact widget prompt", async () => {
             "This long filler represents lesson context that should be trimmed. ".repeat(
               80,
             ),
-            serializeCourseQuestionWidget(widget),
           ].join("\n\n"),
+          toolCalls: [courseQuestionWidgetToolCallFromWidget(widget)],
         },
         {
           role: "user",
-          content: serializeCourseQuestionWidgetAnswer({ widget, answer }),
+          content: answer,
+          widgetAnswer: {
+            question: widget.question,
+            widgetId: widget.id,
+            answer,
+          },
         },
       ],
     });
@@ -908,7 +867,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
   try {
     const result = await streamCourseChatTurn({
       apiKey: "test-key",
-      model: "google/gemini-3.5-flash",
+      model: "google/gemini-3.1-flash-lite",
       userId: "user_1",
       course,
       messages: [],
@@ -1186,7 +1145,7 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
   try {
     const result = await streamCourseAnswerContinuation({
       apiKey: "test-key",
-      model: "anthropic/claude-haiku-4.5",
+      model: "google/gemini-3.1-flash-lite",
       userId: "user_1",
       course,
       messages: [
@@ -1198,10 +1157,12 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
         },
         {
           role: "user",
-          content: serializeCourseQuestionWidgetAnswer({
-            widget,
+          content: "You have to update it in many rows and can miss one.",
+          widgetAnswer: {
+            question: widget.question,
+            widgetId: widget.id,
             answer: "You have to update it in many rows and can miss one.",
-          }),
+          },
         },
       ],
       onAnswerDecision(decision) {
@@ -1363,7 +1324,7 @@ test("streamCourseAnswerContinuation rejects malformed answer decision tools", a
       () =>
         streamCourseAnswerContinuation({
           apiKey: "test-key",
-          model: "anthropic/claude-haiku-4.5",
+          model: "google/gemini-3.1-flash-lite",
           userId: "user_1",
           course,
           messages: [
@@ -1375,10 +1336,12 @@ test("streamCourseAnswerContinuation rejects malformed answer decision tools", a
             },
             {
               role: "user",
-              content: serializeCourseQuestionWidgetAnswer({
-                widget,
+              content: "You have to update it in many rows.",
+              widgetAnswer: {
+                question: widget.question,
+                widgetId: widget.id,
                 answer: "You have to update it in many rows.",
-              }),
+              },
             },
           ],
           onTextDelta() {},
@@ -1459,7 +1422,7 @@ test("streamCourseChatTurn keeps the same cache-capable session key across Learn
   try {
     await streamCourseChatTurn({
       apiKey: "test-key",
-      model: "google/gemini-3.5-flash",
+      model: "google/gemini-3.1-flash-lite",
       userId: "user_1",
       course: baseCourse,
       messages: [],
@@ -1467,7 +1430,7 @@ test("streamCourseChatTurn keeps the same cache-capable session key across Learn
     });
     await streamCourseChatTurn({
       apiKey: "test-key",
-      model: "google/gemini-3.5-flash",
+      model: "google/gemini-3.1-flash-lite",
       userId: "user_1",
       course: {
         ...baseCourse,
@@ -1622,14 +1585,8 @@ test("parseCourseQuestionAttemptToolResult reads choices from a hidden question 
         "A PPO ratio of 0.5 means the new policy probability is half of the old policy probability.",
       score: 10,
     }),
-    [
-      "<!-- waxon:answered-question",
-      "question: What does a PPO ratio r = 0.5 mean?",
-      "widget_id: ratio-check",
-      "-->",
-      "B",
-    ].join("\n"),
-    serializeCourseQuestionWidget({
+    "B",
+    formatCourseQuestionWidgetForPrompt({
       type: "multiple_choice",
       id: "ratio-check",
       question: "What does a PPO ratio r = 0.5 mean?",
@@ -1650,53 +1607,6 @@ test("parseCourseQuestionAttemptToolResult reads choices from a hidden question 
   if (result.toolCall === "record_course_question_attempt") {
     assert.equal(result.answer, selectedAnswer);
   }
-});
-
-test("parseCourseQuestionWidgetAnswer reads hidden question metadata", () => {
-  const parsed = parseCourseQuestionWidgetAnswer(
-    [
-      "<!-- waxon:answered-question",
-      "question: A regression model has R-squared = 0.80. What does that mean?",
-      "widget_id: r2-check",
-      "-->",
-      "B) The model explains about 80% of the variation in the outcome values.",
-    ].join("\n"),
-  );
-
-  assert.deepEqual(parsed, {
-    question: "A regression model has R-squared = 0.80. What does that mean?",
-    widgetId: "r2-check",
-    answer:
-      "B) The model explains about 80% of the variation in the outcome values.",
-  });
-});
-
-test("collectCourseQuestionWidgetAnswers keeps answered widget IDs for Learn history", () => {
-  const widget = {
-    type: "free_text" as const,
-    id: "ppo-loop-check",
-    question: "What role does reward play in the agent-environment loop?",
-    placeholder: "Type your answer here...",
-  };
-  const answers = collectCourseQuestionWidgetAnswers([
-    {
-      content: "Ordinary chat message",
-    },
-    {
-      content: serializeCourseQuestionWidgetAnswer({
-        widget,
-        answer: "Reward is the feedback signal after an action.",
-      }),
-    },
-  ]);
-
-  assert.deepEqual(answers, [
-    {
-      question: widget.question,
-      widgetId: widget.id,
-      answer: "Reward is the feedback signal after an action.",
-    },
-  ]);
 });
 
 test("parseCourseQuestionAttemptToolResult preserves inline markdown from tutor question", () => {

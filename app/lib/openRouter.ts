@@ -85,9 +85,10 @@ const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 const STREAM_DONE_SENTINEL = "[DONE]";
 const AFFORDABLE_MAX_TOKENS_PATTERN = /can only afford\s+(\d+)/iu;
-export const DEFAULT_OPENROUTER_CHAT_MODEL = "anthropic/claude-haiku-4.5";
-export const DEFAULT_OPENROUTER_LEARN_MODEL = "anthropic/claude-haiku-4.5";
-export const DEFAULT_OPENROUTER_EVALUATION_MODEL = "inception/mercury-2";
+export const DEFAULT_OPENROUTER_CHAT_MODEL = "google/gemini-3.1-flash-lite";
+export const DEFAULT_OPENROUTER_LEARN_MODEL = "google/gemini-3.1-flash-lite";
+export const DEFAULT_OPENROUTER_EVALUATION_MODEL =
+  "google/gemini-3.1-flash-lite";
 
 type OpenRouterChatConfig =
   | {

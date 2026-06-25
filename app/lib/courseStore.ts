@@ -20,8 +20,10 @@ import {
   upsertDueQuestions,
 } from "./postgresStore";
 import { reformatMultipleChoiceQuestionForReview } from "./courseQuestionAttemptParsing";
+import type { CourseMessageMetrics } from "./courseMessageMetrics";
 import {
   normalizeCourseQuestionWidgetToolCalls,
+  type CourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidgetToolCall,
 } from "./courseQuestionWidget";
 
@@ -52,9 +54,20 @@ export type CourseChatMessageRecord = {
   role: "assistant" | "user";
   content: string;
   toolCalls: CourseQuestionWidgetToolCall[];
+  metrics: CourseMessageMetrics | null;
+  evaluation: CourseChatMessageEvaluation | null;
+  widgetAnswer: CourseQuestionWidgetAnswerDetails | null;
   sequence: number;
   createdAt: number;
   updatedAt: number;
+};
+
+export type CourseChatMessageEvaluation = {
+  questionId: string | null;
+  question: string;
+  correctAnswer: string | null;
+  score: number;
+  feedback: string;
 };
 
 export type CourseRecord = {
@@ -121,12 +134,94 @@ function toChoices(value: unknown): CourseChoice[] {
     .filter((choice) => choice.id && choice.text);
 }
 
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizedString(value: unknown, maxLength: number): string {
+  return typeof value === "string"
+    ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
+    : "";
+}
+
+function normalizeStoredMetrics(value: unknown): CourseMessageMetrics | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    cost: finiteNumber(record.cost),
+    promptTokens: finiteNumber(record.promptTokens),
+    cachedPromptTokens: finiteNumber(record.cachedPromptTokens),
+    uncachedPromptTokens: finiteNumber(record.uncachedPromptTokens),
+    cacheWriteTokens: finiteNumber(record.cacheWriteTokens),
+    cacheHitPercent: finiteNumber(record.cacheHitPercent),
+    outputTokens: finiteNumber(record.outputTokens),
+    totalTokens: finiteNumber(record.totalTokens),
+    latencyMs: finiteNumber(record.latencyMs),
+    tokensPerSecond: finiteNumber(record.tokensPerSecond),
+    contextWindowTokens: finiteNumber(record.contextWindowTokens),
+    contextPercent: finiteNumber(record.contextPercent),
+  };
+}
+
+function normalizeStoredEvaluation(
+  value: unknown,
+): CourseChatMessageEvaluation | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const question = normalizedString(record.question, 1_200);
+  const feedback = normalizedString(record.feedback, 1_200);
+  const score = finiteNumber(record.score);
+
+  if (!question || !feedback || score === null) {
+    return null;
+  }
+
+  return {
+    questionId: normalizedString(record.questionId, 80) || null,
+    question,
+    correctAnswer: normalizedString(record.correctAnswer, 1_200) || null,
+    score: Math.max(0, Math.min(10, Math.round(score))),
+    feedback,
+  };
+}
+
+function normalizeStoredWidgetAnswer(
+  value: unknown,
+): CourseQuestionWidgetAnswerDetails | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const answer = normalizedString(record.answer, 4_000);
+
+  if (!answer) {
+    return null;
+  }
+
+  return {
+    question: normalizedString(record.question, 1_200) || null,
+    widgetId: normalizedString(record.widgetId, 80) || null,
+    answer,
+  };
+}
+
 function toCourseChatMessage(row: {
   id: string;
   courseId: string;
   role: string;
   content: string;
   toolCalls: unknown;
+  metrics: unknown;
+  evaluation: unknown;
+  widgetAnswer: unknown;
   sequence: number;
   createdAt: number;
   updatedAt: number;
@@ -137,6 +232,9 @@ function toCourseChatMessage(row: {
     role: toCourseChatRole(row.role),
     content: row.content,
     toolCalls: normalizeCourseQuestionWidgetToolCalls(row.toolCalls),
+    metrics: normalizeStoredMetrics(row.metrics),
+    evaluation: normalizeStoredEvaluation(row.evaluation),
+    widgetAnswer: normalizeStoredWidgetAnswer(row.widgetAnswer),
     sequence: row.sequence,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -392,6 +490,9 @@ export async function replaceCourseChatMessages(input: {
     role: "assistant" | "user";
     content: string;
     toolCalls?: CourseQuestionWidgetToolCall[];
+    metrics?: CourseMessageMetrics | null;
+    evaluation?: CourseChatMessageEvaluation | null;
+    widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
   }>;
 }): Promise<CourseChatMessageRecord[]> {
   const course = await getCourse(input.courseId);
@@ -409,6 +510,15 @@ export async function replaceCourseChatMessages(input: {
         message.role === "assistant"
           ? normalizeCourseQuestionWidgetToolCalls(message.toolCalls)
           : [],
+      metrics: normalizeStoredMetrics(message.metrics),
+      evaluation:
+        message.role === "assistant"
+          ? normalizeStoredEvaluation(message.evaluation)
+          : null,
+      widgetAnswer:
+        message.role === "user"
+          ? normalizeStoredWidgetAnswer(message.widgetAnswer)
+          : null,
     }))
     .filter((message) => message.content);
 
@@ -434,6 +544,9 @@ export async function replaceCourseChatMessages(input: {
           role: message.role,
           content: message.content,
           toolCalls: message.toolCalls,
+          metrics: message.metrics,
+          evaluation: message.evaluation,
+          widgetAnswer: message.widgetAnswer,
           sequence: index,
           createdAt: now + index,
           updatedAt: now + index,

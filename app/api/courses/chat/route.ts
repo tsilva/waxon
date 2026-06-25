@@ -25,15 +25,13 @@ import {
   recordCourseChatQuestionAttempt,
   replaceCourseChatMessages,
   updateCourseToc,
+  type CourseChatMessageEvaluation,
   type CourseDetail,
 } from "@/app/lib/courseStore";
-import {
-  appendCourseMessageMetrics,
-  stripCourseMessageMetrics,
-  type CourseMessageMetrics,
-} from "@/app/lib/courseMessageMetrics";
+import type { CourseMessageMetrics } from "@/app/lib/courseMessageMetrics";
 import {
   normalizeCourseQuestionWidgetToolCalls,
+  type CourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidgetToolCall,
 } from "@/app/lib/courseQuestionWidget";
 import type { CourseToc } from "@/app/lib/courseContent";
@@ -50,7 +48,7 @@ const MAX_CHAT_MESSAGE_CHARS = 16_000;
 const MAX_STORED_CHAT_MESSAGES = 200;
 const MAX_TOPIC_CHARS = 800;
 
-function buildQuestionEvaluationSnippet(input: {
+function buildQuestionEvaluationMessage(input: {
   questionId?: string | null;
   question: string;
   correctAnswer: string;
@@ -66,22 +64,14 @@ function buildQuestionEvaluationSnippet(input: {
 
   return {
     role: "assistant",
-    content: [
-      `<!-- waxon:evaluation-snippet score=${score} -->`,
-      input.questionId
-        ? `<!-- waxon:evaluation-question-id ${encodeURIComponent(input.questionId)} -->`
-        : "",
-      question
-        ? `<!-- waxon:evaluation-question ${encodeURIComponent(question)} -->`
-        : "",
-      correctAnswer
-        ? `<!-- waxon:evaluation-correct-answer ${encodeURIComponent(correctAnswer)} -->`
-        : "",
-      `**Score ${score}/10**`,
-      justification,
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
+    content: `Score ${score}/10\n\n${justification}`,
+    evaluation: {
+      questionId: input.questionId ?? null,
+      question: question || "Course question",
+      correctAnswer: correctAnswer || null,
+      score,
+      feedback: justification,
+    },
   };
 }
 
@@ -96,6 +86,87 @@ type CourseChatLatencyMetrics = {
   chat_stream_ms: number | null;
   rollback_count?: number;
 };
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizedString(value: unknown, maxLength: number): string {
+  return typeof value === "string"
+    ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
+    : "";
+}
+
+function normalizeCourseMessageMetrics(
+  value: unknown,
+): CourseMessageMetrics | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    cost: finiteNumber(record.cost),
+    promptTokens: finiteNumber(record.promptTokens),
+    cachedPromptTokens: finiteNumber(record.cachedPromptTokens),
+    uncachedPromptTokens: finiteNumber(record.uncachedPromptTokens),
+    cacheWriteTokens: finiteNumber(record.cacheWriteTokens),
+    cacheHitPercent: finiteNumber(record.cacheHitPercent),
+    outputTokens: finiteNumber(record.outputTokens),
+    totalTokens: finiteNumber(record.totalTokens),
+    latencyMs: finiteNumber(record.latencyMs),
+    tokensPerSecond: finiteNumber(record.tokensPerSecond),
+    contextWindowTokens: finiteNumber(record.contextWindowTokens),
+    contextPercent: finiteNumber(record.contextPercent),
+  };
+}
+
+function normalizeCourseChatEvaluation(
+  value: unknown,
+): CourseChatMessageEvaluation | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const question = normalizedString(record.question, 1_200);
+  const feedback = normalizedString(record.feedback, 1_200);
+  const score = finiteNumber(record.score);
+
+  if (!question || !feedback || score === null) {
+    return null;
+  }
+
+  return {
+    questionId: normalizedString(record.questionId, 80) || null,
+    question,
+    correctAnswer: normalizedString(record.correctAnswer, 1_200) || null,
+    score: Math.max(0, Math.min(10, Math.round(score))),
+    feedback,
+  };
+}
+
+function normalizeCourseWidgetAnswer(
+  value: unknown,
+): CourseQuestionWidgetAnswerDetails | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const answer = normalizedString(record.answer, 4_000);
+
+  if (!answer) {
+    return null;
+  }
+
+  return {
+    question: normalizedString(record.question, 1_200) || null,
+    widgetId: normalizedString(record.widgetId, 80) || null,
+    answer,
+  };
+}
 
 function normalizeStoredMessages(value: unknown): CourseChatMessage[] {
   if (!Array.isArray(value)) {
@@ -119,18 +190,25 @@ function normalizeStoredMessages(value: unknown): CourseChatMessage[] {
       role === "assistant"
         ? normalizeCourseQuestionWidgetToolCalls(record.toolCalls)
         : [];
+    const metrics = normalizeCourseMessageMetrics(record.metrics);
+    const evaluation =
+      role === "assistant"
+        ? normalizeCourseChatEvaluation(record.evaluation)
+        : null;
+    const widgetAnswer =
+      role === "user" ? normalizeCourseWidgetAnswer(record.widgetAnswer) : null;
 
-    return content ? [{ role, content, toolCalls }] : [];
+    return content
+      ? [{ role, content, toolCalls, metrics, evaluation, widgetAnswer }]
+      : [];
   });
 }
 
 function shouldEvaluateLatestCourseAnswer(messages: CourseChatMessage[]): boolean {
   const previousAssistantMessage = [...messages]
     .reverse()
-    .find((message) => message.role === "assistant");
-  const previousAssistantText = stripCourseMessageMetrics(
-    previousAssistantMessage?.content ?? "",
-  )
+    .find((message) => message.role === "assistant" && !message.evaluation);
+  const previousAssistantText = (previousAssistantMessage?.content ?? "")
     .trim()
     .toLowerCase();
 
@@ -215,12 +293,7 @@ export async function POST(request: Request) {
       ? (parsed.value as Record<string, unknown>)
       : {};
   const storedMessages = normalizeStoredMessages(payload.messages);
-  const messages = storedMessages
-    .map((message) => ({
-      ...message,
-      content: stripCourseMessageMetrics(message.content),
-    }))
-    .slice(-MAX_CHAT_MESSAGES);
+  const messages = storedMessages.slice(-MAX_CHAT_MESSAGES);
   const courseId =
     typeof payload.courseId === "string" ? payload.courseId.trim() : "";
 
@@ -327,28 +400,26 @@ export async function POST(request: Request) {
             score: questionAttempt.score,
             submittedAt: Date.now(),
           });
-          const evaluationSnippet = buildQuestionEvaluationSnippet({
+          const evaluationMessage = buildQuestionEvaluationMessage({
             questionId: recordedAttempt?.questionId ?? null,
             question: questionAttempt.question,
             correctAnswer: questionAttempt.correctAnswer,
             score: questionAttempt.score,
             justification: questionAttempt.justification,
           });
-          const evaluationSnippetWithMetrics = {
-            ...evaluationSnippet,
-            content: appendCourseMessageMetrics(
-              evaluationSnippet.content,
-              metrics,
-            ),
-          };
           questionEvaluationResult = {
-            message: evaluationSnippetWithMetrics,
+            message: {
+              ...evaluationMessage,
+              metrics,
+            },
             score: questionAttempt.score,
           };
           send("evaluation", {
             score: questionAttempt.score,
             justification: questionAttempt.justification,
-            content: evaluationSnippetWithMetrics.content,
+            content: evaluationMessage.content,
+            evaluation: evaluationMessage.evaluation,
+            metrics,
           });
 
           if (answerDecision.progressDecision.toolCall === "mark_milestone_done") {
@@ -492,10 +563,8 @@ export async function POST(request: Request) {
                       : []),
                     {
                       role: "assistant",
-                      content: appendCourseMessageMetrics(
-                        assistantContent,
-                        assistantTurnMetrics,
-                      ),
+                      content: assistantContent,
+                      metrics: assistantTurnMetrics,
                       toolCalls: assistantToolCalls,
                     },
                   ],
@@ -744,10 +813,8 @@ export async function POST(request: Request) {
                 : []),
               {
                 role: "assistant",
-                content: appendCourseMessageMetrics(
-                  assistantContent,
-                  assistantTurnMetrics,
-                ),
+                content: assistantContent,
+                metrics: assistantTurnMetrics,
                 toolCalls: assistantToolCalls,
               },
             ],

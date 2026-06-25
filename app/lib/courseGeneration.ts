@@ -29,17 +29,19 @@ import {
   COURSE_QUESTION_WIDGET_TOOL_NAME,
   courseQuestionWidgetToolCallFromWidget,
   courseQuestionWidgetsFromToolCalls,
-  parseCourseQuestionWidgetAnswer,
-  parseCourseQuestionWidgets,
-  serializeCourseQuestionWidget,
+  formatCourseQuestionWidgetsForPrompt,
   type CourseQuestionWidget,
+  type CourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidgetToolCall,
 } from "./courseQuestionWidget.ts";
 import {
   normalizePartialCourseToc,
   type PartialCourseToc,
 } from "./courseTocStream.ts";
-import type { CourseDetail } from "./courseStore";
+import type {
+  CourseChatMessageEvaluation,
+  CourseDetail,
+} from "./courseStore";
 import type { CourseProgressDecision } from "./courseProgress.ts";
 
 const COURSE_JSON_RESPONSE_FORMAT = { type: "json_object" };
@@ -236,8 +238,6 @@ const COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC = [
   "Stable failure recovery: if a generated turn would be too broad, narrow it to the current milestone objective. If it would be too shallow, add one causal because sentence. If it would ask a question not taught by the turn, revise the explanation first. If it would introduce hidden assumptions, state them plainly or remove them.",
   "Stable cache boundary discipline: the reusable tutor policy belongs before dynamic course state so provider prompt caching can reuse it across Learn turns. Treat this policy as stable instruction text, not as content to quote to the learner. Course title, table of contents, progress state, learner answers, and recent conversation remain after this boundary and should not be blended back into the reusable policy.",
 ].join(" ");
-const QUESTION_EVALUATION_SNIPPET_PATTERN =
-  /^<!--\s*waxon:evaluation-snippet score=\d{1,2}\s*-->\s*/u;
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
 const MODEL_CONTEXT_WINDOW_TOKENS: Array<{
   pattern: RegExp;
@@ -282,6 +282,9 @@ export type CourseChatMessage = {
   role: "user" | "assistant";
   content: string;
   toolCalls?: CourseQuestionWidgetToolCall[];
+  metrics?: CourseMessageMetrics | null;
+  evaluation?: CourseChatMessageEvaluation | null;
+  widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
 };
 
 export type { CourseQuestionAttemptToolResult };
@@ -645,16 +648,14 @@ function compactCourseMessages(messages: CourseChatMessage[]) {
 
     return {
       role: message.role,
-      content: excerptCourseMessageForPrompt(
-        message.content.replace(QUESTION_EVALUATION_SNIPPET_PATTERN, ""),
-        1_200,
-      ),
+      content: excerptCourseMessageForPrompt(message.content, 1_200),
       ...(toolWidgets.length > 0 ? { questionWidgets: toolWidgets } : {}),
+      ...(message.widgetAnswer ? { widgetAnswer: message.widgetAnswer } : {}),
     };
   });
 }
 
-function courseMessageContentWithToolWidgets(message: CourseChatMessage): string {
+function courseMessagePromptContext(message: CourseChatMessage): string {
   const toolWidgets = courseQuestionWidgetsFromToolCalls(message.toolCalls);
 
   if (toolWidgets.length === 0) {
@@ -663,7 +664,7 @@ function courseMessageContentWithToolWidgets(message: CourseChatMessage): string
 
   return [
     message.content,
-    ...toolWidgets.map((widget) => serializeCourseQuestionWidget(widget)),
+    formatCourseQuestionWidgetsForPrompt(toolWidgets),
   ].join("\n\n");
 }
 
@@ -896,30 +897,26 @@ function latestAnsweredWidgetContext(messages: CourseChatMessage[]): {
   const previousAssistantMessage = [...messages]
     .reverse()
     .find((message) => message.role === "assistant");
-  const parsedAnswer = parseCourseQuestionWidgetAnswer(
-    latestUserMessage?.content ?? "",
-  );
+  const parsedAnswer = latestUserMessage?.widgetAnswer ?? null;
 
   if (!latestUserMessage || !previousAssistantMessage || !parsedAnswer) {
     return null;
   }
 
-  const parsedWidgets = parseCourseQuestionWidgets(previousAssistantMessage.content);
   const toolWidgets = courseQuestionWidgetsFromToolCalls(
     previousAssistantMessage.toolCalls,
   );
   const matchedWidget =
-    [...toolWidgets, ...parsedWidgets.widgets].find(
+    toolWidgets.find(
       (widget) => widget.id === parsedAnswer.widgetId,
     ) ??
-    toolWidgets.at(-1) ??
-    parsedWidgets.widgets.at(-1);
+    toolWidgets.at(-1);
   const question = parsedAnswer.question ?? matchedWidget?.question ?? null;
 
   return {
     question,
     answer: parsedAnswer.answer,
-    choiceSource: courseMessageContentWithToolWidgets(previousAssistantMessage),
+    choiceSource: courseMessagePromptContext(previousAssistantMessage),
     widget: matchedWidget ?? null,
   };
 }
@@ -939,17 +936,13 @@ function buildCourseAnswerDecisionUserPrompt(input: {
   ];
 
   if (input.answeredWidget) {
-    const visibleLessonContext = parseCourseQuestionWidgets(
-      input.previousAssistantContent,
-    ).content;
-
     return [
       ...baseContext,
       input.answeredWidget.widget
         ? `Answered widget JSON: ${JSON.stringify(input.answeredWidget.widget)}`
         : `Answered widget question: ${input.answeredWidget.question ?? "unknown"}`,
       `Learner answer: ${input.answeredWidget.answer}`,
-      `Short lesson context:\n${excerptCourseMessageForPrompt(visibleLessonContext, 900)}`,
+      `Short lesson context:\n${excerptCourseMessageForPrompt(input.previousAssistantContent, 900)}`,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -1134,8 +1127,8 @@ export async function generateCourseQuestionAttemptToolResult(input: {
           content: [
             "You are filling Waxon's server-side course question attempt tool.",
             "Look at the tutor's previous assistant message and the learner's latest user message.",
-            "If the previous assistant message ended with a real learner-facing question or a hidden waxon:question-widget UI tool call and the latest user message answers it, return a record_course_question_attempt tool call.",
-            "If the latest user message contains a hidden waxon:answered-question comment, use that comment's question as the learner-facing question being answered.",
+            "If the previous assistant message ended with a real learner-facing question or a render_question_widget tool call and the latest user message answers it, return a record_course_question_attempt tool call.",
+            "If the latest user message includes structured widgetAnswer metadata, use that metadata's question as the learner-facing question being answered.",
             "Write question as a self-contained free-response review prompt that tests the same idea as the learner-facing question.",
             "If the tutor question was multiple choice, rephrase it into a recall question instead of using words like choose, option, A/B/C/D, or answer choice.",
             "Grade the answer from 0 to 10 using normal Waxon review standards.",
@@ -1154,9 +1147,14 @@ export async function generateCourseQuestionAttemptToolResult(input: {
             `Course title: ${input.course.title}`,
             `Current milestone: ${page.title}`,
             `Milestone objective: ${page.objective}`,
-            `Previous assistant message:\n${excerptCourseMessageForPrompt(courseMessageContentWithToolWidgets(previousAssistantMessage), 4_000)}`,
+            `Previous assistant message:\n${excerptCourseMessageForPrompt(courseMessagePromptContext(previousAssistantMessage), 4_000)}`,
+            latestUserMessage.widgetAnswer
+              ? `Latest widget answer metadata:\n${JSON.stringify(latestUserMessage.widgetAnswer)}`
+              : "",
             `Latest learner answer:\n${excerptCourseMessageForPrompt(latestUserMessage.content, 4_000)}`,
-          ].join("\n\n"),
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
         },
       ],
     },
@@ -1174,7 +1172,7 @@ export async function generateCourseQuestionAttemptToolResult(input: {
   return parseCourseQuestionAttemptToolResult(
     extractChatCompletionText(body),
     latestUserMessage.content,
-    courseMessageContentWithToolWidgets(previousAssistantMessage),
+    courseMessagePromptContext(previousAssistantMessage),
   );
 }
 
@@ -1266,9 +1264,7 @@ export async function streamCourseAnswerContinuation(input: {
     "",
     COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC,
   ].join("\n");
-  const visibleLessonContext = parseCourseQuestionWidgets(
-    previousAssistantMessage.content,
-  ).content;
+  const visibleLessonContext = previousAssistantMessage.content;
   const stableCourseContext = [
     "Use the dynamic course context below to evaluate the learner's answer and continue the next tutor turn.",
     `Course title: ${input.course.title}`,
@@ -1305,7 +1301,7 @@ export async function streamCourseAnswerContinuation(input: {
   const requireRecordedAttempt = true;
   const choiceSource =
     answeredWidget?.choiceSource ??
-    courseMessageContentWithToolWidgets(previousAssistantMessage);
+    courseMessagePromptContext(previousAssistantMessage);
   const fallbackAnswer = answeredWidget?.answer ?? latestUserMessage.content;
   const tryAcceptAnswerDecision = async (
     toolCall: OpenRouterToolCall & { index?: number },
@@ -1432,15 +1428,9 @@ export async function streamCourseAnswerContinuation(input: {
     );
   }
 
-  const repairInputText =
-    responseWidgets.length > 0
-      ? [
-          responseText,
-          ...responseWidgets.map((widget) => serializeCourseQuestionWidget(widget)),
-        ].join("\n\n")
-      : responseText;
   const ensuredTurn = ensureCourseChatTurnHasLearnerQuestion({
-    text: repairInputText,
+    text: responseText,
+    widgets: responseWidgets,
     pageTitle:
       finalAnswerDecision.progressDecision.toolCall === "mark_milestone_done"
         ? (nextPage?.title ?? page.title)
@@ -1454,16 +1444,12 @@ export async function streamCourseAnswerContinuation(input: {
       COURSE_CHAT_TURN_MAX_TOKENS,
     ),
   });
-  const repairedParsed = parseCourseQuestionWidgets(ensuredTurn.text);
-  const fallbackToolCalls = repairedParsed.widgets.map((widget) =>
+  const fallbackToolCalls = ensuredTurn.widgets.map((widget) =>
     courseQuestionWidgetToolCallFromWidget(widget),
   );
 
   return {
-    content:
-      fallbackToolCalls.length > 0 && responseWidgets.length === 0
-        ? repairedParsed.content
-        : ensuredTurn.text,
+    content: ensuredTurn.text,
     toolCalls: responseToolCalls.length > 0 ? responseToolCalls : fallbackToolCalls,
     answerDecision: finalAnswerDecision,
   };
@@ -1602,15 +1588,9 @@ export async function streamCourseChatTurn(input: {
   const responseText = extractChatCompletionText(body);
   const responseToolCalls = extractChatCompletionWidgetToolCalls(body);
   const responseWidgets = courseQuestionWidgetsFromToolCalls(responseToolCalls);
-  const repairInputText =
-    responseWidgets.length > 0
-      ? [
-          responseText,
-          ...responseWidgets.map((widget) => serializeCourseQuestionWidget(widget)),
-        ].join("\n\n")
-      : responseText;
   const ensuredTurn = ensureCourseChatTurnHasLearnerQuestion({
-    text: repairInputText,
+    text: responseText,
+    widgets: responseWidgets,
     pageTitle: page.title,
     pageObjective: page.objective,
     stripTrailingPartialContent: didReachMaxCompletionTokens(
@@ -1623,8 +1603,7 @@ export async function streamCourseChatTurn(input: {
     input.onTextDelta(ensuredTurn.appendedText);
   }
 
-  const parsedEnsuredTurn = parseCourseQuestionWidgets(ensuredTurn.text);
-  const ensuredToolCalls = parsedEnsuredTurn.widgets.map((widget, index) =>
+  const ensuredToolCalls = ensuredTurn.widgets.map((widget, index) =>
     courseQuestionWidgetToolCallFromWidget(
       widget,
       responseToolCalls[index]?.id ?? `widget-call-${widget.id}`,
@@ -1632,7 +1611,7 @@ export async function streamCourseChatTurn(input: {
   );
 
   return {
-    content: parsedEnsuredTurn.content,
+    content: ensuredTurn.text,
     toolCalls: ensuredToolCalls,
   };
 }

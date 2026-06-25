@@ -1,44 +1,38 @@
-import {
-  parseCourseQuestionWidgets,
-  serializeCourseQuestionWidget,
-} from "./courseQuestionWidget.ts";
-
-const PARTIAL_QUESTION_WIDGET_PATTERN =
-  /<!--\s*waxon:question-widget\b[\s\S]*$/u;
+import type { CourseQuestionWidget } from "./courseQuestionWidget.ts";
 
 export function ensureCourseChatTurnHasLearnerQuestion(input: {
   text: string;
   pageTitle: string;
   pageObjective: string;
+  widgets?: CourseQuestionWidget[];
   stripTrailingPartialContent?: boolean;
 }): {
   text: string;
   appendedText: string;
+  widgets: CourseQuestionWidget[];
 } {
   const generatedText = input.text.trim();
-  const parsedGeneratedTurn = parseCourseQuestionWidgets(generatedText);
-  const hasLearnerQuestion = isCourseChatTurnComplete(generatedText);
-  const fallbackWidget = serializeCourseQuestionWidget({
+  const inputWidgets = input.widgets ?? [];
+  const hasLearnerQuestion = isCourseChatTurnComplete(generatedText, inputWidgets);
+  const fallbackWidget: CourseQuestionWidget = {
     type: "free_text",
     id: "fallback-milestone-check",
     question: "What is the main idea of this milestone in your own words?",
     placeholder: "Explain the idea in your own words...",
-  });
+  };
 
-  if (parsedGeneratedTurn.widgets.length > 0) {
+  if (inputWidgets.length > 0) {
     const cleanedVisibleContent = stripInvalidRepairParagraphs(
-      parsedGeneratedTurn.content.trim(),
+      generatedText,
     );
     const sanitizedVisibleContent =
       stripDanglingTailIfNeeded(cleanedVisibleContent) ||
       `This milestone is about ${input.pageObjective}`;
-    const widgetText = parsedGeneratedTurn.widgets
-      .map((widget) => serializeCourseQuestionWidget(widget))
-      .join("\n\n");
 
     return {
-      text: [sanitizedVisibleContent, widgetText].join("\n\n"),
+      text: sanitizedVisibleContent,
       appendedText: "",
+      widgets: inputWidgets,
     };
   }
 
@@ -46,6 +40,7 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     return {
       text: generatedText,
       appendedText: "",
+      widgets: [],
     };
   }
 
@@ -53,24 +48,34 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     const fallbackLesson = [
       `This milestone is about ${input.pageObjective}`,
       "A good answer should name the core idea, explain why it matters, and connect it to a small example.",
-      fallbackWidget,
+      fallbackWidget.question,
     ].join("\n\n");
 
     return {
       text: fallbackLesson,
       appendedText: fallbackLesson,
+      widgets: [fallbackWidget],
     };
   }
 
   const parsedRepairContent = stripInvalidRepairParagraphs(
-    parsedGeneratedTurn.content.trim(),
+    generatedText,
   );
+  const rawRepairParagraphCount = generatedText
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean).length;
+  const cleanedRepairParagraphCount = parsedRepairContent
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean).length;
+  const removedInvalidRepairParagraph =
+    cleanedRepairParagraphCount < rawRepairParagraphCount;
   const shouldStripTrailingPartialContent =
     input.stripTrailingPartialContent === true &&
-    !PARTIAL_QUESTION_WIDGET_PATTERN.test(generatedText);
+    !removedInvalidRepairParagraph;
   const shouldStripDanglingTail =
     !shouldStripTrailingPartialContent &&
-    !PARTIAL_QUESTION_WIDGET_PATTERN.test(generatedText) &&
     !/[.!?)]\s*$/u.test(parsedRepairContent);
   const strippedRepairContent = shouldStripTrailingPartialContent
     ? stripTrailingPartialRepairContent(parsedRepairContent)
@@ -87,12 +92,13 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
   const fallbackQuestion = [
     separator.trimEnd(),
     `Focus on this milestone: ${input.pageObjective}`,
-    fallbackWidget,
+    fallbackWidget.question,
   ].join("\n\n");
 
   return {
     text: `${repairBaseText}${fallbackQuestion}`,
     appendedText: fallbackQuestion,
+    widgets: [fallbackWidget],
   };
 }
 
@@ -216,7 +222,10 @@ export function excerptCourseMessageForPrompt(
   return `${normalizedContent.slice(0, headLength)}${marker}${normalizedContent.slice(-tailLength)}`;
 }
 
-export function isCourseChatTurnComplete(text: string): boolean {
+export function isCourseChatTurnComplete(
+  text: string,
+  widgets: CourseQuestionWidget[] = [],
+): boolean {
   const normalizedText = text.trim();
 
   if (!normalizedText) {
@@ -227,7 +236,7 @@ export function isCourseChatTurnComplete(text: string): boolean {
     return true;
   }
 
-  if (parseCourseQuestionWidgets(normalizedText).widgets.length > 0) {
+  if (widgets.length > 0) {
     return true;
   }
 

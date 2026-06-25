@@ -21,28 +21,16 @@ import {
   useState,
 } from "react";
 import { AnswerComposer } from "@/app/AnswerComposer";
+import { JsonSyntaxBlock } from "@/app/JsonSyntaxBlock";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
-import {
-  isQuestionEvaluationSnippet,
-  parseQuestionEvaluationSnippet,
-  type LearnQuestionEvaluationSnippet,
-} from "@/app/lib/courseEvaluationSnippet";
-import {
-  parseCourseMessageMetrics,
-  type CourseMessageMetrics,
-} from "@/app/lib/courseMessageMetrics";
+import type { CourseMessageMetrics } from "@/app/lib/courseMessageMetrics";
 import { shouldShowCourseChatInterruptedWarning } from "@/app/lib/courseChatTurn";
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import {
-  collectCourseQuestionWidgetAnswers,
   courseQuestionWidgetsFromToolCalls,
   normalizeCourseQuestionWidgetToolCalls,
-  parseCourseQuestionWidgets,
-  parseCourseQuestionWidgetAnswer,
-  serializeCourseQuestionWidgetAnswer,
-  stripAnsweredQuestionMetadata,
   type CourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidget,
   type CourseQuestionWidgetToolCall,
@@ -83,7 +71,18 @@ type StoredCourseChatMessage = {
   role: "assistant" | "user";
   content: string;
   toolCalls?: CourseQuestionWidgetToolCall[];
+  metrics?: CourseMessageMetrics | null;
+  evaluation?: StoredCourseChatEvaluation | null;
+  widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
   createdAt?: number;
+};
+
+type StoredCourseChatEvaluation = {
+  questionId: string | null;
+  question: string;
+  correctAnswer: string | null;
+  score: number;
+  feedback: string;
 };
 
 export type UserProfile = {
@@ -98,10 +97,12 @@ type LearnChatMessage = {
   content: string;
   toolCalls?: CourseQuestionWidgetToolCall[];
   metrics?: CourseMessageMetrics | null;
+  evaluation?: StoredCourseChatEvaluation | null;
   status?: string;
   pendingEvaluation?: boolean;
   hasPendingQuestionWidget?: boolean;
   widgetAnswerDetails?: LearnWidgetAnswerDetails | null;
+  widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
   interrupted?: boolean;
   createdAt?: number;
 };
@@ -124,8 +125,17 @@ type LearnEvaluationDetails = {
   createdAt?: number;
 };
 
+type LearnQuestionEvaluationSnippet = {
+  content: string;
+  questionId: string | null;
+  question: string | null;
+  correctAnswer: string | null;
+  score: number;
+};
+
 type LearnWidgetAnswerDetails = {
   question: string | null;
+  widgetId?: string | null;
   answer: string;
 };
 
@@ -419,18 +429,14 @@ function findPreviousLearnerQuestion(
 
     if (
       message?.role !== "assistant" ||
-      isQuestionEvaluationSnippet(message.content)
+      message.evaluation
     ) {
       continue;
     }
 
-    const parsedMetrics = parseCourseMessageMetrics(message.content);
-    const parsedWidgets = parseCourseQuestionWidgets(parsedMetrics.content);
     const toolWidgets = courseQuestionWidgetsFromToolCalls(message.toolCalls);
-    const widgetQuestion =
-      toolWidgets.at(-1)?.question ?? parsedWidgets.widgets.at(-1)?.question;
-    const question =
-      widgetQuestion ?? extractFinalLearnerQuestion(parsedWidgets.content);
+    const widgetQuestion = toolWidgets.at(-1)?.question;
+    const question = widgetQuestion ?? extractFinalLearnerQuestion(message.content);
 
     if (question) {
       return question;
@@ -451,7 +457,7 @@ function findPreviousWidgetAnswer(
       continue;
     }
 
-    const parsedAnswer = parseCourseQuestionWidgetAnswer(message.content);
+    const parsedAnswer = message.widgetAnswer;
 
     if (parsedAnswer?.answer) {
       return {
@@ -474,7 +480,7 @@ function findLaterWidgetAnswers(
     if (
       laterMessage.role === "assistant" &&
       !laterMessage.pendingEvaluation &&
-      !isQuestionEvaluationSnippet(laterMessage.content)
+      !laterMessage.evaluation
     ) {
       break;
     }
@@ -482,7 +488,9 @@ function findLaterWidgetAnswers(
     answerWindow.push(laterMessage);
   }
 
-  const answers = collectCourseQuestionWidgetAnswers(answerWindow);
+  const answers = answerWindow.flatMap((message) =>
+    message.widgetAnswer?.answer ? [message.widgetAnswer] : [],
+  );
   const answersByWidgetId = new Map<string, CourseQuestionWidgetAnswerDetails>();
 
   for (const answer of answers) {
@@ -518,12 +526,9 @@ function storedMessageToLearnMessage(
   index: number,
   messages: StoredCourseChatMessage[] = [message],
 ): LearnChatMessage {
-  const parsedMetrics = parseCourseMessageMetrics(message.content);
   const hasStructuredQuestionWidget =
     courseQuestionWidgetsFromToolCalls(message.toolCalls).length > 0;
-  const isEvaluationSnippet =
-    message.role === "assistant" &&
-    isQuestionEvaluationSnippet(parsedMetrics.content);
+  const isEvaluationMessage = message.role === "assistant" && Boolean(message.evaluation);
   const id =
     typeof message.id === "string" && message.id.trim()
       ? message.id
@@ -534,14 +539,16 @@ function storedMessageToLearnMessage(
     role: message.role,
     content: message.content,
     toolCalls: message.toolCalls,
-    metrics: parsedMetrics.metrics,
+    metrics: message.metrics ?? null,
+    evaluation: message.evaluation ?? null,
+    widgetAnswer: message.widgetAnswer ?? null,
     createdAt: message.createdAt,
     interrupted: hasStructuredQuestionWidget
       ? false
       : shouldShowCourseChatInterruptedWarning({
           role: message.role,
-          content: parsedMetrics.content,
-          isEvaluationSnippet,
+          content: message.content,
+          isEvaluationSnippet: isEvaluationMessage,
           hasLaterStoredMessage: index < messages.length - 1,
         }),
   };
@@ -834,9 +841,11 @@ function rawLearnConversationJson(input: {
         content: message.content,
         toolCalls: message.toolCalls ?? [],
         metrics: message.metrics ?? null,
+        evaluation: message.evaluation ?? null,
         status: message.status ?? null,
         pendingEvaluation: Boolean(message.pendingEvaluation),
         hasPendingQuestionWidget: Boolean(message.hasPendingQuestionWidget),
+        widgetAnswer: message.widgetAnswer ?? null,
         widgetAnswerDetails: message.widgetAnswerDetails ?? null,
         interrupted: Boolean(message.interrupted),
         createdAt: message.createdAt ?? null,
@@ -1230,22 +1239,32 @@ export default function LearnPageClient({
     );
   }
 
-  function insertQuestionEvaluationSnippet(
+  function evaluationToSnippet(
+    evaluation: StoredCourseChatEvaluation,
+  ): LearnQuestionEvaluationSnippet {
+    return {
+      content: evaluation.feedback,
+      questionId: evaluation.questionId,
+      question: evaluation.question,
+      correctAnswer: evaluation.correctAnswer,
+      score: evaluation.score,
+    };
+  }
+
+  function insertQuestionEvaluationMessage(
     assistantMessageId: string,
     content: string,
+    evaluation: StoredCourseChatEvaluation,
+    metrics?: CourseMessageMetrics | null,
   ) {
-    const parsedSnippet = parseQuestionEvaluationSnippet(content);
-
-    if (!parsedSnippet?.content) {
-      return;
-    }
-
     setChatMessages((messages) => {
       const snippetMessageId = `${assistantMessageId}-evaluation`;
       const snippetMessage: LearnChatMessage = {
         id: snippetMessageId,
         role: "assistant",
         content,
+        evaluation,
+        metrics: metrics ?? null,
       };
 
       if (messages.some((message) => message.id === snippetMessageId)) {
@@ -1497,6 +1516,13 @@ export default function LearnPageClient({
       id: chatMessageId(),
       role: "user",
       content,
+      widgetAnswer: options.widgetAnswerDetails
+        ? {
+            question: options.widgetAnswerDetails.question,
+            widgetId: options.widgetAnswerDetails.widgetId ?? null,
+            answer: options.widgetAnswerDetails.answer,
+          }
+        : null,
     };
     const assistantMessageId = chatMessageId();
     const assistantMessage: LearnChatMessage = {
@@ -1538,6 +1564,9 @@ export default function LearnPageClient({
             role: message.role,
             content: message.content,
             toolCalls: message.toolCalls,
+            metrics: message.metrics,
+            evaluation: message.evaluation,
+            widgetAnswer: message.widgetAnswer,
           })),
         }),
       });
@@ -1638,12 +1667,22 @@ export default function LearnPageClient({
           } else if (parsed?.event === "evaluation_pending") {
             insertPendingQuestionEvaluation(assistantMessageId);
           } else if (parsed?.event === "evaluation") {
-            const data = parsed.data as { content?: unknown };
+            const data = parsed.data as {
+              content?: unknown;
+              evaluation?: StoredCourseChatEvaluation;
+              metrics?: CourseMessageMetrics | null;
+            };
 
-            if (typeof data.content === "string") {
-              insertQuestionEvaluationSnippet(
+            if (
+              typeof data.content === "string" &&
+              data.evaluation &&
+              typeof data.evaluation === "object"
+            ) {
+              insertQuestionEvaluationMessage(
                 assistantMessageId,
                 data.content,
+                data.evaluation,
+                data.metrics ?? null,
               );
             }
           } else if (parsed?.event === "evaluation_skipped") {
@@ -1745,15 +1784,13 @@ export default function LearnPageClient({
     widget: CourseQuestionWidget,
     answer: string,
   ) {
-    void submitChatContent(
-      serializeCourseQuestionWidgetAnswer({ widget, answer }),
-      {
-        widgetAnswerDetails: {
-          question: widget.question,
-          answer,
-        },
+    void submitChatContent(answer, {
+      widgetAnswerDetails: {
+        question: widget.question,
+        widgetId: widget.id,
+        answer,
       },
-    );
+    });
   }
 
   function handleChatComposerKeyDown(
@@ -2030,7 +2067,10 @@ export default function LearnPageClient({
                       ref={chatThreadRef}
                       tabIndex={0}
                     >
-                      <pre>{rawConversationJson}</pre>
+                      <JsonSyntaxBlock
+                        className="learn-raw-conversation-pre"
+                        payload={rawConversationJson}
+                      />
                     </div>
                   ) : (
                     <div className="learn-chat-thread" ref={chatThreadRef}>
@@ -2049,47 +2089,26 @@ export default function LearnPageClient({
                         );
                       }
 
-                      const parsedMessage = parseCourseMessageMetrics(
-                        message.content,
-                      );
                       const widgetAnswer =
-                        message.role === "user"
-                          ? parseCourseQuestionWidgetAnswer(
-                              parsedMessage.content,
-                            )
-                          : null;
+                        message.role === "user" ? message.widgetAnswer : null;
 
                       if (widgetAnswer?.answer) {
                         return null;
                       }
 
-                      const metadataStrippedContent =
-                        message.role === "user"
-                          ? stripAnsweredQuestionMetadata(parsedMessage.content)
-                          : parsedMessage.content;
-                      const parsedWidgets =
-                        message.role === "assistant"
-                          ? parseCourseQuestionWidgets(metadataStrippedContent)
-                          : { content: metadataStrippedContent, widgets: [] };
                       const toolCallWidgets =
                         message.role === "assistant"
                           ? courseQuestionWidgetsFromToolCalls(message.toolCalls)
                           : [];
-                      const questionWidgets = [
-                        ...toolCallWidgets,
-                        ...parsedWidgets.widgets,
-                      ];
+                      const questionWidgets = toolCallWidgets;
                       const hasPendingQuestionWidget =
                         Boolean(message.hasPendingQuestionWidget) &&
                         questionWidgets.length === 0;
-                      const visibleMessageContent = parsedWidgets.content;
-                      const messageMetrics =
-                        message.metrics ?? parsedMessage.metrics;
+                      const visibleMessageContent = message.content;
+                      const messageMetrics = message.metrics ?? null;
                       const evaluationSnippet =
-                        message.role === "assistant"
-                          ? parseQuestionEvaluationSnippet(
-                              visibleMessageContent,
-                            )
+                        message.role === "assistant" && message.evaluation
+                          ? evaluationToSnippet(message.evaluation)
                           : null;
                       const messageContent =
                         evaluationSnippet?.content ?? visibleMessageContent;

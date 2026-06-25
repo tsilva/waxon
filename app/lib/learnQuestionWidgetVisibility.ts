@@ -1,9 +1,8 @@
-import { isQuestionEvaluationSnippet } from "./courseEvaluationSnippet.ts";
-
 export type LearnQuestionWidgetVisibilityMessage = {
   role: "assistant" | "user";
   content: string;
   pendingEvaluation?: boolean;
+  evaluation?: unknown;
 };
 
 export function shouldShowLearnQuestionWidgets(input: {
@@ -30,7 +29,7 @@ export function shouldShowLearnQuestionWidgets(input: {
     return (
       laterMessage.role === "user" ||
       laterMessage.pendingEvaluation ||
-      isQuestionEvaluationSnippet(laterMessage.content)
+      laterMessage.evaluation
     );
   });
 }

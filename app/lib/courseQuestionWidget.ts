@@ -34,14 +34,6 @@ export type CourseQuestionWidgetAnswerDetails = {
   answer: string;
 };
 
-const QUESTION_WIDGET_COMMENT_PATTERN =
-  /<!--\s*waxon:question-widget\s+([\s\S]*?)\s*-->/gu;
-const TRAILING_PARTIAL_QUESTION_WIDGET_COMMENT_PATTERN =
-  /\s*<!--\s*waxon:question-widget\b[\s\S]*$/u;
-const ANSWERED_QUESTION_COMMENT_PATTERN =
-  /<!--\s*waxon:answered-question[\s\S]*?-->\s*/gu;
-const ANSWERED_QUESTION_COMMENT_CAPTURE_PATTERN =
-  /<!--\s*waxon:answered-question([\s\S]*?)-->\s*/u;
 const MAX_WIDGET_TEXT_CHARS = 1_200;
 const MAX_WIDGET_ID_CHARS = 80;
 const MAX_CHOICE_TEXT_CHARS = 500;
@@ -103,56 +95,6 @@ export function normalizeCourseQuestionWidget(
     question,
     placeholder:
       normalizeText(record.placeholder, 160) || "Type your answer here...",
-  };
-}
-
-function parseEncodedWidget(source: string): CourseQuestionWidget | null {
-  const encoded = source.trim();
-
-  if (!encoded) {
-    return null;
-  }
-
-  try {
-    return normalizeCourseQuestionWidget(JSON.parse(decodeURIComponent(encoded)));
-  } catch {
-    try {
-      return normalizeCourseQuestionWidget(JSON.parse(encoded));
-    } catch {
-      return null;
-    }
-  }
-}
-
-export function serializeCourseQuestionWidget(
-  widget: CourseQuestionWidget,
-): string {
-  return `<!-- waxon:question-widget ${encodeURIComponent(JSON.stringify(widget))} -->`;
-}
-
-export function parseCourseQuestionWidgets(content: string): {
-  content: string;
-  widgets: CourseQuestionWidget[];
-} {
-  const widgets: CourseQuestionWidget[] = [];
-  const strippedContent = content
-    .replace(
-      QUESTION_WIDGET_COMMENT_PATTERN,
-      (_comment, encodedWidget: string) => {
-        const widget = parseEncodedWidget(encodedWidget);
-
-        if (widget) {
-          widgets.push(widget);
-        }
-
-        return "";
-      },
-    )
-    .replace(TRAILING_PARTIAL_QUESTION_WIDGET_COMMENT_PATTERN, "");
-
-  return {
-    content: strippedContent.trim(),
-    widgets,
   };
 }
 
@@ -238,77 +180,23 @@ export function courseQuestionWidgetsFromToolCalls(
   );
 }
 
-export function stripAnsweredQuestionMetadata(content: string): string {
-  return content.replace(ANSWERED_QUESTION_COMMENT_PATTERN, "").trim();
-}
+export function formatCourseQuestionWidgetForPrompt(
+  widget: CourseQuestionWidget,
+): string {
+  const lines = [`Question widget: ${widget.question}`];
 
-export function parseCourseQuestionWidgetAnswer(content: string): {
-  question: string | null;
-  widgetId: string | null;
-  answer: string;
-} | null {
-  const match = content.match(ANSWERED_QUESTION_COMMENT_CAPTURE_PATTERN);
-
-  if (!match) {
-    return null;
+  if (widget.type === "multiple_choice") {
+    lines.push(
+      "Choices:",
+      ...widget.choices.map((choice) => `${choice.id}) ${choice.text}`),
+    );
   }
 
-  const metadata = match[1] ?? "";
-  const answer = stripAnsweredQuestionMetadata(content);
-  let question: string | null = null;
-  let widgetId: string | null = null;
-
-  for (const line of metadata.split(/\n/u)) {
-    const [rawKey, ...rawValueParts] = line.split(":");
-    const key = rawKey?.trim().toLowerCase();
-    const value = rawValueParts.join(":").trim();
-
-    if (key === "question" && value) {
-      question = normalizeText(value, MAX_WIDGET_TEXT_CHARS);
-    }
-
-    if (key === "widget_id" && value) {
-      widgetId = normalizeText(value, MAX_WIDGET_ID_CHARS);
-    }
-  }
-
-  return {
-    question,
-    widgetId,
-    answer,
-  };
+  return lines.join("\n");
 }
 
-export function collectCourseQuestionWidgetAnswers(
-  messages: Array<{ content: string }>,
-): CourseQuestionWidgetAnswerDetails[] {
-  return messages.flatMap((message) => {
-    const parsedAnswer = parseCourseQuestionWidgetAnswer(message.content);
-
-    return parsedAnswer?.answer ? [parsedAnswer] : [];
-  });
-}
-
-function sanitizeCommentText(value: string): string {
-  return value.replace(/--/gu, "-").trim();
-}
-
-export function serializeCourseQuestionWidgetAnswer(input: {
-  widget: CourseQuestionWidget;
-  answer: string;
-}): string {
-  const question = sanitizeCommentText(input.widget.question);
-  const answer = input.answer.trim();
-
-  if (!question) {
-    return answer;
-  }
-
-  return [
-    "<!-- waxon:answered-question",
-    `question: ${question}`,
-    `widget_id: ${sanitizeCommentText(input.widget.id)}`,
-    "-->",
-    answer,
-  ].join("\n");
+export function formatCourseQuestionWidgetsForPrompt(
+  widgets: CourseQuestionWidget[],
+): string {
+  return widgets.map(formatCourseQuestionWidgetForPrompt).join("\n\n");
 }
