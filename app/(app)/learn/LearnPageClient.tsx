@@ -1252,6 +1252,27 @@ export default function LearnPageClient({
     );
   }
 
+  function rollbackAssistantTurn(assistantMessageId: string, status: string) {
+    const snippetMessageId = `${assistantMessageId}-evaluation`;
+
+    setChatMessages((messages) =>
+      messages
+        .filter((message) => message.id !== snippetMessageId)
+        .map((message) =>
+          message.id === assistantMessageId
+            ? {
+                ...message,
+                content: "",
+                toolCalls: [],
+                metrics: null,
+                status,
+                hasPendingQuestionWidget: false,
+              }
+            : message,
+        ),
+    );
+  }
+
   async function selectCourse(courseId: string) {
     if (isStreaming || loadingCourseId) {
       return;
@@ -1568,6 +1589,18 @@ export default function LearnPageClient({
             }
           } else if (parsed?.event === "evaluation_skipped") {
             removePendingQuestionEvaluation(assistantMessageId);
+          } else if (parsed?.event === "rollback") {
+            const data = parsed.data as { retry?: unknown };
+            const retry = data.retry !== false;
+
+            rollbackAssistantTurn(
+              assistantMessageId,
+              retry ? "Retrying..." : "Using fallback...",
+            );
+
+            if (retry && pendingEvaluationMessage) {
+              insertPendingQuestionEvaluation(assistantMessageId);
+            }
           } else if (parsed?.event === "error") {
             const data = parsed.data as { error?: unknown };
 

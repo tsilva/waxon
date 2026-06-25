@@ -35,3 +35,9 @@ Fresh v8 Learn measurements on `anthropic/claude-haiku-4.5` found that a 15,762-
 # Constraints
 
 `google/gemini-2.5-flash-lite` produced high cache metrics in one comparison, but a continuation returned `completion_tokens=0` and forced a generic server fallback, so it was rejected despite better cache percentage. `google/gemini-2.5-flash` preserved visible tutor quality in the verified continuation but is slower and more expensive than the old default on some first turns.
+
+## 2026-06-25 single-stream answer flow
+
+The single-stream answer experiment on `google/gemini-3.1-flash-lite` verified the request shape but exposed a provider/tool behavior constraint. Real `/learn/courses/d12868fc-bc2b-4876-a5dc-f15262d08666` SQL turns serialized `course-chat-v9`, one explicit `cache_control` breakpoint on a roughly 22k-character stable tutor/tool-protocol block, and both tools (`record_course_answer_decision`, `render_question_widget`). After enabling `parallel_tool_calls`, repeated single-stream attempts finally reported Gemini cache metrics (`cached_tokens=4503`, first retry `cache_write_tokens=4503`, next retry `cache_write_tokens=0`), proving the cache shape works for that model once the stable block is large enough.
+
+The same Gemini attempts still emitted only `record_course_answer_decision` with zero visible tutor text and no widget, even when prompted to use both tools in one response. The durable implementation therefore treats decision-only streams as malformed, rolls back/retries once, then falls back to the existing tutor stream to preserve teaching quality and widget behavior. The fallback tutor stream on the same model/session returned `cached_tokens=4151` with `cache_write_tokens=0` and rendered the substantive next 1NF lesson and widget.

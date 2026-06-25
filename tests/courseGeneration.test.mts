@@ -9,10 +9,12 @@ import {
 import {
   generateCourseAnswerDecision,
   generateCourseToc,
+  streamCourseAnswerContinuation,
   streamCourseChatTurn,
 } from "../app/lib/courseGeneration.ts";
 import {
   collectCourseQuestionWidgetAnswers,
+  courseQuestionWidgetToolCallFromWidget,
   parseCourseQuestionWidgetAnswer,
   parseCourseQuestionWidgets,
   serializeCourseQuestionWidget,
@@ -920,7 +922,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
 
     assert.ok(requestBody);
     const capturedBody = requestBody as Record<string, unknown>;
-    assert.equal(capturedBody.session_id, "learn:user_1:course-chat-v8");
+    assert.equal(capturedBody.session_id, "learn:user_1:course-chat-v9");
     assert.deepEqual(
       (capturedBody as { tools?: unknown[] }).tools?.[0],
       {
@@ -1024,6 +1026,370 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
   }
 });
 
+test("streamCourseAnswerContinuation uses one cached stream for evaluation and next widget", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  let requestBody: Record<string, unknown> | null = null;
+  const events: string[] = [];
+  let pendingWidgetToolDeltas = 0;
+  const widget = {
+    type: "free_text" as const,
+    id: "sql-redundancy",
+    question: "Why can repeated customer data cause update problems?",
+    placeholder: "Explain the problem...",
+  };
+  const course = {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt: "Learn SQL joins",
+    title: "SQL Joins",
+    description: "Learn joins and normalization.",
+    toc: {
+      title: "SQL Joins",
+      description: "Learn joins and normalization.",
+      pages: [
+        {
+          title: "Why Relationships Matter",
+          objective: "Explain why related tables reduce duplication.",
+        },
+        {
+          title: "How Joins Use Keys",
+          objective: "Explain how matching keys combine rows.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: 2,
+    generatedPages: 2,
+    chatMessageCount: 2,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+
+  globalThis.fetch = async (_url, init) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<
+      string,
+      unknown
+    >;
+
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: "call_decision",
+                          type: "function",
+                          function: {
+                            name: "record_course_answer_decision",
+                            arguments: JSON.stringify({
+                              questionAttempt: {
+                                toolCall: "record_course_question_attempt",
+                                question:
+                                  "Why can repeated customer data cause update problems?",
+                                answer:
+                                  "You have to update it in many rows and can miss one.",
+                                answerSummary:
+                                  "Repeated rows make updates inconsistent.",
+                                conciseAnswer:
+                                  "Repeated data can become inconsistent.",
+                                correctAnswer:
+                                  "Update one fact in many places risks inconsistency.",
+                                justification:
+                                  "Names duplication and update inconsistency.",
+                                score: 9,
+                              },
+                              progressDecision: {
+                                toolCall: "mark_milestone_done",
+                                reason: "The learner explained the core risk.",
+                              },
+                            }),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      content:
+                        "Good. A join uses matching keys to combine related rows only when you query them.",
+                    },
+                  },
+                ],
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 1,
+                          id: "call_widget",
+                          type: "function",
+                          function: {
+                            name: "render_question_widget",
+                            arguments:
+                              "{\"type\":\"free_text\",\"id\":\"join-key\",\"question\":\"What has to match for a join to connect two rows?\"}",
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+                usage: {
+                  prompt_tokens: 5200,
+                  completion_tokens: 160,
+                  total_tokens: 5360,
+                  prompt_tokens_details: {
+                    cached_tokens: 4897,
+                    cache_write_tokens: 0,
+                  },
+                  cost: 0.001,
+                },
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      },
+    );
+  };
+
+  try {
+    const result = await streamCourseAnswerContinuation({
+      apiKey: "test-key",
+      model: "anthropic/claude-haiku-4.5",
+      userId: "user_1",
+      course,
+      messages: [
+        {
+          role: "assistant",
+          content:
+            "Repeated data means you must update one fact in many places.",
+          toolCalls: [courseQuestionWidgetToolCallFromWidget(widget)],
+        },
+        {
+          role: "user",
+          content: serializeCourseQuestionWidgetAnswer({
+            widget,
+            answer: "You have to update it in many rows and can miss one.",
+          }),
+        },
+      ],
+      onAnswerDecision(decision) {
+        events.push(`decision:${decision.progressDecision.toolCall}`);
+      },
+      onTextDelta(delta) {
+        events.push(`delta:${delta}`);
+      },
+      onQuestionWidgetToolDelta() {
+        pendingWidgetToolDeltas += 1;
+      },
+    });
+
+    assert.ok(requestBody);
+    const capturedBody = requestBody as Record<string, unknown>;
+    assert.equal(capturedBody.session_id, "learn:user_1:course-chat-v9");
+    assert.equal(capturedBody.parallel_tool_calls, true);
+    assert.deepEqual(
+      (capturedBody as { tools?: Array<{ function?: { name?: string } }> })
+        .tools?.map((tool) => tool.function?.name),
+      ["record_course_answer_decision", "render_question_widget"],
+    );
+    const answerDecisionTool = (
+      capturedBody as { tools?: Array<{ function?: { name?: string; parameters?: { properties?: Record<string, { required?: string[] }> } } }> }
+    ).tools?.find(
+      (tool) => tool.function?.name === "record_course_answer_decision",
+    );
+
+    assert.ok(
+      answerDecisionTool?.function?.parameters?.properties?.questionAttempt
+        ?.required?.includes("score"),
+    );
+
+    const requestMessages = capturedBody.messages as Array<{
+      role: string;
+      content: unknown;
+    }>;
+    const userContent = requestMessages[1]?.content as Array<
+      Record<string, unknown>
+    >;
+
+    assert.deepEqual(userContent[0]?.cache_control, { type: "ephemeral" });
+    assert.match(String(userContent[0]?.text), /Stable tutor instructions/u);
+    assert.match(
+      String(userContent[0]?.text),
+      /record_course_answer_decision/u,
+    );
+    assert.doesNotMatch(String(userContent[0]?.text), /Learner answer:/u);
+    assert.match(String(userContent[1]?.text), /Learner answer:/u);
+    assert.match(String(userContent[1]?.text), /Recent conversation JSON/u);
+    assert.deepEqual(events, [
+      "decision:mark_milestone_done",
+      "delta:Good. A join uses matching keys to combine related rows only when you query them.",
+    ]);
+    assert.equal(result.answerDecision.questionAttempt.toolCall, "record_course_question_attempt");
+    assert.equal(result.answerDecision.questionAttempt.score, 9);
+    assert.equal(result.toolCalls[0]?.function.arguments.id, "join-key");
+    assert.equal(pendingWidgetToolDeltas, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("streamCourseAnswerContinuation rejects malformed answer decision tools", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const widget = {
+    type: "free_text" as const,
+    id: "sql-redundancy",
+    question: "Why can repeated customer data cause update problems?",
+  };
+  const course = {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt: "Learn SQL joins",
+    title: "SQL Joins",
+    description: "Learn joins and normalization.",
+    toc: {
+      title: "SQL Joins",
+      description: "Learn joins and normalization.",
+      pages: [
+        {
+          title: "Why Relationships Matter",
+          objective: "Explain why related tables reduce duplication.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: 1,
+    generatedPages: 1,
+    chatMessageCount: 2,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+
+  globalThis.fetch = async () =>
+    new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: "call_decision",
+                          type: "function",
+                          function: {
+                            name: "record_course_answer_decision",
+                            arguments: JSON.stringify({
+                              questionAttempt: {
+                                toolCall: "record_course_question_attempt",
+                                question:
+                                  "Why can repeated customer data cause update problems?",
+                                answer:
+                                  "You have to update it in many rows.",
+                                answerSummary:
+                                  "Repeated rows make updates harder.",
+                                conciseAnswer:
+                                  "Repeated data can become inconsistent.",
+                                correctAnswer:
+                                  "Update one fact in many places risks inconsistency.",
+                                justification: "Missing a numeric score.",
+                              },
+                              progressDecision: {
+                                toolCall: "continue_current_milestone",
+                                reason: "Missing score.",
+                              },
+                            }),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      },
+    );
+
+  try {
+    await assert.rejects(
+      () =>
+        streamCourseAnswerContinuation({
+          apiKey: "test-key",
+          model: "anthropic/claude-haiku-4.5",
+          userId: "user_1",
+          course,
+          messages: [
+            {
+              role: "assistant",
+              content:
+                "Repeated data means you must update one fact in many places.",
+              toolCalls: [courseQuestionWidgetToolCallFromWidget(widget)],
+            },
+            {
+              role: "user",
+              content: serializeCourseQuestionWidgetAnswer({
+                widget,
+                answer: "You have to update it in many rows.",
+              }),
+            },
+          ],
+          onTextDelta() {},
+        }),
+      /score/u,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("streamCourseChatTurn keeps the same cache-capable session key across Learn courses", async () => {
   const originalFetch = globalThis.fetch;
   const encoder = new TextEncoder();
@@ -1113,7 +1479,7 @@ test("streamCourseChatTurn keeps the same cache-capable session key across Learn
 
     assert.equal(sessionIds.length, 2);
     assert.equal(sessionIds[0], sessionIds[1]);
-    assert.equal(sessionIds[0], "learn:user_1:course-chat-v8");
+    assert.equal(sessionIds[0], "learn:user_1:course-chat-v9");
   } finally {
     globalThis.fetch = originalFetch;
   }

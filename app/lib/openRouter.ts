@@ -455,7 +455,9 @@ async function parseOpenRouterStream(
   response: Response,
   onActivity?: () => void,
   onTextDelta?: (delta: string) => void,
-  onToolCallDelta?: (toolCalls: OpenRouterToolCall[]) => void,
+  onToolCallDelta?: (
+    toolCalls: OpenRouterToolCall[],
+  ) => void | Promise<void>,
 ): Promise<OpenRouterChatResponse> {
   if (!response.body) {
     return (await parseOpenRouterJson(response)) as OpenRouterChatResponse;
@@ -470,7 +472,7 @@ async function parseOpenRouterStream(
   let usage: OpenRouterUsage | undefined;
   const streamedToolCalls: Array<OpenRouterToolCall & { index?: number }> = [];
 
-  const parseEvent = (eventText: string) => {
+  const parseEvent = async (eventText: string) => {
     const payloads = eventText
       .split("\n")
       .map((line) => line.trim())
@@ -497,7 +499,7 @@ async function parseOpenRouterStream(
       mergeStreamingToolCallDeltas(streamedToolCalls, toolCallDeltas);
 
       if (toolCallDeltas.length > 0) {
-        onToolCallDelta?.(toolCallDeltas);
+        await onToolCallDelta?.(toolCallDeltas);
         onActivity?.();
       }
 
@@ -530,7 +532,7 @@ async function parseOpenRouterStream(
     while (eventBoundary) {
       const eventText = buffer.slice(0, eventBoundary.index);
       buffer = buffer.slice(eventBoundary.index + eventBoundary.length);
-      parseEvent(eventText);
+      await parseEvent(eventText);
       eventBoundary = findStreamingEventBoundary(buffer);
     }
   }
@@ -540,7 +542,7 @@ async function parseOpenRouterStream(
   buffer += finalText;
 
   if (buffer.trim()) {
-    parseEvent(buffer);
+    await parseEvent(buffer);
   }
 
   const finalResponseChunk = finalChunk as OpenRouterChatResponse | null;
@@ -589,7 +591,9 @@ export async function openRouterChatCompletion(input: {
   stream?: boolean;
   onActivity?: () => void;
   onTextDelta?: (delta: string) => void;
-  onToolCallDelta?: (toolCalls: OpenRouterToolCall[]) => void;
+  onToolCallDelta?: (
+    toolCalls: OpenRouterToolCall[],
+  ) => void | Promise<void>;
 }): Promise<{ response: Response; body: OpenRouterChatResponse }> {
   const traceId = input.trace.traceId ?? crypto.randomUUID();
   const trace = {
