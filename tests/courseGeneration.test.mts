@@ -1570,7 +1570,7 @@ test("parseCourseQuestionAttemptToolResult reads choices from tutor message cont
   }
 });
 
-test("parseCourseQuestionAttemptToolResult reads choices from a hidden question widget", () => {
+test("parseCourseQuestionAttemptToolResult reads choices from structured question widget context", () => {
   const selectedAnswer =
     "The sampled action is now half as likely under the new policy";
   const result = parseCourseQuestionAttemptToolResult(
