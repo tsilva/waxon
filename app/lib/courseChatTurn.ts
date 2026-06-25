@@ -19,10 +19,13 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
   const generatedText = input.text.trim();
   const inputWidgets = (input.widgets ?? []).map(sanitizeLearnerFacingCourseWidget);
   const hasLearnerQuestion = isCourseChatTurnComplete(generatedText, inputWidgets);
+  const fallbackLearnerQuestion = fallbackQuestionFromPageObjective(
+    input.pageObjective,
+  );
   const fallbackWidget: CourseQuestionWidget = {
     type: "free_text",
     id: "fallback-understanding-check",
-    question: FALLBACK_LEARNER_QUESTION,
+    question: fallbackLearnerQuestion,
     placeholder: "Explain the idea in your own words...",
   };
 
@@ -54,7 +57,6 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     const fallbackLesson = [
       `This section is about ${input.pageObjective}.`,
       "A good answer should name the core idea, explain why it matters, and connect it to a small example.",
-      fallbackWidget.question,
     ].join("\n\n");
 
     return {
@@ -95,15 +97,14 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
       : sanitizeLearnerFacingCourseText(parsedRepairContent)) ||
     `This section is about ${input.pageObjective}.`;
   const separator = /[.!?)]\s*$/u.test(repairBaseText) ? "\n\n" : ".\n\n";
-  const fallbackQuestion = [
+  const fallbackPromptText = [
     separator.trimEnd(),
     `Focus on this idea: ${input.pageObjective}`,
-    fallbackWidget.question,
   ].join("\n\n");
 
   return {
-    text: sanitizeLearnerFacingCourseText(`${repairBaseText}${fallbackQuestion}`),
-    appendedText: fallbackQuestion,
+    text: sanitizeLearnerFacingCourseText(`${repairBaseText}${fallbackPromptText}`),
+    appendedText: fallbackPromptText,
     widgets: [fallbackWidget],
   };
 }
@@ -138,6 +139,27 @@ export function sanitizeLearnerFacingCourseText(text: string): string {
     .replace(/\bthe milestone\b/giu, (match) =>
       preserveLeadingCase(match, "the topic"),
     );
+}
+
+function fallbackQuestionFromPageObjective(pageObjective: string): string {
+  const objective = sanitizeLearnerFacingCourseText(pageObjective)
+    .trim()
+    .replace(/\s+/gu, " ")
+    .replace(/[.!?]+$/u, "");
+
+  if (!objective) {
+    return FALLBACK_LEARNER_QUESTION;
+  }
+
+  const explainableObjective = objective.replace(
+    /^(?:understand|learn|review)\s+/iu,
+    "explain ",
+  );
+  const questionStem = /^[A-Z]/u.test(explainableObjective)
+    ? `${explainableObjective.slice(0, 1).toLowerCase()}${explainableObjective.slice(1)}`
+    : explainableObjective;
+
+  return `In your own words, ${questionStem}?`;
 }
 
 export function sanitizeLearnerFacingCourseWidget(
