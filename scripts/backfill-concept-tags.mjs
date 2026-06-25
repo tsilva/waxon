@@ -1,6 +1,10 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { extractJsonObject } from "./lib/json-object.mjs";
 import {
+  loadPromptTemplate,
+  renderPromptTemplate,
+} from "./lib/prompts.mjs";
+import {
   chunks,
   configureNeonWebSocket,
   createDatabasePool,
@@ -265,16 +269,8 @@ async function loadQuestions(pool, userId) {
 }
 
 function buildPrompt(batch, candidateSlugsByUser) {
-  return [
-    "Generate concept slugs for existing review questions.",
-    "Use 1-3 lowercase kebab-case slugs for each question.",
-    "Each slug must be a full, self-disambiguating concept phrase.",
-    "Prefer candidateExistingSlugs when one accurately describes the tested concept.",
-    "Create a new slug only when no candidate fits.",
-    "Never return course titles, lesson titles, source labels, or broad container labels.",
-    "Do not use acronym-only slugs such as ppo, rl, cnn, or kl unless globally unambiguous.",
-    "Return strict JSON only: {\"assignments\":[{\"questionId\":\"...\",\"conceptSlugs\":[\"...\"]}]}",
-    JSON.stringify({
+  return renderPromptTemplate(loadPromptTemplate("backfill-concept-tags-user.md"), {
+    questionsJson: JSON.stringify({
       questions: batch.map((row) => ({
         questionId: row.questionId,
         question: row.question,
@@ -287,7 +283,7 @@ function buildPrompt(batch, candidateSlugsByUser) {
         ),
       })),
     }),
-  ].join("\n\n");
+  });
 }
 
 function extractChatMessageText(body) {
@@ -342,8 +338,7 @@ async function generateConceptSlugs(batch, candidateSlugsByUser, apiKey) {
       messages: [
         {
           role: "system",
-          content:
-            "You assign compact concept slugs for a spaced-repetition question bank. Output only one valid JSON object.",
+          content: loadPromptTemplate("backfill-concept-tags-system.md"),
         },
         {
           role: "user",

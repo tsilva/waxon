@@ -11,6 +11,10 @@ import {
   openRouterChatCompletion,
 } from "./openRouter";
 import {
+  loadPromptTemplate,
+  renderPromptTemplate,
+} from "./promptTemplates.ts";
+import {
   failedEvaluation,
   parseEvaluation,
 } from "./evaluateAnswerParsing";
@@ -111,15 +115,14 @@ async function evaluateBrowserSmokeAnswer(
 }
 
 function buildUserPrompt(input: EvaluateAnswerInput): string {
-  return [
-    "Grade this submitted flashcard answer.",
-    `Question: ${input.question}`,
-    input.expectedAnswer
+  return renderPromptTemplate(loadPromptTemplate("evaluate-answer-user.md"), {
+    question: input.question,
+    expectedAnswerBlock: input.expectedAnswer
       ? `Stored expected answer: ${input.expectedAnswer}`
-      : null,
-    `User answer: ${input.answer}`,
-    `Previous review history: ${input.previousReviews}`,
-  ].filter(Boolean).join("\n\n");
+      : "",
+    answer: input.answer,
+    previousReviews: input.previousReviews,
+  }).replace(/\n{3,}/gu, "\n\n");
 }
 
 export async function evaluateAnswer(

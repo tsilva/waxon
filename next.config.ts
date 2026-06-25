@@ -27,8 +27,7 @@ const nextConfig: NextConfig = {
     ];
   },
   outputFileTracingIncludes: {
-    "/api/questions/generate": ["./reference/question-quality.md"],
-    "/api/submit-answer": ["./reference/question-quality.md"],
+    "/api/:path*": ["./prompts/**/*.md", "./reference/question-quality.md"],
   },
   webpack(config) {
     if (isLocalAuditAuthBuild) {

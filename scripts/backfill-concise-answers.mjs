@@ -1,6 +1,10 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import { extractJsonObject } from "./lib/json-object.mjs";
 import {
+  loadPromptTemplate,
+  renderPromptTemplate,
+} from "./lib/prompts.mjs";
+import {
   chunks,
   configureNeonWebSocket,
   createDatabasePool,
@@ -15,12 +19,9 @@ configureNeonWebSocket(neonConfig);
 
 const DEFAULT_BATCH_SIZE = 20;
 const MAX_CONCISE_ANSWER_CHARS = 320;
-const CONCISE_ANSWER_SYSTEM_PROMPT = [
-  "Generate concise expected answers for flashcard questions.",
-  "Each answer is used for semantic duplicate detection, not as an explanation.",
-  "Keep each answer factual, direct, and as short as possible while preserving the recall target.",
-  "Return strict JSON: {\"answers\":[{\"id\":\"...\",\"conciseAnswer\":\"...\"}]}",
-].join("\n\n");
+const CONCISE_ANSWER_SYSTEM_PROMPT = loadPromptTemplate(
+  "concise-answer-system.md",
+);
 
 function parseArgs(argv) {
   const options = {
@@ -91,15 +92,14 @@ async function generateConciseAnswers(batch, apiKey) {
         },
         {
           role: "user",
-          content: [
-            "Questions:",
-            JSON.stringify(
+          content: renderPromptTemplate(loadPromptTemplate("concise-answer-user.md"), {
+            questionsJson: JSON.stringify(
               batch.map((row) => ({
                 id: row.id,
                 question: row.question,
               })),
             ),
-          ].join("\n\n"),
+          }),
         },
       ],
     }),

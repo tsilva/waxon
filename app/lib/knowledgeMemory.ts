@@ -7,6 +7,10 @@ import {
   getRecentQuestionAttempts,
   readQuestions,
 } from "./postgresStore";
+import {
+  loadPromptTemplate,
+  renderPromptTemplate,
+} from "./promptTemplates.ts";
 
 export const MAX_KNOWLEDGE_MEMORY_CHARS = 8_000;
 const MAX_MEMORY_CONTEXT_QUESTIONS = 220;
@@ -102,18 +106,7 @@ export function memorySectionBody(memory: string, heading: string): string {
 }
 
 function buildKnowledgeMemorySystemPrompt(): string {
-  return [
-    "You update knowledge MEMORY.md files.",
-    "The memory is a durable user-level curriculum asset, not a question-generation response.",
-    "Infer the current learning state from the knowledge-base goal, current memory, existing questions, and recent answer attempts.",
-    "Preserve established scope unless the knowledge-base goal clearly requires expanding it. Never narrow a broad or complete goal into only a beginner subset.",
-    "Maintain compact sections: Goal, Curriculum Map, Target Ledger, Proficiency, Weak Points, Frontier, Frontier Queue, Completion.",
-    "Use Target Ledger statuses: todo, planned, strong, partial, weak.",
-    "Mark answered high-score targets strong, low-score targets weak or partial, generated unanswered targets planned, and future uncovered targets todo.",
-    "For finite goals, make the Target Ledger or module map explicit enough that completion is auditable.",
-    "Preserve exact symbols, formulas, code identifiers, names, terms, kana, and other atomic target strings.",
-    "Return strict JSON only: {\"memory\":\"# Knowledge Memory\\n...\"}",
-  ].join("\n\n");
+  return loadPromptTemplate("knowledge-memory-system.md");
 }
 
 function compactQuestionContext(
@@ -175,22 +168,18 @@ export async function refreshKnowledgeMemory(input: {
         },
         {
           role: "user",
-          content: [
-            `Refresh reason: ${input.reason}.`,
-            "Knowledge base:",
-            JSON.stringify({
+          content: renderPromptTemplate(loadPromptTemplate("knowledge-memory-user.md"), {
+            refreshReason: input.reason,
+            knowledgeBaseJson: JSON.stringify({
               name: knowledgeBase.name,
               goal: knowledgeBase.goal,
               cardCount: knowledgeBase.cardCount,
               dueCount: knowledgeBase.dueCount,
             }),
-            "Current MEMORY.md:",
             currentMemory,
-            "Existing knowledge-base questions:",
-            JSON.stringify(questionContext),
-            "Recent answer attempts:",
-            JSON.stringify(recentAttempts),
-          ].join("\n\n"),
+            questionContextJson: JSON.stringify(questionContext),
+            recentAttemptsJson: JSON.stringify(recentAttempts),
+          }),
         },
       ],
     },

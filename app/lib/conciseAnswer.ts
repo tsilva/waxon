@@ -6,6 +6,10 @@ import {
   type OpenRouterTraceContext,
 } from "./openRouter";
 import { extractJsonObject } from "./jsonObject";
+import {
+  loadPromptTemplate,
+  renderPromptTemplate,
+} from "./promptTemplates.ts";
 
 export type ConciseAnswerInput = {
   id: string;
@@ -18,12 +22,9 @@ export type ConciseAnswerResult = ConciseAnswerInput & {
 
 const CONCISE_ANSWER_TIMEOUT_MS = 25_000;
 const MAX_CONCISE_ANSWER_CHARS = 320;
-const CONCISE_ANSWER_SYSTEM_PROMPT = [
-  "Generate concise expected answers for flashcard questions.",
-  "Each answer is used for semantic duplicate detection, not as an explanation.",
-  "Keep each answer factual, direct, and as short as possible while preserving the recall target.",
-  "Return strict JSON: {\"answers\":[{\"id\":\"...\",\"conciseAnswer\":\"...\"}]}",
-].join("\n\n");
+const CONCISE_ANSWER_SYSTEM_PROMPT = loadPromptTemplate(
+  "concise-answer-system.md",
+);
 
 function normalizeConciseAnswer(value: unknown): string {
   if (typeof value !== "string") {
@@ -75,15 +76,14 @@ export async function generateConciseAnswers(
           },
           {
             role: "user",
-            content: [
-              "Questions:",
-              JSON.stringify(
+            content: renderPromptTemplate(loadPromptTemplate("concise-answer-user.md"), {
+              questionsJson: JSON.stringify(
                 input.map((item) => ({
                   id: item.id,
                   question: item.question,
                 })),
               ),
-            ].join("\n\n"),
+            }),
           },
         ],
       },

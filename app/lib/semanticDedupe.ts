@@ -18,6 +18,10 @@ import {
 } from "./embeddingSource";
 import { generateConciseAnswers } from "./conciseAnswer";
 import { extractJsonObject } from "./jsonObject";
+import {
+  loadPromptTemplate,
+  renderPromptTemplate,
+} from "./promptTemplates.ts";
 import type { QuestionInput } from "./postgresStore";
 import { vectorLiteral } from "./vectorLiteral";
 
@@ -62,12 +66,9 @@ const NEIGHBOR_COUNT = 10;
 const MIN_EXTERNAL_SIMILARITY = 0.78;
 const MIN_BATCH_SIMILARITY = 0.86;
 const JUDGE_BATCH_SIZE = 10;
-const SEMANTIC_DEDUPE_JUDGE_SYSTEM_PROMPT = [
-  "Decide whether generated flashcard candidates are semantic duplicates of close neighbors.",
-  "Reject only when the candidate and a neighbor test the same atomic recall target, so mastering one would make the other redundant.",
-  "Similar topic is not enough. Keep contrast pairs, prerequisite variants, examples with materially different reasoning, boundary cases, and failure-mode questions.",
-  "Return strict JSON: {\"decisions\":[{\"candidateId\":\"...\",\"duplicateOf\":\"neighbor id or null\",\"rationale\":\"short\"}]}",
-].join("\n\n");
+const SEMANTIC_DEDUPE_JUDGE_SYSTEM_PROMPT = loadPromptTemplate(
+  "semantic-dedupe-judge-system.md",
+);
 
 function normalizeQuestionInput(
   input: Array<string | QuestionInput>,
@@ -448,19 +449,21 @@ async function judgeDuplicateBatch(
           },
           {
             role: "user",
-            content: JSON.stringify({
-              candidates: batch.map((candidate) => ({
-                id: candidate.id,
-                question: candidate.question,
-                conciseAnswer: candidate.conciseAnswer,
-                neighbors: candidate.neighbors.map((neighbor) => ({
-                  id: neighbor.id,
-                  kind: neighbor.kind,
-                  question: neighbor.question,
-                  conciseAnswer: neighbor.conciseAnswer,
-                  similarity: neighbor.similarity,
+            content: renderPromptTemplate(loadPromptTemplate("semantic-dedupe-judge-user.md"), {
+              candidatesJson: JSON.stringify({
+                candidates: batch.map((candidate) => ({
+                  id: candidate.id,
+                  question: candidate.question,
+                  conciseAnswer: candidate.conciseAnswer,
+                  neighbors: candidate.neighbors.map((neighbor) => ({
+                    id: neighbor.id,
+                    kind: neighbor.kind,
+                    question: neighbor.question,
+                    conciseAnswer: neighbor.conciseAnswer,
+                    similarity: neighbor.similarity,
+                  })),
                 })),
-              })),
+              }),
             }),
           },
         ],
