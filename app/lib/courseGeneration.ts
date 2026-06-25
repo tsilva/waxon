@@ -644,16 +644,13 @@ function currentCourseMilestone(course: CourseDetail) {
 }
 
 function compactCourseMessages(messages: CourseChatMessage[]) {
-  return messages.slice(-10).map((message) => {
-    const toolWidgets = courseQuestionWidgetsFromToolCalls(message.toolCalls);
-
-    return {
-      role: message.role,
-      content: excerptCourseMessageForPrompt(message.content, 1_200),
-      ...(toolWidgets.length > 0 ? { questionWidgets: toolWidgets } : {}),
-      ...(message.widgetAnswer ? { widgetAnswer: message.widgetAnswer } : {}),
-    };
-  });
+  return messages.slice(-10).map((message) => ({
+    role: message.role,
+    content: excerptCourseMessageForPrompt(
+      courseMessagePromptContext(message),
+      1_200,
+    ),
+  }));
 }
 
 function courseMessagePromptContext(message: CourseChatMessage): string {

@@ -1262,13 +1262,23 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
       /record_course_answer_decision/u,
     );
     assert.doesNotMatch(String(userContent[0]?.text), /Learner answer:/u);
-    assert.match(String(userContent[1]?.text), /Learner answer:/u);
-    assert.match(String(userContent[1]?.text), /Recent conversation JSON/u);
+    const volatilePrompt = String(userContent[1]?.text);
+    assert.match(volatilePrompt, /Learner answer:/u);
+    assert.match(volatilePrompt, /Recent conversation JSON/u);
+    assert.doesNotMatch(volatilePrompt, /"widgetAnswer"/u);
+    assert.doesNotMatch(volatilePrompt, /"questionWidgets"/u);
+    assert.match(
+      volatilePrompt,
+      /Why can repeated customer data cause update problems/u,
+    );
     assert.deepEqual(events, [
       "decision:mark_milestone_done",
       "delta:Good. A join uses matching keys to combine related rows only when you query them.",
     ]);
-    assert.equal(result.answerDecision.questionAttempt.toolCall, "record_course_question_attempt");
+    assert.equal(
+      result.answerDecision.questionAttempt.toolCall,
+      "record_course_question_attempt",
+    );
     assert.equal(result.answerDecision.questionAttempt.score, 9);
     assert.equal(result.toolCalls[0]?.function.arguments.id, "join-key");
     assert.equal(pendingWidgetToolDeltas, 1);

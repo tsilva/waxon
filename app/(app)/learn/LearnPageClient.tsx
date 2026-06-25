@@ -940,6 +940,33 @@ function rawLearnConversationJson(input: {
   );
 }
 
+function learnConversationRequestPayload(messages: LearnChatMessage[]) {
+  return {
+    messages: messages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      toolCalls: message.toolCalls,
+      metrics: message.metrics,
+      evaluation: message.evaluation,
+    })),
+    widgetAnswers: messages.flatMap((message, messageIndex) => {
+      const widgetAnswer =
+        message.role === "user" ? message.widgetAnswer : null;
+
+      return widgetAnswer?.answer
+        ? [
+            {
+              messageIndex,
+              question: widgetAnswer.question,
+              widgetId: widgetAnswer.widgetId,
+              answer: widgetAnswer.answer,
+            },
+          ]
+        : [];
+    }),
+  };
+}
+
 function parseSseEvent(rawEvent: string): { event: string; data: unknown } | null {
   const lines = rawEvent.split("\n");
   const event =
@@ -1097,14 +1124,7 @@ export default function LearnPageClient({
       signal: abortController.signal,
       body: JSON.stringify({
         courseId: selectedCourse.id,
-        messages: chatMessages.map((message) => ({
-          role: message.role,
-          content: message.content,
-          toolCalls: message.toolCalls,
-          metrics: message.metrics,
-          evaluation: message.evaluation,
-          widgetAnswer: message.widgetAnswer,
-        })),
+        ...learnConversationRequestPayload(chatMessages),
       }),
     })
       .then(async (response) => {
@@ -1862,14 +1882,7 @@ export default function LearnPageClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           courseId: selectedCourse?.id,
-          messages: nextMessages.map((message) => ({
-            role: message.role,
-            content: message.content,
-            toolCalls: message.toolCalls,
-            metrics: message.metrics,
-            evaluation: message.evaluation,
-            widgetAnswer: message.widgetAnswer,
-          })),
+          ...learnConversationRequestPayload(nextMessages),
         }),
       });
 
