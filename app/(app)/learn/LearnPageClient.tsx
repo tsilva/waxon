@@ -153,7 +153,9 @@ type LearnWidgetAnswerDetails = {
 type LearnConversationViewMode = "chat" | "raw";
 type LearnRawPromptPreview = {
   ok?: boolean;
-  modelRequest?: unknown;
+  modelRequest?: {
+    requestBody?: unknown;
+  };
   error?: string;
 };
 
@@ -885,85 +887,32 @@ function LearnQuestionWidgetPlaceholder() {
 }
 
 function rawLearnConversationJson(input: {
-  course: Course | null;
-  messages: LearnChatMessage[];
   promptPreview: LearnRawPromptPreview | null;
   promptPreviewError: string | null;
   isLoadingPromptPreview: boolean;
 }) {
+  const requestBody = input.promptPreview?.modelRequest?.requestBody;
+
   return JSON.stringify(
-    {
-      nextModelRequest: input.promptPreview?.modelRequest ?? null,
-      promptPreviewStatus: input.promptPreview?.modelRequest
-        ? "ready"
-        : input.isLoadingPromptPreview
-          ? "loading"
-          : input.promptPreviewError
-            ? "error"
-            : "unavailable",
-      promptPreviewError: input.promptPreviewError,
-      storedConversation: {
-        course: input.course
-        ? {
-            id: input.course.id,
-            title: input.course.title,
-            topicPrompt: input.course.topicPrompt,
-            status: input.course.status,
-            currentPageIndex: input.course.currentPageIndex,
-            totalPages: input.course.totalPages,
-            generatedPages: input.course.generatedPages,
-            chatMessageCount: input.course.chatMessageCount,
-            conversationCost: input.course.conversationCost,
-            updatedAt: input.course.updatedAt,
-          }
-        : null,
-        messages: input.messages.map((message, index) => ({
-          index,
-          id: message.id,
-          role: message.role,
-          content: message.content,
-          toolCalls: message.toolCalls ?? [],
-          metrics: message.metrics ?? null,
-          evaluation: message.evaluation ?? null,
-          status: message.status ?? null,
-          pendingEvaluation: Boolean(message.pendingEvaluation),
-          hasPendingQuestionWidget: Boolean(message.hasPendingQuestionWidget),
-          widgetAnswer: message.widgetAnswer ?? null,
-          widgetAnswerDetails: message.widgetAnswerDetails ?? null,
-          interrupted: Boolean(message.interrupted),
-          createdAt: message.createdAt ?? null,
-        })),
-      },
+    requestBody ?? {
+      status: input.isLoadingPromptPreview
+        ? "loading"
+        : input.promptPreviewError
+          ? "error"
+          : "unavailable",
+      error: input.promptPreviewError,
     },
     null,
     2,
   );
 }
 
-function learnConversationRequestPayload(messages: LearnChatMessage[]) {
+function learnUserInputRequestPayload(message: LearnChatMessage) {
   return {
-    messages: messages.map((message) => ({
-      role: message.role,
+    message: {
       content: message.content,
-      toolCalls: message.toolCalls,
-      metrics: message.metrics,
-      evaluation: message.evaluation,
-    })),
-    widgetAnswers: messages.flatMap((message, messageIndex) => {
-      const widgetAnswer =
-        message.role === "user" ? message.widgetAnswer : null;
-
-      return widgetAnswer?.answer
-        ? [
-            {
-              messageIndex,
-              question: widgetAnswer.question,
-              widgetId: widgetAnswer.widgetId,
-              answer: widgetAnswer.answer,
-            },
-          ]
-        : [];
-    }),
+      widgetAnswer: message.widgetAnswer ?? null,
+    },
   };
 }
 
@@ -1085,18 +1034,14 @@ export default function LearnPageClient({
   const rawConversationJson = useMemo(
     () =>
       rawLearnConversationJson({
-        course: selectedCourse,
-        messages: chatMessages,
         promptPreview: rawPromptPreview,
         promptPreviewError: rawPromptPreviewError,
         isLoadingPromptPreview: isLoadingRawPromptPreview,
       }),
     [
-      chatMessages,
       isLoadingRawPromptPreview,
       rawPromptPreview,
       rawPromptPreviewError,
-      selectedCourse,
     ],
   );
 
@@ -1124,7 +1069,6 @@ export default function LearnPageClient({
       signal: abortController.signal,
       body: JSON.stringify({
         courseId: selectedCourse.id,
-        ...learnConversationRequestPayload(chatMessages),
       }),
     })
       .then(async (response) => {
@@ -1162,7 +1106,7 @@ export default function LearnPageClient({
     return () => {
       abortController.abort();
     };
-  }, [chatMessages, conversationViewMode, isStreaming, selectedCourse]);
+  }, [conversationViewMode, isStreaming, selectedCourse]);
 
   usePageScrollLock(Boolean(courseSettingsCourse || selectedEvaluationDetails));
 
@@ -1882,7 +1826,7 @@ export default function LearnPageClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           courseId: selectedCourse?.id,
-          ...learnConversationRequestPayload(nextMessages),
+          ...learnUserInputRequestPayload(userMessage),
         }),
       });
 

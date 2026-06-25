@@ -940,7 +940,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
         function: {
           name: "render_question_widget",
           description:
-            "Render one learner-facing Waxon question widget after the tutor explanation.",
+            "Render one learner-facing question widget after the tutor explanation.",
           parameters: {
             type: "object",
             additionalProperties: false,

@@ -6,12 +6,8 @@ import {
   shouldUseCourseAnswerContinuationRequest,
   type CourseChatMessage,
 } from "@/app/lib/courseGeneration";
-import { getCourse } from "@/app/lib/courseStore";
-import type { CourseMessageMetrics } from "@/app/lib/courseMessageMetrics";
-import {
-  normalizeCourseQuestionWidgetToolCalls,
-  type CourseQuestionWidgetAnswerDetails,
-} from "@/app/lib/courseQuestionWidget";
+import { getCourse, type CourseChatMessageRecord } from "@/app/lib/courseStore";
+import { courseQuestionWidgetsFromToolCalls } from "@/app/lib/courseQuestionWidget";
 import {
   DEFAULT_OPENROUTER_LEARN_MODEL,
   getOpenRouterLearnModel,
@@ -20,166 +16,49 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_PROMPT_PREVIEW_BODY_BYTES = 256 * 1024;
+const MAX_PROMPT_PREVIEW_BODY_BYTES = 8 * 1024;
 const MAX_CHAT_MESSAGES = 20;
-const MAX_CHAT_MESSAGE_CHARS = 16_000;
+const NEXT_INPUT_PLACEHOLDER = "<next learner input>";
 
-function finiteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function normalizedString(value: unknown, maxLength: number): string {
-  return typeof value === "string"
-    ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
-    : "";
-}
-
-function normalizeCourseMessageMetrics(
-  value: unknown,
-): CourseMessageMetrics | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-
+function storedCourseChatMessageToPromptMessage(
+  message: CourseChatMessageRecord,
+): CourseChatMessage {
   return {
-    cost: finiteNumber(record.cost),
-    promptTokens: finiteNumber(record.promptTokens),
-    cachedPromptTokens: finiteNumber(record.cachedPromptTokens),
-    uncachedPromptTokens: finiteNumber(record.uncachedPromptTokens),
-    cacheWriteTokens: finiteNumber(record.cacheWriteTokens),
-    cacheHitPercent: finiteNumber(record.cacheHitPercent),
-    outputTokens: finiteNumber(record.outputTokens),
-    totalTokens: finiteNumber(record.totalTokens),
-    latencyMs: finiteNumber(record.latencyMs),
-    tokensPerSecond: finiteNumber(record.tokensPerSecond),
-    contextWindowTokens: finiteNumber(record.contextWindowTokens),
-    contextPercent: finiteNumber(record.contextPercent),
+    role: message.role,
+    content: message.content,
+    toolCalls: message.role === "assistant" ? message.toolCalls : [],
+    metrics: message.metrics,
+    evaluation: message.role === "assistant" ? message.evaluation : null,
+    widgetAnswer: message.role === "user" ? message.widgetAnswer : null,
   };
 }
 
-function normalizeCourseChatEvaluation(
-  value: unknown,
-): CourseChatMessage["evaluation"] {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
+function findLatestUnansweredWidget(messages: CourseChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
 
-  const record = value as Record<string, unknown>;
-  const question = normalizedString(record.question, 1_200);
-  const feedback = normalizedString(record.feedback, 1_200);
-  const score = finiteNumber(record.score);
-
-  if (!question || !feedback || score === null) {
-    return null;
-  }
-
-  return {
-    questionId: normalizedString(record.questionId, 80) || null,
-    question,
-    correctAnswer: normalizedString(record.correctAnswer, 1_200) || null,
-    score: Math.max(0, Math.min(10, Math.round(score))),
-    feedback,
-  };
-}
-
-function normalizeCourseWidgetAnswer(
-  value: unknown,
-): CourseQuestionWidgetAnswerDetails | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const answer = normalizedString(record.answer, 4_000);
-
-  if (!answer) {
-    return null;
-  }
-
-  return {
-    question: normalizedString(record.question, 1_200) || null,
-    widgetId: normalizedString(record.widgetId, 80) || null,
-    answer,
-  };
-}
-
-function normalizeIndexedWidgetAnswers(
-  value: unknown,
-): Map<number, CourseQuestionWidgetAnswerDetails> {
-  const indexedAnswers = new Map<number, CourseQuestionWidgetAnswerDetails>();
-
-  if (!Array.isArray(value)) {
-    return indexedAnswers;
-  }
-
-  for (const item of value) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
+    if (message?.role !== "assistant") {
       continue;
     }
 
-    const record = item as Record<string, unknown>;
-    const messageIndex =
-      typeof record.messageIndex === "number" &&
-      Number.isInteger(record.messageIndex) &&
-      record.messageIndex >= 0
-        ? record.messageIndex
-        : null;
-    const widgetAnswer = normalizeCourseWidgetAnswer(record);
+    const widgets = courseQuestionWidgetsFromToolCalls(message.toolCalls);
 
-    if (messageIndex !== null && widgetAnswer) {
-      indexedAnswers.set(messageIndex, widgetAnswer);
+    for (const widget of widgets.toReversed()) {
+      const hasLaterAnswer = messages
+        .slice(index + 1)
+        .some(
+          (laterMessage) =>
+            laterMessage.role === "user" &&
+            laterMessage.widgetAnswer?.widgetId === widget.id,
+        );
+
+      if (!hasLaterAnswer) {
+        return widget;
+      }
     }
   }
 
-  return indexedAnswers;
-}
-
-function normalizeStoredMessages(
-  value: unknown,
-  widgetAnswers = new Map<number, CourseQuestionWidgetAnswerDetails>(),
-): CourseChatMessage[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const retainedMessages = value.slice(-MAX_CHAT_MESSAGES);
-  const messageIndexOffset = value.length - retainedMessages.length;
-
-  return retainedMessages.flatMap((item, index) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      return [];
-    }
-
-    const record = item as Record<string, unknown>;
-    const role: CourseChatMessage["role"] =
-      record.role === "assistant" ? "assistant" : "user";
-    const content =
-      typeof record.content === "string"
-        ? record.content.trim().slice(0, MAX_CHAT_MESSAGE_CHARS)
-        : "";
-
-    const toolCalls =
-      role === "assistant"
-        ? normalizeCourseQuestionWidgetToolCalls(record.toolCalls)
-        : [];
-    const metrics = normalizeCourseMessageMetrics(record.metrics);
-    const evaluation =
-      role === "assistant"
-        ? normalizeCourseChatEvaluation(record.evaluation)
-        : null;
-    const indexedWidgetAnswer = widgetAnswers.get(messageIndexOffset + index);
-    const widgetAnswer =
-      role === "user"
-        ? (indexedWidgetAnswer ??
-          normalizeCourseWidgetAnswer(record.widgetAnswer))
-        : null;
-
-    return content
-      ? [{ role, content, toolCalls, metrics, evaluation, widgetAnswer }]
-      : [];
-  });
+  return null;
 }
 
 export async function POST(request: Request) {
@@ -198,21 +77,10 @@ export async function POST(request: Request) {
       : {};
   const courseId =
     typeof payload.courseId === "string" ? payload.courseId.trim() : "";
-  const messages = normalizeStoredMessages(
-    payload.messages,
-    normalizeIndexedWidgetAnswers(payload.widgetAnswers),
-  );
 
   if (!courseId) {
     return Response.json(
       { ok: false, error: "courseId is required." },
-      { status: 400 },
-    );
-  }
-
-  if (messages.length === 0) {
-    return Response.json(
-      { ok: false, error: "messages are required." },
       { status: 400 },
     );
   }
@@ -228,6 +96,22 @@ export async function POST(request: Request) {
   }
 
   const model = getOpenRouterLearnModel() ?? DEFAULT_OPENROUTER_LEARN_MODEL;
+  const storedMessages = course.chatMessages.map(
+    storedCourseChatMessageToPromptMessage,
+  );
+  const latestUnansweredWidget = findLatestUnansweredWidget(storedMessages);
+  const nextUserMessage: CourseChatMessage = {
+    role: "user",
+    content: NEXT_INPUT_PLACEHOLDER,
+    widgetAnswer: latestUnansweredWidget
+      ? {
+          question: latestUnansweredWidget.question,
+          widgetId: latestUnansweredWidget.id,
+          answer: NEXT_INPUT_PLACEHOLDER,
+        }
+      : null,
+  };
+  const messages = [...storedMessages, nextUserMessage].slice(-MAX_CHAT_MESSAGES);
   const requestPreview = shouldUseCourseAnswerContinuationRequest(messages)
     ? buildCourseAnswerContinuationModelRequest({
         userId: user.id,

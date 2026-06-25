@@ -19,19 +19,18 @@ import {
   type CourseProgressDecision,
 } from "@/app/lib/courseProgress";
 import {
+  appendCourseChatMessages,
   addCourseConversationCost,
   advanceCourseProgress,
   createCourse,
   getCourse,
   recordCourseChatQuestionAttempt,
-  replaceCourseChatMessages,
   updateCourseToc,
-  type CourseChatMessageEvaluation,
+  type CourseChatMessageRecord,
   type CourseDetail,
 } from "@/app/lib/courseStore";
 import type { CourseMessageMetrics } from "@/app/lib/courseMessageMetrics";
 import {
-  normalizeCourseQuestionWidgetToolCalls,
   type CourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidgetToolCall,
 } from "@/app/lib/courseQuestionWidget";
@@ -43,7 +42,7 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAX_COURSE_CHAT_BODY_BYTES = 256 * 1024;
+const MAX_COURSE_CHAT_BODY_BYTES = 32 * 1024;
 const MAX_CHAT_MESSAGES = 20;
 const MAX_CHAT_MESSAGE_CHARS = 16_000;
 const MAX_STORED_CHAT_MESSAGES = 200;
@@ -88,64 +87,10 @@ type CourseChatLatencyMetrics = {
   rollback_count?: number;
 };
 
-function finiteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
 function normalizedString(value: unknown, maxLength: number): string {
   return typeof value === "string"
     ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
     : "";
-}
-
-function normalizeCourseMessageMetrics(
-  value: unknown,
-): CourseMessageMetrics | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-
-  return {
-    cost: finiteNumber(record.cost),
-    promptTokens: finiteNumber(record.promptTokens),
-    cachedPromptTokens: finiteNumber(record.cachedPromptTokens),
-    uncachedPromptTokens: finiteNumber(record.uncachedPromptTokens),
-    cacheWriteTokens: finiteNumber(record.cacheWriteTokens),
-    cacheHitPercent: finiteNumber(record.cacheHitPercent),
-    outputTokens: finiteNumber(record.outputTokens),
-    totalTokens: finiteNumber(record.totalTokens),
-    latencyMs: finiteNumber(record.latencyMs),
-    tokensPerSecond: finiteNumber(record.tokensPerSecond),
-    contextWindowTokens: finiteNumber(record.contextWindowTokens),
-    contextPercent: finiteNumber(record.contextPercent),
-  };
-}
-
-function normalizeCourseChatEvaluation(
-  value: unknown,
-): CourseChatMessageEvaluation | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const question = normalizedString(record.question, 1_200);
-  const feedback = normalizedString(record.feedback, 1_200);
-  const score = finiteNumber(record.score);
-
-  if (!question || !feedback || score === null) {
-    return null;
-  }
-
-  return {
-    questionId: normalizedString(record.questionId, 80) || null,
-    question,
-    correctAnswer: normalizedString(record.correctAnswer, 1_200) || null,
-    score: Math.max(0, Math.min(10, Math.round(score))),
-    feedback,
-  };
 }
 
 function normalizeCourseWidgetAnswer(
@@ -169,81 +114,48 @@ function normalizeCourseWidgetAnswer(
   };
 }
 
-function normalizeIndexedWidgetAnswers(
-  value: unknown,
-): Map<number, CourseQuestionWidgetAnswerDetails> {
-  const indexedAnswers = new Map<number, CourseQuestionWidgetAnswerDetails>();
-
-  if (!Array.isArray(value)) {
-    return indexedAnswers;
-  }
-
-  for (const item of value) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      continue;
-    }
-
-    const record = item as Record<string, unknown>;
-    const messageIndex =
-      typeof record.messageIndex === "number" &&
-      Number.isInteger(record.messageIndex) &&
-      record.messageIndex >= 0
-        ? record.messageIndex
-        : null;
-    const widgetAnswer = normalizeCourseWidgetAnswer(record);
-
-    if (messageIndex !== null && widgetAnswer) {
-      indexedAnswers.set(messageIndex, widgetAnswer);
-    }
-  }
-
-  return indexedAnswers;
+function storedCourseChatMessageToPromptMessage(
+  message: CourseChatMessageRecord,
+): CourseChatMessage {
+  return {
+    role: message.role,
+    content: message.content,
+    toolCalls: message.role === "assistant" ? message.toolCalls : [],
+    metrics: message.metrics,
+    evaluation: message.role === "assistant" ? message.evaluation : null,
+    widgetAnswer: message.role === "user" ? message.widgetAnswer : null,
+  };
 }
 
-function normalizeStoredMessages(
-  value: unknown,
-  widgetAnswers = new Map<number, CourseQuestionWidgetAnswerDetails>(),
-): CourseChatMessage[] {
-  if (!Array.isArray(value)) {
-    return [];
+function normalizeIncomingUserMessage(
+  payload: Record<string, unknown>,
+  maxLength: number,
+):
+  | { ok: true; message: CourseChatMessage }
+  | { ok: false; response: Response } {
+  const messageValue = payload.message;
+  const messageRecord =
+    messageValue && typeof messageValue === "object" && !Array.isArray(messageValue)
+      ? (messageValue as Record<string, unknown>)
+      : {};
+  const content = normalizeBoundedText(messageRecord.content, {
+    field: "message.content",
+    maxLength,
+    required: true,
+  });
+
+  if (!content.ok) {
+    return content;
   }
 
-  const retainedMessages = value.slice(-MAX_STORED_CHAT_MESSAGES);
-  const messageIndexOffset = value.length - retainedMessages.length;
-
-  return retainedMessages.flatMap((item, index) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      return [];
-    }
-
-    const record = item as Record<string, unknown>;
-    const role: CourseChatMessage["role"] =
-      record.role === "assistant" ? "assistant" : "user";
-    const content =
-      typeof record.content === "string"
-        ? record.content.trim().slice(0, MAX_CHAT_MESSAGE_CHARS)
-        : "";
-
-    const toolCalls =
-      role === "assistant"
-        ? normalizeCourseQuestionWidgetToolCalls(record.toolCalls)
-        : [];
-    const metrics = normalizeCourseMessageMetrics(record.metrics);
-    const evaluation =
-      role === "assistant"
-        ? normalizeCourseChatEvaluation(record.evaluation)
-        : null;
-    const indexedWidgetAnswer = widgetAnswers.get(messageIndexOffset + index);
-    const widgetAnswer =
-      role === "user"
-        ? (indexedWidgetAnswer ??
-          normalizeCourseWidgetAnswer(record.widgetAnswer))
-        : null;
-
-    return content
-      ? [{ role, content, toolCalls, metrics, evaluation, widgetAnswer }]
-      : [];
-  });
+  return {
+    ok: true,
+    message: {
+      role: "user",
+      content: content.value,
+      widgetAnswer: normalizeCourseWidgetAnswer(messageRecord.widgetAnswer),
+    },
+  };
 }
 
 function buildProvisionalCourseToc(
@@ -320,32 +232,31 @@ export async function POST(request: Request) {
     parsed.value && typeof parsed.value === "object"
       ? (parsed.value as Record<string, unknown>)
       : {};
-  const storedMessages = normalizeStoredMessages(
-    payload.messages,
-    normalizeIndexedWidgetAnswers(payload.widgetAnswers),
-  );
-  const messages = storedMessages.slice(-MAX_CHAT_MESSAGES);
   const courseId =
     typeof payload.courseId === "string" ? payload.courseId.trim() : "";
+  const incomingUserMessage = normalizeIncomingUserMessage(
+    payload,
+    courseId ? MAX_CHAT_MESSAGE_CHARS : MAX_TOPIC_CHARS,
+  );
 
-  if (messages.length === 0) {
-    return Response.json(
-      { ok: false, error: "messages are required." },
-      { status: 400 },
-    );
+  if (!incomingUserMessage.ok) {
+    return incomingUserMessage.response;
   }
 
-  const latestUserMessage = [...storedMessages]
-    .reverse()
-    .find((message) => message.role === "user");
-  const topic = normalizeBoundedText(latestUserMessage?.content ?? "", {
-    field: "topic",
-    maxLength: MAX_TOPIC_CHARS,
-    required: true,
-  });
+  const userMessage = incomingUserMessage.message;
+  let conversationMessages: CourseChatMessage[] = [userMessage];
+  let messages = conversationMessages.slice(-MAX_CHAT_MESSAGES);
 
-  if (!topic.ok) {
-    return topic.response;
+  if (!courseId) {
+    const topic = normalizeBoundedText(userMessage.content, {
+      field: "topic",
+      maxLength: MAX_TOPIC_CHARS,
+      required: true,
+    });
+
+    if (!topic.ok) {
+      return topic.response;
+    }
   }
 
   const openRouterConfig = getOpenRouterLearnConfig();
@@ -476,6 +387,12 @@ export async function POST(request: Request) {
               throw new Error("Course could not be loaded.");
             }
 
+            conversationMessages = [
+              ...course.chatMessages.map(storedCourseChatMessageToPromptMessage),
+              userMessage,
+            ].slice(-MAX_STORED_CHAT_MESSAGES);
+            messages = conversationMessages.slice(-MAX_CHAT_MESSAGES);
+
             if (shouldUseCourseAnswerContinuationRequest(messages)) {
               send("evaluation_pending", {});
               const runSingleStreamContinuation = async (
@@ -585,10 +502,10 @@ export async function POST(request: Request) {
 
                 const evaluationResult =
                   questionEvaluationResult as CourseQuestionEvaluationResult | null;
-                const chatMessages = await replaceCourseChatMessages({
+                const chatMessages = await appendCourseChatMessages({
                   courseId: course.id,
                   messages: [
-                    ...storedMessages,
+                    userMessage,
                     ...(evaluationResult
                       ? [evaluationResult.message]
                       : []),
@@ -599,6 +516,7 @@ export async function POST(request: Request) {
                       toolCalls: assistantToolCalls,
                     },
                   ],
+                  maxMessages: MAX_STORED_CHAT_MESSAGES,
                 });
                 await addCourseConversationCost({
                   courseId: course.id,
@@ -674,7 +592,7 @@ export async function POST(request: Request) {
               },
             }).catch(() => ({
               action: "create_course" as const,
-              topic: topic.value,
+              topic: userMessage.content,
               message: "I have enough context to start the course.",
             }));
 
@@ -835,10 +753,10 @@ export async function POST(request: Request) {
 
           const evaluationResult =
             questionEvaluationResult as CourseQuestionEvaluationResult | null;
-          const chatMessages = await replaceCourseChatMessages({
+          const chatMessages = await appendCourseChatMessages({
             courseId: course.id,
             messages: [
-              ...storedMessages,
+              userMessage,
               ...(evaluationResult
                 ? [evaluationResult.message]
                 : []),
@@ -849,6 +767,7 @@ export async function POST(request: Request) {
                 toolCalls: assistantToolCalls,
               },
             ],
+            maxMessages: MAX_STORED_CHAT_MESSAGES,
           });
           await addCourseConversationCost({
             courseId: course.id,

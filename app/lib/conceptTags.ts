@@ -218,7 +218,7 @@ function buildConceptTaggingPrompt(input: {
   relevantTagsByQuestionId: Map<string, RelevantConceptTag[]>;
 }) {
   return [
-    "Assign concept slugs to saved Waxon review questions.",
+    "Assign concept slugs to saved review questions.",
     "Use 1-3 lowercase kebab-case slugs per question.",
     "Prefer existingSlugs when they accurately describe the tested concept.",
     "Create a new slug only when no existing slug fits.",

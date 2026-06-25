@@ -51,7 +51,7 @@ const COURSE_QUESTION_WIDGET_TOOL = {
   function: {
     name: COURSE_QUESTION_WIDGET_TOOL_NAME,
     description:
-      "Render one learner-facing Waxon question widget after the tutor explanation.",
+      "Render one learner-facing question widget after the tutor explanation.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -803,7 +803,7 @@ export async function generateCourseIntakeDecision(input: {
         {
           role: "system",
           content: [
-            "You are the Waxon Learn course-intake assistant.",
+            "You are the course-intake assistant.",
             "Decide whether the user has given enough context to start a concise mini-course.",
             "Ask at most one clarifying question when scope, level, or goal is ambiguous.",
             "If the user already clarified or the request is specific enough, create the course topic prompt.",
@@ -851,7 +851,7 @@ export async function evaluateCourseChatProgress(input: {
         {
           role: "system",
           content: [
-            "You are controlling Waxon's milestone progress tool.",
+            "You are controlling the milestone progress tool.",
             "Decide whether the learner's latest answer shows enough understanding to finish the current TOC milestone.",
             "Be conservative: a learner should stay on the current milestone until they have clearly grasped its objective.",
             "Use mark_milestone_done only when the learner demonstrates the core idea with enough specificity to transfer it, such as a correct explanation in their own words or a correct selection plus a clear reason.",
@@ -1000,7 +1000,7 @@ export async function generateCourseAnswerDecision(input: {
   const answeredWidget = latestAnsweredWidgetContext(input.messages);
   const model = input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL;
   const systemPrompt = [
-    "You are Waxon's fast answer grader.",
+    "You are the fast answer grader.",
     "Return strict compact JSON only.",
     "If widget/question evidence is present, grade that answered question.",
     "Make questionAttempt.question a self-contained recall prompt, not multiple-choice wording.",
@@ -1123,13 +1123,13 @@ export async function generateCourseQuestionAttemptToolResult(input: {
         {
           role: "system",
           content: [
-            "You are filling Waxon's server-side course question attempt tool.",
+            "You are filling the server-side course question attempt tool.",
             "Look at the tutor's previous assistant message and the learner's latest user message.",
             "If the previous assistant message ended with a real learner-facing question or a render_question_widget tool call and the latest user message answers it, return a record_course_question_attempt tool call.",
             "If the latest user message includes structured widgetAnswer metadata, use that metadata's question as the learner-facing question being answered.",
             "Write question as a self-contained free-response review prompt that tests the same idea as the learner-facing question.",
             "If the tutor question was multiple choice, rephrase it into a recall question instead of using words like choose, option, A/B/C/D, or answer choice.",
-            "Grade the answer from 0 to 10 using normal Waxon review standards.",
+            "Grade the answer from 0 to 10 using normal review standards.",
             "Always write correctAnswer as the concise ideal answer to the tutor question, even when the learner was fully correct.",
             "Do not leave correctAnswer or conciseAnswer blank, null, generic, or omitted in a record_course_question_attempt call.",
             "If there is no answerable tutor question, or the user is asking a new unrelated course-management question, skip.",
@@ -1178,7 +1178,7 @@ function buildCourseTutorSystemPrompt(input: {
   answerDecisionTool: boolean;
 }): string {
   return [
-    "You are Waxon's Learn chat tutor.",
+    "You are the Learn chat tutor.",
     "Run a milestone-driven course entirely inside chat.",
     "Maximize the probability that a learner at any knowledge level can understand the explanation deeply.",
     "Start from concrete intuition and plain language, define necessary jargon before relying on it, and make every causal or mathematical step feel motivated.",
@@ -1343,7 +1343,7 @@ export function buildCourseAnswerContinuationModelRequest(input: {
         {
           role: "system",
           content:
-            "You are Waxon's Learn chat tutor. Follow the stable tutor instructions and dynamic course state in the user message.",
+            "You are the Learn chat tutor. Follow the stable tutor instructions and dynamic course state in the user message.",
         },
         {
           role: "user",
@@ -1424,7 +1424,7 @@ export function buildCourseChatTurnModelRequest(input: {
             {
               role: "system",
               content:
-                "You are Waxon's Learn chat tutor. Follow the stable tutor instructions and dynamic course state in the user message.",
+                "You are the Learn chat tutor. Follow the stable tutor instructions and dynamic course state in the user message.",
             },
             {
               role: "user",
@@ -1760,7 +1760,7 @@ export async function generateCourseToc(input: {
         {
           role: "system",
           content:
-            "You design concise adaptive mini-courses for Waxon. Return strict JSON only.",
+            "You design concise adaptive mini-courses. Return strict JSON only.",
         },
         {
           role: "user",
