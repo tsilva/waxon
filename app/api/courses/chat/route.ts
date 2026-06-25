@@ -31,6 +31,7 @@ import {
 } from "@/app/lib/courseStore";
 import type { CourseMessageMetrics } from "@/app/lib/courseMessageMetrics";
 import {
+  courseTocToolCallFromToc,
   type CourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidgetToolCall,
 } from "@/app/lib/courseQuestionWidget";
@@ -214,6 +215,22 @@ function buildDraftCourseDetail(input: {
     updatedAt: now,
     pages: [],
     chatMessages: [],
+  };
+}
+
+function buildCourseTocGeneratedMessage(course: CourseDetail): CourseChatMessage {
+  return {
+    role: "assistant",
+    content: "Generated the course table of contents.",
+    toolCalls: [
+      courseTocToolCallFromToc(
+        {
+          topic: course.topicPrompt,
+          toc: course.toc,
+        },
+        `course-toc-${course.id}`.slice(0, 80),
+      ),
+    ],
   };
 }
 
@@ -502,10 +519,14 @@ export async function POST(request: Request) {
 
                 const evaluationResult =
                   questionEvaluationResult as CourseQuestionEvaluationResult | null;
+                const tocGenerationMessages = finalCoursePromise
+                  ? [buildCourseTocGeneratedMessage(course)]
+                  : [];
                 const chatMessages = await appendCourseChatMessages({
                   courseId: course.id,
                   messages: [
                     userMessage,
+                    ...tocGenerationMessages,
                     ...(evaluationResult
                       ? [evaluationResult.message]
                       : []),
@@ -753,10 +774,14 @@ export async function POST(request: Request) {
 
           const evaluationResult =
             questionEvaluationResult as CourseQuestionEvaluationResult | null;
+          const tocGenerationMessages = finalCoursePromise
+            ? [buildCourseTocGeneratedMessage(course)]
+            : [];
           const chatMessages = await appendCourseChatMessages({
             courseId: course.id,
             messages: [
               userMessage,
+              ...tocGenerationMessages,
               ...(evaluationResult
                 ? [evaluationResult.message]
                 : []),

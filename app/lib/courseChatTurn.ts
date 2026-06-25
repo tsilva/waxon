@@ -1,6 +1,6 @@
 import type {
   CourseQuestionWidget,
-  CourseQuestionWidgetToolCall,
+  CourseToolCall,
 } from "./courseQuestionWidget.ts";
 
 const FALLBACK_LEARNER_QUESTION = "What is the main idea in your own words?";
@@ -188,15 +188,21 @@ export function sanitizeLearnerFacingCourseWidget(
 }
 
 export function sanitizeLearnerFacingCourseWidgetToolCalls(
-  toolCalls: CourseQuestionWidgetToolCall[],
-): CourseQuestionWidgetToolCall[] {
-  return toolCalls.map((toolCall) => ({
-    ...toolCall,
-    function: {
-      ...toolCall.function,
-      arguments: sanitizeLearnerFacingCourseWidget(toolCall.function.arguments),
-    },
-  }));
+  toolCalls: CourseToolCall[],
+): CourseToolCall[] {
+  return toolCalls.map((toolCall) => {
+    if (toolCall.function.name !== "render_question_widget") {
+      return toolCall;
+    }
+
+    return {
+      ...toolCall,
+      function: {
+        ...toolCall.function,
+        arguments: sanitizeLearnerFacingCourseWidget(toolCall.function.arguments),
+      },
+    };
+  });
 }
 
 function sanitizeLearnerFacingCourseWidgetId(id: string): string {

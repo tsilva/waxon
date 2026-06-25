@@ -8,5 +8,3 @@ Learner answer: {{learnerAnswer}}
 
 Previous visible lesson context:
 {{previousVisibleLessonContext}}
-
-Recent conversation JSON: {{recentConversationJson}}
