@@ -5544,7 +5544,7 @@ textarea {
   min-width: 0;
   max-height: 100%;
   overflow: auto;
-  padding-right: 4px;
+  padding: 4px 14px 12px 2px;
 }
 
 .learn-course-picker-full {
@@ -5648,6 +5648,55 @@ textarea {
   font-family: var(--font-ui);
   font-size: 13px;
   font-weight: 700;
+}
+
+.learn-course-loading-more,
+.learn-course-load-sentinel {
+  display: flex;
+  justify-content: center;
+  min-height: 36px;
+}
+
+.learn-course-loading-more {
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.learn-course-loading-more svg {
+  width: 14px;
+  height: 14px;
+}
+
+.learn-course-load-more {
+  min-height: 32px;
+  border: 1px solid rgb(166 124 82 / 22%);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: rgb(255 252 245 / 76%);
+  color: var(--accent);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.learn-course-load-more:hover,
+.learn-course-load-more:focus-visible {
+  border-color: rgb(166 124 82 / 38%);
+  background: #ffffff;
+  color: var(--accent-hover);
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 2px;
+}
+
+.learn-course-load-more:disabled {
+  cursor: wait;
+  opacity: 0.58;
 }
 
 .learn-course-picker-full .learn-course-list {
@@ -5838,27 +5887,26 @@ textarea {
   color: var(--accent);
 }
 
-.learn-course-state-panel {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
+.learn-course-item .learn-course-state-panel {
+  display: grid;
+  align-items: start;
   justify-self: end;
-  justify-content: flex-end;
-  gap: 6px 12px;
+  justify-items: end;
+  gap: 3px;
   min-width: 0;
   text-align: right;
 }
 
 .learn-course-progress {
-  flex: 0 0 auto;
+  justify-content: flex-end;
   white-space: nowrap;
 }
 
-.learn-course-meta {
-  flex-wrap: wrap;
-  justify-content: flex-end;
+.learn-course-item .learn-course-meta {
+  display: grid;
+  justify-items: end;
   min-width: 0;
-  row-gap: 2px;
+  gap: 3px;
   text-align: right;
 }
 
@@ -7625,14 +7673,14 @@ textarea {
     margin-left: auto;
   }
 
-  .learn-course-state-panel {
+  .learn-course-item .learn-course-state-panel {
     justify-self: start;
-    justify-content: flex-start;
+    justify-items: start;
     text-align: left;
   }
 
-  .learn-course-meta {
-    justify-content: flex-start;
+  .learn-course-item .learn-course-meta {
+    justify-items: start;
     text-align: left;
   }
 

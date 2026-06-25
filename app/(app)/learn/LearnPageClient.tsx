@@ -116,6 +116,17 @@ type LearnPageClientProps = {
   initialSelectedCourse?: Course | null;
 };
 
+type CourseListCursor = {
+  updatedAt: number;
+  id: string;
+};
+
+type CoursesPageResponse = {
+  courses?: Course[];
+  hasMore?: boolean;
+  nextCursor?: CourseListCursor | null;
+};
+
 type LearnEvaluationDetails = {
   questionId: string | null;
   question: string;
@@ -148,6 +159,14 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
 };
 
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
+const COURSE_LIST_FALLBACK_PAGE_SIZE = 8;
+const COURSE_LIST_MIN_PAGE_SIZE = 4;
+const COURSE_LIST_MAX_PAGE_SIZE = 24;
+const COURSE_LIST_MOBILE_BREAKPOINT = 760;
+const COURSE_LIST_DESKTOP_VERTICAL_CHROME_PX = 195;
+const COURSE_LIST_MOBILE_VERTICAL_CHROME_PX = 208;
+const COURSE_LIST_DESKTOP_ROW_PITCH_PX = 80;
+const COURSE_LIST_MOBILE_ROW_PITCH_PX = 150;
 
 const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -162,6 +181,52 @@ const COURSE_UPDATED_TITLE_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeStyle: "short",
   timeZone: "UTC",
 });
+
+function coursesPageUrl(input: {
+  cursor?: CourseListCursor | null;
+  limit: number;
+  search?: string;
+}): string {
+  const searchParams = new URLSearchParams();
+
+  searchParams.set("limit", String(input.limit));
+
+  if (input.search?.trim()) {
+    searchParams.set("search", input.search.trim());
+  }
+
+  if (input.cursor) {
+    searchParams.set("cursorUpdatedAt", String(input.cursor.updatedAt));
+    searchParams.set("cursorId", input.cursor.id);
+  }
+
+  return `/api/courses?${searchParams.toString()}`;
+}
+
+function courseListPageSizeForViewport(): number {
+  if (typeof window === "undefined") {
+    return COURSE_LIST_FALLBACK_PAGE_SIZE;
+  }
+
+  const isMobile = window.innerWidth <= COURSE_LIST_MOBILE_BREAKPOINT;
+  const availableListHeight = Math.max(
+    isMobile
+      ? window.innerHeight - COURSE_LIST_MOBILE_VERTICAL_CHROME_PX
+      : window.innerHeight - COURSE_LIST_DESKTOP_VERTICAL_CHROME_PX,
+    0,
+  );
+  const rowPitch = isMobile
+    ? COURSE_LIST_MOBILE_ROW_PITCH_PX
+    : COURSE_LIST_DESKTOP_ROW_PITCH_PX;
+
+  return Math.max(
+    COURSE_LIST_MIN_PAGE_SIZE,
+    Math.min(
+      COURSE_LIST_MAX_PAGE_SIZE,
+      Math.ceil(availableListHeight / rowPitch),
+    ),
+  );
+}
 
 function chatMessageId() {
   return `learn-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -911,6 +976,11 @@ export default function LearnPageClient({
     Set<string>
   >(() => new Set());
   const [courses, setCourses] = useState<Course[]>(() => initialCourses ?? []);
+  const [courseListCursor, setCourseListCursor] =
+    useState<CourseListCursor | null>(null);
+  const [hasMoreCourses, setHasMoreCourses] = useState(false);
+  const [isLoadingCoursesPage, setIsLoadingCoursesPage] = useState(false);
+  const [activeCourseSearchQuery, setActiveCourseSearchQuery] = useState("");
   const [courseSearchQuery, setCourseSearchQuery] = useState("");
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(
     initialSelectedCourse ?? null,
@@ -934,6 +1004,9 @@ export default function LearnPageClient({
   const [courseSettingsMessage, setCourseSettingsMessage] =
     useState<string | null>(null);
   const chatThreadRef = useRef<HTMLDivElement | null>(null);
+  const coursePickerRef = useRef<HTMLElement | null>(null);
+  const courseListMoreRef = useRef<HTMLDivElement | null>(null);
+  const courseListPageSizeRef = useRef(courseListPageSizeForViewport());
   const shouldAutoScrollChatRef = useRef(true);
   const autoScrollFrameRef = useRef<number | null>(null);
   const touchScrollStartYRef = useRef<number | null>(null);
@@ -978,6 +1051,67 @@ export default function LearnPageClient({
     });
   }, []);
 
+  const applyCoursesPage = useCallback(
+    (page: CoursesPageResponse, mode: "replace" | "append") => {
+      const pageCourses = page.courses ?? [];
+
+      setCourses((items) => {
+        if (mode === "replace") {
+          return pageCourses;
+        }
+
+        const incomingIds = new Set(pageCourses.map((course) => course.id));
+
+        return [...items.filter((course) => !incomingIds.has(course.id)), ...pageCourses]
+          .sort(
+            (left, right) =>
+              right.updatedAt - left.updatedAt ||
+              left.title.localeCompare(right.title),
+          );
+      });
+      setHasMoreCourses(Boolean(page.hasMore));
+      setCourseListCursor(page.nextCursor ?? null);
+    },
+    [],
+  );
+
+  const loadNextCoursesPage = useCallback(async () => {
+    if (isLoadingCoursesPage || !hasMoreCourses || !courseListCursor) {
+      return;
+    }
+
+    setIsLoadingCoursesPage(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        coursesPageUrl({
+          cursor: courseListCursor,
+          limit: courseListPageSizeRef.current,
+          search: activeCourseSearchQuery,
+        }),
+        { cache: "no-store" },
+      );
+      const page = await readApiJson<CoursesPageResponse>(response);
+
+      applyCoursesPage(page, "append");
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Could not load more courses.",
+      );
+    } finally {
+      setIsLoadingCoursesPage(false);
+    }
+  }, [
+    activeCourseSearchQuery,
+    applyCoursesPage,
+    courseListCursor,
+    hasMoreCourses,
+    isLoadingCoursesPage,
+  ]);
+
   const applySelectedCourse = useCallback((course: Course) => {
     shouldAutoScrollChatRef.current = true;
     setSelectedCourse(course);
@@ -1016,7 +1150,9 @@ export default function LearnPageClient({
             })
           : Promise.resolve(null);
         const coursesResponsePromise = shouldFetchCourses
-          ? fetch("/api/courses", { cache: "no-store" })
+          ? fetch(coursesPageUrl({ limit: courseListPageSizeRef.current }), {
+              cache: "no-store",
+            })
           : Promise.resolve(null);
         const [userResponse, queueResponse, coursesResponse, courseResponse] =
           await Promise.all([
@@ -1033,7 +1169,7 @@ export default function LearnPageClient({
           queueResponse,
         )) as { queueRemaining?: number };
         const coursesData = coursesResponse
-          ? await readApiJson<{ courses?: Course[] }>(coursesResponse)
+          ? await readApiJson<CoursesPageResponse>(coursesResponse)
           : null;
         const courseData = courseResponse
           ? await readApiJson<{ course: Course }>(courseResponse)
@@ -1046,7 +1182,8 @@ export default function LearnPageClient({
         setCurrentUser(userData);
         setDueCount(queueData.queueRemaining ?? 0);
         if (coursesData) {
-          setCourses(coursesData.courses ?? []);
+          applyCoursesPage(coursesData, "replace");
+          setActiveCourseSearchQuery("");
         }
         if (courseData) {
           applySelectedCourse(courseData.course);
@@ -1073,11 +1210,71 @@ export default function LearnPageClient({
     };
   }, [
     applySelectedCourse,
+    applyCoursesPage,
     initialCourseId,
     initialCourses,
     initialCoursesArePartial,
     initialCurrentUser,
     initialSelectedCourse,
+  ]);
+
+  useEffect(() => {
+    if (isBooting) {
+      return;
+    }
+
+    const normalizedSearch = courseSearchQuery.trim();
+
+    if (normalizedSearch === activeCourseSearchQuery) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setIsLoadingCoursesPage(true);
+      setError(null);
+
+      try {
+        const response = await fetch(
+          coursesPageUrl({
+            limit: courseListPageSizeRef.current,
+            search: normalizedSearch,
+          }),
+          {
+            cache: "no-store",
+            signal: controller.signal,
+          },
+        );
+        const page = await readApiJson<CoursesPageResponse>(response);
+
+        if (!controller.signal.aborted) {
+          applyCoursesPage(page, "replace");
+          setActiveCourseSearchQuery(normalizedSearch);
+        }
+      } catch (searchError) {
+        if (!controller.signal.aborted) {
+          setError(
+            searchError instanceof Error
+              ? searchError.message
+              : "Could not search courses.",
+          );
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingCoursesPage(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [
+    activeCourseSearchQuery,
+    applyCoursesPage,
+    courseSearchQuery,
+    isBooting,
   ]);
 
   useEffect(() => {
@@ -1810,40 +2007,52 @@ export default function LearnPageClient({
   const showCourseList =
     !selectedCourse &&
     !draftCourseToc &&
-    courses.length > 0 &&
+    (courses.length > 0 ||
+      courseSearchQuery.trim().length > 0 ||
+      activeCourseSearchQuery.length > 0 ||
+      isLoadingCoursesPage) &&
     !isStartingNewCourse;
   const visibleCourseToc = draftCourseToc ?? selectedCourse?.toc;
   const visibleCourseTitle =
     draftCourseToc?.title ?? selectedCourse?.title ?? "Generating TOC";
-  const sortedCourses = useMemo(
-    () =>
-      [...courses].sort(
-        (left, right) =>
-          right.updatedAt - left.updatedAt ||
-          left.title.localeCompare(right.title),
-      ),
-    [courses],
-  );
-  const filteredCourses = useMemo(() => {
-    const normalizedQuery = courseSearchQuery.trim().toLowerCase();
+  const isCourseChatActive = Boolean(selectedCourse);
 
-    if (!normalizedQuery) {
-      return sortedCourses;
+  useEffect(() => {
+    const coursePicker = coursePickerRef.current;
+    const loadMoreTarget = courseListMoreRef.current;
+
+    if (
+      !showCourseList ||
+      !coursePicker ||
+      !loadMoreTarget ||
+      !hasMoreCourses ||
+      isLoadingCoursesPage
+    ) {
+      return;
     }
 
-    return sortedCourses.filter((course) =>
-      [
-        course.title,
-        course.description,
-        course.topicPrompt,
-        course.toc.title,
-        course.toc.description,
-      ]
-        .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(normalizedQuery)),
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void loadNextCoursesPage();
+        }
+      },
+      {
+        root: coursePicker,
+        rootMargin: "0px",
+        threshold: 0,
+      },
     );
-  }, [courseSearchQuery, sortedCourses]);
-  const isCourseChatActive = Boolean(selectedCourse);
+
+    observer.observe(loadMoreTarget);
+
+    return () => observer.disconnect();
+  }, [
+    hasMoreCourses,
+    isLoadingCoursesPage,
+    loadNextCoursesPage,
+    showCourseList,
+  ]);
 
   return (
     <main className="page page-learn-active">
@@ -1952,6 +2161,7 @@ export default function LearnPageClient({
                 <section
                   className="learn-course-picker learn-course-picker-full"
                   aria-label="Courses"
+                  ref={coursePickerRef}
                 >
                   <LearnCourseToolbar
                     courseSearchQuery={courseSearchQuery}
@@ -1960,10 +2170,12 @@ export default function LearnPageClient({
                     onCreateCourse={startNewCourse}
                   />
                   <div className="learn-course-list">
-                    {filteredCourses.length === 0 ? (
-                      <p className="learn-course-empty">No matching courses.</p>
+                    {courses.length === 0 && !isLoadingCoursesPage ? (
+                      <p className="learn-course-empty">
+                        {activeCourseSearchQuery ? "No matching courses." : "No courses yet."}
+                      </p>
                     ) : null}
-                    {filteredCourses.map((course) => (
+                    {courses.map((course) => (
                       <article
                         className="learn-course-item learn-course-card"
                         key={course.id}
@@ -1983,10 +2195,11 @@ export default function LearnPageClient({
                               {courseProgressLabel(course)}
                             </span>
                             <small className="learn-course-meta">
-                              {loadingCourseId === course.id
-                                ? "Loading"
-                                : `${course.generatedPages}/${course.totalPages} generated`}
-                              {" / "}
+                              <span>
+                                {loadingCourseId === course.id
+                                  ? "Loading"
+                                  : `${course.generatedPages}/${course.totalPages} generated`}
+                              </span>
                               <time
                                 className="learn-course-updated"
                                 dateTime={new Date(course.updatedAt).toISOString()}
@@ -2008,6 +2221,29 @@ export default function LearnPageClient({
                         </button>
                       </article>
                     ))}
+                    {isLoadingCoursesPage && courses.length > 0 ? (
+                      <p className="learn-course-loading-more" role="status">
+                        <Loader2 className="learn-spin-icon" aria-hidden="true" />
+                        Loading more courses
+                      </p>
+                    ) : null}
+                    {hasMoreCourses ? (
+                      <div
+                        className="learn-course-load-sentinel"
+                        ref={courseListMoreRef}
+                      >
+                        <button
+                          className="learn-course-load-more"
+                          disabled={isLoadingCoursesPage}
+                          type="button"
+                          onClick={() => {
+                            void loadNextCoursesPage();
+                          }}
+                        >
+                          {isLoadingCoursesPage ? "Loading" : "Load more"}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </section>
               ) : null}
