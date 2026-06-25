@@ -22,9 +22,9 @@ import {
 import { reformatMultipleChoiceQuestionForReview } from "./courseQuestionAttemptParsing";
 import type { CourseMessageMetrics } from "./courseMessageMetrics";
 import {
-  normalizeCourseQuestionWidgetToolCalls,
+  normalizeCourseToolCalls,
   type CourseQuestionWidgetAnswerDetails,
-  type CourseQuestionWidgetToolCall,
+  type CourseToolCall,
 } from "./courseQuestionWidget";
 import {
   sanitizeLearnerFacingCourseText,
@@ -57,7 +57,7 @@ export type CourseChatMessageRecord = {
   courseId: string;
   role: "assistant" | "user";
   content: string;
-  toolCalls: CourseQuestionWidgetToolCall[];
+  toolCalls: CourseToolCall[];
   metrics: CourseMessageMetrics | null;
   evaluation: CourseChatMessageEvaluation | null;
   widgetAnswer: CourseQuestionWidgetAnswerDetails | null;
@@ -242,7 +242,7 @@ function toCourseChatMessage(row: {
   updatedAt: number;
 }): CourseChatMessageRecord {
   const role = toCourseChatRole(row.role);
-  const toolCalls = normalizeCourseQuestionWidgetToolCalls(row.toolCalls);
+  const toolCalls = normalizeCourseToolCalls(row.toolCalls);
 
   return {
     id: row.id,
@@ -583,7 +583,7 @@ export async function replaceCourseChatMessages(input: {
   messages: Array<{
     role: "assistant" | "user";
     content: string;
-    toolCalls?: CourseQuestionWidgetToolCall[];
+    toolCalls?: CourseToolCall[];
     metrics?: CourseMessageMetrics | null;
     evaluation?: CourseChatMessageEvaluation | null;
     widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
@@ -602,7 +602,7 @@ export async function replaceCourseChatMessages(input: {
       content: message.content.trim(),
       toolCalls:
         message.role === "assistant"
-          ? normalizeCourseQuestionWidgetToolCalls(message.toolCalls)
+          ? normalizeCourseToolCalls(message.toolCalls)
           : [],
       metrics: normalizeStoredMetrics(message.metrics),
       evaluation:
@@ -660,7 +660,7 @@ export async function replaceCourseChatMessages(input: {
 type CourseChatMessageWrite = {
   role: "assistant" | "user";
   content: string;
-  toolCalls?: CourseQuestionWidgetToolCall[];
+  toolCalls?: CourseToolCall[];
   metrics?: CourseMessageMetrics | null;
   evaluation?: CourseChatMessageEvaluation | null;
   widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
@@ -672,7 +672,7 @@ function normalizeCourseChatMessageWrite(message: CourseChatMessageWrite) {
     content: message.content.trim(),
     toolCalls:
       message.role === "assistant"
-        ? normalizeCourseQuestionWidgetToolCalls(message.toolCalls)
+        ? normalizeCourseToolCalls(message.toolCalls)
         : [],
     metrics: normalizeStoredMetrics(message.metrics),
     evaluation:

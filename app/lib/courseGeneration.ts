@@ -4,6 +4,7 @@ import {
   getOpenRouterEvaluationReasoning,
   openRouterChatCompletion,
   type OpenRouterChatResponse,
+  type OpenRouterMessage,
   type OpenRouterChatRequest,
   type OpenRouterToolCall,
 } from "./openRouter.ts";
@@ -28,11 +29,14 @@ import {
 } from "./courseQuestionAttemptParsing.ts";
 import {
   COURSE_QUESTION_WIDGET_TOOL_NAME,
+  COURSE_TOC_TOOL_NAME,
   courseQuestionWidgetToolCallFromWidget,
   courseQuestionWidgetsFromToolCalls,
   formatCourseQuestionWidgetsForPrompt,
+  hasCourseTocToolCall,
   type CourseQuestionWidget,
   type CourseQuestionWidgetAnswerDetails,
+  type CourseToolCall,
   type CourseQuestionWidgetToolCall,
 } from "./courseQuestionWidget.ts";
 import {
@@ -236,7 +240,7 @@ export type CourseIntakeDecision =
 export type CourseChatMessage = {
   role: "user" | "assistant";
   content: string;
-  toolCalls?: CourseQuestionWidgetToolCall[];
+  toolCalls?: CourseToolCall[];
   metrics?: CourseMessageMetrics | null;
   evaluation?: CourseChatMessageEvaluation | null;
   widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
@@ -607,6 +611,62 @@ function compactCourseMessages(messages: CourseChatMessage[]) {
   }));
 }
 
+function courseTocPromptMessages(course: CourseDetail): OpenRouterMessage[] {
+  const toolCallId = `course-toc-${course.id}`.slice(0, 80);
+  const argumentsJson = JSON.stringify({
+    topic: course.topicPrompt,
+    toc: course.toc,
+  });
+
+  return [
+    {
+      role: "assistant",
+      content: "Generated the course table of contents.",
+      tool_calls: [
+        {
+          id: toolCallId,
+          type: "function",
+          function: {
+            name: COURSE_TOC_TOOL_NAME,
+            arguments: argumentsJson,
+          },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      tool_call_id: toolCallId,
+      name: COURSE_TOC_TOOL_NAME,
+      content: argumentsJson,
+    },
+  ];
+}
+
+function courseChatMessagesForModel(
+  messages: CourseChatMessage[],
+): OpenRouterMessage[] {
+  return messages
+    .slice(-10)
+    .filter((message) => !hasCourseTocToolCall(message.toolCalls))
+    .map((message) => {
+      const content = courseMessagePromptContext(message);
+      const widgetAnswer = message.role === "user" ? message.widgetAnswer : null;
+
+      return {
+        role: message.role,
+        content:
+          widgetAnswer?.answer
+            ? [
+                content,
+                `Answered widget question: ${widgetAnswer.question ?? "unknown"}`,
+                `Answered widget id: ${widgetAnswer.widgetId ?? "unknown"}`,
+                `Learner answer: ${widgetAnswer.answer}`,
+              ].join("\n\n")
+            : content,
+      };
+    });
+}
+
 function courseMessagePromptContext(message: CourseChatMessage): string {
   const toolWidgets = courseQuestionWidgetsFromToolCalls(message.toolCalls);
 
@@ -651,21 +711,6 @@ function openRouterPromptContent(input: {
   return input.cacheable
     ? [cacheableTextBlock(input.text)]
     : [textBlock(input.text)];
-}
-
-function openRouterPromptParts(input: {
-  cacheablePrefix: string;
-  volatileSuffix: string;
-  model: string;
-}): string | OpenRouterTextContentBlock[] {
-  if (!supportsExplicitOpenRouterPromptCaching(input.model)) {
-    return [input.cacheablePrefix, input.volatileSuffix].join("\n");
-  }
-
-  return [
-    cacheableTextBlock(input.cacheablePrefix),
-    textBlock(input.volatileSuffix),
-  ];
 }
 
 function courseChatSessionId(input: {
@@ -1182,9 +1227,6 @@ export function buildCourseAnswerContinuationModelRequest(input: {
   const stableCourseContext = renderPromptTemplate(
     loadPromptTemplate("course-answer-continuation-stable-course-context.md"),
     {
-      courseTitle: input.course.title,
-      courseDescription: input.course.description,
-      tocJson: JSON.stringify(input.course.toc),
       currentMilestoneIndex: input.course.currentPageIndex,
       currentMilestone: page.title,
       milestoneObjective: page.objective,
@@ -1207,7 +1249,6 @@ export function buildCourseAnswerContinuationModelRequest(input: {
         visibleLessonContext,
         900,
       ),
-      recentConversationJson: JSON.stringify(compactCourseMessages(input.messages)),
     },
   ).replace(/\n{3,}/gu, "\n\n");
 
@@ -1236,18 +1277,21 @@ export function buildCourseAnswerContinuationModelRequest(input: {
       messages: [
         {
           role: "system",
-          content: loadPromptTemplate("course-chat-system.md"),
+          content: openRouterPromptContent({
+            text: stableTutorContext,
+            model,
+            cacheable: true,
+          }),
         },
         {
-          role: "user",
-          content: openRouterPromptParts({
-            cacheablePrefix: stableTutorContext,
-            volatileSuffix: [stableCourseContext, volatileCourseContext].join(
-              "\n\n",
-            ),
+          role: "system",
+          content: openRouterPromptContent({
+            text: [stableCourseContext, volatileCourseContext].join("\n\n"),
             model,
           }),
         },
+        ...courseTocPromptMessages(input.course),
+        ...courseChatMessagesForModel(input.messages),
       ],
     },
   };
@@ -1270,9 +1314,6 @@ export function buildCourseChatTurnModelRequest(input: {
   const stableCourseContext = renderPromptTemplate(
     loadPromptTemplate("course-chat-turn-stable-course-context.md"),
     {
-      courseTitle: input.course.title,
-      courseDescription: input.course.description,
-      tocJson: JSON.stringify(input.course.toc),
       currentMilestoneIndex: input.course.currentPageIndex,
       currentMilestone: page.title,
       milestoneObjective: page.objective,
@@ -1284,11 +1325,8 @@ export function buildCourseChatTurnModelRequest(input: {
       progressToolResult: input.progressDecision
         ? `Progress tool result: ${input.progressDecision.toolCall} - ${input.progressDecision.reason}`
         : "Progress tool result: starting or continuing current milestone.",
-      recentConversationJson: JSON.stringify(compactCourseMessages(input.messages)),
     },
   );
-  const useExplicitTutorCacheShape =
-    supportsExplicitOpenRouterPromptCaching(model);
   const stableTutorContext = [
     "Stable tutor instructions:",
     systemPrompt,
@@ -1317,39 +1355,25 @@ export function buildCourseChatTurnModelRequest(input: {
       tools: [COURSE_QUESTION_WIDGET_TOOL],
       tool_choice: "auto",
       parallel_tool_calls: false,
-      messages: useExplicitTutorCacheShape
-        ? [
-            {
-              role: "system",
-              content: loadPromptTemplate("course-chat-system.md"),
-            },
-            {
-              role: "user",
-              content: openRouterPromptParts({
-                cacheablePrefix: stableTutorContext,
-                volatileSuffix: dynamicTutorContext,
-                model,
-              }),
-            },
-          ]
-        : [
-            {
-              role: "system",
-              content: openRouterPromptContent({
-                text: stableTutorContext,
-                model,
-                cacheable: true,
-              }),
-            },
-            {
-              role: "user",
-              content: openRouterPromptParts({
-                cacheablePrefix: stableCourseContext,
-                volatileSuffix: volatileCourseContext,
-                model,
-              }),
-            },
-          ],
+      messages: [
+        {
+          role: "system",
+          content: openRouterPromptContent({
+            text: stableTutorContext,
+            model,
+            cacheable: true,
+          }),
+        },
+        {
+          role: "system",
+          content: openRouterPromptContent({
+            text: dynamicTutorContext,
+            model,
+          }),
+        },
+        ...courseTocPromptMessages(input.course),
+        ...courseChatMessagesForModel(input.messages),
+      ],
     },
   };
 }

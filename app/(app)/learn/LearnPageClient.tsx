@@ -30,9 +30,11 @@ import { shouldShowCourseChatInterruptedWarning } from "@/app/lib/courseChatTurn
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import {
   courseQuestionWidgetsFromToolCalls,
+  hasCourseTocToolCall,
   normalizeCourseQuestionWidgetToolCalls,
   type CourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidget,
+  type CourseToolCall,
   type CourseQuestionWidgetToolCall,
 } from "@/app/lib/courseQuestionWidget";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
@@ -70,7 +72,7 @@ type StoredCourseChatMessage = {
   id?: string;
   role: "assistant" | "user";
   content: string;
-  toolCalls?: CourseQuestionWidgetToolCall[];
+  toolCalls?: CourseToolCall[];
   metrics?: CourseMessageMetrics | null;
   evaluation?: StoredCourseChatEvaluation | null;
   widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
@@ -95,7 +97,7 @@ type LearnChatMessage = {
   id: string;
   role: "assistant" | "user";
   content: string;
-  toolCalls?: CourseQuestionWidgetToolCall[];
+  toolCalls?: CourseToolCall[];
   metrics?: CourseMessageMetrics | null;
   evaluation?: StoredCourseChatEvaluation | null;
   status?: string;
@@ -2373,6 +2375,13 @@ export default function LearnPageClient({
                   ) : (
                     <div className="learn-chat-thread" ref={chatThreadRef}>
                       {chatMessages.map((message, messageIndex) => {
+                        if (
+                          message.role === "assistant" &&
+                          hasCourseTocToolCall(message.toolCalls)
+                        ) {
+                          return null;
+                        }
+
                       if (message.pendingEvaluation) {
                         const answerDetails =
                           message.widgetAnswerDetails ??

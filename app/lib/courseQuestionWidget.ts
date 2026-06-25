@@ -1,3 +1,5 @@
+import type { CourseToc } from "./courseContent";
+
 export type CourseQuestionWidgetChoice = {
   id: string;
   text: string;
@@ -18,6 +20,7 @@ export type CourseQuestionWidget =
     };
 
 export const COURSE_QUESTION_WIDGET_TOOL_NAME = "render_question_widget";
+export const COURSE_TOC_TOOL_NAME = "generate_course_toc";
 
 export type CourseQuestionWidgetToolCall = {
   id: string;
@@ -27,6 +30,20 @@ export type CourseQuestionWidgetToolCall = {
     arguments: CourseQuestionWidget;
   };
 };
+
+export type CourseTocToolCall = {
+  id: string;
+  type: "function";
+  function: {
+    name: typeof COURSE_TOC_TOOL_NAME;
+    arguments: {
+      topic: string;
+      toc: CourseToc;
+    };
+  };
+};
+
+export type CourseToolCall = CourseQuestionWidgetToolCall | CourseTocToolCall;
 
 export type CourseQuestionWidgetAnswerDetails = {
   question: string | null;
@@ -110,6 +127,102 @@ function normalizeToolCallArguments(value: unknown): unknown {
   }
 }
 
+function normalizeCourseTocToolCallArguments(value: unknown): CourseTocToolCall["function"]["arguments"] | null {
+  const parsed = normalizeToolCallArguments(value);
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const topic = normalizeText(record.topic, 800);
+  const toc = record.toc;
+
+  if (!toc || typeof toc !== "object" || Array.isArray(toc)) {
+    return null;
+  }
+
+  const tocRecord = toc as Record<string, unknown>;
+  const title = normalizeText(tocRecord.title, 240);
+  const description = normalizeText(tocRecord.description, 1_200);
+  const pages = Array.isArray(tocRecord.pages)
+    ? tocRecord.pages.flatMap((page) => {
+        if (!page || typeof page !== "object" || Array.isArray(page)) {
+          return [];
+        }
+
+        const pageRecord = page as Record<string, unknown>;
+        const pageTitle = normalizeText(pageRecord.title, 240);
+        const objective = normalizeText(pageRecord.objective, 1_200);
+
+        return pageTitle && objective
+          ? [{ title: pageTitle, objective }]
+          : [];
+      })
+    : [];
+
+  if (!title || !description || pages.length === 0) {
+    return null;
+  }
+
+  return {
+    topic,
+    toc: {
+      title,
+      description,
+      pages,
+    },
+  };
+}
+
+export function normalizeCourseToolCalls(value: unknown): CourseToolCall[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((candidate, index): CourseToolCall[] => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return [];
+    }
+
+    const record = candidate as Record<string, unknown>;
+    const rawFunction = record.function;
+
+    if (!rawFunction || typeof rawFunction !== "object" || Array.isArray(rawFunction)) {
+      return [];
+    }
+
+    const functionRecord = rawFunction as Record<string, unknown>;
+
+    if (functionRecord.name === COURSE_QUESTION_WIDGET_TOOL_NAME) {
+      return normalizeCourseQuestionWidgetToolCalls([candidate]);
+    }
+
+    if (functionRecord.name !== COURSE_TOC_TOOL_NAME) {
+      return [];
+    }
+
+    const args = normalizeCourseTocToolCallArguments(functionRecord.arguments);
+
+    if (!args) {
+      return [];
+    }
+
+    const rawId = normalizeText(record.id, MAX_WIDGET_ID_CHARS);
+
+    return [
+      {
+        id: rawId || `course-toc-call-${index + 1}`,
+        type: "function" as const,
+        function: {
+          name: COURSE_TOC_TOOL_NAME,
+          arguments: args,
+        },
+      },
+    ];
+  });
+}
+
 export function normalizeCourseQuestionWidgetToolCalls(
   value: unknown,
 ): CourseQuestionWidgetToolCall[] {
@@ -156,6 +269,26 @@ export function normalizeCourseQuestionWidgetToolCalls(
       },
     ];
   });
+}
+
+export function courseTocToolCallFromToc(
+  input: { topic: string; toc: CourseToc },
+  id = "course-toc",
+): CourseTocToolCall {
+  return {
+    id,
+    type: "function",
+    function: {
+      name: COURSE_TOC_TOOL_NAME,
+      arguments: input,
+    },
+  };
+}
+
+export function hasCourseTocToolCall(toolCalls: unknown): boolean {
+  return normalizeCourseToolCalls(toolCalls).some(
+    (toolCall) => toolCall.function.name === COURSE_TOC_TOOL_NAME,
+  );
 }
 
 export function courseQuestionWidgetToolCallFromWidget(

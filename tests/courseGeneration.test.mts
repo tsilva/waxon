@@ -990,28 +990,52 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
     const requestMessages = capturedBody.messages as Array<{
       role: string;
       content: unknown;
+      name?: string;
+      tool_calls?: Array<{ function?: { name?: string } }>;
     }>;
-    const systemContent = requestMessages[0]?.content;
-    const userContent = requestMessages[1]?.content as Array<
+    const systemContent = requestMessages[0]?.content as Array<
       Record<string, unknown>
     >;
+    const dynamicContent = requestMessages[1]?.content as Array<
+      Record<string, unknown>
+    >;
+    const tocAssistantMessage = requestMessages[2];
+    const tocToolMessage = requestMessages[3];
 
-    assert.equal(typeof systemContent, "string");
-    assert.deepEqual(userContent[0]?.cache_control, { type: "ephemeral" });
+    assert.deepEqual(systemContent[0]?.cache_control, { type: "ephemeral" });
     assert.equal(
       JSON.stringify(capturedBody).match(/cache_control/gu)?.length,
       1,
     );
-    assert.match(String(userContent[0]?.text), /Stable tutor instructions/u);
+    assert.match(String(systemContent[0]?.text), /Stable tutor instructions/u);
     assert.match(
-      String(userContent[0]?.text),
+      String(systemContent[0]?.text),
       /End every non-completion turn by calling render_question_widget/u,
     );
-    assert.ok(String(userContent[0]?.text).length > 21_000);
-    assert.doesNotMatch(String(userContent[0]?.text), /Course title: PPO/u);
-    assert.doesNotMatch(String(userContent[0]?.text), /Recent conversation JSON/u);
-    assert.match(String(userContent[1]?.text), /Course title: PPO/u);
-    assert.match(String(userContent[1]?.text), /Recent conversation JSON/u);
+    assert.ok(String(systemContent[0]?.text).length > 3_000);
+    assert.doesNotMatch(String(systemContent[0]?.text), /Course title: PPO/u);
+    assert.doesNotMatch(
+      String(systemContent[0]?.text),
+      /Recent conversation JSON/u,
+    );
+    assert.equal(requestMessages[1]?.role, "system");
+    assert.equal(dynamicContent[0]?.cache_control, undefined);
+    assert.match(String(dynamicContent[0]?.text), /Current course state/u);
+    assert.match(String(dynamicContent[0]?.text), /Current milestone: PPO Purpose/u);
+    assert.doesNotMatch(String(dynamicContent[0]?.text), /Full TOC JSON/u);
+    assert.doesNotMatch(String(dynamicContent[0]?.text), /Recent conversation JSON/u);
+    assert.equal(tocAssistantMessage?.role, "assistant");
+    assert.equal(tocAssistantMessage?.content, "Generated the course table of contents.");
+    assert.equal(
+      (
+        tocAssistantMessage as {
+          tool_calls?: Array<{ function?: { name?: string } }>;
+        }
+      ).tool_calls?.[0]?.function?.name,
+      "generate_course_toc",
+    );
+    assert.equal(tocToolMessage?.role, "tool");
+    assert.equal(tocToolMessage?.name, "generate_course_toc");
     assert.equal((requestBody as { tool_choice?: unknown }).tool_choice, "auto");
     assert.equal(
       (requestBody as { parallel_tool_calls?: unknown }).parallel_tool_calls,
@@ -1250,27 +1274,56 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
     const requestMessages = capturedBody.messages as Array<{
       role: string;
       content: unknown;
+      name?: string;
+      tool_calls?: Array<{ function?: { name?: string } }>;
     }>;
-    const userContent = requestMessages[1]?.content as Array<
+    const systemContent = requestMessages[0]?.content as Array<
       Record<string, unknown>
     >;
+    const dynamicContent = requestMessages[1]?.content as Array<
+      Record<string, unknown>
+    >;
+    const tocAssistantMessage = requestMessages[2];
+    const tocToolMessage = requestMessages[3];
+    const assistantHistoryMessage = requestMessages[4];
+    const userHistoryMessage = requestMessages[5];
 
-    assert.deepEqual(userContent[0]?.cache_control, { type: "ephemeral" });
-    assert.match(String(userContent[0]?.text), /Stable tutor instructions/u);
+    assert.deepEqual(systemContent[0]?.cache_control, { type: "ephemeral" });
+    assert.match(String(systemContent[0]?.text), /Stable tutor instructions/u);
     assert.match(
-      String(userContent[0]?.text),
+      String(systemContent[0]?.text),
       /record_course_answer_decision/u,
     );
-    assert.doesNotMatch(String(userContent[0]?.text), /Learner answer:/u);
-    const volatilePrompt = String(userContent[1]?.text);
+    assert.doesNotMatch(String(systemContent[0]?.text), /Learner answer:/u);
+    assert.equal(requestMessages[1]?.role, "system");
+    assert.equal(dynamicContent[0]?.cache_control, undefined);
+    const volatilePrompt = String(dynamicContent[0]?.text);
     assert.match(volatilePrompt, /Learner answer:/u);
-    assert.match(volatilePrompt, /Recent conversation JSON/u);
+    assert.doesNotMatch(volatilePrompt, /Recent conversation JSON/u);
     assert.doesNotMatch(volatilePrompt, /"widgetAnswer"/u);
     assert.doesNotMatch(volatilePrompt, /"questionWidgets"/u);
     assert.match(
       volatilePrompt,
       /Why can repeated customer data cause update problems/u,
     );
+    assert.equal(tocAssistantMessage?.role, "assistant");
+    assert.equal(
+      (
+        tocAssistantMessage as {
+          tool_calls?: Array<{ function?: { name?: string } }>;
+        }
+      ).tool_calls?.[0]?.function?.name,
+      "generate_course_toc",
+    );
+    assert.equal(tocToolMessage?.role, "tool");
+    assert.equal(tocToolMessage?.name, "generate_course_toc");
+    assert.equal(assistantHistoryMessage?.role, "assistant");
+    assert.match(
+      String(assistantHistoryMessage?.content),
+      /Question widget: Why can repeated customer data cause update problems/u,
+    );
+    assert.equal(userHistoryMessage?.role, "user");
+    assert.match(String(userHistoryMessage?.content), /Learner answer:/u);
     assert.deepEqual(events, [
       "decision:mark_milestone_done",
       "delta:Good. A join uses matching keys to combine related rows only when you query them.",

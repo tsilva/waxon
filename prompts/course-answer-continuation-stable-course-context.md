@@ -1,8 +1,5 @@
-Use the dynamic course context below to evaluate the learner's answer and continue the next tutor turn.
+Current course state for evaluating the learner answer and continuing the next tutor turn. Use the generated course TOC from the conversation tool event for the full course plan.
 
-Course title: {{courseTitle}}
-Course description: {{courseDescription}}
-Full TOC JSON: {{tocJson}}
 Current milestone index: {{currentMilestoneIndex}}
 Current milestone: {{currentMilestone}}
 Milestone objective: {{milestoneObjective}}
