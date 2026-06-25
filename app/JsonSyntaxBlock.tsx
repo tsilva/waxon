@@ -96,34 +96,13 @@ function renderJsonKey(name: string): ReactNode {
 
 function renderJsonPrimitive(
   value: unknown,
-  input: {
-    keyName?: string;
-    onPreviewString: (preview: JsonStringPreview) => void;
-    path: string;
-  },
 ): ReactNode {
   if (typeof value === "string") {
     if (shouldShowStringPreview(value)) {
       return (
-        <>
-          <span className="admin-json-token admin-json-token-string">
-            {jsonStringPreview(value)}
-          </span>
-          <button
-            className="admin-json-string-preview"
-            type="button"
-            aria-label={`Preview ${input.keyName ?? "string"} as markdown`}
-            title="Preview markdown"
-            onClick={() =>
-              input.onPreviewString({
-                title: input.keyName ?? input.path,
-                value,
-              })
-            }
-          >
-            <Eye aria-hidden="true" />
-          </button>
-        </>
+        <span className="admin-json-token admin-json-token-string">
+          {jsonStringPreview(value)}
+        </span>
       );
     }
 
@@ -158,6 +137,30 @@ function renderJsonPrimitive(
     <span className="admin-json-token admin-json-token-string">
       {JSON.stringify(String(value))}
     </span>
+  );
+}
+
+function renderStringPreviewButton(input: {
+  keyName?: string;
+  onPreviewString: (preview: JsonStringPreview) => void;
+  path: string;
+  value: string;
+}): ReactNode {
+  return (
+    <button
+      className="admin-json-string-preview"
+      type="button"
+      aria-label={`Preview ${input.keyName ?? "string"} as markdown`}
+      title="Preview markdown"
+      onClick={() =>
+        input.onPreviewString({
+          title: input.keyName ?? input.path,
+          value: input.value,
+        })
+      }
+    >
+      <Eye aria-hidden="true" size={12} strokeWidth={2.7} />
+    </button>
   );
 }
 
@@ -237,18 +240,25 @@ export function JsonSyntaxBlock({
     const { depth, keyName, path, trailingComma, value } = input;
 
     if (!isCollapsibleJsonValue(value)) {
+      const previewButton =
+        typeof value === "string" && shouldShowStringPreview(value)
+          ? renderStringPreviewButton({
+              keyName,
+              onPreviewString: setStringPreview,
+              path,
+              value,
+            })
+          : undefined;
+
       return [
         renderJsonLine({
           key: path,
+          toggle: previewButton,
           children: (
             <>
               {renderIndent(depth)}
               {keyName === undefined ? null : renderJsonKey(keyName)}
-              {renderJsonPrimitive(value, {
-                keyName,
-                onPreviewString: setStringPreview,
-                path,
-              })}
+              {renderJsonPrimitive(value)}
               {trailingComma ? (
                 <span className="admin-json-token admin-json-token-punctuation">
                   ,
@@ -282,9 +292,9 @@ export function JsonSyntaxBlock({
             onClick={() => togglePath(path)}
           >
             {isCollapsed ? (
-              <ChevronRight aria-hidden="true" />
+              <ChevronRight aria-hidden="true" size={14} strokeWidth={3.25} />
             ) : (
-              <ChevronDown aria-hidden="true" />
+              <ChevronDown aria-hidden="true" size={14} strokeWidth={3.25} />
             )}
           </button>
         ),

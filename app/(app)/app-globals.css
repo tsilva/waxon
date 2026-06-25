@@ -5344,22 +5344,38 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
   vertical-align: -4px;
   border: 1px solid rgb(227 218 196 / 78%);
-  border-radius: 6px;
   background: rgb(255 255 255 / 62%);
   color: var(--accent);
   cursor: pointer;
 }
 
-.admin-json-string-preview {
-  margin: 0 0 0 6px;
+.admin-json-branch-toggle {
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+  margin-top: 1px;
 }
 
-.admin-json-branch-toggle svg,
+.admin-json-string-preview {
+  width: 14px;
+  height: 14px;
+  border-radius: 5px;
+  margin-top: 1px;
+}
+
+.admin-json-branch-toggle svg {
+  display: block;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  stroke-width: 3.25;
+}
+
 .admin-json-string-preview svg {
+  display: block;
+  flex: 0 0 12px;
   width: 12px;
   height: 12px;
   stroke-width: 2.4;
