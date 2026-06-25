@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import {
   courseChatMessages,
@@ -91,6 +91,17 @@ export type CourseRecord = {
 export type CourseDetail = CourseRecord & {
   pages: CoursePageRecord[];
   chatMessages: CourseChatMessageRecord[];
+};
+
+export type CourseListCursor = {
+  updatedAt: number;
+  id: string;
+};
+
+export type CourseListPage = {
+  courses: CourseRecord[];
+  hasMore: boolean;
+  nextCursor: CourseListCursor | null;
 };
 
 export type CourseChatQuestionAttemptInput = {
@@ -286,8 +297,48 @@ function toCoursePage(row: {
   };
 }
 
-async function loadCourseRows(userId: string, courseId?: string) {
-  return db
+async function loadCourseRows(
+  userId: string,
+  options: {
+    courseId?: string;
+    cursor?: CourseListCursor | null;
+    limit?: number;
+    search?: string;
+  } = {},
+) {
+  const filters = [eq(courses.userId, userId)];
+  const normalizedSearch = options.search?.trim();
+
+  if (options.courseId) {
+    filters.push(eq(courses.id, options.courseId));
+  }
+
+  if (options.cursor) {
+    filters.push(
+      or(
+        lt(courses.updatedAt, options.cursor.updatedAt),
+        and(
+          eq(courses.updatedAt, options.cursor.updatedAt),
+          lt(courses.id, options.cursor.id),
+        ),
+      )!,
+    );
+  }
+
+  if (normalizedSearch) {
+    const pattern = `%${normalizedSearch}%`;
+
+    filters.push(
+      or(
+        ilike(courses.title, pattern),
+        ilike(courses.description, pattern),
+        ilike(courses.topicPrompt, pattern),
+        sql`${courses.toc}::text ILIKE ${pattern}`,
+      )!,
+    );
+  }
+
+  const query = db
     .select({
       id: courses.id,
       userId: courses.userId,
@@ -313,12 +364,14 @@ async function loadCourseRows(userId: string, courseId?: string) {
       )`,
     })
     .from(courses)
-    .where(
-      courseId
-        ? and(eq(courses.userId, userId), eq(courses.id, courseId))
-        : eq(courses.userId, userId),
-    )
-    .orderBy(desc(courses.updatedAt));
+    .where(and(...filters))
+    .orderBy(desc(courses.updatedAt), desc(courses.id));
+
+  if (typeof options.limit === "number") {
+    return query.limit(options.limit);
+  }
+
+  return query;
 }
 
 function hydrateCourse(input: {
@@ -363,9 +416,37 @@ export async function listCourses(): Promise<CourseRecord[]> {
   return rows.map((row) => hydrateCourse({ row }));
 }
 
+export async function listCoursesPage(input: {
+  cursor?: CourseListCursor | null;
+  limit: number;
+  search?: string;
+}): Promise<CourseListPage> {
+  const user = await getCurrentUser();
+  const limit = Math.max(1, Math.min(50, Math.floor(input.limit)));
+  const rows = await loadCourseRows(user.id, {
+    cursor: input.cursor ?? null,
+    limit: limit + 1,
+    search: input.search,
+  });
+  const pageRows = rows.slice(0, limit);
+  const nextRow = pageRows.at(-1);
+
+  return {
+    courses: pageRows.map((row) => hydrateCourse({ row })),
+    hasMore: rows.length > limit,
+    nextCursor:
+      rows.length > limit && nextRow
+        ? {
+            updatedAt: nextRow.updatedAt,
+            id: nextRow.id,
+          }
+        : null,
+  };
+}
+
 export async function getCourse(courseId: string): Promise<CourseDetail | null> {
   const user = await getCurrentUser();
-  const [row] = await loadCourseRows(user.id, courseId);
+  const [row] = await loadCourseRows(user.id, { courseId });
 
   if (!row) {
     return null;
