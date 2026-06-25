@@ -6217,7 +6217,6 @@ textarea {
   justify-content: flex-end;
   width: min(780px, 100%);
   margin: 0;
-  padding-right: clamp(24px, 2.4vw, 34px);
 }
 
 .learn-chat-view-toggle {
@@ -6314,7 +6313,7 @@ textarea {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 4px clamp(24px, 2.4vw, 34px) 0 0;
+  padding: 4px 0 0;
 }
 
 .learn-raw-conversation {
