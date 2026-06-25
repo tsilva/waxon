@@ -4,6 +4,7 @@ import {
   getOpenRouterEvaluationReasoning,
   openRouterChatCompletion,
   type OpenRouterChatResponse,
+  type OpenRouterToolCall,
 } from "./openRouter.ts";
 import { extractJsonObject } from "./jsonObject.ts";
 import {
@@ -93,9 +94,95 @@ const COURSE_QUESTION_WIDGET_TOOL = {
     },
   },
 } as const;
+const COURSE_ANSWER_DECISION_TOOL_NAME = "record_course_answer_decision";
+const COURSE_ANSWER_DECISION_TOOL = {
+  type: "function",
+  function: {
+    name: COURSE_ANSWER_DECISION_TOOL_NAME,
+    description:
+      "Record the learner's latest answer evaluation and decide whether the current course milestone is complete.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        questionAttempt: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            toolCall: {
+              type: "string",
+              enum: [
+                "record_course_question_attempt",
+                "skip_course_question_attempt",
+              ],
+            },
+            question: {
+              type: "string",
+              description: "Self-contained recall prompt being answered.",
+            },
+            answer: {
+              type: "string",
+              description: "Learner's submitted answer.",
+            },
+            answerSummary: {
+              type: "string",
+              description: "Short summary of the learner answer.",
+            },
+            conciseAnswer: {
+              type: "string",
+              description: "Concise model-normalized answer.",
+            },
+            correctAnswer: {
+              type: "string",
+              description: "Concise ideal answer.",
+            },
+            justification: {
+              type: "string",
+              description: "Brief grading reason.",
+            },
+            score: {
+              type: "number",
+              minimum: 0,
+              maximum: 10,
+            },
+            reason: {
+              type: "string",
+              description: "Reason when skipping.",
+            },
+          },
+          required: [
+            "toolCall",
+            "question",
+            "answer",
+            "answerSummary",
+            "conciseAnswer",
+            "correctAnswer",
+            "justification",
+            "score",
+          ],
+        },
+        progressDecision: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            toolCall: {
+              type: "string",
+              enum: ["mark_milestone_done", "continue_current_milestone"],
+            },
+            reason: {
+              type: "string",
+            },
+          },
+          required: ["toolCall", "reason"],
+        },
+      },
+      required: ["questionAttempt", "progressDecision"],
+    },
+  },
+} as const;
 const MAX_INTAKE_MESSAGE_CHARS = 500;
 const MAX_INTAKE_TOPIC_CHARS = 800;
-const COURSE_CHAT_TURN_MAX_TOKENS = 900;
+const COURSE_CHAT_TURN_MAX_TOKENS = 1_200;
 const COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC = [
   "Stable teaching rubric for every tutor turn:",
   "A strong turn starts with the plain-language purpose of the idea, then names the technical concept, then gives one small concrete example. Define every new term the first time it matters. Prefer short sentences and avoid stacking multiple abstractions in the same sentence.",
@@ -259,6 +346,183 @@ function extractChatCompletionWidgetToolCalls(
       courseQuestionWidgetToolCallFromWidget(widget, toolCall.id),
     );
   });
+}
+
+function extractChatCompletionToolCalls(
+  body: OpenRouterChatResponse,
+): OpenRouterToolCall[] {
+  return body.choices?.[0]?.message?.tool_calls ?? [];
+}
+
+function parseToolCallArguments(toolCall: OpenRouterToolCall): unknown | null {
+  const rawArguments = toolCall.function?.arguments;
+
+  if (!rawArguments) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawArguments);
+  } catch {
+    return null;
+  }
+}
+
+function mergeStreamingLearnToolDeltas(
+  toolCalls: Array<OpenRouterToolCall & { index?: number }>,
+  deltas: OpenRouterToolCall[],
+) {
+  for (const [fallbackIndex, delta] of deltas.entries()) {
+    const deltaWithIndex = delta as OpenRouterToolCall & { index?: unknown };
+    const index =
+      typeof deltaWithIndex.index === "number" &&
+      Number.isFinite(deltaWithIndex.index) &&
+      deltaWithIndex.index >= 0
+        ? Math.round(deltaWithIndex.index)
+        : fallbackIndex;
+    const existing =
+      toolCalls[index] ??
+      ({
+        function: {
+          arguments: "",
+        },
+      } as OpenRouterToolCall & { index?: number });
+
+    existing.index = index;
+    existing.id = delta.id ?? existing.id;
+    existing.type = delta.type ?? existing.type;
+
+    if (delta.function) {
+      existing.function = {
+        name: delta.function.name ?? existing.function?.name,
+        arguments:
+          (existing.function?.arguments ?? "") +
+          (typeof delta.function.arguments === "string"
+            ? delta.function.arguments
+            : ""),
+      };
+    }
+
+    toolCalls[index] = existing;
+  }
+}
+
+function validateRawAnswerDecisionToolValue(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "Answer decision tool arguments must be an object.";
+  }
+
+  const record = value as Record<string, unknown>;
+  const questionAttempt = record.questionAttempt;
+  const progressDecision = record.progressDecision;
+
+  if (
+    !questionAttempt ||
+    typeof questionAttempt !== "object" ||
+    Array.isArray(questionAttempt)
+  ) {
+    return "Answer decision tool requires questionAttempt.";
+  }
+
+  if (
+    !progressDecision ||
+    typeof progressDecision !== "object" ||
+    Array.isArray(progressDecision)
+  ) {
+    return "Answer decision tool requires progressDecision.";
+  }
+
+  const attemptRecord = questionAttempt as Record<string, unknown>;
+  const progressRecord = progressDecision as Record<string, unknown>;
+  const attemptToolCall = normalizeIntakeText(attemptRecord.toolCall, 80);
+  const progressToolCall = normalizeIntakeText(progressRecord.toolCall, 80);
+
+  if (
+    attemptToolCall !== "record_course_question_attempt" &&
+    attemptToolCall !== "skip_course_question_attempt"
+  ) {
+    return "questionAttempt.toolCall is invalid.";
+  }
+
+  if (
+    progressToolCall !== "mark_milestone_done" &&
+    progressToolCall !== "continue_current_milestone"
+  ) {
+    return "progressDecision.toolCall is invalid.";
+  }
+
+  if (attemptToolCall === "record_course_question_attempt") {
+    const requiredStringFields = [
+      "question",
+      "answer",
+      "answerSummary",
+      "conciseAnswer",
+      "correctAnswer",
+      "justification",
+    ];
+    const missingField = requiredStringFields.find(
+      (field) => !normalizeIntakeText(attemptRecord[field], 1_200),
+    );
+
+    if (missingField) {
+      return `questionAttempt.${missingField} is required.`;
+    }
+
+    if (
+      typeof attemptRecord.score !== "number" ||
+      !Number.isFinite(attemptRecord.score) ||
+      attemptRecord.score < 0 ||
+      attemptRecord.score > 10
+    ) {
+      return "questionAttempt.score must be a number from 0 to 10.";
+    }
+  } else if (!normalizeIntakeText(attemptRecord.reason, 500)) {
+    return "Skipped questionAttempt requires a reason.";
+  }
+
+  if (!normalizeIntakeText(progressRecord.reason, 500)) {
+    return "progressDecision.reason is required.";
+  }
+
+  return null;
+}
+
+function parseStrictCourseAnswerDecisionToolCall(input: {
+  toolCall: OpenRouterToolCall;
+  fallbackAnswer: string;
+  choiceSource: string;
+  requireRecordedAttempt: boolean;
+}): CourseAnswerDecisionToolResult | null {
+  if (input.toolCall.function?.name !== COURSE_ANSWER_DECISION_TOOL_NAME) {
+    return null;
+  }
+
+  const value = parseToolCallArguments(input.toolCall);
+
+  if (!value) {
+    return null;
+  }
+
+  const validationError = validateRawAnswerDecisionToolValue(value);
+
+  if (validationError) {
+    throw new Error(validationError);
+  }
+
+  const decision = parseCourseAnswerDecisionToolResult(
+    JSON.stringify(value),
+    input.fallbackAnswer,
+    input.choiceSource,
+  );
+
+  if (
+    input.requireRecordedAttempt &&
+    decision.questionAttempt.toolCall !== "record_course_question_attempt"
+  ) {
+    throw new Error("Answer decision did not record the answered question.");
+  }
+
+  return decision;
 }
 
 function didReachMaxCompletionTokens(
@@ -456,7 +720,7 @@ function courseChatSessionId(input: {
   course: CourseDetail;
 }): string {
   void input.course;
-  return `learn:${input.userId}:course-chat-v8`.slice(0, 256);
+  return `learn:${input.userId}:course-chat-v9`.slice(0, 256);
 }
 
 function courseAnswerDecisionSessionId(input: { userId: string }): string {
@@ -914,6 +1178,297 @@ export async function generateCourseQuestionAttemptToolResult(input: {
   );
 }
 
+function buildCourseTutorSystemPrompt(input: {
+  answerDecisionTool: boolean;
+}): string {
+  return [
+    "You are Waxon's Learn chat tutor.",
+    "Run a milestone-driven course entirely inside chat.",
+    "Maximize the probability that a learner at any knowledge level can understand the explanation deeply.",
+    "Start from concrete intuition and plain language, define necessary jargon before relying on it, and make every causal or mathematical step feel motivated.",
+    "When a prerequisite idea is needed, add a one-sentence bridge instead of assuming the learner already knows it.",
+    "Connect three layers whenever useful: the intuitive picture, the precise technical claim, and a small example.",
+    "Keep the explanation approachable without removing the real concept or hiding important mechanics.",
+    "Be a great tutor: explain the intuition first, then the mechanics, then a small concrete example when useful.",
+    "Use metaphors and analogies when they make the idea easier, but keep them technically accurate and brief.",
+    "Do not compress the explanation into a dense summary. Teach enough for a motivated learner to build a mental model.",
+    "Use markdown for readability: **bold** key terms, bullets for moving parts, and inline code or math notation for shapes/formulas.",
+    "Do not start with a standalone title, header, or status line. Start directly with the teaching sentence, never with lines like 'Same milestone...' or 'CNN vs. fully connected network'.",
+    "Prefer this shape: 1-2 explanatory paragraphs, an **Analogy** or **Example** paragraph when helpful, then a tiny bullet list of the key pieces.",
+    "Avoid markdown tables.",
+    "Keep each teaching turn focused: hard cap the visible teaching content at 120-180 words before the question, and never more than one milestone at a time.",
+    "The visible explanation plus the widget tool-call arguments must fit comfortably under 900 tokens.",
+    "Do not include word counts, token counts, compliance checks, or self-evaluation commentary in the learner-facing response.",
+    "Do not write planning labels such as Goal, Question, or Test; only write the learner-facing lesson and call the widget tool.",
+    "Do not ask rhetorical questions inside the teaching snippet.",
+    input.answerDecisionTool
+      ? [
+          `Use both Learn tools in this same assistant response without waiting for tool results: call ${COURSE_ANSWER_DECISION_TOOL_NAME} exactly once for the learner's latest answer, then call ${COURSE_QUESTION_WIDGET_TOOL_NAME} exactly once after the visible lesson text unless the course is complete.`,
+          "The answer decision tool is authoritative for pedagogy: score the answer, record the attempt, and decide whether to continue or mark the milestone done.",
+          "If you mark the milestone done and a next milestone is provided, continue the visible lesson on that next milestone. If no next milestone is provided, give a concise completion message and do not call a new widget.",
+          "If you continue the current milestone, reteach the same objective from a different angle and ask a different targeted check.",
+          "Do not mention the score, progress decision, or internal tool protocol in visible lesson text.",
+        ].join(" ")
+      : "",
+    `End every non-completion turn by calling ${COURSE_QUESTION_WIDGET_TOOL_NAME} exactly once after the explanation.`,
+    "Use a free-text widget for recall or explanation checks: {\"type\":\"free_text\",\"id\":\"short-stable-id\",\"question\":\"self-contained question\",\"placeholder\":\"Type your answer here...\"}.",
+    "Use a multiple-choice widget for focused discrimination checks: {\"type\":\"multiple_choice\",\"id\":\"short-stable-id\",\"question\":\"self-contained question without answer choices\",\"choices\":[{\"id\":\"A\",\"text\":\"...\"},{\"id\":\"B\",\"text\":\"...\"},{\"id\":\"C\",\"text\":\"...\"},{\"id\":\"D\",\"text\":\"...\"}]}",
+    "Do not write the learner-facing question or answer choices in visible prose outside the widget tool call arguments.",
+    "Choose the widget type that best tests the current learning risk. Prefer free text when the learner needs to explain the mechanism, and multiple choice when contrasting common confusions.",
+    "Generate as many question turns as needed over the session: if prior answers show gaps, ask another focused widget question before advancing.",
+    "If the progress tool says the previous answer completed a milestone, briefly acknowledge it and move to the next milestone.",
+    "If the progress tool says the previous answer did not complete the milestone, do not advance. Stay on the same milestone, reteach the same topic from a different angle, and ask a different targeted question that tests the same objective.",
+    "Do not mention tool calls or internal progress decisions.",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+export async function streamCourseAnswerContinuation(input: {
+  apiKey: string;
+  model?: string;
+  userId: string;
+  course: CourseDetail;
+  messages: CourseChatMessage[];
+  retryInstruction?: string | null;
+  onTextDelta: (delta: string) => void;
+  onQuestionWidgetToolDelta?: () => void;
+  onAnswerDecision?: (
+    decision: CourseAnswerDecisionToolResult,
+  ) => void | Promise<void>;
+} & CourseCostObserver): Promise<{
+  content: string;
+  toolCalls: CourseQuestionWidgetToolCall[];
+  answerDecision: CourseAnswerDecisionToolResult;
+}> {
+  const latestUserMessage = [...input.messages]
+    .reverse()
+    .find((message) => message.role === "user");
+  const previousAssistantMessage = [...input.messages]
+    .reverse()
+    .find((message) => message.role === "assistant");
+
+  if (!latestUserMessage || !previousAssistantMessage) {
+    throw new Error("Answer continuation requires a prior question and answer.");
+  }
+
+  const { page } = currentCourseMilestone(input.course);
+  const nextPage = input.course.toc.pages[input.course.currentPageIndex + 1];
+  const answeredWidget = latestAnsweredWidgetContext(input.messages);
+  const startedAt = Date.now();
+  const model = input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL;
+  const systemPrompt = buildCourseTutorSystemPrompt({
+    answerDecisionTool: true,
+  });
+  const stableTutorContext = [
+    "Stable tutor instructions:",
+    systemPrompt,
+    "",
+    COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC,
+  ].join("\n");
+  const visibleLessonContext = parseCourseQuestionWidgets(
+    previousAssistantMessage.content,
+  ).content;
+  const stableCourseContext = [
+    "Use the dynamic course context below to evaluate the learner's answer and continue the next tutor turn.",
+    `Course title: ${input.course.title}`,
+    `Course description: ${input.course.description}`,
+    `Full TOC JSON: ${JSON.stringify(input.course.toc)}`,
+    `Current milestone index: ${input.course.currentPageIndex}`,
+    `Current milestone: ${page.title}`,
+    `Milestone objective: ${page.objective}`,
+    nextPage
+      ? `Next milestone: ${nextPage.title}\nNext milestone objective: ${nextPage.objective}`
+      : "Next milestone: none; this is the final milestone.",
+  ].join("\n");
+  const volatileCourseContext = [
+    "Produce a complete single response for the learner answer below: answer-decision tool call, visible tutor continuation, and question-widget tool call. Do not stop after the answer-decision tool.",
+    input.retryInstruction
+      ? `Retry instruction after rollback: ${input.retryInstruction}`
+      : "",
+    answeredWidget?.widget
+      ? `Answered widget JSON: ${JSON.stringify(answeredWidget.widget)}`
+      : `Answered widget question: ${answeredWidget?.question ?? "unknown"}`,
+    `Learner answer: ${answeredWidget?.answer ?? latestUserMessage.content}`,
+    `Previous visible lesson context:\n${excerptCourseMessageForPrompt(visibleLessonContext, 900)}`,
+    `Recent conversation JSON: ${JSON.stringify(compactCourseMessages(input.messages))}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  const streamedToolCalls: Array<OpenRouterToolCall & { index?: number }> = [];
+  let reportedQuestionWidgetToolDelta = false;
+  const acceptedAnswerDecisionRef: {
+    current: CourseAnswerDecisionToolResult | null;
+  } = {
+    current: null,
+  };
+  const requireRecordedAttempt = true;
+  const choiceSource =
+    answeredWidget?.choiceSource ??
+    courseMessageContentWithToolWidgets(previousAssistantMessage);
+  const fallbackAnswer = answeredWidget?.answer ?? latestUserMessage.content;
+  const tryAcceptAnswerDecision = async (
+    toolCall: OpenRouterToolCall & { index?: number },
+  ) => {
+    if (
+      acceptedAnswerDecisionRef.current ||
+      toolCall.function?.name !== COURSE_ANSWER_DECISION_TOOL_NAME
+    ) {
+      return;
+    }
+
+    const decision = parseStrictCourseAnswerDecisionToolCall({
+      toolCall,
+      fallbackAnswer,
+      choiceSource,
+      requireRecordedAttempt,
+    });
+
+    if (!decision) {
+      return;
+    }
+
+    acceptedAnswerDecisionRef.current = decision;
+    await input.onAnswerDecision?.(decision);
+  };
+
+  const { body, response } = await openRouterChatCompletion({
+    apiKey: input.apiKey,
+    stream: true,
+    onTextDelta: input.onTextDelta,
+    trace: {
+      operation: "course_chat_turn",
+      userId: input.userId,
+      question: page.title,
+    },
+    async onToolCallDelta(toolCallDeltas) {
+      mergeStreamingLearnToolDeltas(streamedToolCalls, toolCallDeltas);
+
+      for (const toolCall of streamedToolCalls) {
+        await tryAcceptAnswerDecision(toolCall);
+
+        if (
+          !reportedQuestionWidgetToolDelta &&
+          toolCall.function?.name === COURSE_QUESTION_WIDGET_TOOL_NAME
+        ) {
+          reportedQuestionWidgetToolDelta = true;
+          input.onQuestionWidgetToolDelta?.();
+        }
+      }
+    },
+    body: {
+      model,
+      session_id: courseChatSessionId({
+        userId: input.userId,
+        course: input.course,
+      }),
+      reasoning_effort: "minimal",
+      temperature: 0.4,
+      max_tokens: COURSE_CHAT_TURN_MAX_TOKENS,
+      tools: [COURSE_ANSWER_DECISION_TOOL, COURSE_QUESTION_WIDGET_TOOL],
+      tool_choice: "auto",
+      parallel_tool_calls: true,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are Waxon's Learn chat tutor. Follow the stable tutor instructions and dynamic course state in the user message.",
+        },
+        {
+          role: "user",
+          content: openRouterPromptParts({
+            cacheablePrefix: stableTutorContext,
+            volatileSuffix: [stableCourseContext, volatileCourseContext].join(
+              "\n\n",
+            ),
+            model,
+          }),
+        },
+      ],
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error("Course answer continuation failed.");
+  }
+
+  reportResponseMetrics(input, body.usage, Date.now() - startedAt, model);
+
+  for (const toolCall of extractChatCompletionToolCalls(body)) {
+    await tryAcceptAnswerDecision(toolCall);
+  }
+
+  if (!acceptedAnswerDecisionRef.current) {
+    throw new Error("Course answer continuation did not emit a valid answer decision.");
+  }
+
+  const finalAnswerDecision = acceptedAnswerDecisionRef.current;
+  const responseText = extractChatCompletionText(body);
+  const responseToolCalls = extractChatCompletionWidgetToolCalls(body);
+  const responseWidgets = courseQuestionWidgetsFromToolCalls(responseToolCalls);
+  const completesCourse =
+    finalAnswerDecision.progressDecision.toolCall === "mark_milestone_done" &&
+    !nextPage;
+
+  if (completesCourse) {
+    return {
+      content:
+        responseText.trim() ||
+        "That completes the course. The generated questions are now available for Review.",
+      toolCalls: [],
+      answerDecision: finalAnswerDecision,
+    };
+  }
+
+  if (!responseText.trim()) {
+    throw new Error(
+      "Course answer continuation did not emit visible tutor text after the answer decision.",
+    );
+  }
+
+  if (responseToolCalls.length === 0) {
+    throw new Error(
+      "Course answer continuation did not emit a question widget after the answer decision.",
+    );
+  }
+
+  const repairInputText =
+    responseWidgets.length > 0
+      ? [
+          responseText,
+          ...responseWidgets.map((widget) => serializeCourseQuestionWidget(widget)),
+        ].join("\n\n")
+      : responseText;
+  const ensuredTurn = ensureCourseChatTurnHasLearnerQuestion({
+    text: repairInputText,
+    pageTitle:
+      finalAnswerDecision.progressDecision.toolCall === "mark_milestone_done"
+        ? (nextPage?.title ?? page.title)
+        : page.title,
+    pageObjective:
+      finalAnswerDecision.progressDecision.toolCall === "mark_milestone_done"
+        ? (nextPage?.objective ?? page.objective)
+        : page.objective,
+    stripTrailingPartialContent: didReachMaxCompletionTokens(
+      body.usage,
+      COURSE_CHAT_TURN_MAX_TOKENS,
+    ),
+  });
+  const repairedParsed = parseCourseQuestionWidgets(ensuredTurn.text);
+  const fallbackToolCalls = repairedParsed.widgets.map((widget) =>
+    courseQuestionWidgetToolCallFromWidget(widget),
+  );
+
+  return {
+    content:
+      fallbackToolCalls.length > 0 && responseWidgets.length === 0
+        ? repairedParsed.content
+        : ensuredTurn.text,
+    toolCalls: responseToolCalls.length > 0 ? responseToolCalls : fallbackToolCalls,
+    answerDecision: finalAnswerDecision,
+  };
+}
+
 export async function streamCourseChatTurn(input: {
   apiKey: string;
   model?: string;
@@ -942,36 +1497,9 @@ export async function streamCourseChatTurn(input: {
   const startedAt = Date.now();
   let reportedQuestionWidgetToolDelta = false;
   const model = input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL;
-  const systemPrompt = [
-    "You are Waxon's Learn chat tutor.",
-    "Run a milestone-driven course entirely inside chat.",
-    "Maximize the probability that a learner at any knowledge level can understand the explanation deeply.",
-    "Start from concrete intuition and plain language, define necessary jargon before relying on it, and make every causal or mathematical step feel motivated.",
-    "When a prerequisite idea is needed, add a one-sentence bridge instead of assuming the learner already knows it.",
-    "Connect three layers whenever useful: the intuitive picture, the precise technical claim, and a small example.",
-    "Keep the explanation approachable without removing the real concept or hiding important mechanics.",
-    "Be a great tutor: explain the intuition first, then the mechanics, then a small concrete example when useful.",
-    "Use metaphors and analogies when they make the idea easier, but keep them technically accurate and brief.",
-    "Do not compress the explanation into a dense summary. Teach enough for a motivated learner to build a mental model.",
-    "Use markdown for readability: **bold** key terms, bullets for moving parts, and inline code or math notation for shapes/formulas.",
-    "Do not start with a standalone title, header, or status line. Start directly with the teaching sentence, never with lines like 'Same milestone...' or 'CNN vs. fully connected network'.",
-    "Prefer this shape: 1-2 explanatory paragraphs, an **Analogy** or **Example** paragraph when helpful, then a tiny bullet list of the key pieces.",
-    "Avoid markdown tables.",
-    "Keep each teaching turn focused: hard cap the visible teaching content at 120-180 words before the question, and never more than one milestone at a time.",
-    "The visible explanation plus the widget tool-call arguments must fit comfortably under 900 tokens.",
-    "Do not include word counts, token counts, compliance checks, or self-evaluation commentary in the learner-facing response.",
-    "Do not write planning labels such as Goal, Question, or Test; only write the learner-facing lesson and call the widget tool.",
-    "Do not ask rhetorical questions inside the teaching snippet.",
-    `End every non-completion turn by calling ${COURSE_QUESTION_WIDGET_TOOL_NAME} exactly once after the explanation.`,
-    "Use a free-text widget for recall or explanation checks: {\"type\":\"free_text\",\"id\":\"short-stable-id\",\"question\":\"self-contained question\",\"placeholder\":\"Type your answer here...\"}.",
-    "Use a multiple-choice widget for focused discrimination checks: {\"type\":\"multiple_choice\",\"id\":\"short-stable-id\",\"question\":\"self-contained question without answer choices\",\"choices\":[{\"id\":\"A\",\"text\":\"...\"},{\"id\":\"B\",\"text\":\"...\"},{\"id\":\"C\",\"text\":\"...\"},{\"id\":\"D\",\"text\":\"...\"}]}",
-    "Do not write the learner-facing question or answer choices in visible prose outside the widget tool call arguments.",
-    "Choose the widget type that best tests the current learning risk. Prefer free text when the learner needs to explain the mechanism, and multiple choice when contrasting common confusions.",
-    "Generate as many question turns as needed over the session: if prior answers show gaps, ask another focused widget question before advancing.",
-    "If the progress tool says the previous answer completed a milestone, briefly acknowledge it and move to the next milestone.",
-    "If the progress tool says the previous answer did not complete the milestone, do not advance. Stay on the same milestone, reteach the same topic from a different angle, and ask a different targeted question that tests the same objective.",
-    "Do not mention tool calls or internal progress decisions.",
-  ].join(" ");
+  const systemPrompt = buildCourseTutorSystemPrompt({
+    answerDecisionTool: false,
+  });
   const stableCourseContext = [
     "Use the dynamic course context below to write the next tutor turn. Stable course fields come before volatile turn state and conversation history.",
     `Course title: ${input.course.title}`,
