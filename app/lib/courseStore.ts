@@ -657,6 +657,114 @@ export async function replaceCourseChatMessages(input: {
   });
 }
 
+type CourseChatMessageWrite = {
+  role: "assistant" | "user";
+  content: string;
+  toolCalls?: CourseQuestionWidgetToolCall[];
+  metrics?: CourseMessageMetrics | null;
+  evaluation?: CourseChatMessageEvaluation | null;
+  widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
+};
+
+function normalizeCourseChatMessageWrite(message: CourseChatMessageWrite) {
+  return {
+    role: message.role === "assistant" ? "assistant" : "user",
+    content: message.content.trim(),
+    toolCalls:
+      message.role === "assistant"
+        ? normalizeCourseQuestionWidgetToolCalls(message.toolCalls)
+        : [],
+    metrics: normalizeStoredMetrics(message.metrics),
+    evaluation:
+      message.role === "assistant"
+        ? normalizeStoredEvaluation(message.evaluation)
+        : null,
+    widgetAnswer:
+      message.role === "user"
+        ? normalizeStoredWidgetAnswer(message.widgetAnswer)
+        : null,
+  };
+}
+
+export async function appendCourseChatMessages(input: {
+  courseId: string;
+  messages: CourseChatMessageWrite[];
+  maxMessages?: number;
+}): Promise<CourseChatMessageRecord[]> {
+  const user = await getCurrentUser();
+  const now = Date.now();
+  const messages = input.messages
+    .map(normalizeCourseChatMessageWrite)
+    .filter((message) => message.content);
+  const maxMessages =
+    typeof input.maxMessages === "number"
+      ? Math.max(1, Math.floor(input.maxMessages))
+      : 200;
+
+  const [course] = await db
+    .select({ id: courses.id })
+    .from(courses)
+    .where(and(eq(courses.userId, user.id), eq(courses.id, input.courseId)))
+    .limit(1);
+
+  if (!course) {
+    throw new Error("Course could not be loaded.");
+  }
+
+  return db.transaction(async (tx) => {
+    if (messages.length > 0) {
+      const [sequenceRow] = await tx
+        .select({
+          maxSequence: sql<number | null>`max(${courseChatMessages.sequence})`,
+        })
+        .from(courseChatMessages)
+        .where(eq(courseChatMessages.courseId, course.id));
+      const nextSequence = Number(sequenceRow?.maxSequence ?? -1) + 1;
+
+      await tx.insert(courseChatMessages).values(
+        messages.map((message, index) => ({
+          courseId: course.id,
+          role: message.role,
+          content: message.content,
+          toolCalls: message.toolCalls,
+          metrics: message.metrics,
+          evaluation: message.evaluation,
+          widgetAnswer: message.widgetAnswer,
+          sequence: nextSequence + index,
+          createdAt: now + index,
+          updatedAt: now + index,
+        })),
+      );
+
+      const firstRetainedSequence = nextSequence + messages.length - maxMessages;
+
+      if (firstRetainedSequence > 0) {
+        await tx
+          .delete(courseChatMessages)
+          .where(
+            and(
+              eq(courseChatMessages.courseId, course.id),
+              lt(courseChatMessages.sequence, firstRetainedSequence),
+            ),
+          );
+      }
+    }
+
+    await tx
+      .update(courses)
+      .set({ updatedAt: now })
+      .where(eq(courses.id, course.id));
+
+    const rows = await tx
+      .select()
+      .from(courseChatMessages)
+      .where(eq(courseChatMessages.courseId, course.id))
+      .orderBy(asc(courseChatMessages.sequence));
+
+    return rows.map(toCourseChatMessage);
+  });
+}
+
 export async function addCourseConversationCost(input: {
   courseId: string;
   cost: number;

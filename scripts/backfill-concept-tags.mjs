@@ -266,7 +266,7 @@ async function loadQuestions(pool, userId) {
 
 function buildPrompt(batch, candidateSlugsByUser) {
   return [
-    "Generate concept slugs for existing Waxon review questions.",
+    "Generate concept slugs for existing review questions.",
     "Use 1-3 lowercase kebab-case slugs for each question.",
     "Each slug must be a full, self-disambiguating concept phrase.",
     "Prefer candidateExistingSlugs when one accurately describes the tested concept.",
