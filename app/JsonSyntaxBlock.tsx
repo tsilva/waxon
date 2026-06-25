@@ -241,7 +241,7 @@ export function JsonSyntaxBlock({
 
     if (!isCollapsibleJsonValue(value)) {
       const previewButton =
-        typeof value === "string" && shouldShowStringPreview(value)
+        typeof value === "string"
           ? renderStringPreviewButton({
               keyName,
               onPreviewString: setStringPreview,
