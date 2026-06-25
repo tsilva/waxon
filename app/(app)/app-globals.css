@@ -6755,6 +6755,9 @@ textarea {
 }
 
 .learn-toc li {
+  --learn-toc-title-font-size: 13px;
+  --learn-toc-title-line-height: 1.3;
+
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
   gap: 6px;
@@ -6774,7 +6777,7 @@ textarea {
   display: grid;
   place-items: center;
   width: 20px;
-  height: 20px;
+  height: calc(var(--learn-toc-title-font-size) * var(--learn-toc-title-line-height));
 }
 
 .learn-toc-status svg {
@@ -6801,9 +6804,9 @@ textarea {
 
 .learn-toc li p {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--learn-toc-title-font-size);
   font-weight: 680;
-  line-height: 1.3;
+  line-height: var(--learn-toc-title-line-height);
 }
 
 @media (max-width: 760px) {
