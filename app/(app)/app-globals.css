@@ -6195,7 +6195,7 @@ textarea {
   outline-offset: 2px;
 }
 
-.learn-raw-conversation pre {
+.learn-raw-conversation-pre {
   min-width: max-content;
   margin: 0;
   padding: 14px 16px;
@@ -7704,7 +7704,7 @@ textarea {
     width: 100%;
   }
 
-  .learn-raw-conversation pre {
+  .learn-raw-conversation-pre {
     padding: 12px;
     font-size: 10px;
   }

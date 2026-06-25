@@ -19,6 +19,7 @@ import {
   type CSSProperties,
 } from "react";
 import type { AuthenticatedUser } from "@/app/lib/auth";
+import { JsonSyntaxBlock } from "@/app/JsonSyntaxBlock";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { MarkdownContent } from "@/app/MarkdownContent";
@@ -82,20 +83,6 @@ type AdminPageClientProps = {
 type AdminTracesResponse = {
   interactions: TraceInteraction[];
   dueCount: number;
-};
-
-type JsonTokenKind =
-  | "boolean"
-  | "key"
-  | "null"
-  | "number"
-  | "plain"
-  | "punctuation"
-  | "string";
-
-type JsonToken = {
-  kind: JsonTokenKind;
-  text: string;
 };
 
 type PayloadViewMode = "json" | "markdown";
@@ -586,100 +573,6 @@ function traceCacheStatsForCall(
     cacheWriteTokens,
     cacheHitPercent,
   };
-}
-
-function normalizeJsonPayload(payload: string): {
-  parsed: unknown | null;
-  text: string;
-} {
-  const parsed = parseJsonPayload(payload);
-
-  if (parsed === null) {
-    return {
-      parsed: null,
-      text: payload,
-    };
-  }
-
-  return {
-    parsed,
-    text: JSON.stringify(parsed, null, 2),
-  };
-}
-
-function tokenizeJson(text: string): JsonToken[] {
-  const tokens: JsonToken[] = [];
-  const matcher =
-    /("(?:\\.|[^"\\])*")|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b|[{}\[\],:]/g;
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = matcher.exec(text)) !== null) {
-    if (match.index > cursor) {
-      tokens.push({
-        kind: "plain",
-        text: text.slice(cursor, match.index),
-      });
-    }
-
-    const token = match[0];
-    const nextText = text.slice(matcher.lastIndex);
-    const isKey = token.startsWith("\"") && /^\s*:/.test(nextText);
-    let kind: JsonTokenKind = "plain";
-
-    if (isKey) {
-      kind = "key";
-    } else if (token.startsWith("\"")) {
-      kind = "string";
-    } else if (/^-?\d/.test(token)) {
-      kind = "number";
-    } else if (token === "true" || token === "false") {
-      kind = "boolean";
-    } else if (token === "null") {
-      kind = "null";
-    } else {
-      kind = "punctuation";
-    }
-
-    tokens.push({ kind, text: token });
-    cursor = matcher.lastIndex;
-  }
-
-  if (cursor < text.length) {
-    tokens.push({
-      kind: "plain",
-      text: text.slice(cursor),
-    });
-  }
-
-  return tokens;
-}
-
-function JsonPayloadView({ payload }: { payload: string }) {
-  const { parsed, text } = normalizeJsonPayload(payload);
-
-  if (parsed === null) {
-    return (
-      <pre className="admin-call-payload-pre">
-        <code>{text}</code>
-      </pre>
-    );
-  }
-
-  return (
-    <pre className="admin-call-payload-pre admin-json-payload">
-      <code>
-        {tokenizeJson(text).map((token, index) => (
-          <span
-            className={`admin-json-token admin-json-token-${token.kind}`}
-            key={`${token.kind}-${index}`}
-          >
-            {token.text}
-          </span>
-        ))}
-      </code>
-    </pre>
-  );
 }
 
 function contentPartsToText(content: unknown): string | null {
@@ -1985,7 +1878,10 @@ export function AdminPageClient({
                     messages={selectedRequestMarkdownMessages}
                   />
                 ) : (
-                  <JsonPayloadView payload={selectedRequestPayload} />
+                  <JsonSyntaxBlock
+                    className="admin-call-payload-pre"
+                    payload={selectedRequestPayload}
+                  />
                 )}
               </section>
               <section className="admin-call-payload-panel">
@@ -2033,7 +1929,10 @@ export function AdminPageClient({
                 selectedResponseMarkdown ? (
                   <TraceMarkdownContent text={selectedResponseMarkdown} />
                 ) : (
-                  <JsonPayloadView payload={selectedResponsePayload} />
+                  <JsonSyntaxBlock
+                    className="admin-call-payload-pre"
+                    payload={selectedResponsePayload}
+                  />
                 )}
               </section>
             </div>

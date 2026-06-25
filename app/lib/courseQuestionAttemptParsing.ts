@@ -1,8 +1,3 @@
-import {
-  parseCourseQuestionWidgets,
-  stripAnsweredQuestionMetadata,
-} from "./courseQuestionWidget.ts";
-
 export type CourseQuestionAttemptToolResult =
   | {
       toolCall: "record_course_question_attempt";
@@ -88,16 +83,6 @@ function normalizeChoiceKey(value: string): string {
 function readMultipleChoiceOptions(question: string): Map<string, string> {
   const choices = new Map<string, string>();
 
-  for (const widget of parseCourseQuestionWidgets(question).widgets) {
-    if (widget.type !== "multiple_choice") {
-      continue;
-    }
-
-    for (const choice of widget.choices) {
-      choices.set(normalizeChoiceKey(choice.id), normalizeIntakeText(choice.text));
-    }
-  }
-
   for (const line of question.replace(/\r\n?/g, "\n").split("\n")) {
     const match = CHOICE_LINE_CAPTURE_PATTERN.exec(line);
 
@@ -116,9 +101,7 @@ function normalizeSubmittedAnswer(input: {
   fallbackAnswer: string;
 }): string {
   const answer =
-    stripAnsweredQuestionMetadata(
-      normalizeMultilineText(input.fallbackAnswer, 4_000),
-    ) ||
+    normalizeMultilineText(input.fallbackAnswer, 4_000) ||
     normalizeMultilineText(input.recordAnswer, 4_000);
   const choices = readMultipleChoiceOptions(
     [input.question, input.choiceSource ?? ""].filter(Boolean).join("\n"),

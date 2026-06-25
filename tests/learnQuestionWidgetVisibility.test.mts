@@ -56,7 +56,10 @@ test("shouldShowLearnQuestionWidgets hides widgets replaced by an evaluation", (
         assistantWithWidget,
         {
           role: "assistant",
-          content: "<!-- waxon:evaluation-snippet score=9 -->\n\nGood.",
+          content: "Score 9/10\n\nGood.",
+          evaluation: {
+            score: 9,
+          },
         },
       ],
       message: assistantWithWidget,

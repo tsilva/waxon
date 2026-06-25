@@ -38,7 +38,7 @@ test("openRouterChatCompletion sends user trace identifiers", async () => {
         traceId: "trace-789",
       },
       body: {
-        model: "google/gemini-3.5-flash",
+        model: "google/gemini-3.1-flash-lite",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -76,7 +76,7 @@ test("openRouterChatCompletion preserves an explicit session id", async () => {
         userId: "user-123",
       },
       body: {
-        model: "google/gemini-3.5-flash",
+        model: "google/gemini-3.1-flash-lite",
         session_id: "learn:user-123:course-456",
         messages: [{ role: "user", content: "hello" }],
       },
@@ -129,7 +129,7 @@ test("extractAffordableOpenRouterMaxTokens ignores unrelated errors", () => {
   );
 });
 
-test("getOpenRouterChatModel defaults to Claude Haiku and allows env override", () => {
+test("getOpenRouterChatModel defaults to Gemini flash-lite and allows env override", () => {
   const originalModel = process.env.LLM_MODEL;
 
   try {
@@ -147,7 +147,7 @@ test("getOpenRouterChatModel defaults to Claude Haiku and allows env override", 
   }
 });
 
-test("getOpenRouterEvaluationModel defaults to Mercury and allows env override", () => {
+test("getOpenRouterEvaluationModel defaults to Gemini flash-lite and allows env override", () => {
   const originalModel = process.env.LLM_EVALUATION_MODEL;
 
   try {
@@ -168,7 +168,7 @@ test("getOpenRouterEvaluationModel defaults to Mercury and allows env override",
   }
 });
 
-test("getOpenRouterLearnModel defaults to Claude Haiku and ignores global chat model", () => {
+test("getOpenRouterLearnModel defaults to Gemini flash-lite and ignores global chat model", () => {
   const originalChatModel = process.env.LLM_MODEL;
   const originalLearnModel = process.env.LLM_LEARN_MODEL;
 
@@ -260,7 +260,7 @@ test("openRouterChatCompletion mirrors body user into trace metadata", async () 
         operation: "test_operation",
       },
       body: {
-        model: "google/gemini-3.5-flash",
+        model: "google/gemini-3.1-flash-lite",
         user: "body-user",
         messages: [{ role: "user", content: "hello" }],
       },
@@ -310,7 +310,7 @@ test("openRouterChatCompletion records actual request and response payloads", as
         traceId,
       },
       body: {
-        model: "google/gemini-3.5-flash",
+        model: "google/gemini-3.1-flash-lite",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -363,7 +363,7 @@ test("listLlmTraceInteractions falls back to local traces when db read is unavai
         traceId,
       },
       body: {
-        model: "google/gemini-3.5-flash",
+        model: "google/gemini-3.1-flash-lite",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -394,7 +394,7 @@ test("recordFailedLlmTrace records an error trace for configuration failures", a
   await recordFailedLlmTrace({
     traceId,
     operation: "evaluate_answer",
-    model: "google/gemini-3.5-flash",
+    model: "google/gemini-3.1-flash-lite",
     question: "What should admin show for missing LLM configuration?",
     requestBody: {
       question: "What should admin show for missing LLM configuration?",
@@ -472,7 +472,7 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
         operation: "test_streaming",
       },
       body: {
-        model: "google/gemini-3.5-flash",
+        model: "google/gemini-3.1-flash-lite",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -565,7 +565,7 @@ test("openRouterChatCompletion preserves streamed tool calls", async () => {
         operation: "test_streaming_tools",
       },
       body: {
-        model: "google/gemini-3.5-flash",
+        model: "google/gemini-3.1-flash-lite",
         messages: [{ role: "user", content: "hello" }],
       },
       onToolCallDelta(toolCalls) {

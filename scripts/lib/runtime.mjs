@@ -33,7 +33,7 @@ export function requireOpenRouterApiKey() {
 }
 
 export function openRouterChatModel() {
-  return process.env.LLM_MODEL?.trim() || "google/gemini-3.5-flash";
+  return process.env.LLM_MODEL?.trim() || "google/gemini-3.1-flash-lite";
 }
 
 export function createDatabasePool(Pool) {
