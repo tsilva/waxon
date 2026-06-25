@@ -1,4 +1,9 @@
-import type { CourseQuestionWidget } from "./courseQuestionWidget.ts";
+import type {
+  CourseQuestionWidget,
+  CourseQuestionWidgetToolCall,
+} from "./courseQuestionWidget.ts";
+
+const FALLBACK_LEARNER_QUESTION = "What is the main idea in your own words?";
 
 export function ensureCourseChatTurnHasLearnerQuestion(input: {
   text: string;
@@ -12,12 +17,12 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
   widgets: CourseQuestionWidget[];
 } {
   const generatedText = input.text.trim();
-  const inputWidgets = input.widgets ?? [];
+  const inputWidgets = (input.widgets ?? []).map(sanitizeLearnerFacingCourseWidget);
   const hasLearnerQuestion = isCourseChatTurnComplete(generatedText, inputWidgets);
   const fallbackWidget: CourseQuestionWidget = {
     type: "free_text",
-    id: "fallback-milestone-check",
-    question: "What is the main idea of this milestone in your own words?",
+    id: "fallback-understanding-check",
+    question: FALLBACK_LEARNER_QUESTION,
     placeholder: "Explain the idea in your own words...",
   };
 
@@ -25,9 +30,10 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     const cleanedVisibleContent = stripInvalidRepairParagraphs(
       generatedText,
     );
-    const sanitizedVisibleContent =
+    const sanitizedVisibleContent = sanitizeLearnerFacingCourseText(
       stripDanglingTailIfNeeded(cleanedVisibleContent) ||
-      `This milestone is about ${input.pageObjective}`;
+        `This section is about ${input.pageObjective}.`,
+    );
 
     return {
       text: sanitizedVisibleContent,
@@ -38,7 +44,7 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
 
   if (hasLearnerQuestion) {
     return {
-      text: generatedText,
+      text: sanitizeLearnerFacingCourseText(generatedText),
       appendedText: "",
       widgets: [],
     };
@@ -46,7 +52,7 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
 
   if (!generatedText) {
     const fallbackLesson = [
-      `This milestone is about ${input.pageObjective}`,
+      `This section is about ${input.pageObjective}.`,
       "A good answer should name the core idea, explain why it matters, and connect it to a small example.",
       fallbackWidget.question,
     ].join("\n\n");
@@ -83,23 +89,104 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
       ? stripDanglingTrailingRepairContent(parsedRepairContent)
       : parsedRepairContent;
   const repairBaseText =
-    strippedRepairContent ||
+    sanitizeLearnerFacingCourseText(strippedRepairContent) ||
     (shouldStripTrailingPartialContent || shouldStripDanglingTail
       ? ""
-      : parsedRepairContent) ||
-    `This milestone is about ${input.pageObjective}`;
+      : sanitizeLearnerFacingCourseText(parsedRepairContent)) ||
+    `This section is about ${input.pageObjective}.`;
   const separator = /[.!?)]\s*$/u.test(repairBaseText) ? "\n\n" : ".\n\n";
   const fallbackQuestion = [
     separator.trimEnd(),
-    `Focus on this milestone: ${input.pageObjective}`,
+    `Focus on this idea: ${input.pageObjective}`,
     fallbackWidget.question,
   ].join("\n\n");
 
   return {
-    text: `${repairBaseText}${fallbackQuestion}`,
+    text: sanitizeLearnerFacingCourseText(`${repairBaseText}${fallbackQuestion}`),
     appendedText: fallbackQuestion,
     widgets: [fallbackWidget],
   };
+}
+
+export function sanitizeLearnerFacingCourseText(text: string): string {
+  return text
+    .replace(/\bfocus on this milestone\b/giu, (match) =>
+      preserveLeadingCase(match, "focus on this idea"),
+    )
+    .replace(
+      /\bwhat is the main idea of this milestone in your own words\?/giu,
+      (match) => preserveLeadingCase(match, FALLBACK_LEARNER_QUESTION),
+    )
+    .replace(/\bthis milestone is about\b/giu, (match) =>
+      preserveLeadingCase(match, "this section is about"),
+    )
+    .replace(/\bmilestone objective\b/giu, (match) =>
+      preserveLeadingCase(match, "learning goal"),
+    )
+    .replace(/\bcurrent milestone\b/giu, (match) =>
+      preserveLeadingCase(match, "current topic"),
+    )
+    .replace(/\bnext milestone\b/giu, (match) =>
+      preserveLeadingCase(match, "next topic"),
+    )
+    .replace(/\bsame milestone\b/giu, (match) =>
+      preserveLeadingCase(match, "same topic"),
+    )
+    .replace(/\bthis milestone\b/giu, (match) =>
+      preserveLeadingCase(match, "this topic"),
+    )
+    .replace(/\bthe milestone\b/giu, (match) =>
+      preserveLeadingCase(match, "the topic"),
+    );
+}
+
+export function sanitizeLearnerFacingCourseWidget(
+  widget: CourseQuestionWidget,
+): CourseQuestionWidget {
+  if (widget.type === "multiple_choice") {
+    return {
+      ...widget,
+      id: sanitizeLearnerFacingCourseWidgetId(widget.id),
+      question: sanitizeLearnerFacingCourseText(widget.question),
+      choices: widget.choices.map((choice) => ({
+        ...choice,
+        text: sanitizeLearnerFacingCourseText(choice.text),
+      })),
+    };
+  }
+
+  return {
+    ...widget,
+    id: sanitizeLearnerFacingCourseWidgetId(widget.id),
+    question: sanitizeLearnerFacingCourseText(widget.question),
+    placeholder: widget.placeholder
+      ? sanitizeLearnerFacingCourseText(widget.placeholder)
+      : widget.placeholder,
+  };
+}
+
+export function sanitizeLearnerFacingCourseWidgetToolCalls(
+  toolCalls: CourseQuestionWidgetToolCall[],
+): CourseQuestionWidgetToolCall[] {
+  return toolCalls.map((toolCall) => ({
+    ...toolCall,
+    function: {
+      ...toolCall.function,
+      arguments: sanitizeLearnerFacingCourseWidget(toolCall.function.arguments),
+    },
+  }));
+}
+
+function sanitizeLearnerFacingCourseWidgetId(id: string): string {
+  return id === "fallback-milestone-check"
+    ? "fallback-understanding-check"
+    : id;
+}
+
+function preserveLeadingCase(source: string, replacement: string): string {
+  return /^[A-Z]/u.test(source)
+    ? `${replacement.slice(0, 1).toUpperCase()}${replacement.slice(1)}`
+    : replacement;
 }
 
 function stripInvalidRepairParagraphs(text: string): string {

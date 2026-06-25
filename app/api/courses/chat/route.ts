@@ -9,6 +9,7 @@ import {
   generateCourseAnswerDecision,
   generateCourseIntakeDecision,
   generateCourseToc,
+  shouldUseCourseAnswerContinuationRequest,
   streamCourseAnswerContinuation,
   streamCourseChatTurn,
   type CourseChatMessage,
@@ -202,20 +203,6 @@ function normalizeStoredMessages(value: unknown): CourseChatMessage[] {
       ? [{ role, content, toolCalls, metrics, evaluation, widgetAnswer }]
       : [];
   });
-}
-
-function shouldEvaluateLatestCourseAnswer(messages: CourseChatMessage[]): boolean {
-  const previousAssistantMessage = [...messages]
-    .reverse()
-    .find((message) => message.role === "assistant" && !message.evaluation);
-  const previousAssistantText = (previousAssistantMessage?.content ?? "")
-    .trim()
-    .toLowerCase();
-
-  return Boolean(
-    previousAssistantText &&
-      previousAssistantText !== "what do you want to learn?",
-  );
 }
 
 function buildProvisionalCourseToc(
@@ -445,7 +432,7 @@ export async function POST(request: Request) {
               throw new Error("Course could not be loaded.");
             }
 
-            if (shouldEvaluateLatestCourseAnswer(messages)) {
+            if (shouldUseCourseAnswerContinuationRequest(messages)) {
               send("evaluation_pending", {});
               const runSingleStreamContinuation = async (
                 retryInstruction: string | null,

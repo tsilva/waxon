@@ -26,6 +26,10 @@ import {
   type CourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidgetToolCall,
 } from "./courseQuestionWidget";
+import {
+  sanitizeLearnerFacingCourseText,
+  sanitizeLearnerFacingCourseWidgetToolCalls,
+} from "./courseChatTurn";
 
 export type CourseStatus = "active" | "completed";
 
@@ -237,12 +241,21 @@ function toCourseChatMessage(row: {
   createdAt: number;
   updatedAt: number;
 }): CourseChatMessageRecord {
+  const role = toCourseChatRole(row.role);
+  const toolCalls = normalizeCourseQuestionWidgetToolCalls(row.toolCalls);
+
   return {
     id: row.id,
     courseId: row.courseId,
-    role: toCourseChatRole(row.role),
-    content: row.content,
-    toolCalls: normalizeCourseQuestionWidgetToolCalls(row.toolCalls),
+    role,
+    content:
+      role === "assistant"
+        ? sanitizeLearnerFacingCourseText(row.content)
+        : row.content,
+    toolCalls:
+      role === "assistant"
+        ? sanitizeLearnerFacingCourseWidgetToolCalls(toolCalls)
+        : toolCalls,
     metrics: normalizeStoredMetrics(row.metrics),
     evaluation: normalizeStoredEvaluation(row.evaluation),
     widgetAnswer: normalizeStoredWidgetAnswer(row.widgetAnswer),
