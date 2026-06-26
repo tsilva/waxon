@@ -1,4 +1,9 @@
-Current course state for this tutor turn. Use the generated course TOC from the conversation tool event for the full course plan.
+Current course state for this tutor turn.
+
+Course title: {{courseTitle}}
+Course description: {{courseDescription}}
+Course plan:
+{{coursePlan}}
 
 Current milestone index: {{currentMilestoneIndex}}
 Current milestone: {{currentMilestone}}
