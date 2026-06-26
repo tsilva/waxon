@@ -29,11 +29,9 @@ import {
 } from "./courseQuestionAttemptParsing.ts";
 import {
   COURSE_QUESTION_WIDGET_TOOL_NAME,
-  COURSE_TOC_TOOL_NAME,
   courseQuestionWidgetToolCallFromWidget,
   courseQuestionWidgetsFromToolCalls,
   formatCourseQuestionWidgetsForPrompt,
-  hasCourseTocToolCall,
   type CourseQuestionWidget,
   type CourseQuestionWidgetAnswerDetails,
   type CourseToolCall,
@@ -611,35 +609,15 @@ function compactCourseMessages(messages: CourseChatMessage[]) {
   }));
 }
 
-function courseTocPromptMessages(course: CourseDetail): OpenRouterMessage[] {
-  const toolCallId = `course-toc-${course.id}`.slice(0, 80);
-  const argumentsJson = JSON.stringify({
-    topic: course.topicPrompt,
-    toc: course.toc,
-  });
+function formatCoursePlanForPrompt(course: CourseDetail): string {
+  return course.toc.pages
+    .map((page, index) => {
+      const marker =
+        index === course.currentPageIndex ? "current milestone" : "milestone";
 
-  return [
-    {
-      role: "assistant",
-      content: "Generated the course table of contents.",
-      tool_calls: [
-        {
-          id: toolCallId,
-          type: "function",
-          function: {
-            name: COURSE_TOC_TOOL_NAME,
-            arguments: argumentsJson,
-          },
-        },
-      ],
-    },
-    {
-      role: "tool",
-      tool_call_id: toolCallId,
-      name: COURSE_TOC_TOOL_NAME,
-      content: argumentsJson,
-    },
-  ];
+      return `${index + 1}. ${page.title} (${marker}) - ${page.objective}`;
+    })
+    .join("\n");
 }
 
 function courseChatMessagesForModel(
@@ -647,7 +625,6 @@ function courseChatMessagesForModel(
 ): OpenRouterMessage[] {
   return messages
     .slice(-10)
-    .filter((message) => !hasCourseTocToolCall(message.toolCalls))
     .map((message) => {
       const content = courseMessagePromptContext(message);
       const widgetAnswer = message.role === "user" ? message.widgetAnswer : null;
@@ -1236,6 +1213,9 @@ export function buildCourseAnswerContinuationModelRequest(input: {
   const stableCourseContext = renderPromptTemplate(
     loadPromptTemplate("course-answer-continuation-stable-course-context.md"),
     {
+      courseTitle: input.course.title,
+      courseDescription: input.course.description,
+      coursePlan: formatCoursePlanForPrompt(input.course),
       currentMilestoneIndex: input.course.currentPageIndex,
       currentMilestone: page.title,
       milestoneObjective: page.objective,
@@ -1299,7 +1279,6 @@ export function buildCourseAnswerContinuationModelRequest(input: {
             model,
           }),
         },
-        ...courseTocPromptMessages(input.course),
         ...courseChatMessagesForModel(input.messages),
       ],
     },
@@ -1323,6 +1302,9 @@ export function buildCourseChatTurnModelRequest(input: {
   const stableCourseContext = renderPromptTemplate(
     loadPromptTemplate("course-chat-turn-stable-course-context.md"),
     {
+      courseTitle: input.course.title,
+      courseDescription: input.course.description,
+      coursePlan: formatCoursePlanForPrompt(input.course),
       currentMilestoneIndex: input.course.currentPageIndex,
       currentMilestone: page.title,
       milestoneObjective: page.objective,
@@ -1380,7 +1362,6 @@ export function buildCourseChatTurnModelRequest(input: {
             model,
           }),
         },
-        ...courseTocPromptMessages(input.course),
         ...courseChatMessagesForModel(input.messages),
       ],
     },

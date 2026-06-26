@@ -7,6 +7,7 @@ import {
   shouldShowCourseChatInterruptedWarning,
 } from "../app/lib/courseChatTurn.ts";
 import {
+  buildCourseAnswerContinuationModelRequest,
   generateCourseAnswerDecision,
   generateCourseToc,
   shouldUseCourseAnswerContinuationRequest,
@@ -14,6 +15,7 @@ import {
   streamCourseChatTurn,
 } from "../app/lib/courseGeneration.ts";
 import {
+  courseTocToolCallFromToc,
   courseQuestionWidgetToolCallFromWidget,
   formatCourseQuestionWidgetForPrompt,
 } from "../app/lib/courseQuestionWidget.ts";
@@ -1044,8 +1046,6 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
     const dynamicContent = requestMessages[1]?.content as Array<
       Record<string, unknown>
     >;
-    const tocAssistantMessage = requestMessages[2];
-    const tocToolMessage = requestMessages[3];
 
     assert.deepEqual(systemContent[0]?.cache_control, { type: "ephemeral" });
     assert.equal(
@@ -1066,21 +1066,23 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
     assert.equal(requestMessages[1]?.role, "system");
     assert.equal(dynamicContent[0]?.cache_control, undefined);
     assert.match(String(dynamicContent[0]?.text), /Current course state/u);
+    assert.match(String(dynamicContent[0]?.text), /Course title: PPO/u);
+    assert.match(String(dynamicContent[0]?.text), /Course plan:/u);
+    assert.match(
+      String(dynamicContent[0]?.text),
+      /1\. PPO Purpose \(current milestone\)/u,
+    );
     assert.match(String(dynamicContent[0]?.text), /Current milestone: PPO Purpose/u);
     assert.doesNotMatch(String(dynamicContent[0]?.text), /Full TOC JSON/u);
-    assert.doesNotMatch(String(dynamicContent[0]?.text), /Recent conversation JSON/u);
-    assert.equal(tocAssistantMessage?.role, "assistant");
-    assert.equal(tocAssistantMessage?.content, "Generated the course table of contents.");
-    assert.equal(
-      (
-        tocAssistantMessage as {
-          tool_calls?: Array<{ function?: { name?: string } }>;
-        }
-      ).tool_calls?.[0]?.function?.name,
-      "generate_course_toc",
+    assert.doesNotMatch(
+      String(dynamicContent[0]?.text),
+      /conversation tool event/u,
     );
-    assert.equal(tocToolMessage?.role, "tool");
-    assert.equal(tocToolMessage?.name, "generate_course_toc");
+    assert.doesNotMatch(
+      String(dynamicContent[0]?.text),
+      /Recent conversation JSON/u,
+    );
+    assert.equal(requestMessages.length, 2);
     assert.equal((requestBody as { tool_choice?: unknown }).tool_choice, "auto");
     assert.equal(
       (requestBody as { parallel_tool_calls?: unknown }).parallel_tool_calls,
@@ -1328,10 +1330,8 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
     const dynamicContent = requestMessages[1]?.content as Array<
       Record<string, unknown>
     >;
-    const tocAssistantMessage = requestMessages[2];
-    const tocToolMessage = requestMessages[3];
-    const assistantHistoryMessage = requestMessages[4];
-    const userHistoryMessage = requestMessages[5];
+    const assistantHistoryMessage = requestMessages[2];
+    const userHistoryMessage = requestMessages[3];
 
     assert.deepEqual(systemContent[0]?.cache_control, { type: "ephemeral" });
     assert.match(String(systemContent[0]?.text), /Stable tutor instructions/u);
@@ -1343,25 +1343,21 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
     assert.equal(requestMessages[1]?.role, "system");
     assert.equal(dynamicContent[0]?.cache_control, undefined);
     const volatilePrompt = String(dynamicContent[0]?.text);
+    assert.match(volatilePrompt, /Course title: SQL Joins/u);
+    assert.match(volatilePrompt, /Course plan:/u);
+    assert.match(
+      volatilePrompt,
+      /1\. Why Relationships Matter \(current milestone\)/u,
+    );
     assert.match(volatilePrompt, /Learner answer:/u);
     assert.doesNotMatch(volatilePrompt, /Recent conversation JSON/u);
     assert.doesNotMatch(volatilePrompt, /"widgetAnswer"/u);
     assert.doesNotMatch(volatilePrompt, /"questionWidgets"/u);
+    assert.doesNotMatch(volatilePrompt, /conversation tool event/u);
     assert.match(
       volatilePrompt,
       /Why can repeated customer data cause update problems/u,
     );
-    assert.equal(tocAssistantMessage?.role, "assistant");
-    assert.equal(
-      (
-        tocAssistantMessage as {
-          tool_calls?: Array<{ function?: { name?: string } }>;
-        }
-      ).tool_calls?.[0]?.function?.name,
-      "generate_course_toc",
-    );
-    assert.equal(tocToolMessage?.role, "tool");
-    assert.equal(tocToolMessage?.name, "generate_course_toc");
     assert.equal(assistantHistoryMessage?.role, "assistant");
     assert.match(
       String(assistantHistoryMessage?.content),
@@ -1369,6 +1365,7 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
     );
     assert.equal(userHistoryMessage?.role, "user");
     assert.match(String(userHistoryMessage?.content), /Learner answer:/u);
+    assert.equal(requestMessages.length, 4);
     assert.deepEqual(events, [
       "decision:mark_milestone_done",
       "delta:Good. A join uses matching keys to combine related rows only when you query them.",
@@ -1383,6 +1380,104 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("course answer continuation preserves stored chat chronology", () => {
+  const widget = {
+    type: "free_text" as const,
+    id: "ppo-clipping",
+    question: "What does PPO clipping prevent?",
+    placeholder: "Answer in one sentence...",
+  };
+  const course = {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt: "Learn PPO",
+    title: "PPO",
+    description: "Learn Proximal Policy Optimization.",
+    toc: {
+      title: "PPO",
+      description: "Learn Proximal Policy Optimization.",
+      pages: [
+        {
+          title: "PPO Clipping",
+          objective: "Explain why PPO clips policy updates.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: 1,
+    generatedPages: 1,
+    chatMessageCount: 4,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+
+  const request = buildCourseAnswerContinuationModelRequest({
+    userId: "user_1",
+    course,
+    model: "google/gemini-3.1-flash-lite",
+    messages: [
+      {
+        role: "user",
+        content: "I want to learn PPO for beginners",
+      },
+      {
+        role: "assistant",
+        content: "Generated the course table of contents.",
+        toolCalls: [
+          courseTocToolCallFromToc({
+            topic: course.topicPrompt,
+            toc: course.toc,
+          }),
+        ],
+      },
+      {
+        role: "assistant",
+        content: "PPO keeps policy updates from changing too much at once.",
+        toolCalls: [courseQuestionWidgetToolCallFromWidget(widget)],
+      },
+      {
+        role: "user",
+        content: "It prevents the policy from moving too far in one update.",
+        widgetAnswer: {
+          question: widget.question,
+          widgetId: widget.id,
+          answer: "It prevents the policy from moving too far in one update.",
+        },
+      },
+    ],
+  });
+
+  const messages = request.requestBody.messages as Array<{
+    role: string;
+    content: unknown;
+  }>;
+  const history = messages.slice(2);
+
+  assert.deepEqual(
+    history.map((message) => message.role),
+    ["user", "assistant", "assistant", "user"],
+  );
+  assert.match(String(history[0]?.content), /I want to learn PPO/u);
+  assert.match(
+    String(history[1]?.content),
+    /Generated the course table of contents/u,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(messages.slice(0, 2)),
+    /Generated the course/u,
+  );
+  assert.match(
+    String(history[2]?.content),
+    /Question widget: What does PPO clipping prevent/u,
+  );
+  assert.match(String(history[3]?.content), /Learner answer:/u);
 });
 
 test("shouldUseCourseAnswerContinuationRequest skips Gemini live fallback churn", () => {
