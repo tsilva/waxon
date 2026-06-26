@@ -16,6 +16,7 @@ import {
   type CourseToc,
 } from "./courseContent.ts";
 import {
+  CourseTutorTextMissingError,
   ensureCourseChatTurnHasLearnerQuestion,
   excerptCourseMessageForPrompt,
 } from "./courseChatTurn.ts";
@@ -258,6 +259,8 @@ const COURSE_CHAT_TURN_MAX_TOKENS = 1_200;
 const COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC = loadPromptTemplate(
   "course-chat-cacheable-teaching-rubric.md",
 );
+const COURSE_CHAT_VISIBLE_TEXT_RETRY_INSTRUCTION =
+  "Retry the same Learn turn. Your previous response called render_question_widget but omitted the visible learner-facing lesson. First write concise beginner tutor prose that explains the idea, then call render_question_widget exactly once. Do not put the question or answer choices in visible prose.";
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
 const MODEL_CONTEXT_WINDOW_TOKENS: Array<{
   pattern: RegExp;
@@ -1374,7 +1377,7 @@ export function buildCourseAnswerContinuationModelRequest(input: {
     "",
     COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC,
   ].join("\n");
-  void input.retryInstruction;
+  const retryInstruction = input.retryInstruction?.trim();
 
   return {
     kind: "course_answer_continuation",
@@ -1407,6 +1410,14 @@ export function buildCourseAnswerContinuationModelRequest(input: {
             cacheable: true,
           }),
         },
+        ...(retryInstruction
+          ? [
+              {
+                role: "system" as const,
+                content: retryInstruction,
+              },
+            ]
+          : []),
         ...courseChatMessagesForModel(input.messages),
       ],
     },
@@ -1418,6 +1429,7 @@ export function buildCourseChatTurnModelRequest(input: {
   course: CourseDetail;
   messages: CourseChatMessage[];
   progressDecision?: CourseProgressDecision | null;
+  retryInstruction?: string | null;
   model?: string;
 }): CourseChatModelRequestPreview & {
   page: CourseToc["pages"][number];
@@ -1433,6 +1445,7 @@ export function buildCourseChatTurnModelRequest(input: {
     "",
     COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC,
   ].join("\n");
+  const retryInstruction = input.retryInstruction?.trim();
   void input.progressDecision;
 
   return {
@@ -1461,6 +1474,14 @@ export function buildCourseChatTurnModelRequest(input: {
             cacheable: true,
           }),
         },
+        ...(retryInstruction
+          ? [
+              {
+                role: "system" as const,
+                content: retryInstruction,
+              },
+            ]
+          : []),
         ...courseChatMessagesForModel(input.messages),
       ],
     },
@@ -1685,72 +1706,96 @@ export async function streamCourseChatTurn(input: {
     };
   }
 
-  const startedAt = Date.now();
-  let reportedQuestionWidgetToolDelta = false;
-  const request = buildCourseChatTurnModelRequest({
-    userId: input.userId,
-    course: input.course,
-    messages: input.messages,
-    progressDecision: input.progressDecision,
-    model: input.model,
-  });
-  const { page } = request;
-  const model = request.model;
-  const { body, response } = await openRouterChatCompletion({
-    apiKey: input.apiKey,
-    stream: true,
-    onTextDelta: input.onTextDelta,
-    trace: {
-      operation: "course_chat_turn",
+  const runAttempt = async (
+    retryInstruction: string | null,
+  ): Promise<{
+    content: string;
+    toolCalls: CourseQuestionWidgetToolCall[];
+  }> => {
+    const startedAt = Date.now();
+    let reportedQuestionWidgetToolDelta = false;
+    const request = buildCourseChatTurnModelRequest({
       userId: input.userId,
-      question: page.title,
-    },
-    onToolCallDelta() {
-      if (reportedQuestionWidgetToolDelta) {
-        return;
-      }
+      course: input.course,
+      messages: input.messages,
+      progressDecision: input.progressDecision,
+      retryInstruction,
+      model: input.model,
+    });
+    const { page } = request;
+    const model = request.model;
+    const { body, response } = await openRouterChatCompletion({
+      apiKey: input.apiKey,
+      stream: true,
+      onTextDelta: input.onTextDelta,
+      trace: {
+        operation: "course_chat_turn",
+        userId: input.userId,
+        question: page.title,
+      },
+      onToolCallDelta() {
+        if (reportedQuestionWidgetToolDelta) {
+          return;
+        }
 
-      reportedQuestionWidgetToolDelta = true;
-      input.onQuestionWidgetToolDelta?.();
-    },
-    body: request.requestBody,
-  });
+        reportedQuestionWidgetToolDelta = true;
+        input.onQuestionWidgetToolDelta?.();
+      },
+      body: request.requestBody,
+    });
 
-  if (!response.ok) {
-    throw new Error("Course chat generation failed.");
-  }
+    if (!response.ok) {
+      throw new Error("Course chat generation failed.");
+    }
 
-  reportResponseMetrics(input, body.usage, Date.now() - startedAt, model);
+    reportResponseMetrics(input, body.usage, Date.now() - startedAt, model);
 
-  const responseText = extractChatCompletionText(body);
-  const responseToolCalls = extractChatCompletionWidgetToolCalls(body);
-  const responseWidgets = courseQuestionWidgetsFromToolCalls(responseToolCalls);
-  const ensuredTurn = ensureCourseChatTurnHasLearnerQuestion({
-    text: responseText,
-    widgets: responseWidgets,
-    pageTitle: page.title,
-    pageObjective: page.objective,
-    stripTrailingPartialContent: didReachMaxCompletionTokens(
-      body.usage,
-      COURSE_CHAT_TURN_MAX_TOKENS,
-    ),
-  });
+    const responseText = extractChatCompletionText(body);
+    const responseToolCalls = extractChatCompletionWidgetToolCalls(body);
+    const responseWidgets = courseQuestionWidgetsFromToolCalls(responseToolCalls);
 
-  if (ensuredTurn.appendedText) {
-    input.onTextDelta(ensuredTurn.appendedText);
-  }
+    if (!responseText.trim()) {
+      throw new CourseTutorTextMissingError();
+    }
 
-  const ensuredToolCalls = ensuredTurn.widgets.map((widget, index) =>
-    courseQuestionWidgetToolCallFromWidget(
-      widget,
-      responseToolCalls[index]?.id ?? `widget-call-${widget.id}`,
-    ),
-  );
+    const ensuredTurn = ensureCourseChatTurnHasLearnerQuestion({
+      text: responseText,
+      widgets: responseWidgets,
+      pageTitle: page.title,
+      pageObjective: page.objective,
+      stripTrailingPartialContent: didReachMaxCompletionTokens(
+        body.usage,
+        COURSE_CHAT_TURN_MAX_TOKENS,
+      ),
+      requireVisibleTeachingTextWithWidgets: true,
+    });
 
-  return {
-    content: ensuredTurn.text,
-    toolCalls: ensuredToolCalls,
+    if (ensuredTurn.appendedText) {
+      input.onTextDelta(ensuredTurn.appendedText);
+    }
+
+    const ensuredToolCalls = ensuredTurn.widgets.map((widget, index) =>
+      courseQuestionWidgetToolCallFromWidget(
+        widget,
+        responseToolCalls[index]?.id ?? `widget-call-${widget.id}`,
+      ),
+    );
+
+    return {
+      content: ensuredTurn.text,
+      toolCalls: ensuredToolCalls,
+    };
   };
+
+  try {
+    return await runAttempt(null);
+  } catch (error) {
+    if (!(error instanceof CourseTutorTextMissingError)) {
+      throw error;
+    }
+  }
+
+  return runAttempt(COURSE_CHAT_VISIBLE_TEXT_RETRY_INSTRUCTION);
 }
 
 export async function generateCourseToc(input: {

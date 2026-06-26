@@ -1145,6 +1145,172 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
   }
 });
 
+test("streamCourseChatTurn retries widget-only tutor turns", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const requestBodies: Record<string, unknown>[] = [];
+  const deltas: string[] = [];
+  let pendingWidgetToolDeltas = 0;
+  const course = {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt: "Learn PPO",
+    title: "PPO",
+    description: "Learn Proximal Policy Optimization.",
+    toc: {
+      title: "PPO",
+      description: "Learn Proximal Policy Optimization.",
+      pages: [
+        {
+          title: "PPO Purpose",
+          objective:
+            "Understand the role of PPO in reinforcement learning and why it is preferred for stability.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: 1,
+    generatedPages: 1,
+    chatMessageCount: 0,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+
+  globalThis.fetch = async (_url, init) => {
+    requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<
+      string,
+      unknown
+    >);
+    const isRetry = requestBodies.length === 2;
+    const contentDelta = isRetry
+      ? "PPO is a way to improve an agent's policy without letting one noisy batch push it too far."
+      : "";
+
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (contentDelta) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  choices: [{ delta: { content: contentDelta } }],
+                })}\n\n`,
+              ),
+            );
+          }
+
+          controller.enqueue(
+            encoder.encode(
+              `data: ${JSON.stringify({
+                choices: [
+                  {
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: isRetry ? "call_ppo_retry" : "call_ppo_empty",
+                          type: "function",
+                          function: {
+                            name: "render_question_widget",
+                            arguments: JSON.stringify({
+                              type: "free_text",
+                              id: "ppo-stability",
+                              question:
+                                "Why should PPO avoid one very large policy update?",
+                            }),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+                usage: {
+                  prompt_tokens: isRetry ? 360 : 300,
+                  completion_tokens: isRetry ? 80 : 40,
+                  total_tokens: isRetry ? 440 : 340,
+                  cost: isRetry ? 0.002 : 0.001,
+                },
+              })}\n\n`,
+            ),
+          );
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+          controller.close();
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      },
+    );
+  };
+
+  try {
+    const result = await streamCourseChatTurn({
+      apiKey: "test-key",
+      model: "google/gemini-3.1-flash-lite",
+      userId: "user_1",
+      course,
+      messages: [
+        {
+          role: "user",
+          content: "I want to learn PPO",
+        },
+        {
+          role: "assistant",
+          content: "Generated the course table of contents.",
+          toolCalls: [
+            courseTocToolCallFromToc({
+              topic: course.topicPrompt,
+              toc: course.toc,
+            }),
+          ],
+        },
+      ],
+      onTextDelta(delta) {
+        deltas.push(delta);
+      },
+      onQuestionWidgetToolDelta() {
+        pendingWidgetToolDeltas += 1;
+      },
+    });
+
+    assert.equal(requestBodies.length, 2);
+    assert.equal(
+      result.content,
+      "PPO is a way to improve an agent's policy without letting one noisy batch push it too far.",
+    );
+    assert.doesNotMatch(result.content, /This section is about/u);
+    assert.equal(result.toolCalls[0]?.function.arguments.id, "ppo-stability");
+    assert.equal(
+      result.toolCalls[0]?.function.arguments.question,
+      "Why should PPO avoid one very large policy update?",
+    );
+    assert.deepEqual(deltas, [
+      "PPO is a way to improve an agent's policy without letting one noisy batch push it too far.",
+    ]);
+    assert.equal(pendingWidgetToolDeltas, 2);
+
+    const retryMessages = requestBodies[1]?.messages as Array<{
+      role: string;
+      content: unknown;
+    }>;
+    assert.equal(retryMessages[0]?.role, "system");
+    assert.equal(retryMessages[1]?.role, "system");
+    assert.match(
+      String(retryMessages[1]?.content),
+      /omitted the visible learner-facing lesson/u,
+    );
+    assert.equal(retryMessages[2]?.role, "user");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("buildCourseChatTurnModelRequest does not fabricate widget render tool responses", () => {
   const widget = {
     type: "free_text" as const,
