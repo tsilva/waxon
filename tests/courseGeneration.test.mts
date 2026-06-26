@@ -803,20 +803,33 @@ test("generateCourseToc keeps static instructions before dynamic topic", async (
         choices: [
           {
             message: {
-              content: JSON.stringify({
-                title: "PPO for Beginners",
-                description: "Learn PPO from first principles.",
-                pages: [
-                  {
-                    title: "What PPO Optimizes",
-                    objective: "Explain PPO's policy optimization goal.",
+              content: "",
+              tool_calls: [
+                {
+                  id: "call_course_toc",
+                  type: "function",
+                  function: {
+                    name: "generate_course_toc",
+                    arguments: JSON.stringify({
+                      topic: "Proximal Policy Optimization (PPO) for beginners",
+                      toc: {
+                        title: "PPO for Beginners",
+                        description: "Learn PPO from first principles.",
+                        pages: [
+                          {
+                            title: "What PPO Optimizes",
+                            objective: "Explain PPO's policy optimization goal.",
+                          },
+                          {
+                            title: "Why Clipping Helps",
+                            objective: "Explain why PPO limits policy updates.",
+                          },
+                        ],
+                      },
+                    }),
                   },
-                  {
-                    title: "Why Clipping Helps",
-                    objective: "Explain why PPO limits policy updates.",
-                  },
-                ],
-              }),
+                },
+              ],
             },
           },
         ],
@@ -846,6 +859,16 @@ test("generateCourseToc keeps static instructions before dynamic topic", async (
 
     const capturedBody = requestBody as Record<string, unknown>;
     assert.equal(capturedBody.model, DEFAULT_OPENROUTER_LEARN_MODEL);
+    assert.deepEqual(
+      (capturedBody as { tools?: Array<{ function?: { name?: string } }> })
+        .tools?.map((tool) => tool.function?.name),
+      ["generate_course_toc"],
+    );
+    assert.deepEqual((capturedBody as { tool_choice?: unknown }).tool_choice, {
+      type: "function",
+      function: { name: "generate_course_toc" },
+    });
+    assert.equal(capturedBody.parallel_tool_calls, false);
     const messages = capturedBody.messages as Array<{
       role: string;
       content: string;
@@ -979,7 +1002,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
 
     assert.ok(requestBody);
     const capturedBody = requestBody as Record<string, unknown>;
-    assert.equal(capturedBody.session_id, "learn:user_1:course-chat-v9");
+    assert.equal(capturedBody.session_id, "learn:user_1:course-chat-v10");
     assert.deepEqual(
       (capturedBody as { tools?: unknown[] }).tools?.[0],
       {
@@ -1300,7 +1323,7 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
 
     assert.ok(requestBody);
     const capturedBody = requestBody as Record<string, unknown>;
-    assert.equal(capturedBody.session_id, "learn:user_1:course-chat-v9");
+    assert.equal(capturedBody.session_id, "learn:user_1:course-chat-v10");
     assert.equal(capturedBody.parallel_tool_calls, true);
     assert.deepEqual(
       (capturedBody as { tools?: Array<{ function?: { name?: string } }> })
@@ -1331,7 +1354,7 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
       Record<string, unknown>
     >;
     const assistantHistoryMessage = requestMessages[2];
-    const userHistoryMessage = requestMessages[3];
+    const toolHistoryMessage = requestMessages[3];
 
     assert.deepEqual(systemContent[0]?.cache_control, { type: "ephemeral" });
     assert.match(String(systemContent[0]?.text), /Stable tutor instructions/u);
@@ -1349,7 +1372,7 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
       volatilePrompt,
       /1\. Why Relationships Matter \(current milestone\)/u,
     );
-    assert.match(volatilePrompt, /Learner answer:/u);
+    assert.doesNotMatch(volatilePrompt, /Learner answer:/u);
     assert.doesNotMatch(volatilePrompt, /Recent conversation JSON/u);
     assert.doesNotMatch(volatilePrompt, /"widgetAnswer"/u);
     assert.doesNotMatch(volatilePrompt, /"questionWidgets"/u);
@@ -1359,12 +1382,26 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
       /Why can repeated customer data cause update problems/u,
     );
     assert.equal(assistantHistoryMessage?.role, "assistant");
-    assert.match(
-      String(assistantHistoryMessage?.content),
-      /Question widget: Why can repeated customer data cause update problems/u,
+    assert.deepEqual(
+      assistantHistoryMessage?.tool_calls?.map(
+        (toolCall) => toolCall.function?.name,
+      ),
+      ["render_question_widget"],
     );
-    assert.equal(userHistoryMessage?.role, "user");
-    assert.match(String(userHistoryMessage?.content), /Learner answer:/u);
+    assert.doesNotMatch(
+      String(assistantHistoryMessage?.content),
+      /Question widget:/u,
+    );
+    assert.equal(toolHistoryMessage?.role, "tool");
+    assert.equal(toolHistoryMessage?.name, "render_question_widget");
+    assert.match(
+      String(toolHistoryMessage?.content),
+      /Why can repeated customer data cause update problems/u,
+    );
+    assert.match(
+      String(toolHistoryMessage?.content),
+      /You have to update it in many rows/u,
+    );
     assert.equal(requestMessages.length, 4);
     assert.deepEqual(events, [
       "decision:mark_milestone_done",
@@ -1457,27 +1494,43 @@ test("course answer continuation preserves stored chat chronology", () => {
   const messages = request.requestBody.messages as Array<{
     role: string;
     content: unknown;
+    name?: string;
+    tool_calls?: Array<{ function?: { name?: string } }>;
   }>;
   const history = messages.slice(2);
 
   assert.deepEqual(
     history.map((message) => message.role),
-    ["user", "assistant", "assistant", "user"],
+    ["user", "assistant", "tool", "assistant", "tool"],
   );
   assert.match(String(history[0]?.content), /I want to learn PPO/u);
-  assert.match(
-    String(history[1]?.content),
-    /Generated the course table of contents/u,
+  assert.equal(history[1]?.content, "");
+  assert.deepEqual(
+    history[1]?.tool_calls?.map((toolCall) => toolCall.function?.name),
+    ["generate_course_toc"],
   );
-  assert.doesNotMatch(
-    JSON.stringify(messages.slice(0, 2)),
-    /Generated the course/u,
-  );
+  assert.equal(history[2]?.role, "tool");
+  assert.equal(history[2]?.name, "generate_course_toc");
   assert.match(
     String(history[2]?.content),
-    /Question widget: What does PPO clipping prevent/u,
+    /PPO for Beginners|Learn Proximal Policy Optimization/u,
   );
-  assert.match(String(history[3]?.content), /Learner answer:/u);
+  assert.doesNotMatch(
+    JSON.stringify(messages),
+    /Generated the course/u,
+  );
+  assert.deepEqual(
+    history[3]?.tool_calls?.map((toolCall) => toolCall.function?.name),
+    ["render_question_widget"],
+  );
+  assert.doesNotMatch(String(history[3]?.content), /Question widget:/u);
+  assert.equal(history[4]?.role, "tool");
+  assert.equal(history[4]?.name, "render_question_widget");
+  assert.match(String(history[4]?.content), /What does PPO clipping prevent/u);
+  assert.match(
+    String(history[4]?.content),
+    /It prevents the policy from moving too far/u,
+  );
 });
 
 test("shouldUseCourseAnswerContinuationRequest skips Gemini live fallback churn", () => {
@@ -1737,7 +1790,7 @@ test("streamCourseChatTurn keeps the same cache-capable session key across Learn
 
     assert.equal(sessionIds.length, 2);
     assert.equal(sessionIds[0], sessionIds[1]);
-    assert.equal(sessionIds[0], "learn:user_1:course-chat-v9");
+    assert.equal(sessionIds[0], "learn:user_1:course-chat-v10");
   } finally {
     globalThis.fetch = originalFetch;
   }

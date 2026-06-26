@@ -4,9 +4,10 @@ import {
   buildCourseAnswerContinuationModelRequest,
   buildCourseChatTurnModelRequest,
   shouldUseCourseAnswerContinuationRequest,
+  storedCourseChatMessageToPromptMessage,
   type CourseChatMessage,
 } from "@/app/lib/courseGeneration";
-import { getCourse, type CourseChatMessageRecord } from "@/app/lib/courseStore";
+import { getCourse } from "@/app/lib/courseStore";
 import { courseQuestionWidgetsFromToolCalls } from "@/app/lib/courseQuestionWidget";
 import {
   DEFAULT_OPENROUTER_LEARN_MODEL,
@@ -19,19 +20,6 @@ export const dynamic = "force-dynamic";
 const MAX_PROMPT_PREVIEW_BODY_BYTES = 8 * 1024;
 const MAX_CHAT_MESSAGES = 20;
 const NEXT_INPUT_PLACEHOLDER = "<next learner input>";
-
-function storedCourseChatMessageToPromptMessage(
-  message: CourseChatMessageRecord,
-): CourseChatMessage {
-  return {
-    role: message.role,
-    content: message.content,
-    toolCalls: message.role === "assistant" ? message.toolCalls : [],
-    metrics: message.metrics,
-    evaluation: message.role === "assistant" ? message.evaluation : null,
-    widgetAnswer: message.role === "user" ? message.widgetAnswer : null,
-  };
-}
 
 function findLatestUnansweredWidget(messages: CourseChatMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {

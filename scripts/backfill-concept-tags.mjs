@@ -8,7 +8,11 @@ import {
   chunks,
   configureNeonWebSocket,
   createDatabasePool,
+  extractOpenRouterChatText,
+  fetchOpenRouterJson,
   loadLocalEnvFiles,
+  OPENROUTER_CHAT_URL,
+  OPENROUTER_EMBEDDINGS_URL,
   openRouterChatModel,
   requireOpenRouterApiKey,
   vectorLiteral,
@@ -17,8 +21,6 @@ import {
 loadLocalEnvFiles();
 configureNeonWebSocket(neonConfig);
 
-const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 const DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-2";
 const DEFAULT_BATCH_SIZE = 10;
 const FALLBACK_CONCEPT_SLUG = "needs-concept-tagging";
@@ -286,51 +288,12 @@ function buildPrompt(batch, candidateSlugsByUser) {
   });
 }
 
-function extractChatMessageText(body) {
-  const content = body?.choices?.[0]?.message?.content;
-
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === "string") {
-          return part;
-        }
-
-        if (part && typeof part === "object") {
-          const record = part;
-
-          if (typeof record.text === "string") {
-            return record.text;
-          }
-
-          if (typeof record.content === "string") {
-            return record.content;
-          }
-        }
-
-        return "";
-      })
-      .filter(Boolean)
-      .join("\n");
-  }
-
-  return "";
-}
-
 async function generateConceptSlugs(batch, candidateSlugsByUser, apiKey) {
-  const response = await fetch(OPENROUTER_CHAT_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:3000",
-      "X-Title": "waxon",
-    },
-    body: JSON.stringify({
+  const body = await fetchOpenRouterJson(OPENROUTER_CHAT_URL, {
+    apiKey,
+    errorPrefix: "Concept backfill request failed",
+    errorTextLength: 400,
+    body: {
       model: openRouterChatModel(),
       response_format: { type: "json_object" },
       temperature: 0.1,
@@ -345,18 +308,9 @@ async function generateConceptSlugs(batch, candidateSlugsByUser, apiKey) {
           content: buildPrompt(batch, candidateSlugsByUser),
         },
       ],
-    }),
+    },
   });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    throw new Error(
-      `Concept backfill request failed: ${response.status} ${errorText.slice(0, 400)}`,
-    );
-  }
-
-  const body = await response.json();
-  const content = extractChatMessageText(body);
+  const content = extractOpenRouterChatText(body);
   let parsed;
 
   try {
@@ -398,29 +352,16 @@ async function fetchConceptEmbeddings(slugs, apiKey) {
     return new Map();
   }
 
-  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:3000",
-      "X-Title": "waxon",
-    },
-    body: JSON.stringify({
+  const body = await fetchOpenRouterJson(OPENROUTER_EMBEDDINGS_URL, {
+    apiKey,
+    errorPrefix: "Concept embedding request failed",
+    errorTextLength: 400,
+    body: {
       model: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
       input: uniqueSlugs.map(titleCaseSlug),
       encoding_format: "float",
-    }),
+    },
   });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    throw new Error(
-      `Concept embedding request failed: ${response.status} ${errorText.slice(0, 400)}`,
-    );
-  }
-
-  const body = await response.json();
 
   if (!Array.isArray(body.data) || body.data.length !== uniqueSlugs.length) {
     throw new Error("Concept embedding response length did not match request.");

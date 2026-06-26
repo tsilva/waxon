@@ -1,3 +1,7 @@
+export const OPENROUTER_CHAT_URL =
+  "https://openrouter.ai/api/v1/chat/completions";
+export const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
+
 export function loadLocalEnvFiles(files = [".env", ".env.local"]) {
   for (const envFile of files) {
     try {
@@ -34,6 +38,69 @@ export function requireOpenRouterApiKey() {
 
 export function openRouterChatModel() {
   return process.env.LLM_MODEL?.trim() || "google/gemini-3.5-flash";
+}
+
+export function openRouterHeaders(apiKey) {
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+    "HTTP-Referer": "http://localhost:3000",
+    "X-Title": "waxon",
+  };
+}
+
+export async function fetchOpenRouterJson(
+  url,
+  { apiKey, body, errorPrefix, errorTextLength = 500 },
+) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: openRouterHeaders(apiKey),
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(
+      `${errorPrefix}: ${response.status} ${response.statusText} ${errorText.slice(
+        0,
+        errorTextLength,
+      )}`.trim(),
+    );
+  }
+
+  return response.json();
+}
+
+export function extractOpenRouterChatText(body) {
+  const content = body?.choices?.[0]?.message?.content;
+
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content
+    .map((part) => {
+      if (typeof part === "string") {
+        return part;
+      }
+
+      if (part && typeof part === "object") {
+        return typeof part.text === "string"
+          ? part.text
+          : typeof part.content === "string"
+            ? part.content
+            : "";
+      }
+
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function createDatabasePool(Pool) {

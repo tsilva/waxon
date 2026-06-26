@@ -4,8 +4,10 @@ import {
   chunks,
   configureNeonWebSocket,
   createDatabasePool,
+  fetchOpenRouterJson,
   loadLocalEnvFiles,
   logSavedProgress,
+  OPENROUTER_EMBEDDINGS_URL,
   requireOpenRouterApiKey,
   vectorLiteral,
 } from "./lib/runtime.mjs";
@@ -13,8 +15,6 @@ import {
 loadLocalEnvFiles();
 configureNeonWebSocket(neonConfig);
 
-const OPENROUTER_EMBEDDINGS_URL =
-  "https://openrouter.ai/api/v1/embeddings";
 const DEFAULT_MODEL = "google/gemini-embedding-2";
 const DEFAULT_KIND = "dedupe_v1";
 const DEFAULT_SOURCE_VERSION = 1;
@@ -126,31 +126,15 @@ function sourceHash(source) {
 }
 
 async function fetchEmbeddings(input, model, apiKey) {
-  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:3000",
-      "X-Title": "waxon",
-    },
-    body: JSON.stringify({
+  const body = await fetchOpenRouterJson(OPENROUTER_EMBEDDINGS_URL, {
+    apiKey,
+    errorPrefix: "OpenRouter embedding request failed",
+    body: {
       model,
       input,
       encoding_format: "float",
-    }),
+    },
   });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    throw new Error(
-      `OpenRouter embedding request failed: ${response.status} ${
-        response.statusText
-      } ${errorText.slice(0, 500)}`.trim(),
-    );
-  }
-
-  const body = await response.json();
 
   if (!Array.isArray(body.data) || body.data.length !== input.length) {
     throw new Error(

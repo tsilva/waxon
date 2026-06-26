@@ -10,6 +10,7 @@ import {
   generateCourseIntakeDecision,
   generateCourseToc,
   shouldUseCourseAnswerContinuationRequest,
+  storedCourseChatMessageToPromptMessage,
   streamCourseAnswerContinuation,
   streamCourseChatTurn,
   type CourseChatMessage,
@@ -26,13 +27,12 @@ import {
   getCourse,
   recordCourseChatQuestionAttempt,
   updateCourseToc,
-  type CourseChatMessageRecord,
   type CourseDetail,
 } from "@/app/lib/courseStore";
 import type { CourseMessageMetrics } from "@/app/lib/courseMessageMetrics";
 import {
   courseTocToolCallFromToc,
-  type CourseQuestionWidgetAnswerDetails,
+  normalizeCourseQuestionWidgetAnswerDetails,
   type CourseQuestionWidgetToolCall,
 } from "@/app/lib/courseQuestionWidget";
 import type { CourseToc } from "@/app/lib/courseContent";
@@ -89,46 +89,6 @@ type CourseChatLatencyMetrics = {
   rollback_count?: number;
 };
 
-function normalizedString(value: unknown, maxLength: number): string {
-  return typeof value === "string"
-    ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
-    : "";
-}
-
-function normalizeCourseWidgetAnswer(
-  value: unknown,
-): CourseQuestionWidgetAnswerDetails | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const answer = normalizedString(record.answer, 4_000);
-
-  if (!answer) {
-    return null;
-  }
-
-  return {
-    question: normalizedString(record.question, 1_200) || null,
-    widgetId: normalizedString(record.widgetId, 80) || null,
-    answer,
-  };
-}
-
-function storedCourseChatMessageToPromptMessage(
-  message: CourseChatMessageRecord,
-): CourseChatMessage {
-  return {
-    role: message.role,
-    content: message.content,
-    toolCalls: message.role === "assistant" ? message.toolCalls : [],
-    metrics: message.metrics,
-    evaluation: message.role === "assistant" ? message.evaluation : null,
-    widgetAnswer: message.role === "user" ? message.widgetAnswer : null,
-  };
-}
-
 function normalizeIncomingUserMessage(
   payload: Record<string, unknown>,
   maxLength: number,
@@ -155,7 +115,9 @@ function normalizeIncomingUserMessage(
     message: {
       role: "user",
       content: content.value,
-      widgetAnswer: normalizeCourseWidgetAnswer(messageRecord.widgetAnswer),
+      widgetAnswer: normalizeCourseQuestionWidgetAnswerDetails(
+        messageRecord.widgetAnswer,
+      ),
     },
   };
 }

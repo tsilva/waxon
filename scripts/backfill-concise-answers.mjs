@@ -8,8 +8,11 @@ import {
   chunks,
   configureNeonWebSocket,
   createDatabasePool,
+  extractOpenRouterChatText,
+  fetchOpenRouterJson,
   loadLocalEnvFiles,
   logSavedProgress,
+  OPENROUTER_CHAT_URL,
   openRouterChatModel,
   requireOpenRouterApiKey,
 } from "./lib/runtime.mjs";
@@ -72,15 +75,11 @@ async function loadQuestions(pool, force) {
 }
 
 async function generateConciseAnswers(batch, apiKey) {
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "http://localhost:3000",
-      "X-Title": "waxon",
-    },
-    body: JSON.stringify({
+  const body = await fetchOpenRouterJson(OPENROUTER_CHAT_URL, {
+    apiKey,
+    errorPrefix: "Concise answer request failed",
+    errorTextLength: 300,
+    body: {
       model: openRouterChatModel(),
       response_format: { type: "json_object" },
       temperature: 0,
@@ -102,19 +101,9 @@ async function generateConciseAnswers(batch, apiKey) {
           }),
         },
       ],
-    }),
+    },
   });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
-    throw new Error(
-      `Concise answer request failed: ${response.status} ${errorText.slice(0, 300)}`,
-    );
-  }
-
-  const body = await response.json();
-  const content = body.choices?.[0]?.message?.content;
-  const parsed = extractJsonObject(typeof content === "string" ? content : "");
+  const parsed = extractJsonObject(extractOpenRouterChatText(body));
 
   if (!Array.isArray(parsed.answers)) {
     throw new Error("Model returned no answers array.");

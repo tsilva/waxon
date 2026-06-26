@@ -1,5 +1,9 @@
 import { desc, sql } from "drizzle-orm";
 import type { llmTraceInteractions } from "../db/schema";
+import {
+  promptCacheMetricsFromOpenRouterUsage,
+  toFiniteNumber,
+} from "./courseMessageMetrics.ts";
 
 export type LlmTraceCallType =
   | "answer_eval"
@@ -570,41 +574,6 @@ function isTraceCall(value: unknown): value is LlmTraceCall {
   );
 }
 
-function toFiniteNumber(value: unknown): number | null {
-  const numberValue =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number.parseFloat(value)
-        : Number.NaN;
-
-  return Number.isFinite(numberValue) ? numberValue : null;
-}
-
-function readNumberProperty(source: unknown, key: string): number | null {
-  if (!source || typeof source !== "object") {
-    return null;
-  }
-
-  return toFiniteNumber((source as Record<string, unknown>)[key]);
-}
-
-function firstFiniteNumber(...values: Array<unknown>): number | null {
-  for (const value of values) {
-    const numberValue = toFiniteNumber(value);
-
-    if (numberValue !== null) {
-      return numberValue;
-    }
-  }
-
-  return null;
-}
-
-function normalizeTokenCount(value: number | null): number | null {
-  return value !== null && value >= 0 ? Math.round(value) : null;
-}
-
 function metricsFromLlmTraceUsage(
   usage: Parameters<typeof finishLlmTrace>[1]["usage"],
   inputTokens: number,
@@ -614,35 +583,17 @@ function metricsFromLlmTraceUsage(
   cacheWriteTokens: number;
   cacheHitPercent: number | null;
 } {
-  const promptTokenDetails = usage?.prompt_tokens_details;
-  const promptTokens =
-    normalizeTokenCount(toFiniteNumber(usage?.prompt_tokens)) ?? inputTokens;
-  const cachedPromptTokens =
-    normalizeTokenCount(
-      firstFiniteNumber(
-        readNumberProperty(promptTokenDetails, "cached_tokens"),
-        readNumberProperty(promptTokenDetails, "cache_read_tokens"),
-        usage?.cache_read_tokens,
-        usage?.cached_tokens,
-      ),
-    ) ?? 0;
-  const cacheWriteTokens =
-    normalizeTokenCount(
-      firstFiniteNumber(
-        usage?.cache_write_tokens,
-        usage?.cache_creation_input_tokens,
-        readNumberProperty(promptTokenDetails, "cache_write_tokens"),
-        readNumberProperty(promptTokenDetails, "cache_creation_input_tokens"),
-      ),
-    ) ?? 0;
-  const uncachedPromptTokens = Math.max(0, promptTokens - cachedPromptTokens);
-  const cacheHitPercent =
-    promptTokens > 0 ? (cachedPromptTokens / promptTokens) * 100 : null;
+  const cacheMetrics = promptCacheMetricsFromOpenRouterUsage(usage, inputTokens);
+  const cachedPromptTokens = cacheMetrics.cachedPromptTokens ?? 0;
+  const cacheWriteTokens = cacheMetrics.cacheWriteTokens ?? 0;
+  const uncachedPromptTokens =
+    cacheMetrics.uncachedPromptTokens ??
+    Math.max(0, (cacheMetrics.promptTokens ?? inputTokens) - cachedPromptTokens);
 
   return {
     cachedPromptTokens,
     uncachedPromptTokens,
     cacheWriteTokens,
-    cacheHitPercent,
+    cacheHitPercent: cacheMetrics.cacheHitPercent,
   };
 }
