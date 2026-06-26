@@ -7,8 +7,10 @@ import {
   shouldShowCourseChatInterruptedWarning,
 } from "../app/lib/courseChatTurn.ts";
 import {
+  COURSE_ANSWER_CONTINUATION_VISIBLE_TEXT_RETRY_INSTRUCTION,
   buildCourseAnswerContinuationModelRequest,
   buildCourseChatTurnModelRequest,
+  courseAnswerContinuationRetryInstructionForError,
   generateCourseAnswerDecision,
   generateCourseToc,
   shouldUseCourseAnswerContinuationRequest,
@@ -1783,6 +1785,112 @@ test("course answer continuation preserves stored chat chronology", () => {
     String(history[4]?.content),
     "It prevents the policy from moving too far in one update.",
   );
+});
+
+test("course answer continuation retries missing visible tutor prose with a focused nudge", () => {
+  const widget = {
+    type: "free_text" as const,
+    id: "ppo-clipping",
+    question: "What does PPO clipping prevent?",
+    placeholder: "Answer in one sentence...",
+  };
+  const course = {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt: "Learn PPO",
+    title: "PPO",
+    description: "Learn Proximal Policy Optimization.",
+    toc: {
+      title: "PPO",
+      description: "Learn Proximal Policy Optimization.",
+      pages: [
+        {
+          title: "PPO Clipping",
+          objective: "Explain why PPO clips policy updates.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: 1,
+    generatedPages: 1,
+    chatMessageCount: 4,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+  const retryInstruction = courseAnswerContinuationRetryInstructionForError(
+    new Error(
+      "Course answer continuation did not emit visible tutor text after the answer decision.",
+    ),
+  );
+
+  assert.equal(
+    retryInstruction,
+    COURSE_ANSWER_CONTINUATION_VISIBLE_TEXT_RETRY_INSTRUCTION,
+  );
+  assert.equal(
+    courseAnswerContinuationRetryInstructionForError(
+      new Error(
+        "Course answer continuation did not emit a question widget after the answer decision.",
+      ),
+    ),
+    null,
+  );
+
+  const request = buildCourseAnswerContinuationModelRequest({
+    userId: "user_1",
+    course,
+    model: "google/gemini-3.1-flash-lite",
+    retryInstruction,
+    messages: [
+      {
+        role: "assistant",
+        content: "PPO keeps policy updates from changing too much at once.",
+        toolCalls: [courseQuestionWidgetToolCallFromWidget(widget)],
+      },
+      {
+        role: "user",
+        content: "It prevents the policy from moving too far in one update.",
+        widgetAnswer: {
+          question: widget.question,
+          widgetId: widget.id,
+          answer: "It prevents the policy from moving too far in one update.",
+        },
+      },
+    ],
+  });
+  const messages = request.requestBody.messages as Array<{
+    role: string;
+    content: unknown;
+  }>;
+  const cacheableSystemContent = messages[0]?.content as Array<{
+    cache_control?: unknown;
+    text?: string;
+  }>;
+
+  assert.equal(messages[0]?.role, "system");
+  assert.deepEqual(cacheableSystemContent[0]?.cache_control, {
+    type: "ephemeral",
+  });
+  assert.doesNotMatch(
+    String(cacheableSystemContent[0]?.text),
+    /omitted visible learner-facing tutor text/u,
+  );
+  assert.equal(messages[1]?.role, "system");
+  assert.match(
+    String(messages[1]?.content),
+    /omitted visible learner-facing tutor text/u,
+  );
+  assert.match(
+    String(messages[1]?.content),
+    /record_course_answer_decision exactly once/u,
+  );
+  assert.equal(messages[2]?.role, "assistant");
+  assert.equal(messages[3]?.role, "tool");
 });
 
 test("shouldUseCourseAnswerContinuationRequest uses single transcript continuation for any model", () => {
