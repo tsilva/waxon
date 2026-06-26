@@ -1450,6 +1450,7 @@ export function buildCourseAnswerContinuationModelRequest(input: {
             cacheable: true,
           }),
         },
+        ...courseChatMessagesForModel(input.messages),
         {
           role: "system",
           content: openRouterPromptContent({
@@ -1457,7 +1458,6 @@ export function buildCourseAnswerContinuationModelRequest(input: {
             model,
           }),
         },
-        ...courseChatMessagesForModel(input.messages),
       ],
     },
   };
@@ -1533,6 +1533,7 @@ export function buildCourseChatTurnModelRequest(input: {
             cacheable: true,
           }),
         },
+        ...courseChatMessagesForModel(input.messages),
         {
           role: "system",
           content: openRouterPromptContent({
@@ -1540,7 +1541,6 @@ export function buildCourseChatTurnModelRequest(input: {
             model,
           }),
         },
-        ...courseChatMessagesForModel(input.messages),
       ],
     },
   };

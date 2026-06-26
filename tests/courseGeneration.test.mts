@@ -1185,12 +1185,18 @@ test("buildCourseChatTurnModelRequest does not fabricate widget render tool resp
     content: unknown;
     tool_calls?: Array<{ function?: { name?: string } }>;
   }>;
-  const history = messages.slice(2);
+  const history = messages.slice(1, -1);
+  const dynamicMessage = messages.at(-1);
+  const dynamicContent = dynamicMessage?.content as Array<
+    Record<string, unknown>
+  >;
 
   assert.deepEqual(
     history.map((message) => message.role),
     ["assistant"],
   );
+  assert.equal(dynamicMessage?.role, "system");
+  assert.match(String(dynamicContent[0]?.text), /Current course state/u);
   assert.equal(history[0]?.tool_calls, undefined);
   assert.match(
     String(history[0]?.content),
@@ -1424,11 +1430,11 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
     const systemContent = requestMessages[0]?.content as Array<
       Record<string, unknown>
     >;
-    const dynamicContent = requestMessages[1]?.content as Array<
+    const dynamicContent = requestMessages.at(-1)?.content as Array<
       Record<string, unknown>
     >;
-    const assistantHistoryMessage = requestMessages[2];
-    const toolHistoryMessage = requestMessages[3];
+    const assistantHistoryMessage = requestMessages[1];
+    const toolHistoryMessage = requestMessages[2];
 
     assert.deepEqual(systemContent[0]?.cache_control, { type: "ephemeral" });
     assert.match(String(systemContent[0]?.text), /Stable tutor instructions/u);
@@ -1437,7 +1443,7 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
       /record_course_answer_decision/u,
     );
     assert.doesNotMatch(String(systemContent[0]?.text), /Learner answer:/u);
-    assert.equal(requestMessages[1]?.role, "system");
+    assert.equal(requestMessages.at(-1)?.role, "system");
     assert.equal(dynamicContent[0]?.cache_control, undefined);
     const volatilePrompt = String(dynamicContent[0]?.text);
     assert.match(volatilePrompt, /Course title: SQL Joins/u);
@@ -1571,12 +1577,18 @@ test("course answer continuation preserves stored chat chronology", () => {
     name?: string;
     tool_calls?: Array<{ function?: { name?: string } }>;
   }>;
-  const history = messages.slice(2);
+  const history = messages.slice(1, -1);
+  const dynamicMessage = messages.at(-1);
+  const dynamicContent = dynamicMessage?.content as Array<
+    Record<string, unknown>
+  >;
 
   assert.deepEqual(
     history.map((message) => message.role),
     ["user", "assistant", "tool", "assistant", "tool"],
   );
+  assert.equal(dynamicMessage?.role, "system");
+  assert.match(String(dynamicContent[0]?.text), /Current course state/u);
   assert.match(String(history[0]?.content), /I want to learn PPO/u);
   assert.equal(history[1]?.content, "");
   assert.deepEqual(
