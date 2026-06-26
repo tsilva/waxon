@@ -1170,9 +1170,18 @@ export type CourseChatModelRequestPreview =
       requestBody: OpenRouterChatRequest;
     };
 
+function supportsSingleResponseCourseAnswerContinuation(model?: string): boolean {
+  return !/^google\/gemini/iu.test(model?.trim() ?? "");
+}
+
 export function shouldUseCourseAnswerContinuationRequest(
   messages: CourseChatMessage[],
+  model?: string,
 ): boolean {
+  if (!supportsSingleResponseCourseAnswerContinuation(model)) {
+    return false;
+  }
+
   const previousAssistantMessage = [...messages]
     .reverse()
     .find((message) => message.role === "assistant" && !message.evaluation);

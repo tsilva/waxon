@@ -112,7 +112,7 @@ export async function POST(request: Request) {
       : null,
   };
   const messages = [...storedMessages, nextUserMessage].slice(-MAX_CHAT_MESSAGES);
-  const requestPreview = shouldUseCourseAnswerContinuationRequest(messages)
+  const requestPreview = shouldUseCourseAnswerContinuationRequest(messages, model)
     ? buildCourseAnswerContinuationModelRequest({
         userId: user.id,
         course,
