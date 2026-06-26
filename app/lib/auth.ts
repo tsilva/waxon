@@ -1,6 +1,6 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import * as Sentry from "@sentry/nextjs";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import { authAccounts, users } from "@/app/db/schema";
 import { isLocalTestAuthEnabled, localTestUser } from "@/app/lib/localTestAuth";
@@ -126,18 +126,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
   });
   const now = Date.now();
 
-  const [existingAccount] = await db
-    .select({ userId: authAccounts.userId })
-    .from(authAccounts)
-    .where(
-      and(
-        eq(authAccounts.provider, CLERK_PROVIDER),
-        eq(authAccounts.providerAccountId, clerkUserId),
-      ),
-    )
-    .limit(1);
-
-  const userId = existingAccount?.userId ?? appUserIdForClerkUser(clerkUserId);
+  const userId = appUserIdForClerkUser(clerkUserId);
   setTraceIdentity({ userId, email, displayName });
 
   const [row] = await db
@@ -164,25 +153,31 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
       avatarUrl: users.avatarUrl,
     });
 
-  await db
-    .insert(authAccounts)
-    .values({
-      userId,
-      provider: CLERK_PROVIDER,
-      providerAccountId: clerkUserId,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [authAccounts.provider, authAccounts.providerAccountId],
-      set: {
-        userId,
-        updatedAt: now,
-      },
-    });
-
   if (!row) {
     throw new Error("Could not load current user.");
+  }
+
+  try {
+    await db
+      .insert(authAccounts)
+      .values({
+        userId,
+        provider: CLERK_PROVIDER,
+        providerAccountId: clerkUserId,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [authAccounts.provider, authAccounts.providerAccountId],
+        set: {
+          userId,
+          updatedAt: now,
+        },
+      });
+  } catch (error) {
+    console.info("[waxon] auth account sync skipped", {
+      error: error instanceof Error ? error.message : "unknown error",
+    });
   }
 
   return row;
