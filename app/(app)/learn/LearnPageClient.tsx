@@ -889,20 +889,67 @@ function LearnQuestionWidgetPlaceholder() {
 }
 
 function rawLearnConversationJson(input: {
+  selectedCourse: Course | null;
+  chatMessages: LearnChatMessage[];
+  draftCourseToc: CourseToc | null;
   promptPreview: LearnRawPromptPreview | null;
   promptPreviewError: string | null;
   isLoadingPromptPreview: boolean;
+  isStreaming: boolean;
 }) {
   const requestBody = input.promptPreview?.modelRequest?.requestBody;
 
+  if (requestBody) {
+    return JSON.stringify(requestBody, null, 2);
+  }
+
   return JSON.stringify(
-    requestBody ?? {
-      status: input.isLoadingPromptPreview
-        ? "loading"
-        : input.promptPreviewError
-          ? "error"
-          : "unavailable",
-      error: input.promptPreviewError,
+    {
+      source: "client_state",
+      modelRequestPreview: {
+        status: input.isStreaming
+          ? "streaming"
+          : input.isLoadingPromptPreview
+            ? "loading"
+            : input.promptPreviewError
+              ? "error"
+              : "unavailable",
+        error: input.promptPreviewError,
+      },
+      course: input.selectedCourse
+        ? {
+            id: input.selectedCourse.id,
+            topicPrompt: input.selectedCourse.topicPrompt,
+            title: input.selectedCourse.title,
+            description: input.selectedCourse.description,
+            status: input.selectedCourse.status,
+            currentPageIndex: input.selectedCourse.currentPageIndex,
+            totalPages: input.selectedCourse.totalPages,
+            generatedPages: input.selectedCourse.generatedPages,
+            conversationCost: input.selectedCourse.conversationCost,
+            toc: input.selectedCourse.toc,
+            draftToc: input.draftCourseToc,
+          }
+        : null,
+      messages: input.chatMessages.map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        status: message.status,
+        toolCalls: message.toolCalls,
+        questionWidgets:
+          message.role === "assistant"
+            ? courseQuestionWidgetsFromToolCalls(message.toolCalls)
+            : [],
+        widgetAnswer: message.widgetAnswer,
+        widgetAnswerDetails: message.widgetAnswerDetails,
+        pendingEvaluation: message.pendingEvaluation,
+        hasPendingQuestionWidget: message.hasPendingQuestionWidget,
+        evaluation: message.evaluation,
+        metrics: message.metrics,
+        interrupted: message.interrupted,
+        createdAt: message.createdAt,
+      })),
     },
     null,
     2,
@@ -1034,16 +1081,30 @@ export default function LearnPageClient({
     [courseSettingsId, courses],
   );
   const rawConversationJson = useMemo(
-    () =>
-      rawLearnConversationJson({
+    () => {
+      if (conversationViewMode !== "raw") {
+        return "";
+      }
+
+      return rawLearnConversationJson({
+        selectedCourse,
+        chatMessages,
+        draftCourseToc,
         promptPreview: rawPromptPreview,
         promptPreviewError: rawPromptPreviewError,
         isLoadingPromptPreview: isLoadingRawPromptPreview,
-      }),
+        isStreaming,
+      });
+    },
     [
+      chatMessages,
+      conversationViewMode,
+      draftCourseToc,
       isLoadingRawPromptPreview,
+      isStreaming,
       rawPromptPreview,
       rawPromptPreviewError,
+      selectedCourse,
     ],
   );
 
