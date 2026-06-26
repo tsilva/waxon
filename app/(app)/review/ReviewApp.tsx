@@ -10,6 +10,13 @@ import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
 import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
 import { SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
 import {
+  deferredReviewRetryQuestionIds,
+  mergeDeferredReviewRetryItem,
+  placeReviewRetryQuestion,
+  releaseDeferredReviewRetries,
+  type ReviewRetryQuestionIdentity,
+} from "@/app/lib/reviewRetryQueue";
+import {
   getSpeechRecognitionConstructor,
   mergeTranscriptText,
   type SpeechRecognition,
@@ -1152,6 +1159,7 @@ export default function ReviewApp({
   const isReviewSessionBackgroundLoadingRef = useRef(false);
   const isFlaggingQuestionRef = useRef(isFlaggingQuestion);
   const pendingRetryItemsRef = useRef(new Map<string, ReviewQueueItem>());
+  const deferredRetryItemsRef = useRef<ReviewQueueItem[]>([]);
   const processedEvaluationIdsRef = useRef(new Set<string>());
   const learnTargetKnowledgeBaseIdRef = useRef<string | null>(null);
   const queueStageRef = useRef<HTMLElement | null>(null);
@@ -1771,7 +1779,11 @@ export default function ReviewApp({
 
     isReviewSessionBackgroundLoadingRef.current = true;
 
-    const excludeQuestionIds = [anchorItem, ...currentQueue]
+    const excludeQuestionIds = [
+      anchorItem,
+      ...currentQueue,
+      ...deferredRetryItemsRef.current,
+    ]
       .map((item) => item.questionId)
       .filter((questionId): questionId is string => Boolean(questionId));
 
@@ -1832,6 +1844,9 @@ export default function ReviewApp({
 
       if (queue.length === 0) {
         queue = await fetchReviewSessionQueue({
+          excludeQuestionIds: deferredReviewRetryQuestionIds(
+            deferredRetryItemsRef.current,
+          ),
           limit: REVIEW_SESSION_FIRST_ITEM_LIMIT,
         });
       }
@@ -1841,7 +1856,18 @@ export default function ReviewApp({
       }
 
       const [nextItem, ...remainingItems] = queue;
-      const nextQueue = nextItem ? remainingItems : [];
+      let nextQueue = nextItem ? remainingItems : [];
+
+      if (nextItem) {
+        const releasedRetries = releaseDeferredReviewRetries({
+          currentItem: nextItem,
+          queue: nextQueue,
+          deferredRetryItems: deferredRetryItemsRef.current,
+        });
+
+        nextQueue = releasedRetries.queue;
+        deferredRetryItemsRef.current = releasedRetries.deferredRetryItems;
+      }
 
       sessionQueueRef.current = nextQueue;
       setSessionQueue(nextQueue);
@@ -2399,24 +2425,31 @@ export default function ReviewApp({
         conciseAnswer: evaluation.correctAnswer ?? retryItem.conciseAnswer,
         lastJustification: evaluation.justification,
       };
-      if (!questionRef.current && sessionQueueRef.current.length === 0) {
-        applyReviewQueueItem(updatedRetryItem);
-        continue;
+      const currentItem: ReviewRetryQuestionIdentity | null =
+        currentSessionItemRef.current ??
+        (questionRef.current
+          ? {
+              questionId: questionIdRef.current,
+              question: questionRef.current,
+            }
+          : null);
+      const placement = placeReviewRetryQuestion({
+        retryItem: updatedRetryItem,
+        currentItem,
+        queue: sessionQueueRef.current,
+      });
+
+      if (placement.deferredRetryItem) {
+        deferredRetryItemsRef.current = mergeDeferredReviewRetryItem(
+          deferredRetryItemsRef.current,
+          placement.deferredRetryItem,
+        );
       }
 
-      const nextQueue = [
-        updatedRetryItem,
-        ...sessionQueueRef.current.filter(
-          (item) =>
-            item.questionId !== updatedRetryItem.questionId &&
-            item.question !== updatedRetryItem.question,
-        ),
-      ];
-
-      sessionQueueRef.current = nextQueue;
-      setSessionQueue(nextQueue);
+      sessionQueueRef.current = placement.queue;
+      setSessionQueue(placement.queue);
     }
-  }, [applyReviewQueueItem, evaluations]);
+  }, [evaluations]);
 
   useEffect(() => {
     setMessages((current) => {

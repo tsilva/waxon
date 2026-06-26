@@ -1,12 +1,12 @@
-# Waxon Specs
+# Project Specs
 
-Durable product requirements for Waxon. Read this file before every task in this repo. After every task, update it when a durable requirement was learned, changed, or dropped.
+Durable product requirements for this project. Read this file before every task in this repo. After every task, update it when a durable requirement was learned, changed, or dropped.
 
 ## Product Summary
 
-Waxon is a chat-first LLM tutor for learning any topic. The user says what they want to learn; the tutor clarifies if needed, generates a table of contents, teaches one section at a time, asks a fresh question through a tool-rendered widget, evaluates the answer, and advances only when the tutor judges the learner is ready. The Learn flow should feel like one fast, natural LLM conversation with tool access, not a set of hidden app-side workflows.
+This project is a chat-first LLM tutor for learning any topic. The user says what they want to learn; the tutor clarifies if needed, generates a table of contents, teaches one section at a time, asks a fresh question through a tool-rendered widget, evaluates the answer, and advances only when the tutor judges the learner is ready. The Learn flow should feel like one fast, natural LLM conversation with tool access, not a set of hidden app-side workflows.
 
-Every generated learning question becomes a durable review item in one unified, tagged question bank. Review then resurfaces due free-text recall questions on a performance-based retention schedule, so the user can build and retain a large body of knowledge with the minimum effective learning and review time.
+Every answered Learn question becomes a durable review item in one unified, tagged question bank with its evaluation data. Review then resurfaces due free-text recall questions on a performance-based retention schedule, so the user can build and retain a large body of knowledge with the minimum effective learning and review time.
 
 ## Spec Maintenance Rules
 
@@ -20,11 +20,11 @@ Every generated learning question becomes a durable review item in one unified, 
 
 ## Product Scope
 
-- Waxon should support learning any topic, including technical topics like AI/ML and non-technical topics like languages.
+- The product should support learning any topic, including technical topics like AI/ML and non-technical topics like languages.
 - Current testing is mostly deep learning and AI/ML, but product decisions should not overfit to that domain.
 - The learner should learn content in the minimum effective time and interactions.
 - Production should support multiple users.
-- Local agent testing should use the local test account for Tiago and the current shared production database unless explicitly changed.
+- Local agent testing should use the local TCLV/Tiago test account and the current shared production database unless explicitly changed.
 - Because local testing uses the shared production database for now, agents must avoid destructive data actions unless the user explicitly allows them.
 
 ## Learn Flow
@@ -49,15 +49,15 @@ Every generated learning question becomes a durable review item in one unified, 
 - The LLM interacts with the app through tool calls: generate the table of contents, render a question widget, save/evaluate a review question, record section advancement, and complete the course.
 - User answers to question widgets should enter the conversation as tool responses to the question tool call.
 - Answer evaluation and lesson continuation should use the fewest LLM calls possible; prefer one call when the tool protocol can support it.
-- Evaluation/persistence should be represented through tool calls that store a free-text review question plus answer/evaluation data.
+- Evaluation/persistence should be represented through tool calls that store a free-text review question plus answer/evaluation data after the learner answers.
 - Section advancement should be emitted by the LLM through the conversation's tool protocol, preferably in the same call as the next teaching/question turn when possible.
 - Keep Learn orchestration inside the tool-call conversation model; avoid app-side workarounds that create hidden parallel teaching or evaluation flows.
 - Non-teaching background jobs are allowed for embeddings, tags, provenance, and other persistence work when they reduce latency and do not alter the Learn transcript or block the UX.
 
 ## Question Library
 
-- Waxon uses one unified question bank; topics and sources are organized with tags and provenance.
-- Every generated Learn question should be added to the question library so it can be reviewed later.
+- The app uses one unified question bank; topics and sources are organized with tags and provenance.
+- Learn questions should be added to the question library only after the learner answers them, so the stored review item already has answer/evaluation data and the flow can remain a single-call continuation.
 - Learn widgets may use multiple choice when useful, but durable review questions should be stored and resurfaced as free-text recall prompts.
 - Tags and provenance can be generated after the question is saved and must not delay the learning flow.
 - Question provenance should make it clear where a question came from, including Learn course and section context.
@@ -75,6 +75,7 @@ Every generated learning question becomes a durable review item in one unified, 
 
 - Sign-in and sign-up routes must render functional Clerk hosted UI components.
 - Auth fixes should be verified on the actual sign-in/sign-up flow before treating the issue as resolved.
+- Local product-flow checks do not need to verify sign-in or sign-up; they should use the local TCLV/Tiago user and verify access to Review, Learn, Tags, and Admin when those areas are relevant.
 
 ## UI
 
