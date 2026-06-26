@@ -693,14 +693,35 @@ function courseChatMessagesForModel(
           isMatchingWidgetAnswerToolCall(toolCall, nextWidgetAnswer),
         ),
     );
+    const toolCallsWithResults = toolCalls.filter(
+      (toolCall) =>
+        toolCall.function.name !== COURSE_QUESTION_WIDGET_TOOL_NAME ||
+        isMatchingWidgetAnswerToolCall(toolCall, nextWidgetAnswer),
+    );
+    const hasUnansweredWidgetToolCalls =
+      toolCallsWithResults.length < toolCalls.length;
+
+    if (toolCallsWithResults.length === 0) {
+      modelMessages.push({
+        role: "assistant",
+        content: hasUnansweredWidgetToolCalls
+          ? courseMessagePromptContext(message)
+          : message.content,
+      });
+      continue;
+    }
 
     modelMessages.push({
       role: "assistant",
-      content: shouldSuppressAssistantToolContent(message) ? "" : message.content,
-      tool_calls: toolCalls.map(openRouterToolCallFromCourseToolCall),
+      content: shouldSuppressAssistantToolContent(message)
+        ? ""
+        : hasUnansweredWidgetToolCalls
+          ? courseMessagePromptContext(message)
+          : message.content,
+      tool_calls: toolCallsWithResults.map(openRouterToolCallFromCourseToolCall),
     });
 
-    for (const toolCall of toolCalls) {
+    for (const toolCall of toolCallsWithResults) {
       modelMessages.push({
         role: "tool",
         tool_call_id: toolCall.id,
@@ -790,7 +811,11 @@ function courseToolResponseContent(
     });
   }
 
-  if (widgetAnswer?.answer) {
+  if (toolCall.function.name === COURSE_QUESTION_WIDGET_TOOL_NAME) {
+    if (!widgetAnswer?.answer) {
+      throw new Error("Question widget tool responses require a learner answer.");
+    }
+
     return JSON.stringify({
       widgetId: widgetAnswer.widgetId ?? toolCall.function.arguments.id,
       question: widgetAnswer.question ?? toolCall.function.arguments.question,
@@ -798,10 +823,7 @@ function courseToolResponseContent(
     });
   }
 
-  return JSON.stringify({
-    rendered: true,
-    widget: toolCall.function.arguments,
-  });
+  throw new Error("Unsupported course tool call.");
 }
 
 function courseMessagePromptContext(message: CourseChatMessage): string {

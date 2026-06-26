@@ -8,6 +8,7 @@ import {
 } from "../app/lib/courseChatTurn.ts";
 import {
   buildCourseAnswerContinuationModelRequest,
+  buildCourseChatTurnModelRequest,
   generateCourseAnswerDecision,
   generateCourseToc,
   shouldUseCourseAnswerContinuationRequest,
@@ -1128,6 +1129,79 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("buildCourseChatTurnModelRequest does not fabricate widget render tool responses", () => {
+  const widget = {
+    type: "free_text" as const,
+    id: "ppo-clipping-check",
+    question: "What does PPO clipping prevent?",
+    placeholder: "Explain the update limit...",
+  };
+  const course = {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt: "Learn PPO",
+    title: "PPO",
+    description: "Learn Proximal Policy Optimization.",
+    toc: {
+      title: "PPO",
+      description: "Learn Proximal Policy Optimization.",
+      pages: [
+        {
+          title: "PPO Purpose",
+          objective: "Explain what PPO is used for.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: 1,
+    generatedPages: 1,
+    chatMessageCount: 1,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+
+  const request = buildCourseChatTurnModelRequest({
+    userId: "user_1",
+    course,
+    model: "google/gemini-3.1-flash-lite",
+    messages: [
+      {
+        role: "assistant",
+        content: "PPO clipping limits how far a policy update can move.",
+        toolCalls: [courseQuestionWidgetToolCallFromWidget(widget)],
+      },
+    ],
+    progressDecision: null,
+  });
+  const messages = request.requestBody.messages as Array<{
+    role: string;
+    content: unknown;
+    tool_calls?: Array<{ function?: { name?: string } }>;
+  }>;
+  const history = messages.slice(2);
+
+  assert.deepEqual(
+    history.map((message) => message.role),
+    ["assistant"],
+  );
+  assert.equal(history[0]?.tool_calls, undefined);
+  assert.match(
+    String(history[0]?.content),
+    /PPO clipping limits how far a policy update can move/u,
+  );
+  assert.match(
+    String(history[0]?.content),
+    /Question widget: What does PPO clipping prevent/u,
+  );
+  assert.doesNotMatch(JSON.stringify(history), /"role":"tool"/u);
+  assert.doesNotMatch(JSON.stringify(history), /rendered/u);
 });
 
 test("streamCourseAnswerContinuation uses one cached stream for evaluation and next widget", async () => {
