@@ -11,7 +11,9 @@ type ClerkProviderComponent = ComponentType<{
   afterSignOutUrl?: string;
   children: ReactNode;
   prefetchUI?: boolean;
+  signInForceRedirectUrl?: string;
   signInUrl?: string;
+  signUpForceRedirectUrl?: string;
   signUpUrl?: string;
 }>;
 
@@ -23,6 +25,7 @@ type LoadedClerkWidgets = {
 };
 
 const verificationPath = "/sign-up/verify-email-address";
+const postAuthReviewUrl = "/review";
 
 const copyByMode = {
   "sign-in": {
@@ -48,6 +51,7 @@ export function AuthClerkHydrator({ mode }: { mode: AuthMode }) {
     null,
   );
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [showFallback, setShowFallback] = useState(false);
   const copy = copyByMode[mode];
   const isVerificationRoute = pathname === verificationPath;
@@ -69,16 +73,27 @@ export function AuthClerkHydrator({ mode }: { mode: AuthMode }) {
     }
 
     setIsLoading(true);
-    void import("@clerk/nextjs").then((module) => {
-      setLoadedWidgets({
-        ClerkProvider: module.ClerkProvider as ClerkProviderComponent,
-        Widget: (mode === "sign-in"
-          ? module.SignIn
-          : module.SignUp) as ClerkWidgetComponent,
+    setLoadError(false);
+    void import("@clerk/nextjs")
+      .then((module) => {
+        setLoadedWidgets({
+          ClerkProvider: module.ClerkProvider as ClerkProviderComponent,
+          Widget: (mode === "sign-in"
+            ? module.SignIn
+            : module.SignUp) as ClerkWidgetComponent,
+        });
+      })
+      .catch(() => {
+        setLoadError(true);
+      })
+      .finally(() => {
+        setIsLoading(false);
       });
-      setIsLoading(false);
-    });
   }, [isLoading, loadedWidgets, mode]);
+
+  useEffect(() => {
+    loadClerkWidget();
+  }, [loadClerkWidget]);
 
   useEffect(() => {
     if (mode !== "sign-up" || !isVerificationRoute || !loadedWidgets) {
@@ -103,25 +118,34 @@ export function AuthClerkHydrator({ mode }: { mode: AuthMode }) {
 
   return (
     <>
-      <section className="auth-static-shell" aria-labelledby="auth-static-title">
-        <p className="auth-fallback-kicker">{copy.kicker}</p>
-        <h1 id="auth-static-title">{copy.title}</h1>
-        <p>{copy.body}</p>
-        <button
-          className="auth-fallback-action"
-          type="button"
-          onClick={loadClerkWidget}
-          aria-busy={isLoading || Boolean(loadedWidgets)}
-        >
-          {isLoading || loadedWidgets ? copy.loading : copy.action}
-        </button>
-      </section>
+      {!loadedWidgets ? (
+        <section className="auth-static-shell" aria-labelledby="auth-static-title">
+          <p className="auth-fallback-kicker">{copy.kicker}</p>
+          <h1 id="auth-static-title">{copy.title}</h1>
+          <p>
+            {loadError
+              ? "The sign-in form could not load. Try again."
+              : copy.body}
+          </p>
+          <button
+            className="auth-fallback-action"
+            type="button"
+            onClick={loadClerkWidget}
+            aria-busy={isLoading}
+            disabled={isLoading}
+          >
+            {loadError ? copy.action : isLoading ? copy.loading : copy.action}
+          </button>
+        </section>
+      ) : null}
 
       {LoadedClerkProvider && LoadedWidget ? (
         <div className="auth-clerk-frame">
           <LoadedClerkProvider
             afterSignOutUrl="/"
+            signInForceRedirectUrl={postAuthReviewUrl}
             signInUrl="/sign-in"
+            signUpForceRedirectUrl={postAuthReviewUrl}
             signUpUrl="/sign-up"
           >
             <LoadedWidget />
