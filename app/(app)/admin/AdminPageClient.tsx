@@ -25,6 +25,11 @@ import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import {
+  normalizeTokenCount,
+  promptCacheMetricsFromOpenRouterUsage,
+  toFiniteNumber,
+} from "@/app/lib/courseMessageMetrics";
+import {
   ADMIN_VIEW_STATE_COOKIE,
   type AdminCachedViewState,
 } from "./adminViewStateCookie";
@@ -475,41 +480,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function toFiniteNumber(value: unknown): number | null {
-  const numberValue =
-    typeof value === "number"
-      ? value
-      : typeof value === "string"
-        ? Number.parseFloat(value)
-        : Number.NaN;
-
-  return Number.isFinite(numberValue) ? numberValue : null;
-}
-
-function readNumberProperty(source: unknown, key: string): number | null {
-  if (!isRecord(source)) {
-    return null;
-  }
-
-  return toFiniteNumber(source[key]);
-}
-
-function firstFiniteNumber(...values: Array<unknown>): number | null {
-  for (const value of values) {
-    const numberValue = toFiniteNumber(value);
-
-    if (numberValue !== null) {
-      return numberValue;
-    }
-  }
-
-  return null;
-}
-
-function normalizeTokenCount(value: number | null): number | null {
-  return value !== null && value >= 0 ? Math.round(value) : null;
-}
-
 function findUsageRecord(value: unknown): Record<string, unknown> | null {
   if (!isRecord(value)) {
     return null;
@@ -535,37 +505,26 @@ function traceCacheStatsForCall(
   responsePayload: string,
 ): TraceCacheStats {
   const usage = extractUsageFromPayload(responsePayload);
-  const promptTokenDetails = usage?.prompt_tokens_details;
-  const promptTokens =
-    normalizeTokenCount(toFiniteNumber(usage?.prompt_tokens)) ?? call.inputTokens;
+  const responseCacheMetrics = promptCacheMetricsFromOpenRouterUsage(
+    usage ?? undefined,
+    call.inputTokens,
+  );
+  const promptTokens = responseCacheMetrics.promptTokens ?? call.inputTokens;
   const cachedPromptTokens =
     normalizeTokenCount(toFiniteNumber(call.cachedPromptTokens)) ??
-    normalizeTokenCount(
-      firstFiniteNumber(
-        readNumberProperty(promptTokenDetails, "cached_tokens"),
-        readNumberProperty(promptTokenDetails, "cache_read_tokens"),
-        usage?.cache_read_tokens,
-        usage?.cached_tokens,
-      ),
-    ) ??
+    responseCacheMetrics.cachedPromptTokens ??
     0;
   const cacheWriteTokens =
     normalizeTokenCount(toFiniteNumber(call.cacheWriteTokens)) ??
-    normalizeTokenCount(
-      firstFiniteNumber(
-        usage?.cache_write_tokens,
-        usage?.cache_creation_input_tokens,
-        readNumberProperty(promptTokenDetails, "cache_write_tokens"),
-        readNumberProperty(promptTokenDetails, "cache_creation_input_tokens"),
-      ),
-    ) ??
+    responseCacheMetrics.cacheWriteTokens ??
     0;
   const uncachedPromptTokens =
     normalizeTokenCount(toFiniteNumber(call.uncachedPromptTokens)) ??
+    responseCacheMetrics.uncachedPromptTokens ??
     Math.max(0, promptTokens - cachedPromptTokens);
   const cacheHitPercent =
     toFiniteNumber(call.cacheHitPercent) ??
-    (promptTokens > 0 ? (cachedPromptTokens / promptTokens) * 100 : null);
+    responseCacheMetrics.cacheHitPercent;
 
   return {
     cachedPromptTokens,

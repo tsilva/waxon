@@ -22,6 +22,7 @@ import {
 import { reformatMultipleChoiceQuestionForReview } from "./courseQuestionAttemptParsing";
 import type { CourseMessageMetrics } from "./courseMessageMetrics";
 import {
+  normalizeCourseQuestionWidgetAnswerDetails,
   normalizeCourseToolCalls,
   type CourseQuestionWidgetAnswerDetails,
   type CourseToolCall,
@@ -207,27 +208,6 @@ function normalizeStoredEvaluation(
   };
 }
 
-function normalizeStoredWidgetAnswer(
-  value: unknown,
-): CourseQuestionWidgetAnswerDetails | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-
-  const record = value as Record<string, unknown>;
-  const answer = normalizedString(record.answer, 4_000);
-
-  if (!answer) {
-    return null;
-  }
-
-  return {
-    question: normalizedString(record.question, 1_200) || null,
-    widgetId: normalizedString(record.widgetId, 80) || null,
-    answer,
-  };
-}
-
 function toCourseChatMessage(row: {
   id: string;
   courseId: string;
@@ -258,7 +238,7 @@ function toCourseChatMessage(row: {
         : toolCalls,
     metrics: normalizeStoredMetrics(row.metrics),
     evaluation: normalizeStoredEvaluation(row.evaluation),
-    widgetAnswer: normalizeStoredWidgetAnswer(row.widgetAnswer),
+    widgetAnswer: normalizeCourseQuestionWidgetAnswerDetails(row.widgetAnswer),
     sequence: row.sequence,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -611,7 +591,7 @@ export async function replaceCourseChatMessages(input: {
           : null,
       widgetAnswer:
         message.role === "user"
-          ? normalizeStoredWidgetAnswer(message.widgetAnswer)
+          ? normalizeCourseQuestionWidgetAnswerDetails(message.widgetAnswer)
           : null,
     }))
     .filter((message) => message.content);
@@ -681,7 +661,7 @@ function normalizeCourseChatMessageWrite(message: CourseChatMessageWrite) {
         : null,
     widgetAnswer:
       message.role === "user"
-        ? normalizeStoredWidgetAnswer(message.widgetAnswer)
+        ? normalizeCourseQuestionWidgetAnswerDetails(message.widgetAnswer)
         : null,
   };
 }

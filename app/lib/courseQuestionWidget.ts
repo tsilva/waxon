@@ -54,11 +54,33 @@ export type CourseQuestionWidgetAnswerDetails = {
 const MAX_WIDGET_TEXT_CHARS = 1_200;
 const MAX_WIDGET_ID_CHARS = 80;
 const MAX_CHOICE_TEXT_CHARS = 500;
+const MAX_WIDGET_ANSWER_CHARS = 4_000;
 
 function normalizeText(value: unknown, maxLength: number): string {
   return typeof value === "string"
     ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
     : "";
+}
+
+export function normalizeCourseQuestionWidgetAnswerDetails(
+  value: unknown,
+): CourseQuestionWidgetAnswerDetails | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const answer = normalizeText(record.answer, MAX_WIDGET_ANSWER_CHARS);
+
+  if (!answer) {
+    return null;
+  }
+
+  return {
+    question: normalizeText(record.question, MAX_WIDGET_TEXT_CHARS) || null,
+    widgetId: normalizeText(record.widgetId, MAX_WIDGET_ID_CHARS) || null,
+    answer,
+  };
 }
 
 export function normalizeCourseQuestionWidget(

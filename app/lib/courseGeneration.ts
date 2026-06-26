@@ -1,7 +1,9 @@
 import {
   DEFAULT_OPENROUTER_LEARN_MODEL,
+  extractChatCompletionToolCalls,
   extractChatCompletionText,
   getOpenRouterEvaluationReasoning,
+  mergeStreamingToolCallDeltas,
   openRouterChatCompletion,
   type OpenRouterChatResponse,
   type OpenRouterMessage,
@@ -29,9 +31,11 @@ import {
 } from "./courseQuestionAttemptParsing.ts";
 import {
   COURSE_QUESTION_WIDGET_TOOL_NAME,
+  COURSE_TOC_TOOL_NAME,
   courseQuestionWidgetToolCallFromWidget,
   courseQuestionWidgetsFromToolCalls,
   formatCourseQuestionWidgetsForPrompt,
+  normalizeCourseToolCalls,
   type CourseQuestionWidget,
   type CourseQuestionWidgetAnswerDetails,
   type CourseToolCall,
@@ -42,6 +46,7 @@ import {
   type PartialCourseToc,
 } from "./courseTocStream.ts";
 import type {
+  CourseChatMessageRecord,
   CourseChatMessageEvaluation,
   CourseDetail,
 } from "./courseStore";
@@ -100,6 +105,63 @@ const COURSE_QUESTION_WIDGET_TOOL = {
         },
       },
       required: ["type", "id", "question"],
+    },
+  },
+} as const;
+const COURSE_TOC_TOOL = {
+  type: "function",
+  function: {
+    name: COURSE_TOC_TOOL_NAME,
+    description:
+      "Generate the learner-facing table of contents for a new Learn course.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        topic: {
+          type: "string",
+          description: "The learner's requested course topic.",
+        },
+        toc: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: {
+              type: "string",
+              description: "Specific course title.",
+            },
+            description: {
+              type: "string",
+              description: "Short course description.",
+            },
+            pages: {
+              type: "array",
+              description:
+                "Flat course pages. Do not group pages into chapters or sections.",
+              minItems: 6,
+              maxItems: 16,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  title: {
+                    type: "string",
+                    description: "Specific page title.",
+                  },
+                  objective: {
+                    type: "string",
+                    description:
+                      "Learner-facing objective for this page.",
+                  },
+                },
+                required: ["title", "objective"],
+              },
+            },
+          },
+          required: ["title", "description", "pages"],
+        },
+      },
+      required: ["topic", "toc"],
     },
   },
 } as const;
@@ -247,6 +309,19 @@ export type CourseChatMessage = {
 export type { CourseQuestionAttemptToolResult };
 export type { CourseAnswerDecisionToolResult };
 
+export function storedCourseChatMessageToPromptMessage(
+  message: CourseChatMessageRecord,
+): CourseChatMessage {
+  return {
+    role: message.role,
+    content: message.content,
+    toolCalls: message.role === "assistant" ? message.toolCalls : [],
+    metrics: message.metrics,
+    evaluation: message.role === "assistant" ? message.evaluation : null,
+    widgetAnswer: message.role === "user" ? message.widgetAnswer : null,
+  };
+}
+
 function normalizeIntakeText(value: unknown, maxLength: number): string {
   return typeof value === "string"
     ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
@@ -308,12 +383,6 @@ function extractChatCompletionWidgetToolCalls(
   });
 }
 
-function extractChatCompletionToolCalls(
-  body: OpenRouterChatResponse,
-): OpenRouterToolCall[] {
-  return body.choices?.[0]?.message?.tool_calls ?? [];
-}
-
 function parseToolCallArguments(toolCall: OpenRouterToolCall): unknown | null {
   const rawArguments = toolCall.function?.arguments;
 
@@ -325,45 +394,6 @@ function parseToolCallArguments(toolCall: OpenRouterToolCall): unknown | null {
     return JSON.parse(rawArguments);
   } catch {
     return null;
-  }
-}
-
-function mergeStreamingLearnToolDeltas(
-  toolCalls: Array<OpenRouterToolCall & { index?: number }>,
-  deltas: OpenRouterToolCall[],
-) {
-  for (const [fallbackIndex, delta] of deltas.entries()) {
-    const deltaWithIndex = delta as OpenRouterToolCall & { index?: unknown };
-    const index =
-      typeof deltaWithIndex.index === "number" &&
-      Number.isFinite(deltaWithIndex.index) &&
-      deltaWithIndex.index >= 0
-        ? Math.round(deltaWithIndex.index)
-        : fallbackIndex;
-    const existing =
-      toolCalls[index] ??
-      ({
-        function: {
-          arguments: "",
-        },
-      } as OpenRouterToolCall & { index?: number });
-
-    existing.index = index;
-    existing.id = delta.id ?? existing.id;
-    existing.type = delta.type ?? existing.type;
-
-    if (delta.function) {
-      existing.function = {
-        name: delta.function.name ?? existing.function?.name,
-        arguments:
-          (existing.function?.arguments ?? "") +
-          (typeof delta.function.arguments === "string"
-            ? delta.function.arguments
-            : ""),
-      };
-    }
-
-    toolCalls[index] = existing;
   }
 }
 
@@ -623,25 +653,155 @@ function formatCoursePlanForPrompt(course: CourseDetail): string {
 function courseChatMessagesForModel(
   messages: CourseChatMessage[],
 ): OpenRouterMessage[] {
-  return messages
-    .slice(-10)
-    .map((message) => {
-      const content = courseMessagePromptContext(message);
-      const widgetAnswer = message.role === "user" ? message.widgetAnswer : null;
+  const selectedMessages = selectCourseMessagesForModel(messages);
+  const modelMessages: OpenRouterMessage[] = [];
 
-      return {
-        role: message.role,
-        content:
-          widgetAnswer?.answer
-            ? [
-                content,
-                `Answered widget question: ${widgetAnswer.question ?? "unknown"}`,
-                `Answered widget id: ${widgetAnswer.widgetId ?? "unknown"}`,
-                `Learner answer: ${widgetAnswer.answer}`,
-              ].join("\n\n")
-            : content,
-      };
+  for (let index = 0; index < selectedMessages.length; index += 1) {
+    const message = selectedMessages[index];
+
+    if (!message) {
+      continue;
+    }
+
+    if (message.role === "user") {
+      if (!message.widgetAnswer?.answer) {
+        modelMessages.push({
+          role: "user",
+          content: message.content,
+        });
+      }
+
+      continue;
+    }
+
+    const toolCalls = normalizeCourseToolCalls(message.toolCalls);
+
+    if (toolCalls.length === 0) {
+      modelMessages.push({
+        role: "assistant",
+        content: message.content,
+      });
+      continue;
+    }
+
+    const nextMessage = selectedMessages[index + 1];
+    const nextWidgetAnswer =
+      nextMessage?.role === "user" ? nextMessage.widgetAnswer : null;
+    const shouldConsumeNextWidgetAnswer = Boolean(
+      nextWidgetAnswer?.answer &&
+        toolCalls.some((toolCall) =>
+          isMatchingWidgetAnswerToolCall(toolCall, nextWidgetAnswer),
+        ),
+    );
+
+    modelMessages.push({
+      role: "assistant",
+      content: shouldSuppressAssistantToolContent(message) ? "" : message.content,
+      tool_calls: toolCalls.map(openRouterToolCallFromCourseToolCall),
     });
+
+    for (const toolCall of toolCalls) {
+      modelMessages.push({
+        role: "tool",
+        tool_call_id: toolCall.id,
+        name: toolCall.function.name,
+        content: courseToolResponseContent(
+          toolCall,
+          shouldConsumeNextWidgetAnswer ? (nextWidgetAnswer ?? null) : null,
+        ),
+      });
+    }
+
+    if (shouldConsumeNextWidgetAnswer) {
+      index += 1;
+    }
+  }
+
+  return modelMessages;
+}
+
+function selectCourseMessagesForModel(
+  messages: CourseChatMessage[],
+): CourseChatMessage[] {
+  const selectedMessages = messages.slice(-10);
+  const firstMessage = selectedMessages[0];
+
+  if (firstMessage?.role !== "user" || !firstMessage.widgetAnswer?.answer) {
+    return selectedMessages;
+  }
+
+  const firstSelectedIndex = messages.length - selectedMessages.length;
+  const previousAssistantMessage = messages
+    .slice(0, firstSelectedIndex)
+    .reverse()
+    .find((message) => message.role === "assistant");
+
+  return previousAssistantMessage
+    ? [previousAssistantMessage, ...selectedMessages]
+    : selectedMessages;
+}
+
+function openRouterToolCallFromCourseToolCall(
+  toolCall: CourseToolCall,
+): OpenRouterToolCall {
+  return {
+    id: toolCall.id,
+    type: "function",
+    function: {
+      name: toolCall.function.name,
+      arguments: JSON.stringify(toolCall.function.arguments),
+    },
+  };
+}
+
+function shouldSuppressAssistantToolContent(message: CourseChatMessage): boolean {
+  return (
+    message.content.trim() === "Generated the course table of contents." &&
+    normalizeCourseToolCalls(message.toolCalls).some(
+      (toolCall) => toolCall.function.name === COURSE_TOC_TOOL_NAME,
+    )
+  );
+}
+
+function isMatchingWidgetAnswerToolCall(
+  toolCall: CourseToolCall,
+  widgetAnswer: CourseQuestionWidgetAnswerDetails | null | undefined,
+): boolean {
+  if (
+    !widgetAnswer?.answer ||
+    toolCall.function.name !== COURSE_QUESTION_WIDGET_TOOL_NAME
+  ) {
+    return false;
+  }
+
+  return widgetAnswer.widgetId
+    ? toolCall.function.arguments.id === widgetAnswer.widgetId
+    : true;
+}
+
+function courseToolResponseContent(
+  toolCall: CourseToolCall,
+  widgetAnswer: CourseQuestionWidgetAnswerDetails | null,
+): string {
+  if (toolCall.function.name === COURSE_TOC_TOOL_NAME) {
+    return JSON.stringify({
+      topic: toolCall.function.arguments.topic,
+      toc: toolCall.function.arguments.toc,
+    });
+  }
+
+  if (widgetAnswer?.answer) {
+    return JSON.stringify({
+      widgetId: widgetAnswer.widgetId ?? toolCall.function.arguments.id,
+      question: widgetAnswer.question ?? toolCall.function.arguments.question,
+      answer: widgetAnswer.answer,
+    });
+  }
+
+  return JSON.stringify({
+    rendered: true,
+    widget: toolCall.function.arguments,
+  });
 }
 
 function courseMessagePromptContext(message: CourseChatMessage): string {
@@ -695,7 +855,7 @@ function courseChatSessionId(input: {
   course: CourseDetail;
 }): string {
   void input.course;
-  return `learn:${input.userId}:course-chat-v9`.slice(0, 256);
+  return `learn:${input.userId}:course-chat-v10`.slice(0, 256);
 }
 
 function courseAnswerDecisionSessionId(input: { userId: string }): string {
@@ -1448,7 +1608,7 @@ export async function streamCourseAnswerContinuation(input: {
       question: page.title,
     },
     async onToolCallDelta(toolCallDeltas) {
-      mergeStreamingLearnToolDeltas(streamedToolCalls, toolCallDeltas);
+      mergeStreamingToolCallDeltas(streamedToolCalls, toolCallDeltas);
 
       for (const toolCall of streamedToolCalls) {
         await tryAcceptAnswerDecision(toolCall);
@@ -1637,6 +1797,7 @@ export async function generateCourseToc(input: {
 } & CourseCostObserver): Promise<CourseToc> {
   let streamedContent = "";
   let lastPartialSignature = "";
+  const streamedToolCalls: Array<OpenRouterToolCall & { index?: number }> = [];
   const onTextDelta = input.onPartialToc
     ? (delta: string) => {
         streamedContent += delta;
@@ -1664,9 +1825,14 @@ export async function generateCourseToc(input: {
     },
     body: {
       model: input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL,
-      response_format: COURSE_JSON_RESPONSE_FORMAT,
       temperature: 0.4,
       max_tokens: 1_800,
+      tools: [COURSE_TOC_TOOL],
+      tool_choice: {
+        type: "function",
+        function: { name: COURSE_TOC_TOOL_NAME },
+      },
+      parallel_tool_calls: false,
       messages: [
         {
           role: "system",
@@ -1680,6 +1846,28 @@ export async function generateCourseToc(input: {
         },
       ],
     },
+    onToolCallDelta(toolCallDeltas) {
+      if (!input.onPartialToc) {
+        return;
+      }
+
+      mergeStreamingToolCallDeltas(streamedToolCalls, toolCallDeltas);
+
+      const tocToolCall = streamedToolCalls.find(
+        (toolCall) => toolCall.function?.name === COURSE_TOC_TOOL_NAME,
+      );
+      const streamedArguments = tocToolCall?.function?.arguments ?? "";
+      const partialToc = normalizePartialCourseToc(streamedArguments);
+      const partialSignature = JSON.stringify(partialToc);
+
+      if (
+        partialSignature !== lastPartialSignature &&
+        (partialToc.title || partialToc.description || partialToc.pages.length > 0)
+      ) {
+        lastPartialSignature = partialSignature;
+        input.onPartialToc(partialToc);
+      }
+    },
   });
 
   if (!response.ok) {
@@ -1687,6 +1875,14 @@ export async function generateCourseToc(input: {
   }
 
   reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
+
+  const tocToolCall = normalizeCourseToolCalls(
+    extractChatCompletionToolCalls(body),
+  ).find((toolCall) => toolCall.function.name === COURSE_TOC_TOOL_NAME);
+
+  if (tocToolCall?.function.name === COURSE_TOC_TOOL_NAME) {
+    return tocToolCall.function.arguments.toc;
+  }
 
   return parseCourseTocJson(extractChatCompletionText(body));
 }

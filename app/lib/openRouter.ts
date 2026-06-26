@@ -264,6 +264,12 @@ export function extractChatCompletionText(response: unknown): string {
   return "";
 }
 
+export function extractChatCompletionToolCalls(
+  response: OpenRouterChatResponse,
+): OpenRouterToolCall[] {
+  return response.choices?.[0]?.message?.tool_calls ?? [];
+}
+
 export function extractAffordableOpenRouterMaxTokens(
   responseBody: unknown,
 ): number | null {
@@ -371,7 +377,7 @@ function extractStreamingToolCallDeltas(chunk: unknown): OpenRouterToolCall[] {
   return Array.isArray(toolCalls) ? (toolCalls as OpenRouterToolCall[]) : [];
 }
 
-function mergeStreamingToolCallDeltas(
+export function mergeStreamingToolCallDeltas(
   toolCalls: Array<OpenRouterToolCall & { index?: number }>,
   deltas: OpenRouterToolCall[],
 ) {

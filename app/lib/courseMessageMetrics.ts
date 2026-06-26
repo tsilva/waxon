@@ -13,7 +13,27 @@ export type CourseMessageMetrics = {
   contextPercent: number | null;
 };
 
-function toFiniteNumber(value: unknown): number | null {
+export type OpenRouterUsageMetrics = {
+  prompt_tokens?: unknown;
+  completion_tokens?: unknown;
+  total_tokens?: unknown;
+  cost?: unknown;
+  prompt_tokens_details?: unknown;
+  cache_read_tokens?: unknown;
+  cached_tokens?: unknown;
+  cache_write_tokens?: unknown;
+  cache_creation_input_tokens?: unknown;
+};
+
+export type PromptCacheMetrics = {
+  promptTokens: number | null;
+  cachedPromptTokens: number | null;
+  uncachedPromptTokens: number | null;
+  cacheWriteTokens: number | null;
+  cacheHitPercent: number | null;
+};
+
+export function toFiniteNumber(value: unknown): number | null {
   const numberValue =
     typeof value === "number"
       ? value
@@ -49,57 +69,63 @@ function firstFiniteNumber(...values: Array<unknown>): number | null {
   return null;
 }
 
-function normalizeTokenCount(value: number | null): number | null {
+export function normalizeTokenCount(value: number | null): number | null {
   return value !== null && value >= 0 ? Math.round(value) : null;
 }
 
+export function promptCacheMetricsFromOpenRouterUsage(
+  usage: OpenRouterUsageMetrics | undefined,
+  promptTokensFallback: number | null = null,
+): PromptCacheMetrics {
+  const promptTokenDetails = usage?.prompt_tokens_details;
+  const promptTokens =
+    normalizeTokenCount(toFiniteNumber(usage?.prompt_tokens)) ??
+    normalizeTokenCount(promptTokensFallback);
+  const cachedPromptTokens = normalizeTokenCount(
+    firstFiniteNumber(
+      readNumberProperty(promptTokenDetails, "cached_tokens"),
+      readNumberProperty(promptTokenDetails, "cache_read_tokens"),
+      usage?.cache_read_tokens,
+      usage?.cached_tokens,
+    ),
+  );
+  const cacheWriteTokens = normalizeTokenCount(
+    firstFiniteNumber(
+      usage?.cache_write_tokens,
+      usage?.cache_creation_input_tokens,
+      readNumberProperty(promptTokenDetails, "cache_write_tokens"),
+      readNumberProperty(promptTokenDetails, "cache_creation_input_tokens"),
+    ),
+  );
+  const uncachedPromptTokens =
+    promptTokens !== null && cachedPromptTokens !== null
+      ? Math.max(0, promptTokens - cachedPromptTokens)
+      : null;
+  const cacheHitPercent =
+    promptTokens !== null && promptTokens > 0 && cachedPromptTokens !== null
+      ? (cachedPromptTokens / promptTokens) * 100
+      : null;
+
+  return {
+    promptTokens,
+    cachedPromptTokens,
+    uncachedPromptTokens,
+    cacheWriteTokens,
+    cacheHitPercent,
+  };
+}
+
 export function metricsFromOpenRouterUsage(
-  usage: {
-    prompt_tokens?: unknown;
-    completion_tokens?: unknown;
-    total_tokens?: unknown;
-    cost?: unknown;
-    prompt_tokens_details?: unknown;
-    cache_read_tokens?: unknown;
-    cached_tokens?: unknown;
-    cache_write_tokens?: unknown;
-    cache_creation_input_tokens?: unknown;
-  } | undefined,
+  usage: OpenRouterUsageMetrics | undefined,
   latencyMs: number,
   contextWindowTokens: number | null = null,
 ): CourseMessageMetrics | null {
   const cost = toFiniteNumber(usage?.cost);
-  const promptTokens = toFiniteNumber(usage?.prompt_tokens);
-  const promptTokenDetails = usage?.prompt_tokens_details;
-  const cachedPromptTokens = firstFiniteNumber(
-    readNumberProperty(promptTokenDetails, "cached_tokens"),
-    readNumberProperty(promptTokenDetails, "cache_read_tokens"),
-    usage?.cache_read_tokens,
-    usage?.cached_tokens,
-  );
-  const cacheWriteTokens = firstFiniteNumber(
-    usage?.cache_write_tokens,
-    usage?.cache_creation_input_tokens,
-    readNumberProperty(promptTokenDetails, "cache_write_tokens"),
-    readNumberProperty(promptTokenDetails, "cache_creation_input_tokens"),
-  );
+  const cacheMetrics = promptCacheMetricsFromOpenRouterUsage(usage);
   const outputTokens = toFiniteNumber(usage?.completion_tokens);
   const totalTokens = toFiniteNumber(usage?.total_tokens);
   const roundedLatencyMs =
     Number.isFinite(latencyMs) && latencyMs > 0 ? Math.round(latencyMs) : null;
-  const roundedPromptTokens = normalizeTokenCount(promptTokens);
-  const roundedCachedPromptTokens = normalizeTokenCount(cachedPromptTokens);
-  const roundedCacheWriteTokens = normalizeTokenCount(cacheWriteTokens);
-  const uncachedPromptTokens =
-    roundedPromptTokens !== null && roundedCachedPromptTokens !== null
-      ? Math.max(0, roundedPromptTokens - roundedCachedPromptTokens)
-      : null;
-  const cacheHitPercent =
-    roundedPromptTokens !== null &&
-    roundedPromptTokens > 0 &&
-    roundedCachedPromptTokens !== null
-      ? (roundedCachedPromptTokens / roundedPromptTokens) * 100
-      : null;
   const tokensPerSecond =
     outputTokens !== null && outputTokens > 0 && roundedLatencyMs !== null
       ? outputTokens / (roundedLatencyMs / 1000)
@@ -111,16 +137,16 @@ export function metricsFromOpenRouterUsage(
       ? Math.round(contextWindowTokens)
       : null;
   const contextPercent =
-    promptTokens !== null &&
-    promptTokens >= 0 &&
+    cacheMetrics.promptTokens !== null &&
+    cacheMetrics.promptTokens >= 0 &&
     roundedContextWindowTokens !== null
-      ? (promptTokens / roundedContextWindowTokens) * 100
+      ? (cacheMetrics.promptTokens / roundedContextWindowTokens) * 100
       : null;
 
   if (
     (cost === null || cost < 0) &&
-    roundedCachedPromptTokens === null &&
-    roundedCacheWriteTokens === null &&
+    cacheMetrics.cachedPromptTokens === null &&
+    cacheMetrics.cacheWriteTokens === null &&
     tokensPerSecond === null &&
     contextPercent === null
   ) {
@@ -129,11 +155,11 @@ export function metricsFromOpenRouterUsage(
 
   return {
     cost: cost !== null && cost >= 0 ? cost : null,
-    promptTokens: roundedPromptTokens,
-    cachedPromptTokens: roundedCachedPromptTokens,
-    uncachedPromptTokens,
-    cacheWriteTokens: roundedCacheWriteTokens,
-    cacheHitPercent,
+    promptTokens: cacheMetrics.promptTokens,
+    cachedPromptTokens: cacheMetrics.cachedPromptTokens,
+    uncachedPromptTokens: cacheMetrics.uncachedPromptTokens,
+    cacheWriteTokens: cacheMetrics.cacheWriteTokens,
+    cacheHitPercent: cacheMetrics.cacheHitPercent,
     outputTokens:
       outputTokens !== null && outputTokens >= 0 ? Math.round(outputTokens) : null,
     totalTokens:

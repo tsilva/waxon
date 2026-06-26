@@ -5,99 +5,65 @@ description: Evaluate and improve Waxon's Learn course experience end to end. Us
 
 # Evaluate Learn Experience
 
-Use this skill to run a tight product-quality loop over Waxon's Learn experience: simulate real beginner learners, measure the actual browser flow, judge teaching quality, tune prompts/models/flow, and rerun the same scenarios before accepting changes.
+Improve Waxon's Learn flow with real learner-like runs. Optimize for a fluid single conversation that helps the user learn the subject efficiently and completely: minimal perceived latency, maximum prompt-cache reuse, fewest user-facing LLM calls, and evaluation evidence before advancement.
 
-## Operating Rules
+## Guardrails
 
-- At the start of every substantive Learn evaluation or tuning run, create a Codex goal for the concrete objective unless an active goal already exists for the same work. Mark the goal complete only after the evaluation, kept changes, verification, and final report are done; mark it blocked only under the platform's repeated-blocker rule.
-- Use the real app flow, preferably in the browser. Start the dev server with `pnpm dev --port auto` and report the printed URL. If a server is already running, do not kill it.
-- Use the native Codex Desktop in-app Browser for browser testing unless a more specific repo instruction overrides it. Load the bundled Browser skill/runtime, initialize `browser-client`, select the `iab` browser, and drive it through its documented Playwright/CUA APIs before using fallbacks.
+- For substantive runs, create a Codex goal unless an active goal already covers the work. Mark it complete only after kept changes, verification, and final report.
+- Use the real app flow. Start with `pnpm dev --port auto`, report the printed URL, and do not kill existing servers.
+- For browser checks, use the native Codex Desktop in-app Browser via the bundled Browser skill/runtime before fallbacks.
 - Keep production and live data untouched unless the user explicitly asks for live validation or deploy work.
-- Treat speed and teaching quality as a joint target. Do not accept a faster flow that worsens factual accuracy, beginner clarity, or mastery gating.
-- Make small, reversible prompt/model/flow changes. Preserve existing tests and add targeted tests for durable contracts.
-- Treat this skill as self-improving within its own scope. The user has granted standing permission to update this skill when an evaluation run reveals a durable bug in the workflow or a better way to perform the task.
+- Preserve the single conversation thread by default. Prefer one streaming answer-continuation request that grades the latest answer, teaches the next smallest idea, and emits the next widget; measure any fallback to separate evaluator/tutor calls.
+- Never trade away factual accuracy, beginner clarity, complete coverage, visible widget history, or `requireCourseMilestoneMastery()` for speed, caching, or lower call count.
+- Make small, reversible prompt/model/flow changes and add targeted tests for durable contracts.
 
 ## Loop
 
-1. Establish the baseline.
-   - Capture current branch and dirty files.
-   - Identify active Learn models from `app/lib/openRouter.ts` and env defaults.
-   - Inspect current Learn flow in `app/api/courses/chat/route.ts`, `app/lib/courseGeneration.ts`, and `app/(app)/learn/LearnPageClient.tsx`.
+1. Establish baseline:
+   Capture branch and dirty files; identify active Learn models in `app/lib/openRouter.ts` and env; inspect `app/api/courses/chat/route.ts`, `app/lib/courseGeneration.ts`, and `app/(app)/learn/LearnPageClient.tsx`.
 
-2. Choose fixed beginner scenarios.
-   - Use at least 3 topics for a quick loop and 5 topics for a stronger loop.
-   - Preferred set: CNNs for images, PPO in reinforcement learning, linear regression, SQL joins, and Bayes rule.
-   - For each topic, define novice personas: correct, partial, confused, wrong, and "asks for clarification".
+2. Use fixed beginner scenarios:
+   Quick loop uses at least 3 topics; stronger loop uses 5. Preferred topics: CNNs for images, PPO in reinforcement learning, linear regression, SQL joins, Bayes rule. Cover correct, partial, confused, wrong, and clarification-seeking learner personas.
 
-3. Run the browser experience.
-   - Start a new course from `/learn`.
-   - Answer at least 4 tutor questions per topic.
-   - Use the inline question widgets when present; do not bypass the user-facing flow by calling APIs directly unless debugging.
-   - After submitting a widget answer and receiving the final response, verify the answered widget remains visible as read-only history with the learner's answer, and the newest unanswered widget remains enabled. This catches regressions where hidden-widget-only questions disappear after evaluation or repeated fallback widget IDs disable the next question.
-   - When judging rendered tutor text, wait for the final SSE `done` result or the stored-message replacement after streaming. Transient streamed deltas can include fragments that server repair removes before persistence.
-   - Save screenshots or concise notes only when they reveal a concrete UX, teaching, or latency issue.
+3. Run the browser experience:
+   Start a course from `/learn`, answer at least 4 tutor questions per topic, and use inline widgets instead of API shortcuts unless debugging. After a widget answer and final SSE `done` or stored-message replacement, verify the answered widget remains visible as read-only history and the newest unanswered widget remains enabled.
 
-4. Measure latency from the user's perspective.
-   - Capture `answer_decision_ms`, `time_to_first_delta_ms`, and `chat_stream_ms` from the course chat SSE `done` payload or stored trace surfaces.
-   - Capture prompt-cache usage from course message metrics when provider usage reports it: cached prompt tokens, uncached prompt tokens, cache-write tokens, and cache-hit percentage.
-   - For OpenRouter/Gemini cache debugging, inspect the serialized request for explicit `cache_control` breakpoints and a stable course/conversation `session_id`; stable prompt ordering alone is not enough to enable cache reads.
-   - When changing cache boundaries, version the `session_id` so sticky routing does not reuse an older incompatible prompt shape. If cache writes stay at zero despite serialized breakpoints, test provider/model support with real turns before adding more prompt bulk.
-   - Also record perceived wait from answer submission to first visible next-material token.
-   - Separate fixed overhead from token throughput: high `tok/s` does not imply a snappy answer-to-next-turn transition.
+4. Measure learner-facing fluidity:
+   Record `answer_decision_ms`, `time_to_first_delta_ms`, `chat_stream_ms`, perceived wait to first visible next-material token, user-facing LLM calls per answer, single-continuation success/fallback rate, and prompt-cache usage: cached tokens, uncached tokens, cache-write tokens, and hit percentage. For cache work, inspect serialized requests for explicit `cache_control` breakpoints and stable versioned `session_id`; stable prompt ordering alone is not enough.
 
-5. Judge teaching quality.
-   - Score each turn from 1-5 for factual accuracy, beginner clarity, jargon definition, concrete example quality, question appropriateness, and progress decision quality.
-   - Flag any hallucinated facts, unexplained technical terms, too-large conceptual jumps, repetitive questions, overly strict advancement, or premature advancement.
-   - Prefer evidence from the actual rendered lesson and question, not only model traces.
+5. Judge teaching quality:
+   Score factual accuracy, beginner clarity, jargon definition, concrete examples, question appropriateness, and progress decision quality from 1-5. Flag hallucinations, unexplained terms, big conceptual jumps, repetition, overly strict advancement, premature advancement, duplicate evaluation chatter, and workflow artifacts. Prefer rendered lesson/widget evidence over traces alone.
 
-6. Tune only the bottleneck.
-   - If `answer_decision_ms` dominates, tune the evaluator prompt, evaluator model, response size, JSON shape, or local deterministic handling.
-   - For compact answer-evaluator prompts, do not pad stable instructions solely to cross a provider cache threshold unless real Learn turns show better wall-clock latency and preserved grading quality than the compact fast evaluator.
-   - If `time_to_first_delta_ms` dominates, tune the tutor model, request size, streaming start path, or whether noncritical work can move after first token.
-   - If `chat_stream_ms` dominates, tune lesson length, model choice, or max token budget.
-   - When tuning Learn prompts for cache efficiency, keep immutable instructions and stable context before dynamic topic, course, milestone, progress, answer, or conversation fields.
-   - If teaching quality is weak, tune the tutor prompt and examples before touching latency.
-   - If progress decisions are wrong, tune the evaluator or local mastery gate without weakening `requireCourseMilestoneMastery()`.
+6. Tune only the bottleneck:
+   If extra calls dominate, first seek a same-response single-thread solution. If answer grading dominates, tune evaluator prompt/model/JSON size. If first-token delay dominates, tune tutor model, request shape, streaming path, or deferred work. If streaming dominates, tune lesson length, model choice, or max tokens. For cache efficiency, keep immutable instructions and stable context before dynamic topic, progress, answer, and conversation fields; version `session_id` when changing cache boundaries. Do not pad prompts for cache unless real turns improve wall-clock latency without quality loss.
 
-7. Rerun the same scenarios.
-   - Use the same topics and learner answers after each meaningful change.
-   - Compare before/after in a compact table.
-   - Keep a change only when latency improves or stays acceptable and quality does not regress.
+7. Rerun and verify:
+   Rerun the same topics and learner answers after meaningful changes. Keep changes only when latency improves or stays acceptable and quality does not regress. Run `pnpm typecheck`, `pnpm test`, and `pnpm lint` unless docs-only. For UI/flow changes, complete at least one browser answer-submission-to-next-lesson check.
 
-8. Verify before handoff.
-   - Run `pnpm typecheck`, `pnpm test`, and `pnpm lint` unless the change is docs-only.
-   - For UI/flow changes, complete at least one browser run through answer submission and next lesson streaming.
-   - Summarize modified files, measured deltas, residual risks, and any skipped checks.
-
-9. Improve this skill when the run teaches something reusable.
-   - At the end of every use, review whether the skill caused friction, missed evidence, repeated a manual workaround, used the wrong measurement, or needed an instruction that would have prevented a bug.
-   - Update `.codex/skills/evaluate-learn-experience/SKILL.md` immediately when the lesson is durable, evidence-backed, and specific to evaluating/tuning the Learn experience.
-   - Keep self-updates concise. Add rules, measurement fields, scenario changes, or decision criteria; do not add narrative retrospectives.
-   - Validate the skill after every self-update with `python3 /Users/tsilva/.codex/skills/.system/skill-creator/scripts/quick_validate.py .codex/skills/evaluate-learn-experience`.
-   - Mention self-updates in the final handoff with the evidence that justified them.
-   - Ask the user before adding new scripts, dependencies, external services, broad policy changes, or instructions that affect other skills.
-   - Do not self-update from a single ambiguous observation, personal preference, transient provider outage, or a failed run that lacks a clear root cause.
+8. Improve this skill when evidence warrants:
+   If a run reveals a durable Learn-evaluation workflow lesson, update this file concisely and validate with `python3 /Users/tsilva/.codex/skills/.system/skill-creator/scripts/quick_validate.py .codex/skills/evaluate-learn-experience`. Ask before adding scripts, dependencies, external services, broad policy changes, or instructions affecting other skills.
 
 ## Report Format
 
-Use a compact table for the core evidence:
+Use a compact evidence table:
 
 ```text
-topic | turn | learner answer type | answer_decision_ms | first_delta_ms | chat_stream_ms | accuracy | beginner clarity | issue
-CNNs  | 2    | partial             | 820                | 1380           | 4100           | 5/5      | 3/5              | "inductive bias" not defined
+topic | turn | answer type | llm_calls | answer_decision_ms | first_delta_ms | chat_stream_ms | cache hit/write | accuracy | clarity | issue
+CNNs  | 2    | partial     | 1         | 820                | 1380           | 4100           | 4897/0          | 5/5      | 3/5    | "inductive bias" not defined
 ```
 
 Then list:
 
+- `Flow metrics`: perceived wait, LLM calls per answer, single-continuation success/fallback rate, and prompt-cache reads/writes.
 - `Changes tried`: prompt/model/flow changes and why.
-- `Kept changes`: only changes supported by the rerun.
-- `Rejected changes`: faster or prettier changes that harmed teaching quality, accuracy, or mastery gating.
-- `Skill updates`: any self-update made to this skill, or `none`.
-- `Next bottleneck`: the single most useful follow-up.
+- `Kept changes`: only changes supported by rerun evidence.
+- `Rejected changes`: faster or cleaner changes that harmed teaching, accuracy, fluidity, or mastery gating.
+- `Skill updates`: self-update made, or `none`.
+- `Next bottleneck`: the single best follow-up.
 
 ## Model Guidance
 
-- Use a fast evaluator model for answer grading and progress decisions. Mercury is a good default when it returns reliable compact JSON.
-- Use a stronger tutor model when lesson quality, examples, or novice explanations regress.
-- Use a stronger judge model only for offline evaluation if needed; do not put slow judge calls in the user-facing path.
-- Always distinguish tutor-model latency from evaluator-model latency in the final analysis.
+- Use a fast evaluator for grading/progress decisions; Mercury is a good default when it returns reliable compact JSON.
+- Use a stronger tutor when novice explanation quality, examples, or factual accuracy regress.
+- Use a stronger judge only offline; do not put slow judge calls in the user-facing path.
+- Always distinguish tutor-model latency from evaluator-model latency.
