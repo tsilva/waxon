@@ -6285,11 +6285,16 @@ textarea {
   box-shadow: 0 1px 2px rgb(86 68 56 / 12%);
 }
 
-.learn-chat-view-button:hover,
+.learn-chat-view-button:hover:not(:disabled),
 .learn-chat-view-button:focus-visible {
   color: var(--accent-hover);
   outline: 2px solid rgb(166 124 82 / 14%);
   outline-offset: -2px;
+}
+
+.learn-chat-view-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .learn-new-course-actions {

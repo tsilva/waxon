@@ -889,9 +889,6 @@ function LearnQuestionWidgetPlaceholder() {
 }
 
 function rawLearnConversationJson(input: {
-  selectedCourse: Course | null;
-  chatMessages: LearnChatMessage[];
-  draftCourseToc: CourseToc | null;
   promptPreview: LearnRawPromptPreview | null;
   promptPreviewError: string | null;
   isLoadingPromptPreview: boolean;
@@ -905,51 +902,14 @@ function rawLearnConversationJson(input: {
 
   return JSON.stringify(
     {
-      source: "client_state",
-      modelRequestPreview: {
-        status: input.isStreaming
-          ? "streaming"
-          : input.isLoadingPromptPreview
-            ? "loading"
-            : input.promptPreviewError
-              ? "error"
-              : "unavailable",
-        error: input.promptPreviewError,
-      },
-      course: input.selectedCourse
-        ? {
-            id: input.selectedCourse.id,
-            topicPrompt: input.selectedCourse.topicPrompt,
-            title: input.selectedCourse.title,
-            description: input.selectedCourse.description,
-            status: input.selectedCourse.status,
-            currentPageIndex: input.selectedCourse.currentPageIndex,
-            totalPages: input.selectedCourse.totalPages,
-            generatedPages: input.selectedCourse.generatedPages,
-            conversationCost: input.selectedCourse.conversationCost,
-            toc: input.selectedCourse.toc,
-            draftToc: input.draftCourseToc,
-          }
-        : null,
-      messages: input.chatMessages.map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        status: message.status,
-        toolCalls: message.toolCalls,
-        questionWidgets:
-          message.role === "assistant"
-            ? courseQuestionWidgetsFromToolCalls(message.toolCalls)
-            : [],
-        widgetAnswer: message.widgetAnswer,
-        widgetAnswerDetails: message.widgetAnswerDetails,
-        pendingEvaluation: message.pendingEvaluation,
-        hasPendingQuestionWidget: message.hasPendingQuestionWidget,
-        evaluation: message.evaluation,
-        metrics: message.metrics,
-        interrupted: message.interrupted,
-        createdAt: message.createdAt,
-      })),
+      status: input.isStreaming
+        ? "streaming"
+        : input.isLoadingPromptPreview
+          ? "loading"
+          : input.promptPreviewError
+            ? "error"
+            : "unavailable",
+      error: input.promptPreviewError,
     },
     null,
     2,
@@ -1080,6 +1040,19 @@ export default function LearnPageClient({
     () => courses.find((course) => course.id === courseSettingsId) ?? null,
     [courseSettingsId, courses],
   );
+  const selectedCourseId = selectedCourse?.id ?? null;
+  const selectedCoursePreviewKey = selectedCourse
+    ? [
+        selectedCourse.id,
+        selectedCourse.updatedAt,
+        selectedCourse.chatMessageCount,
+      ].join(":")
+    : "";
+  const rawPromptPreviewRequestBody =
+    rawPromptPreview?.modelRequest?.requestBody;
+  const canOpenRawConversation = Boolean(
+    rawPromptPreviewRequestBody || rawPromptPreviewError,
+  );
   const rawConversationJson = useMemo(
     () => {
       if (conversationViewMode !== "raw") {
@@ -1087,9 +1060,6 @@ export default function LearnPageClient({
       }
 
       return rawLearnConversationJson({
-        selectedCourse,
-        chatMessages,
-        draftCourseToc,
         promptPreview: rawPromptPreview,
         promptPreviewError: rawPromptPreviewError,
         isLoadingPromptPreview: isLoadingRawPromptPreview,
@@ -1097,19 +1067,19 @@ export default function LearnPageClient({
       });
     },
     [
-      chatMessages,
       conversationViewMode,
-      draftCourseToc,
       isLoadingRawPromptPreview,
       isStreaming,
       rawPromptPreview,
       rawPromptPreviewError,
-      selectedCourse,
     ],
   );
 
   useEffect(() => {
-    if (conversationViewMode !== "raw" || !selectedCourse) {
+    if (!selectedCourseId) {
+      setRawPromptPreview(null);
+      setRawPromptPreviewError(null);
+      setIsLoadingRawPromptPreview(false);
       return;
     }
 
@@ -1131,7 +1101,7 @@ export default function LearnPageClient({
       headers: { "Content-Type": "application/json" },
       signal: abortController.signal,
       body: JSON.stringify({
-        courseId: selectedCourse.id,
+        courseId: selectedCourseId,
       }),
     })
       .then(async (response) => {
@@ -1169,7 +1139,7 @@ export default function LearnPageClient({
     return () => {
       abortController.abort();
     };
-  }, [conversationViewMode, isStreaming, selectedCourse]);
+  }, [isStreaming, selectedCourseId, selectedCoursePreviewKey]);
 
   usePageScrollLock(Boolean(courseSettingsCourse || selectedEvaluationDetails));
 
@@ -1246,6 +1216,9 @@ export default function LearnPageClient({
 
   const applySelectedCourse = useCallback((course: Course) => {
     shouldAutoScrollChatRef.current = true;
+    setRawPromptPreview(null);
+    setRawPromptPreviewError(null);
+    setIsLoadingRawPromptPreview(true);
     setSelectedCourse(course);
     setDraftCourseToc(null);
     setIsStartingNewCourse(false);
@@ -2414,6 +2387,7 @@ export default function LearnPageClient({
                         <button
                           className="learn-chat-view-button"
                           type="button"
+                          disabled={!canOpenRawConversation}
                           aria-pressed={conversationViewMode === "raw"}
                           onClick={() => setConversationViewMode("raw")}
                         >
