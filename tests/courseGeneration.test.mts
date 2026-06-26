@@ -1468,13 +1468,13 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
     );
     assert.equal(toolHistoryMessage?.role, "tool");
     assert.equal(toolHistoryMessage?.name, "render_question_widget");
-    assert.match(
+    assert.doesNotMatch(
       String(toolHistoryMessage?.content),
       /Why can repeated customer data cause update problems/u,
     );
-    assert.match(
+    assert.equal(
       String(toolHistoryMessage?.content),
-      /You have to update it in many rows/u,
+      "You have to update it in many rows and can miss one.",
     );
     assert.equal(requestMessages.length, 4);
     assert.deepEqual(events, [
@@ -1600,10 +1600,10 @@ test("course answer continuation preserves stored chat chronology", () => {
   assert.doesNotMatch(String(history[3]?.content), /Question widget:/u);
   assert.equal(history[4]?.role, "tool");
   assert.equal(history[4]?.name, "render_question_widget");
-  assert.match(String(history[4]?.content), /What does PPO clipping prevent/u);
-  assert.match(
+  assert.doesNotMatch(String(history[4]?.content), /What does PPO clipping prevent/u);
+  assert.equal(
     String(history[4]?.content),
-    /It prevents the policy from moving too far/u,
+    "It prevents the policy from moving too far in one update.",
   );
 });
 

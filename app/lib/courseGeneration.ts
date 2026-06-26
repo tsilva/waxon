@@ -816,11 +816,7 @@ function courseToolResponseContent(
       throw new Error("Question widget tool responses require a learner answer.");
     }
 
-    return JSON.stringify({
-      widgetId: widgetAnswer.widgetId ?? toolCall.function.arguments.id,
-      question: widgetAnswer.question ?? toolCall.function.arguments.question,
-      answer: widgetAnswer.answer,
-    });
+    return widgetAnswer.answer;
   }
 
   throw new Error("Unsupported course tool call.");
