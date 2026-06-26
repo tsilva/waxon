@@ -679,7 +679,7 @@ export async function appendCourseChatMessages(input: {
   const maxMessages =
     typeof input.maxMessages === "number"
       ? Math.max(1, Math.floor(input.maxMessages))
-      : 200;
+      : null;
 
   const [course] = await db
     .select({ id: courses.id })
@@ -716,9 +716,12 @@ export async function appendCourseChatMessages(input: {
         })),
       );
 
-      const firstRetainedSequence = nextSequence + messages.length - maxMessages;
+      const firstRetainedSequence =
+        maxMessages === null
+          ? null
+          : nextSequence + messages.length - maxMessages;
 
-      if (firstRetainedSequence > 0) {
+      if (firstRetainedSequence !== null && firstRetainedSequence > 0) {
         await tx
           .delete(courseChatMessages)
           .where(

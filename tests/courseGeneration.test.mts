@@ -992,7 +992,22 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
       model: "google/gemini-3.1-flash-lite",
       userId: "user_1",
       course,
-      messages: [],
+      messages: [
+        {
+          role: "user",
+          content: "I want to learn PPO",
+        },
+        {
+          role: "assistant",
+          content: "Generated the course table of contents.",
+          toolCalls: [
+            courseTocToolCallFromToc({
+              topic: course.topicPrompt,
+              toc: course.toc,
+            }),
+          ],
+        },
+      ],
       onTextDelta(delta) {
         deltas.push(delta);
       },
@@ -1067,9 +1082,7 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
     const systemContent = requestMessages[0]?.content as Array<
       Record<string, unknown>
     >;
-    const dynamicContent = requestMessages[1]?.content as Array<
-      Record<string, unknown>
-    >;
+    const history = requestMessages.slice(1);
 
     assert.deepEqual(systemContent[0]?.cache_control, { type: "ephemeral" });
     assert.equal(
@@ -1087,26 +1100,27 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
       String(systemContent[0]?.text),
       /Recent conversation JSON/u,
     );
-    assert.equal(requestMessages[1]?.role, "system");
-    assert.equal(dynamicContent[0]?.cache_control, undefined);
-    assert.match(String(dynamicContent[0]?.text), /Current course state/u);
-    assert.match(String(dynamicContent[0]?.text), /Course title: PPO/u);
-    assert.match(String(dynamicContent[0]?.text), /Course plan:/u);
-    assert.match(
-      String(dynamicContent[0]?.text),
-      /1\. PPO Purpose \(current milestone\)/u,
+    assert.deepEqual(
+      history.map((message) => message.role),
+      ["user", "assistant", "tool"],
     );
-    assert.match(String(dynamicContent[0]?.text), /Current milestone: PPO Purpose/u);
-    assert.doesNotMatch(String(dynamicContent[0]?.text), /Full TOC JSON/u);
+    assert.equal(history[1]?.content, "");
+    assert.match(
+      JSON.stringify(history[1]?.tool_calls),
+      /generate_course_toc/u,
+    );
+    assert.equal(history[2]?.name, "generate_course_toc");
+    assert.match(String(history[2]?.content), /PPO Purpose/u);
+    assert.doesNotMatch(JSON.stringify(requestMessages), /Current course state/u);
     assert.doesNotMatch(
-      String(dynamicContent[0]?.text),
+      JSON.stringify(requestMessages),
       /conversation tool event/u,
     );
     assert.doesNotMatch(
-      String(dynamicContent[0]?.text),
+      JSON.stringify(requestMessages),
       /Recent conversation JSON/u,
     );
-    assert.equal(requestMessages.length, 2);
+    assert.equal(requestMessages.length, 4);
     assert.equal((requestBody as { tool_choice?: unknown }).tool_choice, "auto");
     assert.equal(
       (requestBody as { parallel_tool_calls?: unknown }).parallel_tool_calls,
@@ -1185,18 +1199,13 @@ test("buildCourseChatTurnModelRequest does not fabricate widget render tool resp
     content: unknown;
     tool_calls?: Array<{ function?: { name?: string } }>;
   }>;
-  const history = messages.slice(1, -1);
-  const dynamicMessage = messages.at(-1);
-  const dynamicContent = dynamicMessage?.content as Array<
-    Record<string, unknown>
-  >;
+  const history = messages.slice(1);
 
   assert.deepEqual(
     history.map((message) => message.role),
     ["assistant"],
   );
-  assert.equal(dynamicMessage?.role, "system");
-  assert.match(String(dynamicContent[0]?.text), /Current course state/u);
+  assert.equal(messages.length, 2);
   assert.equal(history[0]?.tool_calls, undefined);
   assert.match(
     String(history[0]?.content),
@@ -1208,6 +1217,7 @@ test("buildCourseChatTurnModelRequest does not fabricate widget render tool resp
   );
   assert.doesNotMatch(JSON.stringify(history), /"role":"tool"/u);
   assert.doesNotMatch(JSON.stringify(history), /rendered/u);
+  assert.doesNotMatch(JSON.stringify(messages), /Current course state/u);
 });
 
 test("streamCourseAnswerContinuation uses one cached stream for evaluation and next widget", async () => {
@@ -1430,9 +1440,6 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
     const systemContent = requestMessages[0]?.content as Array<
       Record<string, unknown>
     >;
-    const dynamicContent = requestMessages.at(-1)?.content as Array<
-      Record<string, unknown>
-    >;
     const assistantHistoryMessage = requestMessages[1];
     const toolHistoryMessage = requestMessages[2];
 
@@ -1443,24 +1450,13 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
       /record_course_answer_decision/u,
     );
     assert.doesNotMatch(String(systemContent[0]?.text), /Learner answer:/u);
-    assert.equal(requestMessages.at(-1)?.role, "system");
-    assert.equal(dynamicContent[0]?.cache_control, undefined);
-    const volatilePrompt = String(dynamicContent[0]?.text);
-    assert.match(volatilePrompt, /Course title: SQL Joins/u);
-    assert.match(volatilePrompt, /Course plan:/u);
-    assert.match(
-      volatilePrompt,
-      /1\. Why Relationships Matter \(current milestone\)/u,
-    );
-    assert.doesNotMatch(volatilePrompt, /Learner answer:/u);
-    assert.doesNotMatch(volatilePrompt, /Recent conversation JSON/u);
-    assert.doesNotMatch(volatilePrompt, /"widgetAnswer"/u);
-    assert.doesNotMatch(volatilePrompt, /"questionWidgets"/u);
-    assert.doesNotMatch(volatilePrompt, /conversation tool event/u);
-    assert.match(
-      volatilePrompt,
-      /Why can repeated customer data cause update problems/u,
-    );
+    assert.doesNotMatch(JSON.stringify(requestMessages), /Current course state/u);
+    assert.doesNotMatch(JSON.stringify(requestMessages), /Course title: SQL Joins/u);
+    assert.doesNotMatch(JSON.stringify(requestMessages), /Learner answer:/u);
+    assert.doesNotMatch(JSON.stringify(requestMessages), /Recent conversation JSON/u);
+    assert.doesNotMatch(JSON.stringify(requestMessages), /"widgetAnswer"/u);
+    assert.doesNotMatch(JSON.stringify(requestMessages), /"questionWidgets"/u);
+    assert.doesNotMatch(JSON.stringify(requestMessages), /conversation tool event/u);
     assert.equal(assistantHistoryMessage?.role, "assistant");
     assert.deepEqual(
       assistantHistoryMessage?.tool_calls?.map(
@@ -1482,7 +1478,7 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
       String(toolHistoryMessage?.content),
       "You have to update it in many rows and can miss one.",
     );
-    assert.equal(requestMessages.length, 4);
+    assert.equal(requestMessages.length, 3);
     assert.deepEqual(events, [
       "decision:mark_milestone_done",
       "delta:Good. A join uses matching keys to combine related rows only when you query them.",
@@ -1492,6 +1488,14 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
       "record_course_question_attempt",
     );
     assert.equal(result.answerDecision.questionAttempt.score, 9);
+    assert.equal(
+      result.answerDecisionToolCall.function.name,
+      "record_course_answer_decision",
+    );
+    assert.equal(
+      result.answerDecisionToolCall.function.arguments.progressDecision.toolCall,
+      "mark_milestone_done",
+    );
     assert.equal(result.toolCalls[0]?.function.arguments.id, "join-key");
     assert.equal(pendingWidgetToolDeltas, 1);
   } finally {
@@ -1577,18 +1581,14 @@ test("course answer continuation preserves stored chat chronology", () => {
     name?: string;
     tool_calls?: Array<{ function?: { name?: string } }>;
   }>;
-  const history = messages.slice(1, -1);
-  const dynamicMessage = messages.at(-1);
-  const dynamicContent = dynamicMessage?.content as Array<
-    Record<string, unknown>
-  >;
+  const history = messages.slice(1);
 
   assert.deepEqual(
     history.map((message) => message.role),
     ["user", "assistant", "tool", "assistant", "tool"],
   );
-  assert.equal(dynamicMessage?.role, "system");
-  assert.match(String(dynamicContent[0]?.text), /Current course state/u);
+  assert.equal(messages.length, 6);
+  assert.doesNotMatch(JSON.stringify(messages), /Current course state/u);
   assert.match(String(history[0]?.content), /I want to learn PPO/u);
   assert.equal(history[1]?.content, "");
   assert.deepEqual(
@@ -1619,7 +1619,7 @@ test("course answer continuation preserves stored chat chronology", () => {
   );
 });
 
-test("shouldUseCourseAnswerContinuationRequest skips Gemini live fallback churn", () => {
+test("shouldUseCourseAnswerContinuationRequest uses single transcript continuation for any model", () => {
   const messages = [
     {
       role: "assistant" as const,
@@ -1649,7 +1649,7 @@ test("shouldUseCourseAnswerContinuationRequest skips Gemini live fallback churn"
       messages,
       "google/gemini-3.1-flash-lite",
     ),
-    false,
+    true,
   );
   assert.equal(
     shouldUseCourseAnswerContinuationRequest(

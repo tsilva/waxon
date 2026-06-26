@@ -30,12 +30,14 @@ import {
   type CourseAnswerDecisionToolResult,
 } from "./courseQuestionAttemptParsing.ts";
 import {
+  COURSE_ANSWER_DECISION_TOOL_NAME,
   COURSE_QUESTION_WIDGET_TOOL_NAME,
   COURSE_TOC_TOOL_NAME,
   courseQuestionWidgetToolCallFromWidget,
   courseQuestionWidgetsFromToolCalls,
   formatCourseQuestionWidgetsForPrompt,
   normalizeCourseToolCalls,
+  type CourseAnswerDecisionToolCall,
   type CourseQuestionWidget,
   type CourseQuestionWidgetAnswerDetails,
   type CourseToolCall,
@@ -165,7 +167,6 @@ const COURSE_TOC_TOOL = {
     },
   },
 } as const;
-const COURSE_ANSWER_DECISION_TOOL_NAME = "record_course_answer_decision";
 const COURSE_ANSWER_DECISION_TOOL = {
   type: "function",
   function: {
@@ -639,17 +640,6 @@ function compactCourseMessages(messages: CourseChatMessage[]) {
   }));
 }
 
-function formatCoursePlanForPrompt(course: CourseDetail): string {
-  return course.toc.pages
-    .map((page, index) => {
-      const marker =
-        index === course.currentPageIndex ? "current milestone" : "milestone";
-
-      return `${index + 1}. ${page.title} (${marker}) - ${page.objective}`;
-    })
-    .join("\n");
-}
-
 function courseChatMessagesForModel(
   messages: CourseChatMessage[],
 ): OpenRouterMessage[] {
@@ -660,6 +650,10 @@ function courseChatMessagesForModel(
     const message = selectedMessages[index];
 
     if (!message) {
+      continue;
+    }
+
+    if (message.role === "assistant" && message.evaluation) {
       continue;
     }
 
@@ -744,22 +738,7 @@ function courseChatMessagesForModel(
 function selectCourseMessagesForModel(
   messages: CourseChatMessage[],
 ): CourseChatMessage[] {
-  const selectedMessages = messages.slice(-10);
-  const firstMessage = selectedMessages[0];
-
-  if (firstMessage?.role !== "user" || !firstMessage.widgetAnswer?.answer) {
-    return selectedMessages;
-  }
-
-  const firstSelectedIndex = messages.length - selectedMessages.length;
-  const previousAssistantMessage = messages
-    .slice(0, firstSelectedIndex)
-    .reverse()
-    .find((message) => message.role === "assistant");
-
-  return previousAssistantMessage
-    ? [previousAssistantMessage, ...selectedMessages]
-    : selectedMessages;
+  return messages;
 }
 
 function openRouterToolCallFromCourseToolCall(
@@ -817,6 +796,20 @@ function courseToolResponseContent(
     }
 
     return widgetAnswer.answer;
+  }
+
+  if (toolCall.function.name === COURSE_ANSWER_DECISION_TOOL_NAME) {
+    const { progressDecision, questionAttempt } = toolCall.function.arguments;
+    const stateText =
+      progressDecision.toolCall === "mark_milestone_done"
+        ? "advanced to the next lesson"
+        : "continued the current lesson";
+    const scoreText =
+      questionAttempt.toolCall === "record_course_question_attempt"
+        ? ` Score: ${Math.round(questionAttempt.score)}/10.`
+        : "";
+
+    return `Course state update: ${stateText}. Reason: ${progressDecision.reason}.${scoreText}`;
   }
 
   throw new Error("Unsupported course tool call.");
@@ -1325,17 +1318,11 @@ export type CourseChatModelRequestPreview =
       requestBody: OpenRouterChatRequest;
     };
 
-function supportsSingleResponseCourseAnswerContinuation(model?: string): boolean {
-  return !/^google\/gemini/iu.test(model?.trim() ?? "");
-}
-
 export function shouldUseCourseAnswerContinuationRequest(
   messages: CourseChatMessage[],
   model?: string,
 ): boolean {
-  if (!supportsSingleResponseCourseAnswerContinuation(model)) {
-    return false;
-  }
+  void model;
 
   const previousAssistantMessage = [...messages]
     .reverse()
@@ -1387,37 +1374,7 @@ export function buildCourseAnswerContinuationModelRequest(input: {
     "",
     COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC,
   ].join("\n");
-  const visibleLessonContext = previousAssistantMessage.content;
-  const stableCourseContext = renderPromptTemplate(
-    loadPromptTemplate("course-answer-continuation-stable-course-context.md"),
-    {
-      courseTitle: input.course.title,
-      courseDescription: input.course.description,
-      coursePlan: formatCoursePlanForPrompt(input.course),
-      currentMilestoneIndex: input.course.currentPageIndex,
-      currentMilestone: page.title,
-      milestoneObjective: page.objective,
-      nextMilestoneBlock: nextPage
-        ? `Next milestone: ${nextPage.title}\nNext milestone objective: ${nextPage.objective}`
-        : "Next milestone: none; this is the final milestone.",
-    },
-  );
-  const volatileCourseContext = renderPromptTemplate(
-    loadPromptTemplate("course-answer-continuation-volatile-context.md"),
-    {
-      retryInstructionBlock: input.retryInstruction
-        ? `Retry instruction after rollback: ${input.retryInstruction}`
-        : "",
-      answeredWidgetBlock: answeredWidget?.widget
-        ? `Answered widget JSON: ${JSON.stringify(answeredWidget.widget)}`
-        : `Answered widget question: ${answeredWidget?.question ?? "unknown"}`,
-      learnerAnswer: answeredWidget?.answer ?? latestUserMessage.content,
-      previousVisibleLessonContext: excerptCourseMessageForPrompt(
-        visibleLessonContext,
-        900,
-      ),
-    },
-  ).replace(/\n{3,}/gu, "\n\n");
+  void input.retryInstruction;
 
   return {
     kind: "course_answer_continuation",
@@ -1451,13 +1408,6 @@ export function buildCourseAnswerContinuationModelRequest(input: {
           }),
         },
         ...courseChatMessagesForModel(input.messages),
-        {
-          role: "system",
-          content: openRouterPromptContent({
-            text: [stableCourseContext, volatileCourseContext].join("\n\n"),
-            model,
-          }),
-        },
       ],
     },
   };
@@ -1477,35 +1427,13 @@ export function buildCourseChatTurnModelRequest(input: {
   const systemPrompt = buildCourseTutorSystemPrompt({
     answerDecisionTool: false,
   });
-  const stableCourseContext = renderPromptTemplate(
-    loadPromptTemplate("course-chat-turn-stable-course-context.md"),
-    {
-      courseTitle: input.course.title,
-      courseDescription: input.course.description,
-      coursePlan: formatCoursePlanForPrompt(input.course),
-      currentMilestoneIndex: input.course.currentPageIndex,
-      currentMilestone: page.title,
-      milestoneObjective: page.objective,
-    },
-  );
-  const volatileCourseContext = renderPromptTemplate(
-    loadPromptTemplate("course-chat-turn-volatile-context.md"),
-    {
-      progressToolResult: input.progressDecision
-        ? `Progress tool result: ${input.progressDecision.toolCall} - ${input.progressDecision.reason}`
-        : "Progress tool result: starting or continuing current milestone.",
-    },
-  );
   const stableTutorContext = [
     "Stable tutor instructions:",
     systemPrompt,
     "",
     COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC,
   ].join("\n");
-  const dynamicTutorContext = [
-    stableCourseContext,
-    volatileCourseContext,
-  ].join("\n");
+  void input.progressDecision;
 
   return {
     kind: "course_chat_turn",
@@ -1534,13 +1462,6 @@ export function buildCourseChatTurnModelRequest(input: {
           }),
         },
         ...courseChatMessagesForModel(input.messages),
-        {
-          role: "system",
-          content: openRouterPromptContent({
-            text: dynamicTutorContext,
-            model,
-          }),
-        },
       ],
     },
   };
@@ -1561,6 +1482,7 @@ export async function streamCourseAnswerContinuation(input: {
 } & CourseCostObserver): Promise<{
   content: string;
   toolCalls: CourseQuestionWidgetToolCall[];
+  answerDecisionToolCall: CourseAnswerDecisionToolCall;
   answerDecision: CourseAnswerDecisionToolResult;
 }> {
   const startedAt = Date.now();
@@ -1583,6 +1505,11 @@ export async function streamCourseAnswerContinuation(input: {
   let reportedQuestionWidgetToolDelta = false;
   const acceptedAnswerDecisionRef: {
     current: CourseAnswerDecisionToolResult | null;
+  } = {
+    current: null,
+  };
+  const acceptedAnswerDecisionToolCallRef: {
+    current: CourseAnswerDecisionToolCall | null;
   } = {
     current: null,
   };
@@ -1612,7 +1539,19 @@ export async function streamCourseAnswerContinuation(input: {
       return;
     }
 
+    const normalizedToolCall = normalizeCourseToolCalls([toolCall]).find(
+      (candidate): candidate is CourseAnswerDecisionToolCall =>
+        candidate.function.name === COURSE_ANSWER_DECISION_TOOL_NAME,
+    );
+
+    if (!normalizedToolCall) {
+      throw new Error(
+        "Course answer continuation emitted an invalid state update tool.",
+      );
+    }
+
     acceptedAnswerDecisionRef.current = decision;
+    acceptedAnswerDecisionToolCallRef.current = normalizedToolCall;
     await input.onAnswerDecision?.(decision);
   };
 
@@ -1658,6 +1597,12 @@ export async function streamCourseAnswerContinuation(input: {
   }
 
   const finalAnswerDecision = acceptedAnswerDecisionRef.current;
+  const finalAnswerDecisionToolCall = acceptedAnswerDecisionToolCallRef.current;
+
+  if (!finalAnswerDecisionToolCall) {
+    throw new Error("Course answer continuation did not emit a valid state update tool.");
+  }
+
   const responseText = extractChatCompletionText(body);
   const responseToolCalls = extractChatCompletionWidgetToolCalls(body);
   const responseWidgets = courseQuestionWidgetsFromToolCalls(responseToolCalls);
@@ -1671,6 +1616,7 @@ export async function streamCourseAnswerContinuation(input: {
         responseText.trim() ||
         "That completes the course. The generated questions are now available for Review.",
       toolCalls: [],
+      answerDecisionToolCall: finalAnswerDecisionToolCall,
       answerDecision: finalAnswerDecision,
     };
   }
@@ -1710,6 +1656,7 @@ export async function streamCourseAnswerContinuation(input: {
   return {
     content: ensuredTurn.text,
     toolCalls: responseToolCalls.length > 0 ? responseToolCalls : fallbackToolCalls,
+    answerDecisionToolCall: finalAnswerDecisionToolCall,
     answerDecision: finalAnswerDecision,
   };
 }

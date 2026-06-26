@@ -21,6 +21,8 @@ export type CourseQuestionWidget =
 
 export const COURSE_QUESTION_WIDGET_TOOL_NAME = "render_question_widget";
 export const COURSE_TOC_TOOL_NAME = "generate_course_toc";
+export const COURSE_ANSWER_DECISION_TOOL_NAME =
+  "record_course_answer_decision";
 
 export type CourseQuestionWidgetToolCall = {
   id: string;
@@ -43,7 +45,39 @@ export type CourseTocToolCall = {
   };
 };
 
-export type CourseToolCall = CourseQuestionWidgetToolCall | CourseTocToolCall;
+export type CourseAnswerDecisionToolCall = {
+  id: string;
+  type: "function";
+  function: {
+    name: typeof COURSE_ANSWER_DECISION_TOOL_NAME;
+    arguments: {
+      questionAttempt:
+        | {
+            toolCall: "record_course_question_attempt";
+            question: string;
+            answer: string;
+            answerSummary: string;
+            conciseAnswer: string;
+            correctAnswer: string;
+            justification: string;
+            score: number;
+          }
+        | {
+            toolCall: "skip_course_question_attempt";
+            reason: string;
+          };
+      progressDecision: {
+        toolCall: "mark_milestone_done" | "continue_current_milestone";
+        reason: string;
+      };
+    };
+  };
+};
+
+export type CourseToolCall =
+  | CourseQuestionWidgetToolCall
+  | CourseTocToolCall
+  | CourseAnswerDecisionToolCall;
 
 export type CourseQuestionWidgetAnswerDetails = {
   question: string | null;
@@ -197,6 +231,115 @@ function normalizeCourseTocToolCallArguments(value: unknown): CourseTocToolCall[
   };
 }
 
+function normalizeCourseAnswerDecisionToolCallArguments(
+  value: unknown,
+): CourseAnswerDecisionToolCall["function"]["arguments"] | null {
+  const parsed = normalizeToolCallArguments(value);
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const rawQuestionAttempt = record.questionAttempt;
+  const rawProgressDecision = record.progressDecision;
+
+  if (
+    !rawQuestionAttempt ||
+    typeof rawQuestionAttempt !== "object" ||
+    Array.isArray(rawQuestionAttempt) ||
+    !rawProgressDecision ||
+    typeof rawProgressDecision !== "object" ||
+    Array.isArray(rawProgressDecision)
+  ) {
+    return null;
+  }
+
+  const questionAttemptRecord = rawQuestionAttempt as Record<string, unknown>;
+  const progressDecisionRecord = rawProgressDecision as Record<string, unknown>;
+  const questionAttemptToolCall = normalizeText(
+    questionAttemptRecord.toolCall,
+    80,
+  );
+  const progressDecisionToolCall = normalizeText(
+    progressDecisionRecord.toolCall,
+    80,
+  );
+  const progressReason = normalizeText(progressDecisionRecord.reason, 500);
+
+  if (
+    progressDecisionToolCall !== "mark_milestone_done" &&
+    progressDecisionToolCall !== "continue_current_milestone"
+  ) {
+    return null;
+  }
+
+  const progressDecision = {
+    toolCall: progressDecisionToolCall,
+    reason: progressReason || "Course state decision recorded.",
+  } as const;
+
+  if (questionAttemptToolCall === "skip_course_question_attempt") {
+    const reason = normalizeText(questionAttemptRecord.reason, 500);
+
+    if (!reason) {
+      return null;
+    }
+
+    return {
+      questionAttempt: {
+        toolCall: "skip_course_question_attempt",
+        reason,
+      },
+      progressDecision,
+    };
+  }
+
+  if (questionAttemptToolCall !== "record_course_question_attempt") {
+    return null;
+  }
+
+  const question = normalizeText(questionAttemptRecord.question, 1_200);
+  const answer = normalizeText(questionAttemptRecord.answer, 4_000);
+  const answerSummary = normalizeText(questionAttemptRecord.answerSummary, 1_200);
+  const conciseAnswer = normalizeText(questionAttemptRecord.conciseAnswer, 1_200);
+  const correctAnswer = normalizeText(questionAttemptRecord.correctAnswer, 1_200);
+  const justification = normalizeText(questionAttemptRecord.justification, 1_200);
+  const score =
+    typeof questionAttemptRecord.score === "number"
+      ? questionAttemptRecord.score
+      : typeof questionAttemptRecord.score === "string"
+        ? Number.parseFloat(questionAttemptRecord.score)
+        : null;
+
+  if (
+    !question ||
+    !answer ||
+    !answerSummary ||
+    !conciseAnswer ||
+    !correctAnswer ||
+    !justification ||
+    score === null ||
+    !Number.isFinite(score)
+  ) {
+    return null;
+  }
+
+  return {
+    questionAttempt: {
+      toolCall: "record_course_question_attempt",
+      question,
+      answer,
+      answerSummary,
+      conciseAnswer,
+      correctAnswer,
+      justification,
+      score: Math.max(0, Math.min(10, score)),
+    },
+    progressDecision,
+  };
+}
+
 export function normalizeCourseToolCalls(value: unknown): CourseToolCall[] {
   if (!Array.isArray(value)) {
     return [];
@@ -218,6 +361,29 @@ export function normalizeCourseToolCalls(value: unknown): CourseToolCall[] {
 
     if (functionRecord.name === COURSE_QUESTION_WIDGET_TOOL_NAME) {
       return normalizeCourseQuestionWidgetToolCalls([candidate]);
+    }
+
+    if (functionRecord.name === COURSE_ANSWER_DECISION_TOOL_NAME) {
+      const args = normalizeCourseAnswerDecisionToolCallArguments(
+        functionRecord.arguments,
+      );
+
+      if (!args) {
+        return [];
+      }
+
+      const rawId = normalizeText(record.id, MAX_WIDGET_ID_CHARS);
+
+      return [
+        {
+          id: rawId || `answer-decision-call-${index + 1}`,
+          type: "function" as const,
+          function: {
+            name: COURSE_ANSWER_DECISION_TOOL_NAME,
+            arguments: args,
+          },
+        },
+      ];
     }
 
     if (functionRecord.name !== COURSE_TOC_TOOL_NAME) {

@@ -18,7 +18,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_PROMPT_PREVIEW_BODY_BYTES = 8 * 1024;
-const MAX_CHAT_MESSAGES = 20;
 const NEXT_INPUT_PLACEHOLDER = "<next learner input>";
 
 function findLatestUnansweredWidget(messages: CourseChatMessage[]) {
@@ -99,7 +98,7 @@ export async function POST(request: Request) {
         }
       : null,
   };
-  const messages = [...storedMessages, nextUserMessage].slice(-MAX_CHAT_MESSAGES);
+  const messages = [...storedMessages, nextUserMessage];
   const requestPreview = shouldUseCourseAnswerContinuationRequest(messages, model)
     ? buildCourseAnswerContinuationModelRequest({
         userId: user.id,
