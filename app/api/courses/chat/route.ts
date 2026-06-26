@@ -6,6 +6,7 @@ import {
 import { getCurrentUser } from "@/app/lib/auth";
 import {
   buildFallbackCourseToc,
+  courseAnswerContinuationRetryInstructionForError,
   generateCourseIntakeDecision,
   generateCourseToc,
   shouldUseCourseAnswerContinuationRequest,
@@ -367,7 +368,9 @@ export async function POST(request: Request) {
 
             if (shouldUseCourseAnswerContinuationRequest(messages)) {
               send("evaluation_pending", {});
-              const runSingleStreamContinuation = async () => {
+              const runSingleStreamContinuation = async (
+                retryInstruction: string | null = null,
+              ) => {
                 assistantContent = "";
                 assistantToolCalls = [];
                 answerDecisionToolCall = null;
@@ -389,7 +392,7 @@ export async function POST(request: Request) {
                   userId: user.id,
                   course: activeCourse,
                   messages,
-                  retryInstruction: null,
+                  retryInstruction,
                   onCost: addTurnCost,
                   onMetrics(metrics) {
                     assistantTurnMetrics = metrics;
@@ -447,7 +450,9 @@ export async function POST(request: Request) {
                 });
 
                 try {
-                  await runSingleStreamContinuation();
+                  await runSingleStreamContinuation(
+                    courseAnswerContinuationRetryInstructionForError(error),
+                  );
                   singleStreamSucceeded = true;
                 } catch (retryError) {
                   send("rollback", {

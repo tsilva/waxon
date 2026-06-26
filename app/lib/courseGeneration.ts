@@ -261,6 +261,10 @@ const COURSE_CHAT_CACHEABLE_TEACHING_RUBRIC = loadPromptTemplate(
 );
 const COURSE_CHAT_VISIBLE_TEXT_RETRY_INSTRUCTION =
   "Retry the same Learn turn. Your previous response called render_question_widget but omitted the visible learner-facing lesson. First write concise beginner tutor prose that explains the idea, then call render_question_widget exactly once. Do not put the question or answer choices in visible prose.";
+const COURSE_ANSWER_CONTINUATION_VISIBLE_TEXT_MISSING_ERROR_MESSAGE =
+  "Course answer continuation did not emit visible tutor text after the answer decision.";
+export const COURSE_ANSWER_CONTINUATION_VISIBLE_TEXT_RETRY_INSTRUCTION =
+  "Retry the same Learn answer-continuation turn. Your previous response recorded the answer decision but omitted visible learner-facing tutor text. First write concise tutor prose that responds to the learner's answer and teaches the next smallest idea, then call render_question_widget exactly once unless the course is complete. Still call record_course_answer_decision exactly once. Do not put the question or answer choices in visible prose.";
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
 const MODEL_CONTEXT_WINDOW_TOKENS: Array<{
   pattern: RegExp;
@@ -1340,6 +1344,16 @@ export function shouldUseCourseAnswerContinuationRequest(
   );
 }
 
+export function courseAnswerContinuationRetryInstructionForError(
+  error: unknown,
+): string | null {
+  const message = error instanceof Error ? error.message : "";
+
+  return message === COURSE_ANSWER_CONTINUATION_VISIBLE_TEXT_MISSING_ERROR_MESSAGE
+    ? COURSE_ANSWER_CONTINUATION_VISIBLE_TEXT_RETRY_INSTRUCTION
+    : null;
+}
+
 export function buildCourseAnswerContinuationModelRequest(input: {
   userId: string;
   course: CourseDetail;
@@ -1643,9 +1657,7 @@ export async function streamCourseAnswerContinuation(input: {
   }
 
   if (!responseText.trim()) {
-    throw new Error(
-      "Course answer continuation did not emit visible tutor text after the answer decision.",
-    );
+    throw new Error(COURSE_ANSWER_CONTINUATION_VISIBLE_TEXT_MISSING_ERROR_MESSAGE);
   }
 
   if (responseToolCalls.length === 0) {
