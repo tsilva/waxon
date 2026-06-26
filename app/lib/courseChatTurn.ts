@@ -4,6 +4,15 @@ import type {
 } from "./courseQuestionWidget.ts";
 
 const FALLBACK_LEARNER_QUESTION = "What is the main idea in your own words?";
+const MISSING_VISIBLE_TUTOR_TEXT_MESSAGE =
+  "Course chat generation did not emit visible tutor text before the question widget.";
+
+export class CourseTutorTextMissingError extends Error {
+  constructor() {
+    super(MISSING_VISIBLE_TUTOR_TEXT_MESSAGE);
+    this.name = "CourseTutorTextMissingError";
+  }
+}
 
 export function ensureCourseChatTurnHasLearnerQuestion(input: {
   text: string;
@@ -11,6 +20,7 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
   pageObjective: string;
   widgets?: CourseQuestionWidget[];
   stripTrailingPartialContent?: boolean;
+  requireVisibleTeachingTextWithWidgets?: boolean;
 }): {
   text: string;
   appendedText: string;
@@ -33,9 +43,14 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     const cleanedVisibleContent = stripInvalidRepairParagraphs(
       generatedText,
     );
+    const visibleContent = stripDanglingTailIfNeeded(cleanedVisibleContent);
+
+    if (input.requireVisibleTeachingTextWithWidgets && !visibleContent.trim()) {
+      throw new CourseTutorTextMissingError();
+    }
+
     const sanitizedVisibleContent = sanitizeLearnerFacingCourseText(
-      stripDanglingTailIfNeeded(cleanedVisibleContent) ||
-        `This section is about ${input.pageObjective}.`,
+      visibleContent || `This section is about ${input.pageObjective}.`,
     );
 
     return {
