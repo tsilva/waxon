@@ -9,6 +9,7 @@ import {
 import {
   generateCourseAnswerDecision,
   generateCourseToc,
+  shouldUseCourseAnswerContinuationRequest,
   streamCourseAnswerContinuation,
   streamCourseChatTurn,
 } from "../app/lib/courseGeneration.ts";
@@ -59,6 +60,50 @@ test("ensureCourseChatTurnHasLearnerQuestion appends checkpoint to lesson withou
     result.widgets[0]?.question,
     "In your own words, explain why entropy keeps PPO policy updates exploratory?",
   );
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion makes learn-to objectives grammatical", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: "A tensor stores image values in channel, height, and width dimensions.",
+    pageTitle: "Tensors: The Building Blocks",
+    pageObjective: "Learn to create, manipulate, and reshape PyTorch tensors for image data.",
+  });
+
+  assert.equal(
+    result.widgets[0]?.question,
+    "In your own words, explain how to create, manipulate, and reshape PyTorch tensors for image data?",
+  );
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion makes master-use objectives grammatical", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: "Dataset loads one image at a time. DataLoader batches those images for training.",
+    pageTitle: "Setting Up the Data Pipeline",
+    pageObjective: "Master the use of Dataset and DataLoader classes to feed images into your model.",
+  });
+
+  assert.equal(
+    result.widgets[0]?.question,
+    "In your own words, explain how to use Dataset and DataLoader classes to feed images into your model?",
+  );
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion avoids duplicate focus prompts", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: [
+      "Dataset loads one image at a time. DataLoader batches those images for training.",
+      "",
+      "Focus on this idea: Master the use of Dataset and DataLoader classes to feed images into your model.",
+    ].join("\n\n"),
+    pageTitle: "Setting Up the Data Pipeline",
+    pageObjective: "Master the use of Dataset and DataLoader classes to feed images into your model.",
+  });
+
+  assert.equal(
+    result.text.match(/Focus on this idea:/gu)?.length,
+    1,
+  );
+  assert.equal(result.appendedText, "");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion preserves a complete learner question", () => {
@@ -1338,6 +1383,47 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("shouldUseCourseAnswerContinuationRequest skips Gemini live fallback churn", () => {
+  const messages = [
+    {
+      role: "assistant" as const,
+      content: "A join matches rows by a shared key.",
+      toolCalls: [
+        courseQuestionWidgetToolCallFromWidget({
+          type: "free_text",
+          id: "join-key",
+          question: "What has to match for a join to connect two rows?",
+          placeholder: "Answer in one sentence...",
+        }),
+      ],
+    },
+    {
+      role: "user" as const,
+      content: "The customer id has to match.",
+      widgetAnswer: {
+        question: "What has to match for a join to connect two rows?",
+        widgetId: "join-key",
+        answer: "The customer id has to match.",
+      },
+    },
+  ];
+
+  assert.equal(
+    shouldUseCourseAnswerContinuationRequest(
+      messages,
+      "google/gemini-3.1-flash-lite",
+    ),
+    false,
+  );
+  assert.equal(
+    shouldUseCourseAnswerContinuationRequest(
+      messages,
+      "anthropic/claude-haiku-4.5",
+    ),
+    true,
+  );
 });
 
 test("streamCourseAnswerContinuation rejects malformed answer decision tools", async () => {

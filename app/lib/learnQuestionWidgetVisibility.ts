@@ -22,7 +22,7 @@ export function shouldShowLearnQuestionWidgets(input: {
   }
 
   if (input.answeredWidgetCount > 0) {
-    return false;
+    return true;
   }
 
   return !input.messages.slice(input.messageIndex + 1).some((laterMessage) => {

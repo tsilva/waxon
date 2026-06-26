@@ -37,6 +37,7 @@ import {
 } from "@/app/lib/courseQuestionWidget";
 import type { CourseToc } from "@/app/lib/courseContent";
 import {
+  getOpenRouterEvaluationConfig,
   getOpenRouterLearnConfig,
 } from "@/app/lib/openRouter";
 
@@ -284,6 +285,14 @@ export async function POST(request: Request) {
       { status: 500 },
     );
   }
+  const openRouterEvaluationConfig = getOpenRouterEvaluationConfig();
+
+  if (!openRouterEvaluationConfig.ok) {
+    return Response.json(
+      { ok: false, error: openRouterEvaluationConfig.error },
+      { status: 500 },
+    );
+  }
 
   const user = await getCurrentUser();
   const rateLimitResponse = consumeUserRateLimit({
@@ -411,155 +420,162 @@ export async function POST(request: Request) {
             messages = conversationMessages.slice(-MAX_CHAT_MESSAGES);
 
             if (shouldUseCourseAnswerContinuationRequest(messages)) {
-              send("evaluation_pending", {});
-              const runSingleStreamContinuation = async (
-                retryInstruction: string | null,
-              ) => {
-                assistantContent = "";
-                assistantToolCalls = [];
-                sentQuestionWidgetPending = false;
-                questionEvaluationResult = null;
-                answerDecisionMetrics = null;
-                assistantTurnMetrics = null;
-                const activeCourse = course;
-
-                if (!activeCourse) {
-                  throw new Error("Course could not be loaded.");
-                }
-
-                const chatStreamStartedAt = Date.now();
-                let singleStreamAnswerDecision: Awaited<
-                  ReturnType<typeof generateCourseAnswerDecision>
-                > | null = null;
-                const assistantTurn = await streamCourseAnswerContinuation({
-                  apiKey: openRouterConfig.apiKey,
-                  model: openRouterConfig.model,
-                  userId: user.id,
-                  course: activeCourse,
+              if (
+                shouldUseCourseAnswerContinuationRequest(
                   messages,
-                  retryInstruction,
-                  onCost: addTurnCost,
-                  onMetrics(metrics) {
-                    assistantTurnMetrics = metrics;
-                  },
-                  async onAnswerDecision(answerDecision) {
-                    if (singleStreamAnswerDecision) {
-                      return;
-                    }
+                  openRouterConfig.model,
+                )
+              ) {
+                send("evaluation_pending", {});
+                const runSingleStreamContinuation = async (
+                  retryInstruction: string | null,
+                ) => {
+                  assistantContent = "";
+                  assistantToolCalls = [];
+                  sentQuestionWidgetPending = false;
+                  questionEvaluationResult = null;
+                  answerDecisionMetrics = null;
+                  assistantTurnMetrics = null;
+                  const activeCourse = course;
 
-                    latencyMetrics.answer_decision_ms ??=
-                      Date.now() - requestStartedAt;
-                    singleStreamAnswerDecision = answerDecision;
-                  },
-                  onTextDelta(delta) {
-                    assistantContent += delta;
-                    latencyMetrics.time_to_first_delta_ms ??=
-                      Date.now() - requestStartedAt;
-                    send("delta", { delta });
-                  },
-                  onQuestionWidgetToolDelta() {
-                    if (sentQuestionWidgetPending) {
-                      return;
-                    }
+                  if (!activeCourse) {
+                    throw new Error("Course could not be loaded.");
+                  }
 
-                    sentQuestionWidgetPending = true;
-                    send("question_widget_pending", {});
-                  },
-                });
-                assistantContent = assistantTurn.content;
-                assistantToolCalls = assistantTurn.toolCalls;
-                await applyAnswerDecision(
-                  singleStreamAnswerDecision ?? assistantTurn.answerDecision,
-                  null,
-                );
-                latencyMetrics.chat_stream_ms =
-                  Date.now() - chatStreamStartedAt;
-              };
-              let singleStreamSucceeded = false;
+                  const chatStreamStartedAt = Date.now();
+                  let singleStreamAnswerDecision: Awaited<
+                    ReturnType<typeof generateCourseAnswerDecision>
+                  > | null = null;
+                  const assistantTurn = await streamCourseAnswerContinuation({
+                    apiKey: openRouterConfig.apiKey,
+                    model: openRouterConfig.model,
+                    userId: user.id,
+                    course: activeCourse,
+                    messages,
+                    retryInstruction,
+                    onCost: addTurnCost,
+                    onMetrics(metrics) {
+                      assistantTurnMetrics = metrics;
+                    },
+                    async onAnswerDecision(answerDecision) {
+                      if (singleStreamAnswerDecision) {
+                        return;
+                      }
 
-              try {
-                await runSingleStreamContinuation(null);
-                singleStreamSucceeded = true;
-              } catch (error) {
-                latencyMetrics.rollback_count = 1;
-                const reason =
-                  error instanceof Error
-                    ? error.message
-                    : "Single-stream Learn continuation failed.";
+                      latencyMetrics.answer_decision_ms ??=
+                        Date.now() - requestStartedAt;
+                      singleStreamAnswerDecision = answerDecision;
+                    },
+                    onTextDelta(delta) {
+                      assistantContent += delta;
+                      latencyMetrics.time_to_first_delta_ms ??=
+                        Date.now() - requestStartedAt;
+                      send("delta", { delta });
+                    },
+                    onQuestionWidgetToolDelta() {
+                      if (sentQuestionWidgetPending) {
+                        return;
+                      }
 
-                send("rollback", {
-                  checkpoint: "after_user_answer",
-                  reason,
-                  retry: true,
-                });
+                      sentQuestionWidgetPending = true;
+                      send("question_widget_pending", {});
+                    },
+                  });
+                  assistantContent = assistantTurn.content;
+                  assistantToolCalls = assistantTurn.toolCalls;
+                  await applyAnswerDecision(
+                    singleStreamAnswerDecision ?? assistantTurn.answerDecision,
+                    null,
+                  );
+                  latencyMetrics.chat_stream_ms =
+                    Date.now() - chatStreamStartedAt;
+                };
+                let singleStreamSucceeded = false;
 
                 try {
-                  await runSingleStreamContinuation(reason);
+                  await runSingleStreamContinuation(null);
                   singleStreamSucceeded = true;
-                } catch (retryError) {
+                } catch (error) {
+                  latencyMetrics.rollback_count = 1;
+                  const reason =
+                    error instanceof Error
+                      ? error.message
+                      : "Single-stream Learn continuation failed.";
+
                   send("rollback", {
                     checkpoint: "after_user_answer",
-                    reason:
-                      retryError instanceof Error
-                        ? retryError.message
-                        : "Single-stream Learn continuation retry failed.",
-                    retry: false,
+                    reason,
+                    retry: true,
                   });
+
+                  try {
+                    await runSingleStreamContinuation(reason);
+                    singleStreamSucceeded = true;
+                  } catch (retryError) {
+                    send("rollback", {
+                      checkpoint: "after_user_answer",
+                      reason:
+                        retryError instanceof Error
+                          ? retryError.message
+                          : "Single-stream Learn continuation retry failed.",
+                      retry: false,
+                    });
+                  }
                 }
-              }
 
-              if (singleStreamSucceeded) {
-                if (assistantToolCalls.length > 0) {
-                  send("question_widget", { toolCalls: assistantToolCalls });
+                if (singleStreamSucceeded) {
+                  if (assistantToolCalls.length > 0) {
+                    send("question_widget", { toolCalls: assistantToolCalls });
+                  }
+
+                  if (finalCoursePromise) {
+                    course = await finalCoursePromise;
+                  }
+
+                  const evaluationResult =
+                    questionEvaluationResult as CourseQuestionEvaluationResult | null;
+                  const tocGenerationMessages = finalCoursePromise
+                    ? [buildCourseTocGeneratedMessage(course)]
+                    : [];
+                  const chatMessages = await appendCourseChatMessages({
+                    courseId: course.id,
+                    messages: [
+                      userMessage,
+                      ...tocGenerationMessages,
+                      ...(evaluationResult
+                        ? [evaluationResult.message]
+                        : []),
+                      {
+                        role: "assistant",
+                        content: assistantContent,
+                        metrics: assistantTurnMetrics,
+                        toolCalls: assistantToolCalls,
+                      },
+                    ],
+                    maxMessages: MAX_STORED_CHAT_MESSAGES,
+                  });
+                  await addCourseConversationCost({
+                    courseId: course.id,
+                    cost: turnCost,
+                  });
+                  const updatedCourse = (await getCourse(course.id)) ?? course;
+
+                  send("done", {
+                    ok: true,
+                    course: updatedCourse,
+                    chatMessages,
+                    turnCost,
+                    latencyMetrics,
+                  });
+                  return;
                 }
-
-                if (finalCoursePromise) {
-                  course = await finalCoursePromise;
-                }
-
-                const evaluationResult =
-                  questionEvaluationResult as CourseQuestionEvaluationResult | null;
-                const tocGenerationMessages = finalCoursePromise
-                  ? [buildCourseTocGeneratedMessage(course)]
-                  : [];
-                const chatMessages = await appendCourseChatMessages({
-                  courseId: course.id,
-                  messages: [
-                    userMessage,
-                    ...tocGenerationMessages,
-                    ...(evaluationResult
-                      ? [evaluationResult.message]
-                      : []),
-                    {
-                      role: "assistant",
-                      content: assistantContent,
-                      metrics: assistantTurnMetrics,
-                      toolCalls: assistantToolCalls,
-                    },
-                  ],
-                  maxMessages: MAX_STORED_CHAT_MESSAGES,
-                });
-                await addCourseConversationCost({
-                  courseId: course.id,
-                  cost: turnCost,
-                });
-                const updatedCourse = (await getCourse(course.id)) ?? course;
-
-                send("done", {
-                  ok: true,
-                  course: updatedCourse,
-                  chatMessages,
-                  turnCost,
-                  latencyMetrics,
-                });
-                return;
               }
 
               send("status", { status: "Checking answer" });
               const answerDecisionStartedAt = Date.now();
               const answerDecision = await generateCourseAnswerDecision({
-                apiKey: openRouterConfig.apiKey,
-                model: openRouterConfig.model,
+                apiKey: openRouterEvaluationConfig.apiKey,
+                model: openRouterEvaluationConfig.model,
                 userId: user.id,
                 course,
                 messages,

@@ -22,7 +22,7 @@ test("shouldShowLearnQuestionWidgets shows only unanswered active widgets", () =
   );
 });
 
-test("shouldShowLearnQuestionWidgets hides answered widgets during evaluation", () => {
+test("shouldShowLearnQuestionWidgets keeps answered widgets visible during evaluation", () => {
   const pendingEvaluation = {
     role: "assistant" as const,
     content: "",
@@ -45,7 +45,7 @@ test("shouldShowLearnQuestionWidgets hides answered widgets during evaluation", 
       answeredWidgetCount: 1,
       hasEvaluationSnippet: false,
     }),
-    false,
+    true,
   );
 });
 

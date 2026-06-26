@@ -97,10 +97,11 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
       : sanitizeLearnerFacingCourseText(parsedRepairContent)) ||
     `This section is about ${input.pageObjective}.`;
   const separator = /[.!?)]\s*$/u.test(repairBaseText) ? "\n\n" : ".\n\n";
-  const fallbackPromptText = [
-    separator.trimEnd(),
-    `Focus on this idea: ${input.pageObjective}`,
-  ].join("\n\n");
+  const focusPromptText = `Focus on this idea: ${input.pageObjective}`;
+  const alreadyHasFocusPrompt = repairBaseText.includes(focusPromptText);
+  const fallbackPromptText = alreadyHasFocusPrompt
+    ? ""
+    : [separator.trimEnd(), focusPromptText].join("\n\n");
 
   return {
     text: sanitizeLearnerFacingCourseText(`${repairBaseText}${fallbackPromptText}`),
@@ -151,10 +152,10 @@ function fallbackQuestionFromPageObjective(pageObjective: string): string {
     return FALLBACK_LEARNER_QUESTION;
   }
 
-  const explainableObjective = objective.replace(
-    /^(?:understand|learn|review)\s+/iu,
-    "explain ",
-  );
+  const explainableObjective = objective
+    .replace(/^(?:understand|learn|review)\s+to\s+/iu, "explain how to ")
+    .replace(/^master\s+the\s+use\s+of\s+/iu, "explain how to use ")
+    .replace(/^(?:understand|learn|review)\s+/iu, "explain ");
   const questionStem = /^[A-Z]/u.test(explainableObjective)
     ? `${explainableObjective.slice(0, 1).toLowerCase()}${explainableObjective.slice(1)}`
     : explainableObjective;
