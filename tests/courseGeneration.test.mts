@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  CourseTutorTextMissingError,
   excerptCourseMessageForPrompt,
   ensureCourseChatTurnHasLearnerQuestion,
   isCourseChatTurnComplete,
+  sanitizeLearnerFacingCourseText,
   shouldShowCourseChatInterruptedWarning,
 } from "../app/lib/courseChatTurn.ts";
 import {
@@ -122,7 +124,7 @@ test("generateCourseIntakeDecision sends previous clarification turns", async ()
   }
 });
 
-test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for empty output", () => {
+test("ensureCourseChatTurnHasLearnerQuestion creates generic content for empty output", () => {
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: "",
     pageTitle: "Why PPO Needs an Entropy Term",
@@ -131,7 +133,8 @@ test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for
 
   assert.doesNotMatch(result.text, /^#{1,6}\s+/u);
   assert.doesNotMatch(result.text, /Why PPO Needs an Entropy Term/u);
-  assert.match(result.text, /Explain why entropy/u);
+  assert.doesNotMatch(result.text, /Explain why entropy/u);
+  assert.match(result.text, /A good answer should name the core idea/u);
   assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(result.widgets[0]?.id, "fallback-understanding-check");
   assert.equal(
@@ -141,7 +144,7 @@ test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for
   assert.equal(result.appendedText, result.text);
 });
 
-test("ensureCourseChatTurnHasLearnerQuestion appends checkpoint to lesson without a question", () => {
+test("ensureCourseChatTurnHasLearnerQuestion adds widget to lesson without leaking objective", () => {
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: "Entropy regularization rewards a policy for keeping action probabilities spread out.",
     pageTitle: "Why PPO Needs an Entropy Term",
@@ -149,7 +152,10 @@ test("ensureCourseChatTurnHasLearnerQuestion appends checkpoint to lesson withou
   });
 
   assert.match(result.text, /Entropy regularization rewards/u);
+  assert.doesNotMatch(result.text, /Focus on this idea/u);
+  assert.doesNotMatch(result.text, /Explain why entropy/u);
   assert.doesNotMatch(result.text, /\bmilestone\b/iu);
+  assert.equal(result.appendedText, "");
   assert.equal(result.widgets[0]?.type, "free_text");
   assert.equal(
     result.widgets[0]?.question,
@@ -208,7 +214,7 @@ test("ensureCourseChatTurnHasLearnerQuestion makes master-use objectives grammat
   );
 });
 
-test("ensureCourseChatTurnHasLearnerQuestion avoids duplicate focus prompts", () => {
+test("ensureCourseChatTurnHasLearnerQuestion removes leaked focus prompts", () => {
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: [
       "Dataset loads one image at a time. DataLoader batches those images for training.",
@@ -219,10 +225,9 @@ test("ensureCourseChatTurnHasLearnerQuestion avoids duplicate focus prompts", ()
     pageObjective: "Master the use of Dataset and DataLoader classes to feed images into your model.",
   });
 
-  assert.equal(
-    result.text.match(/Focus on this idea:/gu)?.length,
-    1,
-  );
+  assert.match(result.text, /Dataset loads one image at a time/u);
+  assert.doesNotMatch(result.text, /Focus on this idea:/u);
+  assert.doesNotMatch(result.text, /Master the use of Dataset/u);
   assert.equal(result.appendedText, "");
 });
 
@@ -279,7 +284,7 @@ test("ensureCourseChatTurnHasLearnerQuestion repairs mid-word truncation", () =>
   });
 
   assert.doesNotMatch(result.text, /expec/u);
-  assert.match(result.text, /This section is about/u);
+  assert.match(result.text, /A good answer should name the core idea/u);
   assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(
     result.widgets[0]?.question,
@@ -360,7 +365,7 @@ test("ensureCourseChatTurnHasLearnerQuestion uses generic fallback for capped si
   });
 
   assert.doesNotMatch(result.text, /Let's ask/u);
-  assert.match(result.text, /This section is about/u);
+  assert.match(result.text, /A good answer should name the core idea/u);
   assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(result.widgets.length, 1);
 });
@@ -391,7 +396,7 @@ test("ensureCourseChatTurnHasLearnerQuestion removes leaked widget JSON fragment
   });
 
   assert.doesNotMatch(result.text, /choices/u);
-  assert.match(result.text, /This section is about/u);
+  assert.match(result.text, /A good answer should name the core idea/u);
   assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(result.widgets.length, 1);
 });
@@ -435,7 +440,7 @@ test("ensureCourseChatTurnHasLearnerQuestion sanitizes complete widget turns", (
 
   assert.doesNotMatch(result.text, /Goal: Test/u);
   assert.doesNotMatch(result.text, /:\*\*/u);
-  assert.match(result.text, /This section is about/u);
+  assert.match(result.text, /A good answer should name the core idea/u);
   assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(result.widgets.length, 1);
   assert.equal(result.widgets[0]?.id, "sql-split-check");
@@ -464,13 +469,13 @@ test("ensureCourseChatTurnHasLearnerQuestion removes visible widget-planning pro
   assert.doesNotMatch(result.text, /redundancy\/errors/u);
   assert.doesNotMatch(result.text, /Let's use a multiple-choice/u);
   assert.doesNotMatch(result.text, /Question: "If/u);
-  assert.match(result.text, /This section is about/u);
+  assert.match(result.text, /A good answer should name the core idea/u);
   assert.doesNotMatch(result.text, /\bmilestone\b/iu);
   assert.equal(result.widgets.length, 1);
   assert.equal(result.widgets[0]?.id, "sql-redundancy-check");
 });
 
-test("ensureCourseChatTurnHasLearnerQuestion removes internal milestone wording from generated lesson and widget", () => {
+test("ensureCourseChatTurnHasLearnerQuestion removes internal focus wording from generated lesson and widget", () => {
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: "Focus on this milestone: understand why PPO clips updates.",
     widgets: [
@@ -485,10 +490,9 @@ test("ensureCourseChatTurnHasLearnerQuestion removes internal milestone wording 
     pageObjective: "Explain why clipping limits PPO policy changes.",
   });
 
-  assert.equal(
-    result.text,
-    "Focus on this idea: understand why PPO clips updates.",
-  );
+  assert.match(result.text, /A good answer should name the core idea/u);
+  assert.doesNotMatch(result.text, /Focus on this idea/u);
+  assert.doesNotMatch(result.text, /understand why PPO clips updates/u);
   assert.equal(result.widgets[0]?.type, "free_text");
   assert.equal(result.widgets[0]?.id, "fallback-understanding-check");
   assert.equal(result.widgets[0]?.question, "What is the main idea in your own words?");
@@ -497,6 +501,40 @@ test("ensureCourseChatTurnHasLearnerQuestion removes internal milestone wording 
     "Explain this topic...",
   );
   assert.doesNotMatch(result.text, /\bmilestone\b/iu);
+});
+
+test("ensureCourseChatTurnHasLearnerQuestion rejects focus-only widget turns when teaching text is required", () => {
+  assert.throws(
+    () =>
+      ensureCourseChatTurnHasLearnerQuestion({
+        text: "Focus on this idea: explain why clipping limits PPO policy changes.",
+        widgets: [
+          {
+            type: "free_text",
+            id: "ppo-clipping-check",
+            question: "Why does PPO clip policy updates?",
+          },
+        ],
+        pageTitle: "The Clipping Mechanism Explained",
+        pageObjective: "Explain why clipping limits PPO policy changes.",
+        requireVisibleTeachingTextWithWidgets: true,
+      }),
+    CourseTutorTextMissingError,
+  );
+});
+
+test("sanitizeLearnerFacingCourseText strips stored focus prompt paragraphs", () => {
+  const result = sanitizeLearnerFacingCourseText(
+    [
+      "Policy gradients nudge action probabilities toward choices that worked better than expected.",
+      "",
+      "Focus on this idea: Explain policy gradients and the limitation of standard policy gradient methods.",
+    ].join("\n\n"),
+  );
+
+  assert.match(result, /Policy gradients nudge/u);
+  assert.doesNotMatch(result, /Focus on this idea/u);
+  assert.doesNotMatch(result, /Explain policy gradients and the limitation/u);
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion preserves valid complete widget teaching paragraphs", () => {
