@@ -8,6 +8,8 @@ out
 .env*.local
 pnpm-lock.yaml.tmp
 tsconfig.tsbuildinfo
+__pycache__/
+*.pyc
 data/questions.sqlite
 data/questions.sqlite-*
 

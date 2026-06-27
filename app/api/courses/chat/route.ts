@@ -381,7 +381,10 @@ export async function POST(request: Request) {
             ];
             messages = conversationMessages;
 
-            if (shouldUseCourseAnswerContinuationRequest(messages)) {
+            const hasAnswerContinuationContext =
+              shouldUseCourseAnswerContinuationRequest(messages);
+
+            if (hasAnswerContinuationContext) {
               send("evaluation_pending", {});
               const runSingleStreamContinuation = async (
                 retryInstruction: string | null = null,
@@ -527,8 +530,18 @@ export async function POST(request: Request) {
               };
               let singleStreamSucceeded = false;
 
+              const shouldUseSingleStreamContinuation =
+                shouldUseCourseAnswerContinuationRequest(
+                  messages,
+                  openRouterConfig.model,
+                );
+
               try {
-                await runSingleStreamContinuation();
+                if (shouldUseSingleStreamContinuation) {
+                  await runSingleStreamContinuation();
+                } else {
+                  await runFallbackContinuation();
+                }
                 singleStreamSucceeded = true;
               } catch (error) {
                 latencyMetrics.rollback_count = 1;

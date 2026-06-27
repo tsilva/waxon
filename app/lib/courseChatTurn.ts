@@ -60,11 +60,23 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     };
   }
 
-  if (hasLearnerQuestion) {
+  if (hasLearnerQuestion && !input.requireVisibleTeachingTextWithWidgets) {
     return {
       text: sanitizeLearnerFacingCourseText(generatedText),
       appendedText: "",
       widgets: [],
+    };
+  }
+
+  if (hasLearnerQuestion && input.requireVisibleTeachingTextWithWidgets) {
+    const teachingText =
+      sanitizeLearnerFacingCourseText(stripTrailingQuestion(generatedText)) ||
+      `This section is about ${input.pageObjective}.`;
+
+    return {
+      text: teachingText,
+      appendedText: "",
+      widgets: [fallbackWidget],
     };
   }
 
@@ -308,6 +320,10 @@ function stripDanglingTrailingRepairContent(text: string): string {
 
 function stripDanglingTailIfNeeded(text: string): string {
   return /[.!?)]\s*$/u.test(text) ? text : stripDanglingTrailingRepairContent(text);
+}
+
+function stripTrailingQuestion(text: string): string {
+  return text.replace(/(?:^|\n|\s)[^.!?\n][^?\n]*\?\s*$/u, "").trim();
 }
 
 function stripFinalSentence(text: string): string {

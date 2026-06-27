@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evaluate Learn TUI"
+  short_description: "Audit Waxon Learn through its TUI"
+  default_prompt: "Use $evaluate-learn-experience-tui to run a TUI-only Waxon Learn experience audit."

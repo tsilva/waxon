@@ -39,7 +39,7 @@ Every answered Learn question becomes a durable review item in one unified, tagg
 - Advancement is based on tutor judgment that the learner is ready, not on a hard score threshold.
 - Section advancement only moves forward. A course completes when the tutor advances past the final table-of-contents section.
 - Learn optimizes for completing the table of contents; durable retention drilling belongs to Review.
-- After a learner answers a widget, the answered widget should remain visible as read-only history and the newest unanswered widget should remain enabled.
+- After a learner answers a widget, render that answered turn as a pending or resolved question-evaluation row rather than leaving the answer widget visible; the newest unanswered widget should remain enabled.
 
 ## Learn Architecture
 

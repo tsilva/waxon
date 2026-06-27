@@ -264,7 +264,7 @@ const COURSE_CHAT_VISIBLE_TEXT_RETRY_INSTRUCTION =
 const COURSE_ANSWER_CONTINUATION_VISIBLE_TEXT_MISSING_ERROR_MESSAGE =
   "Course answer continuation did not emit visible tutor text after the answer decision.";
 export const COURSE_ANSWER_CONTINUATION_VISIBLE_TEXT_RETRY_INSTRUCTION =
-  "Retry the same Learn answer-continuation turn. Your previous response recorded the answer decision but omitted visible learner-facing tutor text. First write concise tutor prose that responds to the learner's answer and teaches the next smallest idea, then call render_question_widget exactly once unless the course is complete. Still call record_course_answer_decision exactly once. Do not put the question or answer choices in visible prose.";
+  "Retry the same Learn answer-continuation turn. Your previous response recorded the answer decision but omitted visible learner-facing tutor text. Your assistant message content must not be empty; a tools-only response is invalid. Write concise tutor prose that responds to the learner's answer and teaches the next smallest idea, then call render_question_widget exactly once unless the course is complete. Still call record_course_answer_decision exactly once. Do not put the question or answer choices in visible prose.";
 const DEFAULT_CONTEXT_WINDOW_TOKENS = 1_000_000;
 const MODEL_CONTEXT_WINDOW_TOKENS: Array<{
   pattern: RegExp;
@@ -1329,7 +1329,13 @@ export function shouldUseCourseAnswerContinuationRequest(
   messages: CourseChatMessage[],
   model?: string,
 ): boolean {
-  void model;
+  const normalizedModel = (model ?? DEFAULT_OPENROUTER_LEARN_MODEL)
+    .trim()
+    .toLowerCase();
+
+  if (normalizedModel === "google/gemini-3.1-flash-lite") {
+    return false;
+  }
 
   const previousAssistantMessage = [...messages]
     .reverse()
