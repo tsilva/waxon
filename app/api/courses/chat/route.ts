@@ -7,6 +7,7 @@ import { getCurrentUser } from "@/app/lib/auth";
 import {
   buildFallbackCourseToc,
   courseAnswerContinuationRetryInstructionForError,
+  generateCourseAnswerDecision,
   generateCourseIntakeDecision,
   generateCourseToc,
   shouldUseCourseAnswerContinuationRequest,
@@ -67,6 +68,20 @@ function buildQuestionEvaluationMessage(input: {
       correctAnswer: correctAnswer || null,
       score,
       feedback: justification,
+    },
+  };
+}
+
+function courseAnswerDecisionToolCallFromResult(input: {
+  id: string;
+  answerDecision: CourseAnswerDecisionToolResult;
+}): CourseAnswerDecisionToolCall {
+  return {
+    id: input.id,
+    type: "function",
+    function: {
+      name: "record_course_answer_decision",
+      arguments: input.answerDecision,
     },
   };
 }
@@ -431,6 +446,85 @@ export async function POST(request: Request) {
                 latencyMetrics.chat_stream_ms =
                   Date.now() - chatStreamStartedAt;
               };
+              const runFallbackContinuation = async () => {
+                assistantContent = "";
+                assistantToolCalls = [];
+                sentQuestionWidgetPending = false;
+                questionEvaluationResult = null;
+                assistantTurnMetrics = null;
+                let answerDecisionMetrics: CourseMessageMetrics | null = null;
+                const activeCourse = course;
+
+                if (!activeCourse) {
+                  throw new Error("Course could not be loaded.");
+                }
+
+                send("status", { status: "Recovering answer" });
+                const answerDecisionStartedAt = Date.now();
+                const answerDecision = await generateCourseAnswerDecision({
+                  apiKey: openRouterConfig.apiKey,
+                  model: openRouterConfig.model,
+                  userId: user.id,
+                  course: activeCourse,
+                  messages,
+                  onCost: addTurnCost,
+                  onMetrics(metrics) {
+                    answerDecisionMetrics = metrics;
+                  },
+                });
+                latencyMetrics.answer_decision_ms ??=
+                  Date.now() - answerDecisionStartedAt;
+                answerDecisionToolCall = courseAnswerDecisionToolCallFromResult({
+                  id: `fallback-answer-decision-${requestStartedAt}`,
+                  answerDecision,
+                });
+                await applyAnswerDecision(answerDecision, answerDecisionMetrics);
+
+                if (!course) {
+                  throw new Error("Course could not be loaded.");
+                }
+
+                send("status", { status: "Writing lesson" });
+                const chatStreamStartedAt = Date.now();
+                const fallbackMessages: CourseChatMessage[] = [
+                  ...messages,
+                  {
+                    role: "assistant",
+                    content: "",
+                    toolCalls: [answerDecisionToolCall],
+                  },
+                ];
+                const assistantTurn = await streamCourseChatTurn({
+                  apiKey: openRouterConfig.apiKey,
+                  model: openRouterConfig.model,
+                  userId: user.id,
+                  course,
+                  messages: fallbackMessages,
+                  progressDecision,
+                  onCost: addTurnCost,
+                  onMetrics(metrics) {
+                    assistantTurnMetrics = metrics;
+                  },
+                  onTextDelta(delta) {
+                    assistantContent += delta;
+                    latencyMetrics.time_to_first_delta_ms ??=
+                      Date.now() - requestStartedAt;
+                    send("delta", { delta });
+                  },
+                  onQuestionWidgetToolDelta() {
+                    if (sentQuestionWidgetPending) {
+                      return;
+                    }
+
+                    sentQuestionWidgetPending = true;
+                    send("question_widget_pending", {});
+                  },
+                });
+                assistantContent = assistantTurn.content;
+                assistantToolCalls = assistantTurn.toolCalls;
+                latencyMetrics.chat_stream_ms =
+                  Date.now() - chatStreamStartedAt;
+              };
               let singleStreamSucceeded = false;
 
               try {
@@ -455,15 +549,19 @@ export async function POST(request: Request) {
                   );
                   singleStreamSucceeded = true;
                 } catch (retryError) {
+                  latencyMetrics.rollback_count = 2;
+                  const retryReason =
+                    retryError instanceof Error
+                      ? retryError.message
+                      : "Single-stream Learn continuation retry failed.";
+
                   send("rollback", {
                     checkpoint: "after_user_answer",
-                    reason:
-                      retryError instanceof Error
-                        ? retryError.message
-                        : "Single-stream Learn continuation retry failed.",
+                    reason: retryReason,
                     retry: false,
                   });
-                  throw retryError;
+                  await runFallbackContinuation();
+                  singleStreamSucceeded = true;
                 }
               }
 
