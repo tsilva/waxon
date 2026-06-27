@@ -4,6 +4,8 @@ import type {
 } from "./courseQuestionWidget.ts";
 
 const FALLBACK_LEARNER_QUESTION = "What is the main idea in your own words?";
+const FALLBACK_VISIBLE_TEACHING_TEXT =
+  "A good answer should name the core idea, explain why it matters, and connect it to a small example.";
 const MISSING_VISIBLE_TUTOR_TEXT_MESSAGE =
   "Course chat generation did not emit visible tutor text before the question widget.";
 
@@ -50,7 +52,7 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     }
 
     const sanitizedVisibleContent = sanitizeLearnerFacingCourseText(
-      visibleContent || `This section is about ${input.pageObjective}.`,
+      visibleContent || FALLBACK_VISIBLE_TEACHING_TEXT,
     );
 
     return {
@@ -71,7 +73,7 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
   if (hasLearnerQuestion && input.requireVisibleTeachingTextWithWidgets) {
     const teachingText =
       sanitizeLearnerFacingCourseText(stripTrailingQuestion(generatedText)) ||
-      `This section is about ${input.pageObjective}.`;
+      FALLBACK_VISIBLE_TEACHING_TEXT;
 
     return {
       text: teachingText,
@@ -82,7 +84,7 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
 
   if (!generatedText) {
     const fallbackLesson = [
-      `This section is about ${input.pageObjective}.`,
+      "Let's make the next check about the main idea from this section.",
       "A good answer should name the core idea, explain why it matters, and connect it to a small example.",
     ].join("\n\n");
 
@@ -122,26 +124,17 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
     (shouldStripTrailingPartialContent || shouldStripDanglingTail
       ? ""
       : sanitizeLearnerFacingCourseText(parsedRepairContent)) ||
-    `This section is about ${input.pageObjective}.`;
-  const separator = /[.!?)]\s*$/u.test(repairBaseText) ? "\n\n" : ".\n\n";
-  const focusPromptText = `Focus on this idea: ${input.pageObjective}`;
-  const alreadyHasFocusPrompt = repairBaseText.includes(focusPromptText);
-  const fallbackPromptText = alreadyHasFocusPrompt
-    ? ""
-    : [separator.trimEnd(), focusPromptText].join("\n\n");
+    FALLBACK_VISIBLE_TEACHING_TEXT;
 
   return {
-    text: sanitizeLearnerFacingCourseText(`${repairBaseText}${fallbackPromptText}`),
-    appendedText: fallbackPromptText,
+    text: repairBaseText,
+    appendedText: "",
     widgets: [fallbackWidget],
   };
 }
 
 export function sanitizeLearnerFacingCourseText(text: string): string {
-  return text
-    .replace(/\bfocus on this milestone\b/giu, (match) =>
-      preserveLeadingCase(match, "focus on this idea"),
-    )
+  return stripLeakedFocusPromptParagraphs(text)
     .replace(
       /\bwhat is the main idea of this milestone in your own words\?/giu,
       (match) => preserveLeadingCase(match, FALLBACK_LEARNER_QUESTION),
@@ -272,6 +265,7 @@ function isLeakedTutorMetaParagraph(paragraph: string): boolean {
     ) ||
     /^goal\s*:/iu.test(paragraph) ||
     /^question\s*:/iu.test(paragraph) ||
+    isLeakedFocusPromptParagraph(paragraph) ||
     /^let'?s\s+(?:ask|use)\s+(?:a\s+)?(?:multiple-choice|free-text|question)/iu.test(
       paragraph,
     ) ||
@@ -279,6 +273,19 @@ function isLeakedTutorMetaParagraph(paragraph: string): boolean {
     /^\*\*[,.:;]/u.test(paragraph) ||
     isUnmatchedClosingFragment(paragraph)
   );
+}
+
+function stripLeakedFocusPromptParagraphs(text: string): string {
+  return text
+    .split(/\n{2,}/u)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => !isLeakedFocusPromptParagraph(paragraph))
+    .join("\n\n")
+    .trim();
+}
+
+function isLeakedFocusPromptParagraph(paragraph: string): boolean {
+  return /^focus\s+on\s+this\s+(?:idea|milestone)\s*:/iu.test(paragraph);
 }
 
 function isUnmatchedClosingFragment(paragraph: string): boolean {

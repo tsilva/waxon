@@ -33,6 +33,7 @@ Every answered Learn question becomes a durable review item in one unified, tagg
 - The Learn transcript is the source of truth; do not rewrite, fork, summarize, compact, or otherwise hack the conversation.
 - If context is exhausted, show a clear "course is too long to continue" error.
 - Tutor prose should be informal, direct, accurate, simple, structured, sequential, and use helpful metaphors when they clarify.
+- Internal course objectives, widget-planning directives, and next-question targets must not be shown as learner-facing prose.
 - Tutor turns with question widgets must include substantive visible teaching prose; do not accept or store objective-only fallback text as a completed lesson.
 - The tutor should generally ask one fresh question per turn; do not add a special resurfacing flow for previous Learn questions.
 - Weak answers should keep the tutor on the same section or revisit prior prerequisite ideas before returning to the current section.
