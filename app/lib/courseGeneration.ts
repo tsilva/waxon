@@ -284,9 +284,12 @@ type CourseCostObserver = {
 type OpenRouterTextContentBlock = {
   type: "text";
   text: string;
-  cache_control?: {
-    type: "ephemeral";
-  };
+  cache_control?: OpenRouterPromptCacheControl;
+};
+
+type OpenRouterPromptCacheControl = {
+  type: "ephemeral";
+  ttl?: "5m" | "1h";
 };
 
 export type CourseIntakeMessage = {
@@ -836,7 +839,19 @@ function courseMessagePromptContext(message: CourseChatMessage): string {
 }
 
 function supportsExplicitOpenRouterPromptCaching(model: string): boolean {
-  return /^(?:google\/gemini|anthropic\/|qwen\/)/iu.test(model);
+  return /^(?:google\/gemini|qwen\/)/iu.test(model);
+}
+
+function supportsAutomaticOpenRouterPromptCaching(model: string): boolean {
+  return /^anthropic\//iu.test(model);
+}
+
+function automaticPromptCacheControl(
+  model: string,
+): OpenRouterPromptCacheControl | undefined {
+  return supportsAutomaticOpenRouterPromptCaching(model)
+    ? { type: "ephemeral", ttl: "1h" }
+    : undefined;
 }
 
 function cacheableTextBlock(text: string): OpenRouterTextContentBlock {
@@ -883,6 +898,7 @@ function courseAnswerDecisionSessionId(input: { userId: string }): string {
 function courseAnswerDecisionSupportsCacheControl(model: string): boolean {
   return (
     supportsExplicitOpenRouterPromptCaching(model) ||
+    supportsAutomaticOpenRouterPromptCaching(model) ||
     model.trim().toLowerCase() === "inception/mercury-2"
   );
 }
@@ -893,6 +909,10 @@ function courseAnswerDecisionPromptContent(input: {
   cacheable?: boolean;
 }): string | OpenRouterTextContentBlock[] {
   if (!courseAnswerDecisionSupportsCacheControl(input.model)) {
+    return input.text;
+  }
+
+  if (supportsAutomaticOpenRouterPromptCaching(input.model)) {
     return input.text;
   }
 
@@ -1146,6 +1166,7 @@ export async function generateCourseAnswerDecision(input: {
     body: {
       model,
       session_id: courseAnswerDecisionSessionId({ userId: input.userId }),
+      cache_control: automaticPromptCacheControl(model),
       response_format: COURSE_JSON_RESPONSE_FORMAT,
       reasoning: getOpenRouterEvaluationReasoning(model),
       temperature: 0,
@@ -1415,6 +1436,7 @@ export function buildCourseAnswerContinuationModelRequest(input: {
         userId: input.userId,
         course: input.course,
       }),
+      cache_control: automaticPromptCacheControl(model),
       reasoning_effort: "minimal",
       temperature: 0.4,
       max_tokens: COURSE_CHAT_TURN_MAX_TOKENS,
@@ -1479,6 +1501,7 @@ export function buildCourseChatTurnModelRequest(input: {
         userId: input.userId,
         course: input.course,
       }),
+      cache_control: automaticPromptCacheControl(model),
       reasoning_effort: "minimal",
       temperature: 0.5,
       max_tokens: COURSE_CHAT_TURN_MAX_TOKENS,
