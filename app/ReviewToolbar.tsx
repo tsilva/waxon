@@ -145,7 +145,9 @@ export function ReviewToolbar({
   }, [actions, dueCount, dueCountSource]);
 
   return (
-    <header className="reader-header">
+    <header
+      className={`reader-header ${pendingTab ? "reader-header-loading" : ""}`}
+    >
       <div className="reader-heading">
         <Link className="reader-brand admin-brand-link" href="/" prefetch={false}>
           <Image

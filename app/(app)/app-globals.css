@@ -234,17 +234,13 @@ textarea {
   background: var(--accent);
 }
 
-.reader-tabs-loading,
-.reader-tabs-route-loading {
-  position: relative;
-}
-
-.reader-tabs-loading .reader-tab::after {
+.reader-tabs-loading .reader-tab::after,
+.reader-tabs-route-loading .reader-tab::after {
   background: transparent;
 }
 
-.reader-tabs-loading::after,
-.reader-tabs-route-loading::after {
+.reader-header-loading::after,
+.reader-header-route-loading::after {
   position: absolute;
   right: 0;
   bottom: -1px;
@@ -278,8 +274,8 @@ textarea {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .reader-tabs-loading::after,
-  .reader-tabs-route-loading::after {
+  .reader-header-loading::after,
+  .reader-header-route-loading::after {
     animation: none;
   }
 }
@@ -3960,7 +3956,7 @@ textarea {
   align-items: center;
   min-height: 28px;
   border: 1px solid rgb(227 218 196 / 76%);
-  border-radius: 999px;
+  border-radius: 4px;
   padding: 0 10px;
   background: rgb(251 248 240 / 74%);
   color: var(--ink-soft);
@@ -4272,7 +4268,7 @@ textarea {
   max-width: min(280px, 100%);
   min-height: 26px;
   border: 1px solid rgb(227 218 196 / 86%);
-  border-radius: 999px;
+  border-radius: 4px;
   padding: 0 8px;
   background: #fffdf8;
   color: var(--muted-strong);
@@ -4484,7 +4480,7 @@ textarea {
   align-items: center;
   min-height: 24px;
   border: 1px solid rgb(227 218 196 / 78%);
-  border-radius: 999px;
+  border-radius: 4px;
   padding: 0 8px;
   background: rgb(255 253 248 / 72%);
   color: var(--muted-strong);
