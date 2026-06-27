@@ -89,6 +89,7 @@ const MAX_WIDGET_TEXT_CHARS = 1_200;
 const MAX_WIDGET_ID_CHARS = 80;
 const MAX_CHOICE_TEXT_CHARS = 500;
 const MAX_WIDGET_ANSWER_CHARS = 4_000;
+const FALLBACK_CHOICE_IDS = ["A", "B", "C", "D", "E", "F"];
 
 function normalizeText(value: unknown, maxLength: number): string {
   return typeof value === "string"
@@ -137,13 +138,19 @@ export function normalizeCourseQuestionWidget(
 
   if (type === "multiple_choice") {
     const choices = Array.isArray(record.choices)
-      ? record.choices.flatMap((choice) => {
+      ? record.choices.flatMap((choice, index) => {
           if (!choice || typeof choice !== "object" || Array.isArray(choice)) {
             return [];
           }
 
           const choiceRecord = choice as Record<string, unknown>;
-          const choiceId = normalizeText(choiceRecord.id, 8).toUpperCase();
+          const rawChoiceId = normalizeText(choiceRecord.id, 8).toUpperCase();
+          const choiceId =
+            /^[A-Z]$/u.test(rawChoiceId)
+              ? rawChoiceId
+              : (/^[A-Z](?=[^A-Z0-9]|$)/u.exec(rawChoiceId)?.[0] ??
+                FALLBACK_CHOICE_IDS[index] ??
+                String(index + 1));
           const text = normalizeText(choiceRecord.text, MAX_CHOICE_TEXT_CHARS);
 
           return choiceId && text ? [{ id: choiceId, text }] : [];

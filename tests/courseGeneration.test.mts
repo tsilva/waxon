@@ -21,6 +21,7 @@ import {
   courseTocToolCallFromToc,
   courseQuestionWidgetToolCallFromWidget,
   formatCourseQuestionWidgetForPrompt,
+  normalizeCourseQuestionWidget,
 } from "../app/lib/courseQuestionWidget.ts";
 import {
   parseCourseAnswerDecisionToolResult,
@@ -65,6 +66,31 @@ test("ensureCourseChatTurnHasLearnerQuestion appends checkpoint to lesson withou
     result.widgets[0]?.question,
     "In your own words, explain why entropy keeps PPO policy updates exploratory?",
   );
+});
+
+test("normalizeCourseQuestionWidget cleans malformed multiple-choice ids", () => {
+  const widget = normalizeCourseQuestionWidget({
+    type: "multiple_choice",
+    id: "slope-check",
+    question: "Which slope is positive?",
+    choices: [
+      { id: "A", text: "Flat" },
+      { id: "B,TEXT:", text: "Upward" },
+      { id: "not-a-choice", text: "Downward" },
+    ],
+  });
+
+  assert.equal(widget?.type, "multiple_choice");
+
+  if (widget?.type !== "multiple_choice") {
+    throw new Error("Expected multiple-choice widget.");
+  }
+
+  assert.deepEqual(
+    widget.choices.map((choice) => choice.id),
+    ["A", "B", "C"],
+  );
+  assert.equal(widget.choices[1]?.text, "Upward");
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion makes learn-to objectives grammatical", () => {
@@ -1386,6 +1412,139 @@ test("buildCourseChatTurnModelRequest does not fabricate widget render tool resp
   assert.doesNotMatch(JSON.stringify(history), /"role":"tool"/u);
   assert.doesNotMatch(JSON.stringify(history), /rendered/u);
   assert.doesNotMatch(JSON.stringify(messages), /Current course state/u);
+});
+
+test("buildCourseChatTurnModelRequest serializes answer decision tool responses", () => {
+  const widget = {
+    type: "free_text" as const,
+    id: "sql-redundancy",
+    question: "Why can repeated customer data cause update problems?",
+    placeholder: "Explain the problem...",
+  };
+  const course = {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt: "Learn SQL joins",
+    title: "SQL Joins",
+    description: "Learn joins and normalization.",
+    toc: {
+      title: "SQL Joins",
+      description: "Learn joins and normalization.",
+      pages: [
+        {
+          title: "Why Relationships Matter",
+          objective: "Explain why related tables reduce duplication.",
+        },
+        {
+          title: "How Joins Use Keys",
+          objective: "Explain how matching keys combine rows.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 1,
+    totalPages: 2,
+    generatedPages: 2,
+    chatMessageCount: 4,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+
+  const request = buildCourseChatTurnModelRequest({
+    userId: "user_1",
+    course,
+    model: "google/gemini-3.1-flash-lite",
+    messages: [
+      {
+        role: "assistant",
+        content:
+          "Repeated data means you must update one fact in many places.",
+        toolCalls: [courseQuestionWidgetToolCallFromWidget(widget)],
+      },
+      {
+        role: "user",
+        content: "You have to update it in many rows and can miss one.",
+        widgetAnswer: {
+          question: widget.question,
+          widgetId: widget.id,
+          answer: "You have to update it in many rows and can miss one.",
+        },
+      },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          {
+            id: "fallback-answer-decision-1",
+            type: "function",
+            function: {
+              name: "record_course_answer_decision",
+              arguments: {
+                questionAttempt: {
+                  toolCall: "record_course_question_attempt",
+                  question:
+                    "Why can repeated customer data cause update problems?",
+                  answer: "You have to update it in many rows and can miss one.",
+                  answerSummary:
+                    "Repeated rows make updates inconsistent.",
+                  conciseAnswer:
+                    "Repeated data can become inconsistent.",
+                  correctAnswer:
+                    "Update one fact in many places risks inconsistency.",
+                  justification:
+                    "Names duplication and update inconsistency.",
+                  score: 9,
+                },
+                progressDecision: {
+                  toolCall: "mark_milestone_done",
+                  reason: "The learner explained the core risk.",
+                },
+              },
+            },
+          },
+        ],
+      },
+    ],
+    progressDecision: {
+      toolCall: "mark_milestone_done",
+      reason: "The learner explained the core risk.",
+    },
+  });
+  const messages = request.requestBody.messages as Array<{
+    role: string;
+    content: unknown;
+    name?: string;
+    tool_calls?: Array<{ function?: { name?: string } }>;
+  }>;
+  const history = messages.slice(1);
+
+  assert.equal(request.pageTitle, "How Joins Use Keys");
+  assert.deepEqual(
+    history.map((message) => message.role),
+    ["assistant", "tool", "assistant", "tool"],
+  );
+  assert.deepEqual(
+    history[0]?.tool_calls?.map((toolCall) => toolCall.function?.name),
+    ["render_question_widget"],
+  );
+  assert.equal(history[1]?.name, "render_question_widget");
+  assert.equal(
+    String(history[1]?.content),
+    "You have to update it in many rows and can miss one.",
+  );
+  assert.equal(history[2]?.content, "");
+  assert.deepEqual(
+    history[2]?.tool_calls?.map((toolCall) => toolCall.function?.name),
+    ["record_course_answer_decision"],
+  );
+  assert.equal(history[3]?.name, "record_course_answer_decision");
+  assert.match(String(history[3]?.content), /advanced to the next lesson/u);
+  assert.match(String(history[3]?.content), /Score: 9\/10/u);
+  assert.doesNotMatch(JSON.stringify(history), /Recovered after Learn/u);
 });
 
 test("streamCourseAnswerContinuation uses one cached stream for evaluation and next widget", async () => {
