@@ -23,6 +23,7 @@ When creating, cleaning up, deduplicating, or generating knowledge-base question
 ## Learn Experience Evaluation
 
 When evaluating or tuning the Learn course experience for teaching quality, factual accuracy, beginner clarity, answer-to-next-material latency, or tutor/evaluator model choice, use the project-level skill in [.codex/skills/evaluate-learn-experience/SKILL.md](.codex/skills/evaluate-learn-experience/SKILL.md).
+For TUI-only Learn audits or terminal learner runs, use the project-level skill in [.codex/skills/evaluate-learn-experience-tui/SKILL.md](.codex/skills/evaluate-learn-experience-tui/SKILL.md).
 
 ## UI Design
 

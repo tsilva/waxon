@@ -1,4 +1,6 @@
-Use both Learn tools in this same assistant response without waiting for tool results: call {{answerDecisionToolName}} exactly once for the learner's latest answer, then call {{questionWidgetToolName}} exactly once after the visible lesson text unless the course is complete.
+Use both Learn tools in this same assistant response without waiting for tool results: call {{answerDecisionToolName}} exactly once for the learner's latest answer, write visible tutor text in the assistant message content, then call {{questionWidgetToolName}} exactly once unless the course is complete.
+
+The assistant message content must not be empty. A tools-only response is invalid, even if both tool calls are correct.
 
 The answer decision tool is authoritative for pedagogy: score the answer, record the attempt, and decide whether to continue or mark the milestone done.
 

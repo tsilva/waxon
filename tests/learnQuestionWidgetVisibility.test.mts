@@ -22,7 +22,7 @@ test("shouldShowLearnQuestionWidgets shows only unanswered active widgets", () =
   );
 });
 
-test("shouldShowLearnQuestionWidgets keeps answered widgets visible during evaluation", () => {
+test("shouldShowLearnQuestionWidgets hides answered widgets during evaluation", () => {
   const pendingEvaluation = {
     role: "assistant" as const,
     content: "",
@@ -45,6 +45,26 @@ test("shouldShowLearnQuestionWidgets keeps answered widgets visible during evalu
       answeredWidgetCount: 1,
       hasEvaluationSnippet: false,
     }),
+    false,
+  );
+});
+
+test("shouldShowLearnQuestionWidgets keeps orphaned answered widgets visible", () => {
+  assert.equal(
+    shouldShowLearnQuestionWidgets({
+      messages: [
+        assistantWithWidget,
+        {
+          role: "user",
+          content: "My answer",
+        },
+      ],
+      message: assistantWithWidget,
+      messageIndex: 0,
+      widgetCount: 1,
+      answeredWidgetCount: 1,
+      hasEvaluationSnippet: false,
+    }),
     true,
   );
 });
@@ -54,6 +74,10 @@ test("shouldShowLearnQuestionWidgets hides widgets replaced by an evaluation", (
     shouldShowLearnQuestionWidgets({
       messages: [
         assistantWithWidget,
+        {
+          role: "user",
+          content: "My answer",
+        },
         {
           role: "assistant",
           content: "Score 9/10\n\nGood.",
@@ -65,7 +89,7 @@ test("shouldShowLearnQuestionWidgets hides widgets replaced by an evaluation", (
       message: assistantWithWidget,
       messageIndex: 0,
       widgetCount: 1,
-      answeredWidgetCount: 0,
+      answeredWidgetCount: 1,
       hasEvaluationSnippet: false,
     }),
     false,

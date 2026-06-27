@@ -151,6 +151,20 @@ test("ensureCourseChatTurnHasLearnerQuestion preserves a complete learner questi
   assert.equal(result.appendedText, "");
 });
 
+test("ensureCourseChatTurnHasLearnerQuestion requires widgets for learn turns", () => {
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: "R-squared explains how much variation the model accounts for.\n\nHow would you interpret an R-squared value of 0.85?",
+    pageTitle: "Assessing Model Accuracy",
+    pageObjective: "Evaluate model performance using R-squared and residual analysis.",
+    requireVisibleTeachingTextWithWidgets: true,
+  });
+
+  assert.match(result.text, /R-squared explains/u);
+  assert.doesNotMatch(result.text, /0\.85\?/u);
+  assert.equal(result.widgets.length, 1);
+  assert.equal(result.widgets[0]?.type, "free_text");
+});
+
 test("ensureCourseChatTurnHasLearnerQuestion repairs dangling learner prompt", () => {
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: "PPO constrains updates so the new policy stays close to the old one.\n\nIn your own",
@@ -2048,11 +2062,15 @@ test("course answer continuation retries missing visible tutor prose with a focu
     String(messages[1]?.content),
     /record_course_answer_decision exactly once/u,
   );
+  assert.match(
+    String(messages[1]?.content),
+    /tools-only response is invalid/u,
+  );
   assert.equal(messages[2]?.role, "assistant");
   assert.equal(messages[3]?.role, "tool");
 });
 
-test("shouldUseCourseAnswerContinuationRequest uses single transcript continuation for any model", () => {
+test("shouldUseCourseAnswerContinuationRequest uses single transcript continuation for compatible models", () => {
   const messages = [
     {
       role: "assistant" as const,
@@ -2082,7 +2100,7 @@ test("shouldUseCourseAnswerContinuationRequest uses single transcript continuati
       messages,
       "google/gemini-3.1-flash-lite",
     ),
-    true,
+    false,
   );
   assert.equal(
     shouldUseCourseAnswerContinuationRequest(
