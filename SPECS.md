@@ -82,3 +82,4 @@ Every answered Learn question becomes a durable review item in one unified, tagg
 
 - UI changes must follow `design-reference/design-system.md`.
 - Visual fidelity changes must compare against `design-reference/waxon-approved-ui.png` and update `design-reference/fidelity-ledger.md` when the comparison changes.
+- Tag badges should be squared with only a tiny corner radius, not pill-shaped.
