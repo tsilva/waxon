@@ -1428,6 +1428,58 @@ test("buildCourseChatTurnModelRequest does not fabricate widget render tool resp
   assert.doesNotMatch(JSON.stringify(messages), /Current course state/u);
 });
 
+test("buildCourseChatTurnModelRequest uses automatic one-hour cache for Anthropic", () => {
+  const course = {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt: "Learn PPO",
+    title: "PPO",
+    description: "Learn Proximal Policy Optimization.",
+    toc: {
+      title: "PPO",
+      description: "Learn Proximal Policy Optimization.",
+      pages: [
+        {
+          title: "PPO Purpose",
+          objective: "Explain what PPO is used for.",
+        },
+      ],
+    },
+    status: "active" as const,
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: 1,
+    generatedPages: 1,
+    chatMessageCount: 0,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+  };
+
+  const request = buildCourseChatTurnModelRequest({
+    userId: "user_1",
+    course,
+    model: "anthropic/claude-haiku-4.5",
+    messages: [
+      {
+        role: "user",
+        content: "I want to learn PPO.",
+      },
+    ],
+  });
+
+  assert.deepEqual(request.requestBody.cache_control, {
+    type: "ephemeral",
+    ttl: "1h",
+  });
+  assert.equal(
+    JSON.stringify(request.requestBody.messages).includes("cache_control"),
+    false,
+  );
+});
+
 test("buildCourseChatTurnModelRequest serializes answer decision tool responses", () => {
   const widget = {
     type: "free_text" as const,
