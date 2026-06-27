@@ -677,7 +677,14 @@ function formatCompactTokenCount(tokens: number | null | undefined): string | nu
   }).format(tokens);
 }
 
-function formatPromptCacheRead(metrics: CourseMessageMetrics): string | null {
+type PromptCacheActivity = {
+  label: string;
+  text: string;
+};
+
+function formatPromptCacheReadValue(
+  metrics: CourseMessageMetrics,
+): string | null {
   if (
     metrics.cacheHitPercent !== null &&
     metrics.cacheHitPercent !== undefined &&
@@ -686,18 +693,40 @@ function formatPromptCacheRead(metrics: CourseMessageMetrics): string | null {
   ) {
     return `${metrics.cacheHitPercent.toFixed(
       metrics.cacheHitPercent < 10 ? 1 : 0,
-    )}% cached`;
+    )}%`;
   }
 
-  const cachedPromptTokens = formatCompactTokenCount(metrics.cachedPromptTokens);
-
-  return cachedPromptTokens ? `${cachedPromptTokens} cached` : null;
+  return formatCompactTokenCount(metrics.cachedPromptTokens);
 }
 
-function formatPromptCacheWrite(metrics: CourseMessageMetrics): string | null {
-  const cacheWriteTokens = formatCompactTokenCount(metrics.cacheWriteTokens);
+function formatPromptCacheActivity(
+  metrics: CourseMessageMetrics,
+): PromptCacheActivity | null {
+  const cacheRead = formatPromptCacheReadValue(metrics);
+  const cacheWrite = formatCompactTokenCount(metrics.cacheWriteTokens);
 
-  return cacheWriteTokens ? `${cacheWriteTokens} cache write` : null;
+  if (cacheRead && cacheWrite) {
+    return {
+      text: `cache r/w ${cacheRead}/${cacheWrite}`,
+      label: `cache read ${cacheRead}, cache write ${cacheWrite}`,
+    };
+  }
+
+  if (cacheRead) {
+    return {
+      text: `cache r ${cacheRead}`,
+      label: `cache read ${cacheRead}`,
+    };
+  }
+
+  if (cacheWrite) {
+    return {
+      text: `cache w ${cacheWrite}`,
+      label: `cache write ${cacheWrite}`,
+    };
+  }
+
+  return null;
 }
 
 function LearnChatMessageMetrics({
@@ -707,9 +736,8 @@ function LearnChatMessageMetrics({
 }) {
   const price = formatMessagePrice(metrics?.cost);
   const tokensPerSecond = formatTokensPerSecond(metrics?.tokensPerSecond);
-  const cacheRead = metrics ? formatPromptCacheRead(metrics) : null;
-  const cacheWrite = metrics ? formatPromptCacheWrite(metrics) : null;
-  const items = [price, tokensPerSecond, cacheRead, cacheWrite].filter(
+  const cacheActivity = metrics ? formatPromptCacheActivity(metrics) : null;
+  const items = [price, tokensPerSecond, cacheActivity?.label].filter(
     (item): item is string => Boolean(item),
   );
 
@@ -724,8 +752,7 @@ function LearnChatMessageMetrics({
     >
       {price ? <span>{price}</span> : null}
       {tokensPerSecond ? <span>{tokensPerSecond}</span> : null}
-      {cacheRead ? <span>{cacheRead}</span> : null}
-      {cacheWrite ? <span>{cacheWrite}</span> : null}
+      {cacheActivity ? <span>{cacheActivity.text}</span> : null}
     </p>
   );
 }
@@ -923,6 +950,31 @@ function learnUserInputRequestPayload(message: LearnChatMessage) {
       widgetAnswer: message.widgetAnswer ?? null,
     },
   };
+}
+
+function learnIntakeHistoryRequestPayload(messages: LearnChatMessage[]) {
+  const intakeMessages = messages.flatMap((message) => {
+    const content = message.content.trim();
+
+    if (
+      message.id === INITIAL_CHAT_MESSAGE.id ||
+      message.pendingEvaluation ||
+      message.evaluation ||
+      message.widgetAnswer ||
+      !content
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        role: message.role,
+        content,
+      },
+    ];
+  });
+
+  return intakeMessages.length > 0 ? { intakeMessages } : {};
 }
 
 function parseSseEvent(rawEvent: string): { event: string; data: unknown } | null {
@@ -1863,6 +1915,9 @@ export default function LearnPageClient({
         body: JSON.stringify({
           courseId: selectedCourse?.id,
           ...learnUserInputRequestPayload(userMessage),
+          ...(selectedCourse
+            ? {}
+            : learnIntakeHistoryRequestPayload(chatMessages)),
         }),
       });
 

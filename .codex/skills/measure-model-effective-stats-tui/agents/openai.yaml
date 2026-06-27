@@ -1,0 +1,4 @@
+interface:
+  display_name: "Measure Model Stats TUI"
+  short_description: "Measure Learn model latency, cost, and cache stats"
+  default_prompt: "Use $measure-model-effective-stats-tui to measure effective Waxon Learn stats for a model on a fixed port."
