@@ -11,8 +11,10 @@ import {
   buildCourseAnswerContinuationModelRequest,
   buildCourseChatTurnModelRequest,
   courseAnswerContinuationRetryInstructionForError,
+  generateCourseIntakeDecision,
   generateCourseAnswerDecision,
   generateCourseToc,
+  normalizeCourseIntakeHistory,
   shouldUseCourseAnswerContinuationRequest,
   streamCourseAnswerContinuation,
   streamCourseChatTurn,
@@ -32,6 +34,93 @@ import {
 import { requireCourseMilestoneMastery } from "../app/lib/courseProgress.ts";
 import { normalizePartialCourseToc } from "../app/lib/courseTocStream.ts";
 import { DEFAULT_OPENROUTER_LEARN_MODEL } from "../app/lib/openRouter.ts";
+
+test("normalizeCourseIntakeHistory keeps compact user and assistant turns", () => {
+  assert.deepEqual(
+    normalizeCourseIntakeHistory([
+      { role: "system", content: "Ignore this" },
+      { role: "assistant", content: "  Theory or implementation?  " },
+      { role: "user", content: "  PPO\n\nfor beginners  " },
+      { role: "assistant", content: "" },
+      null,
+    ]),
+    [
+      { role: "assistant", content: "Theory or implementation?" },
+      { role: "user", content: "PPO for beginners" },
+    ],
+  );
+});
+
+test("generateCourseIntakeDecision sends previous clarification turns", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Array<Record<string, unknown>> = [];
+
+  globalThis.fetch = async (_url, init) => {
+    requestBodies.push(
+      JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+    );
+
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                action: "create_course",
+                topic: "Proximal Policy Optimization (PPO) for beginners",
+                message: "I have enough context to start.",
+              }),
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 120,
+          completion_tokens: 40,
+          total_tokens: 160,
+          cost: 0.0001,
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  };
+
+  try {
+    const result = await generateCourseIntakeDecision({
+      apiKey: "test-key",
+      model: "google/gemini-3.1-flash-lite",
+      userId: "user_1",
+      messages: [
+        { role: "user", content: "I want to learn PPO" },
+        {
+          role: "assistant",
+          content: "Do you want mathematical theory or implementation?",
+        },
+        { role: "user", content: "I'm a beginner" },
+      ],
+    });
+
+    assert.equal(result.action, "create_course");
+    const capturedBody = requestBodies[0];
+    assert.ok(capturedBody);
+    const messages = capturedBody.messages as Array<{
+      role?: string;
+      content?: string;
+    }>;
+
+    assert.deepEqual(
+      messages.map((message) => message.role),
+      ["system", "user", "assistant", "user"],
+    );
+    assert.match(messages[1]?.content ?? "", /learn PPO/u);
+    assert.match(messages[2]?.content ?? "", /theory or implementation/u);
+    assert.match(messages[3]?.content ?? "", /beginner/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("ensureCourseChatTurnHasLearnerQuestion creates first-milestone content for empty output", () => {
   const result = ensureCourseChatTurnHasLearnerQuestion({

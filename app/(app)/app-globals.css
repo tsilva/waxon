@@ -6566,6 +6566,9 @@ textarea {
 
 .learn-chat-message-metrics span {
   display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -6766,9 +6769,9 @@ textarea {
 
 .learn-chat-pending-status {
   color: var(--muted-strong);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 780;
-  line-height: 1.2;
+  line-height: 1.52;
   overflow-wrap: anywhere;
 }
 

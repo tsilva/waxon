@@ -320,6 +320,29 @@ export type CourseChatMessage = {
 export type { CourseQuestionAttemptToolResult };
 export type { CourseAnswerDecisionToolResult };
 
+export function normalizeCourseIntakeHistory(value: unknown): CourseIntakeMessage[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .flatMap((item): CourseIntakeMessage[] => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return [];
+      }
+
+      const record = item as Record<string, unknown>;
+      const role =
+        record.role === "assistant" || record.role === "user"
+          ? record.role
+          : null;
+      const content = normalizeIntakeText(record.content, MAX_INTAKE_TOPIC_CHARS);
+
+      return role && content ? [{ role, content }] : [];
+    })
+    .slice(-8);
+}
+
 export function storedCourseChatMessageToPromptMessage(
   message: CourseChatMessageRecord,
 ): CourseChatMessage {

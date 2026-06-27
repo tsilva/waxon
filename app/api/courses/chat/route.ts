@@ -10,6 +10,7 @@ import {
   generateCourseAnswerDecision,
   generateCourseIntakeDecision,
   generateCourseToc,
+  normalizeCourseIntakeHistory,
   shouldUseCourseAnswerContinuationRequest,
   storedCourseChatMessageToPromptMessage,
   streamCourseAnswerContinuation,
@@ -233,7 +234,13 @@ export async function POST(request: Request) {
   }
 
   const userMessage = incomingUserMessage.message;
-  let conversationMessages: CourseChatMessage[] = [userMessage];
+  const intakeHistoryMessages: CourseChatMessage[] = courseId
+    ? []
+    : normalizeCourseIntakeHistory(payload.intakeMessages);
+  let conversationMessages: CourseChatMessage[] = [
+    ...intakeHistoryMessages,
+    userMessage,
+  ];
   let messages = conversationMessages;
 
   if (!courseId) {
@@ -365,6 +372,7 @@ export async function POST(request: Request) {
         let questionEvaluationResult: CourseQuestionEvaluationResult | null =
           null;
         let finalCoursePromise: Promise<CourseDetail> | null = null;
+        let newCourseIntakeMessages: CourseChatMessage[] | null = null;
 
         try {
           if (courseId) {
@@ -762,8 +770,9 @@ export async function POST(request: Request) {
             });
             void finalCoursePromise.catch(() => {});
             course = await firstLessonCoursePromise;
+            newCourseIntakeMessages = conversationMessages;
             conversationMessages = [
-              userMessage,
+              ...newCourseIntakeMessages,
               buildCourseTocGeneratedMessage(course),
             ];
             messages = conversationMessages;
@@ -810,14 +819,16 @@ export async function POST(request: Request) {
 
           const evaluationResult =
             questionEvaluationResult as CourseQuestionEvaluationResult | null;
-          const tocGenerationMessages = finalCoursePromise
-            ? [buildCourseTocGeneratedMessage(course)]
-            : [];
+          const courseStartMessages = finalCoursePromise
+            ? [
+                ...(newCourseIntakeMessages ?? [userMessage]),
+                buildCourseTocGeneratedMessage(course),
+              ]
+            : [userMessage];
           const chatMessages = await appendCourseChatMessages({
             courseId: course.id,
             messages: [
-              userMessage,
-              ...tocGenerationMessages,
+              ...courseStartMessages,
               ...(evaluationResult
                 ? [evaluationResult.message]
                 : []),
