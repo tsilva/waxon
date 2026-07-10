@@ -2,6 +2,24 @@ import {
   beginLlmTrace,
   finishLlmTrace,
 } from "./llmTraceStore.ts";
+import {
+  buildOpenRouterHeaders,
+  DEFAULT_OPENROUTER_CHAT_MODEL,
+  DEFAULT_OPENROUTER_EVALUATION_MODEL,
+  DEFAULT_OPENROUTER_LEARN_MODEL,
+  OPENROUTER_CHAT_URL,
+  OPENROUTER_EMBEDDINGS_URL,
+  resolveOpenRouterApiKey,
+  resolveOpenRouterModel,
+} from "../../shared/openrouter-config.mjs";
+
+export {
+  DEFAULT_OPENROUTER_CHAT_MODEL,
+  DEFAULT_OPENROUTER_EVALUATION_MODEL,
+  DEFAULT_OPENROUTER_LEARN_MODEL,
+  OPENROUTER_CHAT_URL,
+  OPENROUTER_EMBEDDINGS_URL,
+};
 
 export type OpenRouterTraceContext = {
   operation: string;
@@ -81,13 +99,8 @@ export type OpenRouterEmbeddingResponse = {
   usage?: OpenRouterUsage & Record<string, unknown>;
 };
 
-const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
 const STREAM_DONE_SENTINEL = "[DONE]";
 const AFFORDABLE_MAX_TOKENS_PATTERN = /can only afford\s+(\d+)/iu;
-export const DEFAULT_OPENROUTER_CHAT_MODEL = "google/gemini-3.5-flash";
-export const DEFAULT_OPENROUTER_LEARN_MODEL = "google/gemini-3.5-flash";
-export const DEFAULT_OPENROUTER_EVALUATION_MODEL = "google/gemini-3.5-flash";
 
 type OpenRouterChatConfig =
   | {
@@ -101,49 +114,37 @@ type OpenRouterChatConfig =
     };
 
 export function getOpenRouterApiKey(): string | null {
-  const apiKey = process.env.OPENROUTER_API_KEY ?? process.env.LLM_API_KEY ?? "";
-
-  return apiKey.trim() || null;
+  return resolveOpenRouterApiKey();
 }
 
 export function getOpenRouterChatModel(input: {
   requireConfiguredModel?: boolean;
 } = {}): string | null {
-  const model = process.env.LLM_MODEL?.trim() ?? "";
-
-  if (model) {
-    return model;
-  }
-
-  return input.requireConfiguredModel ? null : DEFAULT_OPENROUTER_CHAT_MODEL;
+  return resolveOpenRouterModel({
+    variable: "LLM_MODEL",
+    fallback: DEFAULT_OPENROUTER_CHAT_MODEL,
+    requireConfigured: input.requireConfiguredModel,
+  });
 }
 
 export function getOpenRouterLearnModel(input: {
   requireConfiguredModel?: boolean;
 } = {}): string | null {
-  const model = process.env.LLM_LEARN_MODEL?.trim() ?? "";
-
-  if (model) {
-    return model;
-  }
-
-  return input.requireConfiguredModel ? null : DEFAULT_OPENROUTER_LEARN_MODEL;
+  return resolveOpenRouterModel({
+    variable: "LLM_LEARN_MODEL",
+    fallback: DEFAULT_OPENROUTER_LEARN_MODEL,
+    requireConfigured: input.requireConfiguredModel,
+  });
 }
 
 export function getOpenRouterEvaluationModel(input: {
   requireConfiguredModel?: boolean;
 } = {}): string | null {
-  const model = process.env.LLM_EVALUATION_MODEL?.trim() ?? "";
-
-  if (model) {
-    return model;
-  }
-
-  if (input.requireConfiguredModel) {
-    return null;
-  }
-
-  return DEFAULT_OPENROUTER_EVALUATION_MODEL;
+  return resolveOpenRouterModel({
+    variable: "LLM_EVALUATION_MODEL",
+    fallback: DEFAULT_OPENROUTER_EVALUATION_MODEL,
+    requireConfigured: input.requireConfiguredModel,
+  });
 }
 
 export function getOpenRouterEvaluationReasoning(
@@ -205,32 +206,6 @@ export function getOpenRouterLearnConfig(input: {
     return {
       ok: false,
       error: "LLM_LEARN_MODEL is not configured.",
-    };
-  }
-
-  return { ok: true, apiKey, model };
-}
-
-export function getOpenRouterEvaluationConfig(input: {
-  requireConfiguredModel?: boolean;
-} = {}): OpenRouterChatConfig {
-  const apiKey = getOpenRouterApiKey();
-
-  if (!apiKey) {
-    return {
-      ok: false,
-      error: "OPENROUTER_API_KEY or LLM_API_KEY is not configured.",
-    };
-  }
-
-  const model = getOpenRouterEvaluationModel({
-    requireConfiguredModel: input.requireConfiguredModel,
-  });
-
-  if (!model) {
-    return {
-      ok: false,
-      error: "LLM_EVALUATION_MODEL is not configured.",
     };
   }
 
@@ -308,12 +283,7 @@ export function extractAffordableOpenRouterMaxTokens(
 }
 
 function withOpenRouterHeaders(apiKey: string): HeadersInit {
-  return {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-    "HTTP-Referer": process.env.OPENROUTER_REFERER ?? "http://localhost:3000",
-    "X-Title": process.env.OPENROUTER_TITLE ?? "waxon",
-  };
+  return buildOpenRouterHeaders(apiKey);
 }
 
 async function parseOpenRouterJson(response: Response): Promise<unknown> {

@@ -1,9 +1,9 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { extractJsonObject } from "./lib/json-object.mjs";
+import { extractJsonObject } from "../shared/json-object.mjs";
 import {
   loadPromptTemplate,
   renderPromptTemplate,
-} from "./lib/prompts.mjs";
+} from "../shared/prompt-templates.mjs";
 import {
   chunks,
   configureNeonWebSocket,

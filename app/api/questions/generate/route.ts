@@ -21,6 +21,7 @@ import {
 } from "@/app/lib/openRouter";
 import { extractJsonObject } from "@/app/lib/jsonObject";
 import { getQuestionQualityReference } from "@/app/lib/questionQualityReference";
+import { normalizeQuestionDraft } from "@/app/lib/questionDraft";
 import { vectorLiteral } from "@/app/lib/vectorLiteral";
 
 export const runtime = "nodejs";
@@ -182,6 +183,7 @@ function normalizeExistingQuestions(value: unknown): NormalizeResult<Set<string>
       continue;
     }
 
+    const draft = normalizeQuestionDraft(item);
     const question = item.trim();
 
     if (question.length > MAX_EXISTING_QUESTION_CHARS) {
@@ -190,8 +192,8 @@ function normalizeExistingQuestions(value: unknown): NormalizeResult<Set<string>
       );
     }
 
-    if (question) {
-      questions.add(question.toLowerCase());
+    if (draft) {
+      questions.add(draft.questionIdentity);
     }
   }
 
@@ -324,27 +326,24 @@ function normalizeGeneratedQuestions(
           ? (item as Record<string, unknown>)
           : null;
 
-    if (!record) {
+    const draft = normalizeQuestionDraft(record);
+
+    if (!record || !draft) {
       continue;
     }
 
-    const question = normalizeText(record.question ?? record.q).replace(/\s+/g, " ");
-    const conciseAnswer = normalizeText(record.conciseAnswer ?? record.a).replace(/\s+/g, " ");
-    const key = question.toLowerCase();
-
-    if (!question || !conciseAnswer || seen.has(key)) {
+    if (!draft.conciseAnswer || seen.has(draft.questionIdentity)) {
       continue;
     }
 
-    seen.add(key);
+    seen.add(draft.questionIdentity);
     normalized.push({
-      question,
-      conciseAnswer,
+      question: draft.question,
+      conciseAnswer: draft.conciseAnswer,
       sourceLabel: normalizeText(record.sourceLabel ?? record.s) || "OpenRouter",
-      coverageLabel: normalizeText(record.coverageLabel ?? record.c) || question,
-      proposedConceptSlugs: Array.isArray(record.conceptSlugs)
-        ? record.conceptSlugs.map(normalizeText).filter(Boolean)
-        : [normalizeText(record.proposedConceptSlug ?? record.c)].filter(Boolean),
+      coverageLabel:
+        normalizeText(record.coverageLabel ?? record.c) || draft.question,
+      proposedConceptSlugs: draft.proposedConceptSlugs,
       sourceText: normalizeText(record.sourceText ?? record.s),
     });
   }

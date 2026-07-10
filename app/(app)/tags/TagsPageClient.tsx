@@ -16,24 +16,17 @@ import type {
 } from "@/app/lib/conceptTags";
 import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
+import type {
+  UserProfile,
+  UserProfileSummary,
+} from "@/app/lib/userProfile";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
 type TagsPageClientProps = {
   initialConceptTags?: ConceptTagSummary[] | null;
-  initialUser?: {
-    displayName: string;
-    email: string;
-    avatarUrl: string | null;
-  } | null;
+  initialUser?: UserProfileSummary | null;
   showAdmin?: boolean;
-};
-
-type UserProfileResponse = {
-  id: string;
-  displayName: string;
-  email: string;
-  avatarUrl: string | null;
 };
 
 type ConceptTagMutationResponse =
@@ -123,7 +116,7 @@ export default function TagsPageClient({
             signal: controller.signal,
           }),
         ]);
-        const userData = (await userResponse.json()) as UserProfileResponse & {
+        const userData = (await userResponse.json()) as UserProfile & {
           error?: string;
         };
         const tagsData = (await tagsResponse.json()) as {

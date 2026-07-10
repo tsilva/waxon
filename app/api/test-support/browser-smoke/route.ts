@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/app/db/client";
 import { questions, users } from "@/app/db/schema";
 import { getCurrentUser } from "@/app/lib/auth";
+import { BROWSER_SMOKE_QUESTIONS } from "@/app/lib/browserSmokeSupport";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { questionSlug } from "@/app/lib/questionSlug";
 import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
@@ -10,19 +11,9 @@ import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TEST_QUESTIONS = [
-  {
-    question: "Browser smoke correct card: what exact token proves this answer is correct?",
-    conciseAnswer: "browser-smoke-correct-token",
-  },
-  {
-    question: "Browser smoke incorrect card: what exact token is intentionally omitted?",
-    conciseAnswer: "browser-smoke-correct-token",
-  },
-] as const;
-
 function isEnabled(): boolean {
   return (
+    process.env.NODE_ENV === "development" &&
     isLocalTestAuthEnabled() &&
     process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT === "1"
   );
@@ -60,19 +51,20 @@ export async function POST() {
         },
       });
 
-    for (const item of TEST_QUESTIONS) {
-      await tx
-        .delete(questions)
-        .where(
-          and(
-            eq(questions.userId, currentUser.id),
-            eq(questions.questionSlug, questionSlug(item.question)),
+    await tx
+      .delete(questions)
+      .where(
+        and(
+          eq(questions.userId, currentUser.id),
+          inArray(
+            questions.questionSlug,
+            BROWSER_SMOKE_QUESTIONS.map((item) => questionSlug(item.question)),
           ),
-        );
-    }
+        ),
+      );
 
     await tx.insert(questions).values(
-      TEST_QUESTIONS.map((item) => ({
+      BROWSER_SMOKE_QUESTIONS.map((item) => ({
         userId: currentUser.id,
         question: item.question,
         questionSlug: questionSlug(item.question),
@@ -88,7 +80,7 @@ export async function POST() {
 
   return NextResponse.json({
     ok: true,
-    questions: TEST_QUESTIONS,
+    questions: BROWSER_SMOKE_QUESTIONS,
   });
 }
 
@@ -115,7 +107,7 @@ export async function GET() {
         eq(questions.userId, currentUser.id),
         inArray(
           questions.questionSlug,
-          TEST_QUESTIONS.map((item) => questionSlug(item.question)),
+          BROWSER_SMOKE_QUESTIONS.map((item) => questionSlug(item.question)),
         ),
       ),
     );

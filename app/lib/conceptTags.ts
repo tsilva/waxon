@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, pool } from "@/app/db/client";
 import {
   conceptTags,
@@ -782,28 +782,6 @@ export function activeConceptEligibilityClause(userId: string) {
       and ${conceptTags.userId} = ${userId}
       and ${conceptTags.active} = true
   )`;
-}
-
-export async function countUntaggedQuestions(input: {
-  userId: string;
-}): Promise<number> {
-  const [{ value = 0 } = { value: 0 }] = await db
-    .select({ value: count() })
-    .from(questions)
-    .leftJoin(
-      questionConceptTags,
-      eq(questionConceptTags.questionId, questions.id),
-    )
-    .where(
-      and(
-        eq(questions.userId, input.userId),
-        isNull(questions.flaggedAt),
-        isNull(questionConceptTags.questionId),
-        lte(questions.nextDue, Math.round(Date.now())),
-      ),
-    );
-
-  return Number(value) || 0;
 }
 
 export async function ensureFallbackConceptTagForUser(input: {

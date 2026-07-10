@@ -4,6 +4,7 @@ import {
   chunks,
   configureNeonWebSocket,
   createDatabasePool,
+  DEFAULT_EMBEDDING_MODEL,
   fetchOpenRouterJson,
   loadLocalEnvFiles,
   logSavedProgress,
@@ -15,7 +16,6 @@ import {
 loadLocalEnvFiles();
 configureNeonWebSocket(neonConfig);
 
-const DEFAULT_MODEL = "google/gemini-embedding-2";
 const DEFAULT_KIND = "dedupe_v1";
 const DEFAULT_SOURCE_VERSION = 1;
 const DEFAULT_BATCH_SIZE = 32;
@@ -25,7 +25,7 @@ function parseArgs(argv) {
     batchSize: DEFAULT_BATCH_SIZE,
     force: false,
     kind: DEFAULT_KIND,
-    model: DEFAULT_MODEL,
+    model: DEFAULT_EMBEDDING_MODEL,
     sourceVersion: DEFAULT_SOURCE_VERSION,
   };
 

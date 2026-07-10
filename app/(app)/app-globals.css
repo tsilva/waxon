@@ -4411,6 +4411,14 @@ textarea {
   flex-basis: 210px !important;
 }
 
+.library-filter-row .library-search-mode-label {
+  flex-basis: 140px !important;
+}
+
+.library-action-group {
+  margin-left: auto;
+}
+
 .library-filter-row select {
   width: 100%;
   min-height: 38px;
@@ -7405,8 +7413,14 @@ textarea {
   }
 
   .library-filter-row .library-status-filter-label,
-  .library-filter-row .library-sort-filter-label {
+  .library-filter-row .library-sort-filter-label,
+  .library-filter-row .library-search-mode-label {
     flex-basis: 100% !important;
+  }
+
+  .library-action-group {
+    order: -1;
+    margin-left: 0;
   }
 
   .library-filter-row .library-search-label {

@@ -26,6 +26,7 @@ import {
   courseQuestionWidgetToolCallFromWidget,
   formatCourseQuestionWidgetForPrompt,
   normalizeCourseQuestionWidget,
+  type CourseQuestionWidget,
 } from "../app/lib/courseQuestionWidget.ts";
 import {
   parseCourseAnswerDecisionToolResult,
@@ -33,9 +34,103 @@ import {
   reformatMultipleChoiceQuestionForReview,
   stripMultipleChoiceOptionsFromQuestion,
 } from "../app/lib/courseQuestionAttemptParsing.ts";
-import { requireCourseMilestoneMastery } from "../app/lib/courseProgress.ts";
 import { normalizePartialCourseToc } from "../app/lib/courseTocStream.ts";
 import { DEFAULT_OPENROUTER_LEARN_MODEL } from "../app/lib/openRouter.ts";
+import type { CourseDetail } from "../app/lib/courseStore.ts";
+
+type FreeTextWidget = Extract<CourseQuestionWidget, { type: "free_text" }>;
+
+function courseFixture({
+  topicPrompt,
+  title,
+  description,
+  pages,
+  ...overrides
+}: {
+  topicPrompt: string;
+  title: string;
+  description: string;
+  pages: CourseDetail["toc"]["pages"];
+} & Partial<
+  Omit<
+    CourseDetail,
+    | "topicPrompt"
+    | "title"
+    | "description"
+    | "toc"
+    | "pages"
+    | "chatMessages"
+  >
+>): CourseDetail {
+  return {
+    id: "course_1",
+    userId: "user_1",
+    topicPrompt,
+    title,
+    description,
+    toc: { title, description, pages },
+    status: "active",
+    currentChapterIndex: 0,
+    currentPageIndex: 0,
+    totalPages: pages.length,
+    generatedPages: pages.length,
+    chatMessageCount: 0,
+    conversationCost: 0,
+    createdAt: 1,
+    updatedAt: 1,
+    pages: [],
+    chatMessages: [],
+    ...overrides,
+  };
+}
+
+function freeTextWidget(
+  id: string,
+  question: string,
+  placeholder?: string,
+): FreeTextWidget {
+  return placeholder
+    ? { type: "free_text", id, question, placeholder }
+    : { type: "free_text", id, question };
+}
+
+function installFetchMock(implementation: typeof globalThis.fetch): () => void {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = implementation;
+  return () => {
+    globalThis.fetch = originalFetch;
+  };
+}
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function sseResponse(events: unknown[]): Response {
+  const encoder = new TextEncoder();
+
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${event === "[DONE]" ? event : JSON.stringify(event)}\n\n`,
+            ),
+          );
+        }
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    },
+  );
+}
 
 test("normalizeCourseIntakeHistory keeps compact user and assistant turns", () => {
   assert.deepEqual(
@@ -54,16 +149,14 @@ test("normalizeCourseIntakeHistory keeps compact user and assistant turns", () =
 });
 
 test("generateCourseIntakeDecision sends previous clarification turns", async () => {
-  const originalFetch = globalThis.fetch;
   const requestBodies: Array<Record<string, unknown>> = [];
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBodies.push(
       JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
     );
 
-    return new Response(
-      JSON.stringify({
+    return jsonResponse({
         choices: [
           {
             message: {
@@ -81,13 +174,8 @@ test("generateCourseIntakeDecision sends previous clarification turns", async ()
           total_tokens: 160,
           cost: 0.0001,
         },
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
-  };
+      });
+  });
 
   try {
     const result = await generateCourseIntakeDecision({
@@ -120,7 +208,7 @@ test("generateCourseIntakeDecision sends previous clarification turns", async ()
     assert.match(messages[2]?.content ?? "", /theory or implementation/u);
     assert.match(messages[3]?.content ?? "", /beginner/u);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });
 
@@ -448,11 +536,10 @@ test("ensureCourseChatTurnHasLearnerQuestion removes leaked tutor meta commentar
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion sanitizes complete widget turns", () => {
-  const widget = {
-    type: "free_text" as const,
-    id: "sql-split-check",
-    question: "Why do databases split related data into multiple tables?",
-  };
+  const widget = freeTextWidget(
+    "sql-split-check",
+    "Why do databases split related data into multiple tables?",
+  );
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: [
       ":**",
@@ -474,11 +561,10 @@ test("ensureCourseChatTurnHasLearnerQuestion sanitizes complete widget turns", (
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion removes visible widget-planning prose", () => {
-  const widget = {
-    type: "free_text" as const,
-    id: "sql-redundancy-check",
-    question: "Why can repeated table data cause problems?",
-  };
+  const widget = freeTextWidget(
+    "sql-redundancy-check",
+    "Why can repeated table data cause problems?",
+  );
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: [
       "redundancy/errors).",
@@ -565,11 +651,10 @@ test("sanitizeLearnerFacingCourseText strips stored focus prompt paragraphs", ()
 });
 
 test("ensureCourseChatTurnHasLearnerQuestion preserves valid complete widget teaching paragraphs", () => {
-  const widget = {
-    type: "free_text" as const,
-    id: "join-purpose-check",
-    question: "Why do SQL joins matter?",
-  };
+  const widget = freeTextWidget(
+    "join-purpose-check",
+    "Why do SQL joins matter?",
+  );
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: [
       "A database often splits information into separate tables to avoid repeating the same facts in many rows.",
@@ -636,35 +721,6 @@ test("shouldShowCourseChatInterruptedWarning only flags the latest incomplete tu
       content: "Why does that matter for PPO?",
     }),
     false,
-  );
-});
-
-test("requireCourseMilestoneMastery only advances after high-scoring evaluation", () => {
-  const proposedAdvance = {
-    toolCall: "mark_milestone_done" as const,
-    reason: "The learner answered correctly.",
-  };
-
-  assert.deepEqual(
-    requireCourseMilestoneMastery({
-      progressDecision: proposedAdvance,
-      evaluationScore: 9,
-    }),
-    proposedAdvance,
-  );
-  assert.equal(
-    requireCourseMilestoneMastery({
-      progressDecision: proposedAdvance,
-      evaluationScore: 8,
-    }).toolCall,
-    "continue_current_milestone",
-  );
-  assert.equal(
-    requireCourseMilestoneMastery({
-      progressDecision: proposedAdvance,
-      evaluationScore: null,
-    }).toolCall,
-    "continue_current_milestone",
   );
 });
 
@@ -827,55 +883,35 @@ test("parseCourseAnswerDecisionToolResult maps deterministic widget choices", ()
 });
 
 test("generateCourseAnswerDecision sends compact widget prompt", async () => {
-  const originalFetch = globalThis.fetch;
   let requestBody: Record<string, unknown> | null = null;
-  const widget = {
-    type: "free_text" as const,
-    id: "cnn-check",
-    question:
-      "Explain why CNNs are effective for images by describing three key reasons.",
-    placeholder: "Type your answer here...",
-  };
+  const widget = freeTextWidget(
+    "cnn-check",
+    "Explain why CNNs are effective for images by describing three key reasons.",
+    "Type your answer here...",
+  );
   const answer =
     "They detect local patterns, preserve spatial structure, and share weights.";
-  const course = {
-    id: "course_1",
-    userId: "user_1",
+  const course = courseFixture({
     topicPrompt: "Learn CNNs",
     title: "CNNs",
     description: "Learn convolutional neural networks.",
-    toc: {
-      title: "CNNs",
-      description: "Learn convolutional neural networks.",
-      pages: [
-        {
-          title: "CNN Inductive Bias",
-          objective:
-            "Explain why local patterns, spatial structure, and shared weights make CNNs effective.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
-    currentPageIndex: 0,
-    totalPages: 1,
-    generatedPages: 1,
+    pages: [
+      {
+        title: "CNN Inductive Bias",
+        objective:
+          "Explain why local patterns, spatial structure, and shared weights make CNNs effective.",
+      },
+    ],
     chatMessageCount: 2,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+  });
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<
       string,
       unknown
     >;
 
-    return new Response(
-      JSON.stringify({
+    return jsonResponse({
         choices: [
           {
             message: {
@@ -905,13 +941,8 @@ test("generateCourseAnswerDecision sends compact widget prompt", async () => {
           total_tokens: 300,
           cost: 0.0001,
         },
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
-  };
+      });
+  });
 
   try {
     const result = await generateCourseAnswerDecision({
@@ -981,22 +1012,20 @@ test("generateCourseAnswerDecision sends compact widget prompt", async () => {
     assert.doesNotMatch(userPrompt, /Recent conversation JSON/u);
     assert.ok(userPrompt.length < 1_900);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });
 
 test("generateCourseToc keeps static instructions before dynamic topic", async () => {
-  const originalFetch = globalThis.fetch;
   let requestBody: Record<string, unknown> | null = null;
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<
       string,
       unknown
     >;
 
-    return new Response(
-      JSON.stringify({
+    return jsonResponse({
         choices: [
           {
             message: {
@@ -1036,13 +1065,8 @@ test("generateCourseToc keeps static instructions before dynamic topic", async (
           total_tokens: 260,
           cost: 0.0001,
         },
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      },
-    );
-  };
+      });
+  });
 
   try {
     const toc = await generateCourseToc({
@@ -1079,108 +1103,72 @@ test("generateCourseToc keeps static instructions before dynamic topic", async (
     assert.ok(topicIndex > userPrompt.indexOf("Keep titles specific"));
     assert.ok(userPrompt.trim().endsWith("Topic: Proximal Policy Optimization (PPO) for beginners"));
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });
 
 test("streamCourseChatTurn uses structured widget tool calls", async () => {
-  const originalFetch = globalThis.fetch;
-  const encoder = new TextEncoder();
   let requestBody: Record<string, unknown> | null = null;
   const deltas: string[] = [];
   let pendingWidgetToolDeltas = 0;
-  const course = {
-    id: "course_1",
-    userId: "user_1",
+  const course = courseFixture({
     topicPrompt: "Learn PPO",
     title: "PPO",
     description: "Learn Proximal Policy Optimization.",
-    toc: {
-      title: "PPO",
-      description: "Learn Proximal Policy Optimization.",
-      pages: [
-        {
-          title: "PPO Purpose",
-          objective: "Explain what PPO is used for.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
-    currentPageIndex: 0,
-    totalPages: 1,
-    generatedPages: 1,
-    chatMessageCount: 0,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+    pages: [
+      {
+        title: "PPO Purpose",
+        objective: "Explain what PPO is used for.",
+      },
+    ],
+  });
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<
       string,
       unknown
     >;
 
-    return new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                choices: [
-                  {
-                    delta: {
-                      content:
-                        "PPO is a policy-gradient method that updates behavior carefully.",
-                    },
-                  },
-                ],
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                choices: [
-                  {
-                    delta: {
-                      tool_calls: [
-                        {
-                          index: 0,
-                          id: "call_ppo",
-                          type: "function",
-                          function: {
-                            name: "render_question_widget",
-                            arguments:
-                              "{\"type\":\"free_text\",\"id\":\"ppo-purpose\",\"question\":\"What is PPO used for?\"}",
-                          },
-                        },
-                      ],
-                    },
-                  },
-                ],
-                usage: {
-                  prompt_tokens: 300,
-                  completion_tokens: 80,
-                  total_tokens: 380,
-                  cost: 0.001,
-                },
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
-        },
-      }),
+    return sseResponse([
       {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
+        choices: [
+          {
+            delta: {
+              content:
+                "PPO is a policy-gradient method that updates behavior carefully.",
+            },
+          },
+        ],
       },
-    );
-  };
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_ppo",
+                  type: "function",
+                  function: {
+                    name: "render_question_widget",
+                    arguments:
+                      "{\"type\":\"free_text\",\"id\":\"ppo-purpose\",\"question\":\"What is PPO used for?\"}",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 300,
+          completion_tokens: 80,
+          total_tokens: 380,
+          cost: 0.001,
+        },
+      },
+      "[DONE]",
+    ]);
+  });
 
   try {
     const result = await streamCourseChatTurn({
@@ -1337,47 +1325,28 @@ test("streamCourseChatTurn uses structured widget tool calls", async () => {
     ]);
     assert.equal(pendingWidgetToolDeltas, 1);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });
 
 test("streamCourseChatTurn retries widget-only tutor turns", async () => {
-  const originalFetch = globalThis.fetch;
-  const encoder = new TextEncoder();
   const requestBodies: Record<string, unknown>[] = [];
   const deltas: string[] = [];
   let pendingWidgetToolDeltas = 0;
-  const course = {
-    id: "course_1",
-    userId: "user_1",
+  const course = courseFixture({
     topicPrompt: "Learn PPO",
     title: "PPO",
     description: "Learn Proximal Policy Optimization.",
-    toc: {
-      title: "PPO",
-      description: "Learn Proximal Policy Optimization.",
-      pages: [
-        {
-          title: "PPO Purpose",
-          objective:
-            "Understand the role of PPO in reinforcement learning and why it is preferred for stability.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
-    currentPageIndex: 0,
-    totalPages: 1,
-    generatedPages: 1,
-    chatMessageCount: 0,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+    pages: [
+      {
+        title: "PPO Purpose",
+        objective:
+          "Understand the role of PPO in reinforcement learning and why it is preferred for stability.",
+      },
+    ],
+  });
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<
       string,
       unknown
@@ -1387,22 +1356,11 @@ test("streamCourseChatTurn retries widget-only tutor turns", async () => {
       ? "PPO is a way to improve an agent's policy without letting one noisy batch push it too far."
       : "";
 
-    return new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          if (contentDelta) {
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  choices: [{ delta: { content: contentDelta } }],
-                })}\n\n`,
-              ),
-            );
-          }
-
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
+    return sseResponse([
+      ...(contentDelta
+        ? [{ choices: [{ delta: { content: contentDelta } }] }]
+        : []),
+      {
                 choices: [
                   {
                     delta: {
@@ -1431,19 +1389,10 @@ test("streamCourseChatTurn retries widget-only tutor turns", async () => {
                   total_tokens: isRetry ? 440 : 340,
                   cost: isRetry ? 0.002 : 0.001,
                 },
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
-        },
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
       },
-    );
-  };
+      "[DONE]",
+    ]);
+  });
 
   try {
     const result = await streamCourseChatTurn({
@@ -1503,45 +1452,28 @@ test("streamCourseChatTurn retries widget-only tutor turns", async () => {
     );
     assert.equal(retryMessages[2]?.role, "user");
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });
 
 test("buildCourseChatTurnModelRequest does not fabricate widget render tool responses", () => {
-  const widget = {
-    type: "free_text" as const,
-    id: "ppo-clipping-check",
-    question: "What does PPO clipping prevent?",
-    placeholder: "Explain the update limit...",
-  };
-  const course = {
-    id: "course_1",
-    userId: "user_1",
+  const widget = freeTextWidget(
+    "ppo-clipping-check",
+    "What does PPO clipping prevent?",
+    "Explain the update limit...",
+  );
+  const course = courseFixture({
     topicPrompt: "Learn PPO",
     title: "PPO",
     description: "Learn Proximal Policy Optimization.",
-    toc: {
-      title: "PPO",
-      description: "Learn Proximal Policy Optimization.",
-      pages: [
-        {
-          title: "PPO Purpose",
-          objective: "Explain what PPO is used for.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
-    currentPageIndex: 0,
-    totalPages: 1,
-    generatedPages: 1,
+    pages: [
+      {
+        title: "PPO Purpose",
+        objective: "Explain what PPO is used for.",
+      },
+    ],
     chatMessageCount: 1,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+  });
 
   const request = buildCourseChatTurnModelRequest({
     userId: "user_1",
@@ -1583,34 +1515,17 @@ test("buildCourseChatTurnModelRequest does not fabricate widget render tool resp
 });
 
 test("buildCourseChatTurnModelRequest uses automatic one-hour cache for Anthropic", () => {
-  const course = {
-    id: "course_1",
-    userId: "user_1",
+  const course = courseFixture({
     topicPrompt: "Learn PPO",
     title: "PPO",
     description: "Learn Proximal Policy Optimization.",
-    toc: {
-      title: "PPO",
-      description: "Learn Proximal Policy Optimization.",
-      pages: [
-        {
-          title: "PPO Purpose",
-          objective: "Explain what PPO is used for.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
-    currentPageIndex: 0,
-    totalPages: 1,
-    generatedPages: 1,
-    chatMessageCount: 0,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+    pages: [
+      {
+        title: "PPO Purpose",
+        objective: "Explain what PPO is used for.",
+      },
+    ],
+  });
 
   const request = buildCourseChatTurnModelRequest({
     userId: "user_1",
@@ -1635,44 +1550,28 @@ test("buildCourseChatTurnModelRequest uses automatic one-hour cache for Anthropi
 });
 
 test("buildCourseChatTurnModelRequest serializes answer decision tool responses", () => {
-  const widget = {
-    type: "free_text" as const,
-    id: "sql-redundancy",
-    question: "Why can repeated customer data cause update problems?",
-    placeholder: "Explain the problem...",
-  };
-  const course = {
-    id: "course_1",
-    userId: "user_1",
+  const widget = freeTextWidget(
+    "sql-redundancy",
+    "Why can repeated customer data cause update problems?",
+    "Explain the problem...",
+  );
+  const course = courseFixture({
     topicPrompt: "Learn SQL joins",
     title: "SQL Joins",
     description: "Learn joins and normalization.",
-    toc: {
-      title: "SQL Joins",
-      description: "Learn joins and normalization.",
-      pages: [
-        {
-          title: "Why Relationships Matter",
-          objective: "Explain why related tables reduce duplication.",
-        },
-        {
-          title: "How Joins Use Keys",
-          objective: "Explain how matching keys combine rows.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
+    pages: [
+      {
+        title: "Why Relationships Matter",
+        objective: "Explain why related tables reduce duplication.",
+      },
+      {
+        title: "How Joins Use Keys",
+        objective: "Explain how matching keys combine rows.",
+      },
+    ],
     currentPageIndex: 1,
-    totalPages: 2,
-    generatedPages: 2,
     chatMessageCount: 4,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+  });
 
   const request = buildCourseChatTurnModelRequest({
     userId: "user_1",
@@ -1768,161 +1667,119 @@ test("buildCourseChatTurnModelRequest serializes answer decision tool responses"
 });
 
 test("streamCourseAnswerContinuation uses one cached stream for evaluation and next widget", async () => {
-  const originalFetch = globalThis.fetch;
-  const encoder = new TextEncoder();
   let requestBody: Record<string, unknown> | null = null;
   const events: string[] = [];
   let pendingWidgetToolDeltas = 0;
-  const widget = {
-    type: "free_text" as const,
-    id: "sql-redundancy",
-    question: "Why can repeated customer data cause update problems?",
-    placeholder: "Explain the problem...",
-  };
-  const course = {
-    id: "course_1",
-    userId: "user_1",
+  const widget = freeTextWidget(
+    "sql-redundancy",
+    "Why can repeated customer data cause update problems?",
+    "Explain the problem...",
+  );
+  const course = courseFixture({
     topicPrompt: "Learn SQL joins",
     title: "SQL Joins",
     description: "Learn joins and normalization.",
-    toc: {
-      title: "SQL Joins",
-      description: "Learn joins and normalization.",
-      pages: [
-        {
-          title: "Why Relationships Matter",
-          objective: "Explain why related tables reduce duplication.",
-        },
-        {
-          title: "How Joins Use Keys",
-          objective: "Explain how matching keys combine rows.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
-    currentPageIndex: 0,
-    totalPages: 2,
-    generatedPages: 2,
+    pages: [
+      {
+        title: "Why Relationships Matter",
+        objective: "Explain why related tables reduce duplication.",
+      },
+      {
+        title: "How Joins Use Keys",
+        objective: "Explain how matching keys combine rows.",
+      },
+    ],
     chatMessageCount: 2,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+  });
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBody = JSON.parse(String(init?.body ?? "{}")) as Record<
       string,
       unknown
     >;
 
-    return new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                choices: [
-                  {
-                    delta: {
-                      tool_calls: [
-                        {
-                          index: 0,
-                          id: "call_decision",
-                          type: "function",
-                          function: {
-                            name: "record_course_answer_decision",
-                            arguments: JSON.stringify({
-                              questionAttempt: {
-                                toolCall: "record_course_question_attempt",
-                                question:
-                                  "Why can repeated customer data cause update problems?",
-                                answer:
-                                  "You have to update it in many rows and can miss one.",
-                                answerSummary:
-                                  "Repeated rows make updates inconsistent.",
-                                conciseAnswer:
-                                  "Repeated data can become inconsistent.",
-                                correctAnswer:
-                                  "Update one fact in many places risks inconsistency.",
-                                justification:
-                                  "Names duplication and update inconsistency.",
-                                score: 9,
-                              },
-                              progressDecision: {
-                                toolCall: "mark_milestone_done",
-                                reason: "The learner explained the core risk.",
-                              },
-                            }),
-                          },
-                        },
-                      ],
-                    },
-                  },
-                ],
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                choices: [
-                  {
-                    delta: {
-                      content:
-                        "Good. A join uses matching keys to combine related rows only when you query them.",
-                    },
-                  },
-                ],
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                choices: [
-                  {
-                    delta: {
-                      tool_calls: [
-                        {
-                          index: 1,
-                          id: "call_widget",
-                          type: "function",
-                          function: {
-                            name: "render_question_widget",
-                            arguments:
-                              "{\"type\":\"free_text\",\"id\":\"join-key\",\"question\":\"What has to match for a join to connect two rows?\"}",
-                          },
-                        },
-                      ],
-                    },
-                  },
-                ],
-                usage: {
-                  prompt_tokens: 5200,
-                  completion_tokens: 160,
-                  total_tokens: 5360,
-                  prompt_tokens_details: {
-                    cached_tokens: 4897,
-                    cache_write_tokens: 0,
-                  },
-                  cost: 0.001,
-                },
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
-        },
-      }),
+    return sseResponse([
       {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_decision",
+                  type: "function",
+                  function: {
+                    name: "record_course_answer_decision",
+                    arguments: JSON.stringify({
+                      questionAttempt: {
+                        toolCall: "record_course_question_attempt",
+                        question:
+                          "Why can repeated customer data cause update problems?",
+                        answer:
+                          "You have to update it in many rows and can miss one.",
+                        answerSummary: "Repeated rows make updates inconsistent.",
+                        conciseAnswer: "Repeated data can become inconsistent.",
+                        correctAnswer:
+                          "Update one fact in many places risks inconsistency.",
+                        justification:
+                          "Names duplication and update inconsistency.",
+                        score: 9,
+                      },
+                      progressDecision: {
+                        toolCall: "mark_milestone_done",
+                        reason: "The learner explained the core risk.",
+                      },
+                    }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
       },
-    );
-  };
+      {
+        choices: [
+          {
+            delta: {
+              content:
+                "Good. A join uses matching keys to combine related rows only when you query them.",
+            },
+          },
+        ],
+      },
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 1,
+                  id: "call_widget",
+                  type: "function",
+                  function: {
+                    name: "render_question_widget",
+                    arguments:
+                      "{\"type\":\"free_text\",\"id\":\"join-key\",\"question\":\"What has to match for a join to connect two rows?\"}",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 5200,
+          completion_tokens: 160,
+          total_tokens: 5360,
+          prompt_tokens_details: {
+            cached_tokens: 4897,
+            cache_write_tokens: 0,
+          },
+          cost: 0.001,
+        },
+      },
+      "[DONE]",
+    ]);
+  });
 
   try {
     const result = await streamCourseAnswerContinuation({
@@ -2046,45 +1903,28 @@ test("streamCourseAnswerContinuation uses one cached stream for evaluation and n
     assert.equal(result.toolCalls[0]?.function.arguments.id, "join-key");
     assert.equal(pendingWidgetToolDeltas, 1);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });
 
 test("course answer continuation preserves stored chat chronology", () => {
-  const widget = {
-    type: "free_text" as const,
-    id: "ppo-clipping",
-    question: "What does PPO clipping prevent?",
-    placeholder: "Answer in one sentence...",
-  };
-  const course = {
-    id: "course_1",
-    userId: "user_1",
+  const widget = freeTextWidget(
+    "ppo-clipping",
+    "What does PPO clipping prevent?",
+    "Answer in one sentence...",
+  );
+  const course = courseFixture({
     topicPrompt: "Learn PPO",
     title: "PPO",
     description: "Learn Proximal Policy Optimization.",
-    toc: {
-      title: "PPO",
-      description: "Learn Proximal Policy Optimization.",
-      pages: [
-        {
-          title: "PPO Clipping",
-          objective: "Explain why PPO clips policy updates.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
-    currentPageIndex: 0,
-    totalPages: 1,
-    generatedPages: 1,
+    pages: [
+      {
+        title: "PPO Clipping",
+        objective: "Explain why PPO clips policy updates.",
+      },
+    ],
     chatMessageCount: 4,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+  });
 
   const request = buildCourseAnswerContinuationModelRequest({
     userId: "user_1",
@@ -2167,40 +2007,23 @@ test("course answer continuation preserves stored chat chronology", () => {
 });
 
 test("course answer continuation retries missing visible tutor prose with a focused nudge", () => {
-  const widget = {
-    type: "free_text" as const,
-    id: "ppo-clipping",
-    question: "What does PPO clipping prevent?",
-    placeholder: "Answer in one sentence...",
-  };
-  const course = {
-    id: "course_1",
-    userId: "user_1",
+  const widget = freeTextWidget(
+    "ppo-clipping",
+    "What does PPO clipping prevent?",
+    "Answer in one sentence...",
+  );
+  const course = courseFixture({
     topicPrompt: "Learn PPO",
     title: "PPO",
     description: "Learn Proximal Policy Optimization.",
-    toc: {
-      title: "PPO",
-      description: "Learn Proximal Policy Optimization.",
-      pages: [
-        {
-          title: "PPO Clipping",
-          objective: "Explain why PPO clips policy updates.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
-    currentPageIndex: 0,
-    totalPages: 1,
-    generatedPages: 1,
+    pages: [
+      {
+        title: "PPO Clipping",
+        objective: "Explain why PPO clips policy updates.",
+      },
+    ],
     chatMessageCount: 4,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+  });
   const retryInstruction = courseAnswerContinuationRetryInstructionForError(
     new Error(
       "Course answer continuation did not emit visible tutor text after the answer decision.",
@@ -2318,49 +2141,26 @@ test("shouldUseCourseAnswerContinuationRequest uses single transcript continuati
 });
 
 test("streamCourseAnswerContinuation rejects malformed answer decision tools", async () => {
-  const originalFetch = globalThis.fetch;
-  const encoder = new TextEncoder();
-  const widget = {
-    type: "free_text" as const,
-    id: "sql-redundancy",
-    question: "Why can repeated customer data cause update problems?",
-  };
-  const course = {
-    id: "course_1",
-    userId: "user_1",
+  const widget = freeTextWidget(
+    "sql-redundancy",
+    "Why can repeated customer data cause update problems?",
+  );
+  const course = courseFixture({
     topicPrompt: "Learn SQL joins",
     title: "SQL Joins",
     description: "Learn joins and normalization.",
-    toc: {
-      title: "SQL Joins",
-      description: "Learn joins and normalization.",
-      pages: [
-        {
-          title: "Why Relationships Matter",
-          objective: "Explain why related tables reduce duplication.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
-    currentPageIndex: 0,
-    totalPages: 1,
-    generatedPages: 1,
+    pages: [
+      {
+        title: "Why Relationships Matter",
+        objective: "Explain why related tables reduce duplication.",
+      },
+    ],
     chatMessageCount: 2,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+  });
 
-  globalThis.fetch = async () =>
-    new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
+  const restoreFetch = installFetchMock(async () =>
+    sseResponse([
+      {
                 choices: [
                   {
                     delta: {
@@ -2397,18 +2197,10 @@ test("streamCourseAnswerContinuation rejects malformed answer decision tools", a
                     },
                   },
                 ],
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
-        },
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
       },
-    );
+      "[DONE]",
+    ]),
+  );
 
   try {
     await assert.rejects(
@@ -2440,75 +2232,44 @@ test("streamCourseAnswerContinuation rejects malformed answer decision tools", a
       /score/u,
     );
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });
 
 test("streamCourseChatTurn keeps the same cache-capable session key across Learn courses", async () => {
-  const originalFetch = globalThis.fetch;
-  const encoder = new TextEncoder();
   const sessionIds: string[] = [];
-  const baseCourse = {
+  const baseCourse = courseFixture({
     id: "draft-course",
-    userId: "user_1",
     topicPrompt: "Learn PPO",
     title: "PPO",
     description: "Learn Proximal Policy Optimization.",
-    toc: {
-      title: "PPO",
-      description: "Learn Proximal Policy Optimization.",
-      pages: [
-        {
-          title: "PPO Purpose",
-          objective: "Explain what PPO is used for.",
-        },
-      ],
-    },
-    status: "active" as const,
-    currentChapterIndex: 0,
-    currentPageIndex: 0,
-    totalPages: 1,
-    generatedPages: 1,
-    chatMessageCount: 0,
-    conversationCost: 0,
-    createdAt: 1,
-    updatedAt: 1,
-    pages: [],
-    chatMessages: [],
-  };
+    pages: [
+      {
+        title: "PPO Purpose",
+        objective: "Explain what PPO is used for.",
+      },
+    ],
+  });
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     const requestBody = JSON.parse(String(init?.body ?? "{}")) as {
       session_id?: string;
     };
     sessionIds.push(requestBody.session_id ?? "");
 
-    return new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                choices: [
-                  {
-                    delta: {
-                      content: "PPO keeps policy updates conservative.",
-                    },
-                  },
-                ],
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
-        },
-      }),
+    return sseResponse([
       {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
+        choices: [
+          {
+            delta: {
+              content: "PPO keeps policy updates conservative.",
+            },
+          },
+        ],
       },
-    );
-  };
+      "[DONE]",
+    ]);
+  });
 
   try {
     await streamCourseChatTurn({
@@ -2535,7 +2296,7 @@ test("streamCourseChatTurn keeps the same cache-capable session key across Learn
     assert.equal(sessionIds[0], sessionIds[1]);
     assert.equal(sessionIds[0], "learn:user_1:course-chat-v10");
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });
 

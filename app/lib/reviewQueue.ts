@@ -79,9 +79,6 @@ type Submission = {
   previousReviews: string;
 };
 
-type QueueStatusBroadcastMode = "full" | "evaluations";
-type QueueStatusSubscriber = (mode: QueueStatusBroadcastMode) => void;
-
 type QueueStatusInput = {
   limit?: number;
   offset?: number;
@@ -113,7 +110,6 @@ type QueueState = {
   inFlightQuestionKeys: Set<string>;
   evaluations: EvaluationQueueItem[];
   latestByQuestionKey: Record<string, LatestEvaluation>;
-  subscribers: Set<QueueStatusSubscriber>;
 };
 
 const globalForQueue = globalThis as typeof globalThis & {
@@ -130,7 +126,6 @@ function createQueueState(userId: string | null): QueueState {
     inFlightQuestionKeys: new Set<string>(),
     evaluations: [],
     latestByQuestionKey: {},
-    subscribers: new Set<QueueStatusSubscriber>(),
   };
 }
 
@@ -174,7 +169,6 @@ export function invalidateReviewQueue(userId?: string): void {
     state.initializing = null;
     state.queue = [];
     logQueueFlushStatus(state, "invalidated-review-queue");
-    void broadcastQueueStatus(state, "full");
   }
 }
 
@@ -197,32 +191,6 @@ function logQueueFlushStatus(state: QueueState, action: string): void {
     evaluationsTracked: state.evaluations.length,
     initialized: state.initialized,
   });
-}
-
-async function broadcastQueueStatus(
-  state: QueueState,
-  mode: QueueStatusBroadcastMode = "full",
-): Promise<void> {
-  if (state.subscribers.size === 0) {
-    return;
-  }
-
-  for (const subscriber of state.subscribers) {
-    subscriber(mode);
-  }
-}
-
-export function subscribeQueueStatus(
-  userId: string,
-  subscriber: QueueStatusSubscriber,
-): () => void {
-  const state = getQueueStateForUser(userId);
-
-  state.subscribers.add(subscriber);
-
-  return () => {
-    state.subscribers.delete(subscriber);
-  };
 }
 
 function createEvaluationItem(input: {
@@ -303,7 +271,6 @@ function updateEvaluationPhase(
 
   item.phase = phase;
   item.lastActivityAt = Date.now();
-  void broadcastQueueStatus(state, "evaluations");
 }
 
 function touchEvaluationActivity(
@@ -324,7 +291,6 @@ function touchEvaluationActivity(
   if (item.phase !== phase) {
     item.phase = phase;
     item.lastActivityAt = now;
-    void broadcastQueueStatus(state, "evaluations");
     return true;
   }
 
@@ -333,7 +299,6 @@ function touchEvaluationActivity(
   }
 
   item.lastActivityAt = now;
-  void broadcastQueueStatus(state, "evaluations");
   return true;
 }
 
@@ -953,7 +918,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
     state.pendingEvaluations = Math.max(0, state.pendingEvaluations - 1);
     state.inFlightQuestionKeys.delete(questionKey(submission));
     logQueueFlushStatus(state, options.logAction);
-    void broadcastQueueStatus(state);
     return true;
   };
   resetWatchdog();
@@ -1090,7 +1054,6 @@ export async function flagQuestion(input: {
     );
     state.inFlightQuestionKeys.delete(questionKey(flagged));
     logQueueFlushStatus(state, "flagged-question");
-    void broadcastQueueStatus(state);
   }
 
   return peekNextQuestion();
@@ -1172,7 +1135,6 @@ export async function submitAnswer(input: {
   state.inFlightQuestionKeys.add(questionKey(snapshot));
   state.pendingEvaluations += 1;
   logQueueFlushStatus(state, "submitted-answer");
-  void broadcastQueueStatus(state);
 
   const submission = {
     state,
@@ -1301,7 +1263,6 @@ export async function addQuestionsToKnowledgeBase(input: {
     userId: user.id,
   });
 
-  void broadcastQueueStatus(getQueueStateForUser(user.id));
 
   return {
     added: addedQuestions.length,

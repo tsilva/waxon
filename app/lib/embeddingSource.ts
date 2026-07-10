@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { DEFAULT_EMBEDDING_MODEL } from "../../shared/openrouter-config.mjs";
 
-export const DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-2";
+export { DEFAULT_EMBEDDING_MODEL };
 export const DEDUPE_EMBEDDING_DIMENSIONS = 3072;
 export const DEDUPE_EMBEDDING_KIND = "dedupe_v1";
 export const DEDUPE_SOURCE_VERSION = 1;

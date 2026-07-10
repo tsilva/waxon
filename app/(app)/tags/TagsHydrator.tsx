@@ -2,16 +2,11 @@
 
 import { createAuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
 import type { ConceptTagSummary } from "@/app/lib/conceptTags";
-
-type UserProfile = {
-  displayName: string;
-  email: string;
-  avatarUrl: string | null;
-};
+import type { UserProfileSummary } from "@/app/lib/userProfile";
 
 type TagsPageClientProps = {
   initialConceptTags?: ConceptTagSummary[] | null;
-  initialUser?: UserProfile | null;
+  initialUser?: UserProfileSummary | null;
   showAdmin?: boolean;
 };
 

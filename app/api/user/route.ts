@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/app/db/client";
 import { users } from "@/app/db/schema";
 import { getCurrentUser } from "@/app/lib/auth";
+import type { UserProfile } from "@/app/lib/userProfile";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,19 +12,7 @@ const MAX_AVATAR_DATA_URL_LENGTH = 700_000;
 const AVATAR_DATA_URL_PATTERN =
   /^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i;
 
-type UserProfile = {
-  id: string;
-  displayName: string;
-  email: string;
-  avatarUrl: string | null;
-};
-
-function toUserProfile(row: {
-  id: string;
-  displayName: string;
-  email: string;
-  avatarUrl: string | null;
-}): UserProfile {
+function toUserProfile(row: UserProfile): UserProfile {
   return {
     id: row.id,
     displayName: row.displayName,
