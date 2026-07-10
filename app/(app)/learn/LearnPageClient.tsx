@@ -3,14 +3,9 @@
 import {
   ArrowLeft,
   ArrowUp,
-  BookOpen,
   Loader2,
-  PlusCircle,
-  Search,
-  Settings,
   Square,
   SquareCheck,
-  Trash2,
 } from "lucide-react";
 import {
   Fragment,
@@ -40,61 +35,40 @@ import {
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { shouldShowLearnQuestionWidgets } from "@/app/lib/learnQuestionWidgetVisibility";
+import {
+  CourseSettingsModal,
+  LearnCourseList,
+  LearnCourseToolbar,
+  LearnLoadingPlaceholders,
+  REVIEW_COUNT_URL,
+  courseListPageSizeForViewport,
+  coursesPageUrl,
+  formatCourseUpdatedAt,
+  learnCoursePath,
+  readApiJson,
+  updateLearnHistory,
+} from "./LearnCourseListShared";
+import type {
+  Course,
+  CourseListCursor,
+  CourseListItem,
+  CoursesPageResponse,
+  CourseToc,
+  LearnPageClientProps,
+  StoredCourseChatEvaluation,
+  StoredCourseChatMessage,
+  UserProfile,
+} from "./learnTypes";
 
-export type CourseToc = {
-  title: string;
-  description: string;
-  pages: Array<{
-    title: string;
-    objective: string;
-  }>;
-};
-
-export type CourseListItem = {
-  id: string;
-  topicPrompt: string;
-  title: string;
-  description: string;
-  status: "active" | "completed";
-  currentChapterIndex: number;
-  currentPageIndex: number;
-  totalPages: number;
-  generatedPages: number;
-  chatMessageCount: number;
-  conversationCost: number;
-  createdAt: number;
-  updatedAt: number;
-};
-
-export type Course = CourseListItem & {
-  toc: CourseToc;
-  chatMessages?: StoredCourseChatMessage[];
-};
-
-export type StoredCourseChatMessage = {
-  id?: string;
-  role: "assistant" | "user";
-  content: string;
-  toolCalls?: CourseToolCall[];
-  metrics?: CourseMessageMetrics | null;
-  evaluation?: StoredCourseChatEvaluation | null;
-  widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
-  createdAt?: number;
-};
-
-export type StoredCourseChatEvaluation = {
-  questionId: string | null;
-  question: string;
-  correctAnswer: string | null;
-  score: number;
-  feedback: string;
-};
-
-export type UserProfile = {
-  displayName: string;
-  email: string;
-  avatarUrl: string | null;
-};
+export type {
+  Course,
+  CourseListItem,
+  CourseToc,
+  LearnPageClientProps,
+  StoredCourseChatEvaluation,
+  StoredCourseChatMessage,
+  UserProfile,
+} from "./learnTypes";
 
 type LearnChatMessage = {
   id: string;
@@ -110,27 +84,6 @@ type LearnChatMessage = {
   widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
   interrupted?: boolean;
   createdAt?: number;
-};
-
-export type LearnPageClientProps = {
-  initialCourseId?: string;
-  initialCoursesArePartial?: boolean;
-  initialCourses?: CourseListItem[] | null;
-  initialCurrentUser?: UserProfile | null;
-  initialDueCount?: number | null;
-  initialIsStartingNewCourse?: boolean;
-  initialSelectedCourse?: Course | null;
-};
-
-type CourseListCursor = {
-  updatedAt: number;
-  id: string;
-};
-
-type CoursesPageResponse = {
-  courses?: CourseListItem[];
-  hasMore?: boolean;
-  nextCursor?: CourseListCursor | null;
 };
 
 type LearnEvaluationDetails = {
@@ -172,76 +125,6 @@ const INITIAL_CHAT_MESSAGE: LearnChatMessage = {
 };
 
 const CHAT_AUTO_SCROLL_BOTTOM_THRESHOLD = 48;
-const COURSE_LIST_FALLBACK_PAGE_SIZE = 8;
-const COURSE_LIST_MIN_PAGE_SIZE = 4;
-const COURSE_LIST_MAX_PAGE_SIZE = 24;
-const COURSE_LIST_MOBILE_BREAKPOINT = 760;
-const COURSE_LIST_DESKTOP_VERTICAL_CHROME_PX = 195;
-const COURSE_LIST_MOBILE_VERTICAL_CHROME_PX = 208;
-const COURSE_LIST_DESKTOP_ROW_PITCH_PX = 80;
-const COURSE_LIST_MOBILE_ROW_PITCH_PX = 150;
-const REVIEW_COUNT_URL =
-  "/api/queue-status?mode=review&includeReviewQueue=0&includeRecentAttempts=0&includeQuestionAttempts=0&includeEvaluations=0&includeKnowledgeEmbeddingPlot=0&includeQueueCounts=1";
-
-const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  timeZone: "UTC",
-});
-
-const COURSE_UPDATED_TITLE_FORMATTER = new Intl.DateTimeFormat("en-US", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "UTC",
-});
-
-function coursesPageUrl(input: {
-  cursor?: CourseListCursor | null;
-  limit: number;
-  search?: string;
-}): string {
-  const searchParams = new URLSearchParams();
-
-  searchParams.set("limit", String(input.limit));
-
-  if (input.search?.trim()) {
-    searchParams.set("search", input.search.trim());
-  }
-
-  if (input.cursor) {
-    searchParams.set("cursorUpdatedAt", String(input.cursor.updatedAt));
-    searchParams.set("cursorId", input.cursor.id);
-  }
-
-  return `/api/courses?${searchParams.toString()}`;
-}
-
-function courseListPageSizeForViewport(): number {
-  if (typeof window === "undefined") {
-    return COURSE_LIST_FALLBACK_PAGE_SIZE;
-  }
-
-  const isMobile = window.innerWidth <= COURSE_LIST_MOBILE_BREAKPOINT;
-  const availableListHeight = Math.max(
-    isMobile
-      ? window.innerHeight - COURSE_LIST_MOBILE_VERTICAL_CHROME_PX
-      : window.innerHeight - COURSE_LIST_DESKTOP_VERTICAL_CHROME_PX,
-    0,
-  );
-  const rowPitch = isMobile
-    ? COURSE_LIST_MOBILE_ROW_PITCH_PX
-    : COURSE_LIST_DESKTOP_ROW_PITCH_PX;
-
-  return Math.max(
-    COURSE_LIST_MIN_PAGE_SIZE,
-    Math.min(
-      COURSE_LIST_MAX_PAGE_SIZE,
-      Math.ceil(availableListHeight / rowPitch),
-    ),
-  );
-}
 
 function chatMessageId() {
   return `learn-chat-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -634,17 +517,6 @@ function storedMessageToLearnMessage(
   };
 }
 
-function courseProgressLabel(course: CourseListItem): string {
-  if (course.status === "completed") {
-    return "Completed";
-  }
-
-  const totalPages = Math.max(course.totalPages, 1);
-  const currentPage = Math.min(course.currentPageIndex + 1, totalPages);
-
-  return `${currentPage} of ${totalPages}`;
-}
-
 function formatMessagePrice(cost: number | null | undefined): string | null {
   if (cost === null || cost === undefined || !Number.isFinite(cost)) {
     return null;
@@ -763,41 +635,6 @@ function LearnChatMessageMetrics({
   );
 }
 
-function formatCourseUpdatedAt(timestamp: number): string {
-  if (!Number.isFinite(timestamp) || timestamp <= 0) {
-    return "unknown";
-  }
-
-  return COURSE_UPDATED_FORMATTER.format(new Date(timestamp));
-}
-
-function formatCourseUpdatedTitle(timestamp: number): string {
-  if (!Number.isFinite(timestamp) || timestamp <= 0) {
-    return "Unknown";
-  }
-
-  return COURSE_UPDATED_TITLE_FORMATTER.format(new Date(timestamp));
-}
-
-async function readApiJson<T>(response: Response): Promise<T> {
-  const data = (await response.json().catch(() => null)) as T | null;
-
-  if (!response.ok) {
-    const message =
-      data && typeof data === "object" && "error" in data
-        ? String((data as { error?: unknown }).error ?? "Request failed.")
-        : "Request failed.";
-
-    throw new Error(message);
-  }
-
-  if (!data) {
-    throw new Error("Request failed.");
-  }
-
-  return data;
-}
-
 function isMilestoneComplete(
   course: Course,
   pageIndex: number,
@@ -807,94 +644,6 @@ function isMilestoneComplete(
   }
 
   return pageIndex < course.currentPageIndex;
-}
-
-function LearnCourseToolbar({
-  courseSearchQuery,
-  createDisabled,
-  onCourseSearchQueryChange,
-  onCreateCourse,
-}: {
-  courseSearchQuery: string;
-  createDisabled: boolean;
-  onCourseSearchQueryChange: (value: string) => void;
-  onCreateCourse: () => void;
-}) {
-  return (
-    <div className="learn-course-toolbar">
-      <label className="learn-course-search-shell">
-        <Search aria-hidden="true" />
-        <span className="sr-only">Search courses</span>
-        <input
-          className="learn-course-search-input"
-          type="search"
-          value={courseSearchQuery}
-          onChange={(event) => onCourseSearchQueryChange(event.target.value)}
-          placeholder="Search courses"
-        />
-      </label>
-      <button
-        className="learn-course-create-button"
-        disabled={createDisabled}
-        type="button"
-        onClick={onCreateCourse}
-      >
-        <PlusCircle aria-hidden="true" />
-        Create
-      </button>
-    </div>
-  );
-}
-
-function LearnLoadingPlaceholders({
-  courseSearchQuery,
-  createDisabled,
-  onCourseSearchQueryChange,
-  onCreateCourse,
-}: {
-  courseSearchQuery: string;
-  createDisabled: boolean;
-  onCourseSearchQueryChange: (value: string) => void;
-  onCreateCourse: () => void;
-}) {
-  return (
-    <div
-      className="learn-chat-layout learn-chat-layout-course-list learn-loading-layout"
-    >
-      <section
-        className="learn-course-picker learn-course-picker-full learn-loading-courses"
-        aria-label="Courses"
-        aria-busy="true"
-      >
-        <p className="sr-only" role="status">
-          Loading courses
-        </p>
-        <LearnCourseToolbar
-          courseSearchQuery={courseSearchQuery}
-          createDisabled={createDisabled}
-          onCourseSearchQueryChange={onCourseSearchQueryChange}
-          onCreateCourse={onCreateCourse}
-        />
-        <div className="learn-course-list" aria-hidden="true">
-          {Array.from({ length: 5 }, (_, index) => (
-            <article
-              className="learn-course-item learn-course-card learn-loading-course-card"
-              key={index}
-            >
-              <div className="learn-course-open">
-                <strong className="admin-skeleton-line learn-loading-course-title" />
-                <span className="learn-course-state-panel">
-                  <span className="admin-skeleton-line learn-loading-course-meta" />
-                  <small className="admin-skeleton-line learn-loading-course-copy" />
-                </span>
-              </div>
-              <span className="kb-skeleton-toggle learn-course-settings-trigger learn-loading-course-action" />
-            </article>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
 }
 
 function LearnQuestionWidgetPlaceholder() {
@@ -1001,23 +750,6 @@ function parseSseEvent(rawEvent: string): { event: string; data: unknown } | nul
   } catch {
     return null;
   }
-}
-
-function learnCoursePath(courseId: string): string {
-  return `/learn/courses/${encodeURIComponent(courseId)}`;
-}
-
-function updateLearnHistory(pathname: string, mode: "push" | "replace") {
-  if (typeof window === "undefined" || window.location.pathname === pathname) {
-    return;
-  }
-
-  if (mode === "replace") {
-    window.history.replaceState(null, "", pathname);
-    return;
-  }
-
-  window.history.pushState(null, "", pathname);
 }
 
 export default function LearnPageClient({
@@ -2379,82 +2111,22 @@ export default function LearnPageClient({
                     onCourseSearchQueryChange={setCourseSearchQuery}
                     onCreateCourse={startNewCourse}
                   />
-                  <div className="learn-course-list">
-                    {courses.length === 0 && !isLoadingCoursesPage ? (
-                      <p className="learn-course-empty">
-                        {activeCourseSearchQuery ? "No matching courses." : "No courses yet."}
-                      </p>
-                    ) : null}
-                    {courses.map((course) => (
-                      <article
-                        className="learn-course-item learn-course-card"
-                        key={course.id}
-                      >
-                        <button
-                          className="learn-course-open"
-                          disabled={Boolean(loadingCourseId)}
-                          type="button"
-                          onClick={() => {
-                            void selectCourse(course.id);
-                          }}
-                        >
-                          <strong>{course.title}</strong>
-                          <span className="learn-course-state-panel">
-                            <span className="learn-course-progress">
-                              <BookOpen aria-hidden="true" />
-                              {courseProgressLabel(course)}
-                            </span>
-                            <small className="learn-course-meta">
-                              <span>
-                                {loadingCourseId === course.id
-                                  ? "Loading"
-                                  : `${course.generatedPages}/${course.totalPages} generated`}
-                              </span>
-                              <time
-                                className="learn-course-updated"
-                                dateTime={new Date(course.updatedAt).toISOString()}
-                                title={formatCourseUpdatedTitle(course.updatedAt)}
-                              >
-                                Updated {formatCourseUpdatedAt(course.updatedAt)}
-                              </time>
-                            </small>
-                          </span>
-                        </button>
-                        <button
-                          className="learn-course-settings-trigger"
-                          disabled={Boolean(loadingCourseId)}
-                          type="button"
-                          aria-label={`Open ${course.title} settings`}
-                          onClick={() => openCourseSettings(course)}
-                        >
-                          <Settings aria-hidden="true" />
-                        </button>
-                      </article>
-                    ))}
-                    {isLoadingCoursesPage && courses.length > 0 ? (
-                      <p className="learn-course-loading-more" role="status">
-                        <Loader2 className="learn-spin-icon" aria-hidden="true" />
-                        Loading more courses
-                      </p>
-                    ) : null}
-                    {hasMoreCourses ? (
-                      <div
-                        className="learn-course-load-sentinel"
-                        ref={courseListMoreRef}
-                      >
-                        <button
-                          className="learn-course-load-more"
-                          disabled={isLoadingCoursesPage}
-                          type="button"
-                          onClick={() => {
-                            void loadNextCoursesPage();
-                          }}
-                        >
-                          {isLoadingCoursesPage ? "Loading" : "Load more"}
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
+                  <LearnCourseList
+                    activeCourseSearchQuery={activeCourseSearchQuery}
+                    courses={courses}
+                    createDisabled={Boolean(loadingCourseId)}
+                    hasMoreCourses={hasMoreCourses}
+                    isLoadingCoursesPage={isLoadingCoursesPage}
+                    loadingCourseId={loadingCourseId}
+                    courseListMoreRef={courseListMoreRef}
+                    onLoadMore={() => {
+                      void loadNextCoursesPage();
+                    }}
+                    onOpenCourse={(courseId) => {
+                      void selectCourse(courseId);
+                    }}
+                    onOpenCourseSettings={openCourseSettings}
+                  />
                 </section>
               ) : null}
 
@@ -2741,83 +2413,15 @@ export default function LearnPageClient({
       </section>
 
       {courseSettingsCourse ? (
-        <div
-          className="settings-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              closeCourseSettings();
-            }
+        <CourseSettingsModal
+          course={courseSettingsCourse}
+          isDeletingCourse={isDeletingCourse}
+          message={courseSettingsMessage}
+          onClose={closeCourseSettings}
+          onDelete={() => {
+            void deleteSelectedCourse();
           }}
-        >
-          <section
-            className="settings-modal course-settings-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-busy={isDeletingCourse}
-            aria-labelledby="course-settings-title"
-          >
-            <div className="settings-modal-header">
-              <div>
-                <p className="settings-modal-kicker">Course settings</p>
-                <h2 className="settings-modal-title" id="course-settings-title">
-                  {courseSettingsCourse.title}
-                </h2>
-              </div>
-              <button
-                className="stats-modal-close"
-                type="button"
-                aria-label="Close course settings"
-                disabled={isDeletingCourse}
-                onClick={closeCourseSettings}
-              />
-            </div>
-
-            <dl className="course-settings-summary" aria-label="Course summary">
-              <div>
-                <dt>{courseSettingsCourse.generatedPages}</dt>
-                <dd>generated pages</dd>
-              </div>
-              <div>
-                <dt>{courseSettingsCourse.chatMessageCount}</dt>
-                <dd>chat messages</dd>
-              </div>
-              <div>
-                <dt>{formatCourseUpdatedAt(courseSettingsCourse.updatedAt)}</dt>
-                <dd>last updated</dd>
-              </div>
-            </dl>
-
-            <div className="course-settings-danger">
-              <div>
-                <h3>Delete course</h3>
-                <p>
-                  This removes the course, its chat, generated pages, page
-                  attempts, and generated review questions.
-                </p>
-              </div>
-              <button
-                className="course-delete-action"
-                type="button"
-                disabled={isDeletingCourse}
-                onClick={() => {
-                  void deleteSelectedCourse();
-                }}
-              >
-                <Trash2 aria-hidden="true" />
-                <span>
-                  {isDeletingCourse ? "Deleting..." : "Delete course and data"}
-                </span>
-              </button>
-            </div>
-
-            {courseSettingsMessage ? (
-              <p className="kb-editor-status" role="alert">
-                {courseSettingsMessage}
-              </p>
-            ) : null}
-          </section>
-        </div>
+        />
       ) : null}
 
       {selectedEvaluationDetails ? (

@@ -1,4 +1,4 @@
-import { desc, sql } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import type { llmTraceInteractions } from "../db/schema";
 import {
   promptCacheMetricsFromOpenRouterUsage,
@@ -72,7 +72,6 @@ const MAX_PERSISTED_TRACE_PAYLOAD_CHARS = 12_000;
 
 const globalForTraceStore = globalThis as typeof globalThis & {
   waxonLlmTraces?: LlmTraceState;
-  waxonEnsureLlmTraceTable?: Promise<void> | null;
 };
 
 const state: LlmTraceState =
@@ -81,7 +80,6 @@ const state: LlmTraceState =
   };
 
 globalForTraceStore.waxonLlmTraces = state;
-globalForTraceStore.waxonEnsureLlmTraceTable ??= null;
 
 export function classifyLlmCallType(operation: string): LlmTraceCallType {
   const normalizedOperation = operation.toLowerCase();
@@ -314,7 +312,6 @@ export async function listLlmTraceInteractions(): Promise<LlmTraceInteraction[]>
       const { llmTraceInteractions: llmTraceInteractionsTable } = await import(
         "../db/schema"
       );
-      await ensureLlmTraceTable(db);
       const rows = await db
         .select()
         .from(llmTraceInteractionsTable)
@@ -383,7 +380,6 @@ async function persistTraceInteraction(
     );
     const row = traceInteractionToRow(interaction);
 
-    await ensureLlmTraceTable(db);
     await db
       .insert(llmTraceInteractionsTable)
       .values(row)
@@ -410,56 +406,6 @@ async function persistTraceInteraction(
       });
     }
   }
-}
-
-async function ensureLlmTraceTable(
-  db: typeof import("../db/client").db,
-): Promise<void> {
-  if (!globalForTraceStore.waxonEnsureLlmTraceTable) {
-    globalForTraceStore.waxonEnsureLlmTraceTable = createLlmTraceTable(db).catch(
-      (error: unknown) => {
-        globalForTraceStore.waxonEnsureLlmTraceTable = null;
-        throw error;
-      },
-    );
-  }
-
-  await globalForTraceStore.waxonEnsureLlmTraceTable;
-}
-
-async function createLlmTraceTable(
-  db: typeof import("../db/client").db,
-): Promise<void> {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS "llm_trace_interactions" (
-      "id" text PRIMARY KEY NOT NULL,
-      "title" text NOT NULL,
-      "kind" text NOT NULL,
-      "started_at" bigint NOT NULL,
-      "status" text NOT NULL,
-      "calls" text NOT NULL,
-      "updated_at" bigint DEFAULT (extract(epoch from now()) * 1000)::bigint NOT NULL,
-      CONSTRAINT "llm_trace_interactions_id_nonempty_check" CHECK (length(trim("id")) > 0),
-      CONSTRAINT "llm_trace_interactions_title_nonempty_check" CHECK (length(trim("title")) > 0),
-      CONSTRAINT "llm_trace_interactions_kind_check" CHECK ("kind" IN (
-        'Answer evaluation',
-        'Question generation',
-        'Reference answer',
-        'Embedding',
-        'Knowledge memory',
-        'Quality gate',
-        'Summarization',
-        'Other'
-      )),
-      CONSTRAINT "llm_trace_interactions_status_check" CHECK ("status" IN ('ok', 'pending', 'error')),
-      CONSTRAINT "llm_trace_interactions_started_at_check" CHECK ("started_at" >= 0),
-      CONSTRAINT "llm_trace_interactions_updated_at_check" CHECK ("updated_at" >= "started_at")
-    )
-  `);
-  await db.execute(sql`
-    CREATE INDEX IF NOT EXISTS "llm_trace_interactions_started_at_idx"
-    ON "llm_trace_interactions" ("started_at" DESC NULLS LAST)
-  `);
 }
 
 function traceInteractionToRow(

@@ -190,6 +190,20 @@
       "when": 1782387321000,
       "tag": "0027_course_chat_message_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1783679000000,
+      "tag": "0028_course_list_order_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1783679261161,
+      "tag": "0029_knowledge_memory_trace_kind",
+      "breakpoints": true
     }
   ]
 }

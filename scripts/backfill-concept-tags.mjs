@@ -1,13 +1,14 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { extractJsonObject } from "./lib/json-object.mjs";
+import { extractJsonObject } from "../shared/json-object.mjs";
 import {
   loadPromptTemplate,
   renderPromptTemplate,
-} from "./lib/prompts.mjs";
+} from "../shared/prompt-templates.mjs";
 import {
   chunks,
   configureNeonWebSocket,
   createDatabasePool,
+  DEFAULT_EMBEDDING_MODEL,
   extractOpenRouterChatText,
   fetchOpenRouterJson,
   loadLocalEnvFiles,
@@ -21,7 +22,6 @@ import {
 loadLocalEnvFiles();
 configureNeonWebSocket(neonConfig);
 
-const DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-2";
 const DEFAULT_BATCH_SIZE = 10;
 const FALLBACK_CONCEPT_SLUG = "needs-concept-tagging";
 

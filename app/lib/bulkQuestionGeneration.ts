@@ -18,6 +18,7 @@ import {
   renderPromptTemplate,
 } from "./promptTemplates.ts";
 import { getQuestionQualityReference } from "./questionQualityReference";
+import { normalizeQuestionDraft } from "./questionDraft";
 import { extractCompleteJsonObjectsFromArrayProperty } from "./streamedJsonArray";
 
 const DEFAULT_BULK_QUESTION_COUNT = 50;
@@ -53,12 +54,6 @@ export function normalizeBulkQuestionCount(value: unknown): number {
     MAX_BULK_QUESTION_COUNT,
     Math.max(1, Math.round(numericValue)),
   );
-}
-
-function normalizeText(value: unknown, maxLength: number): string {
-  return typeof value === "string"
-    ? value.trim().replace(/\s+/g, " ").slice(0, maxLength)
-    : "";
 }
 
 function buildGenerationMemoryContext(memory: string): string {
@@ -109,35 +104,29 @@ export function normalizeGeneratedQuestions(
       continue;
     }
 
-    const record = item as Record<string, unknown>;
-    const question = normalizeText(record.question ?? record.q, MAX_QUESTION_CHARS);
-    const conciseAnswer = normalizeText(
-      record.conciseAnswer ?? record.a,
-      MAX_CONCISE_ANSWER_CHARS,
-    );
-    const questionProvenance = normalizeText(
-      record.questionProvenance ?? record.provenance ?? record.p,
-      MAX_PROVENANCE_CHARS,
-    );
-    const key = question.toLowerCase();
+    const draft = normalizeQuestionDraft(item, {
+      question: MAX_QUESTION_CHARS,
+      conciseAnswer: MAX_CONCISE_ANSWER_CHARS,
+      questionProvenance: MAX_PROVENANCE_CHARS,
+      conceptSlug: 120,
+    });
 
     if (
-      !question ||
-      !conciseAnswer ||
-      !questionProvenance ||
-      /\b(review|recap|practice)\b/iu.test(questionProvenance) ||
-      seen.has(key)
+      !draft ||
+      !draft.conciseAnswer ||
+      !draft.questionProvenance ||
+      /\b(review|recap|practice)\b/iu.test(draft.questionProvenance) ||
+      seen.has(draft.questionIdentity)
     ) {
       continue;
     }
 
-    seen.add(key);
+    seen.add(draft.questionIdentity);
     normalized.push({
-      question,
-      conciseAnswer,
-      questionProvenance,
-      proposedConceptSlugs: [normalizeText(record.conceptSlug ?? record.c, 120)]
-        .filter(Boolean),
+      question: draft.question,
+      conciseAnswer: draft.conciseAnswer,
+      questionProvenance: draft.questionProvenance,
+      proposedConceptSlugs: draft.proposedConceptSlugs,
     });
   }
 

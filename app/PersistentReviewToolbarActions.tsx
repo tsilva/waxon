@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createAccountWidgetsCustomPages } from "@/app/AccountProfileWidgets";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
+import type { UserProfile } from "@/app/lib/userProfile";
 import { ReviewToolbarActions } from "@/app/ReviewToolbar";
 import {
   localSettingsEvent,
@@ -16,16 +17,9 @@ import {
 } from "@/app/toolbarEvents";
 import type { ReviewToolbarTab } from "@/app/toolbarTypes";
 
-type UserProfileResponse = {
-  id: string;
-  displayName: string;
-  email: string;
-  avatarUrl: string | null;
-};
-
 type CachedToolbarData = {
   dueCount: number | null;
-  user: UserProfileResponse | null;
+  user: UserProfile | null;
 };
 
 const toolbarRoutes = [
@@ -191,10 +185,10 @@ export function PersistentReviewToolbarActions() {
       return;
     }
 
-    let loadedUser: UserProfileResponse | null = null;
+    let loadedUser: UserProfile | null = null;
 
     if (userResult.status === "fulfilled" && userResult.value.ok) {
-      loadedUser = (await userResult.value.json()) as UserProfileResponse;
+      loadedUser = (await userResult.value.json()) as UserProfile;
     }
 
     setToolbarData((current) => {

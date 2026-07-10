@@ -4,17 +4,11 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { DAY } from "@/app/lib/scheduler";
 import type { StatsResponse } from "@/app/lib/stats";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
+import type { UserProfile } from "@/app/lib/userProfile";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
-type UserProfileResponse = {
-  id: string;
-  displayName: string;
-  email: string;
-  avatarUrl: string | null;
-};
-
 type StatsPageClientProps = {
-  currentUser?: UserProfileResponse | null;
+  currentUser?: UserProfile | null;
   showAdmin?: boolean;
   stats?: StatsResponse | null;
 };
@@ -444,7 +438,7 @@ export default function StatsPageClient({
           fetch("/api/user", { cache: "no-store", signal: controller.signal }),
           fetch("/api/stats", { cache: "no-store", signal: controller.signal }),
         ]);
-        const userData = (await userResponse.json()) as UserProfileResponse & {
+        const userData = (await userResponse.json()) as UserProfile & {
           error?: string;
         };
         const statsData = (await statsResponse.json()) as StatsResponse & {

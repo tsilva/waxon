@@ -18,14 +18,51 @@ import {
   recordFailedLlmTrace,
 } from "../app/lib/llmTraceStore.ts";
 
-test("openRouterChatCompletion sends user trace identifiers", async () => {
+function installFetchMock(implementation: typeof globalThis.fetch): () => void {
   const originalFetch = globalThis.fetch;
+  globalThis.fetch = implementation;
+  return () => {
+    globalThis.fetch = originalFetch;
+  };
+}
+
+function jsonResponse(body: unknown, init?: ResponseInit): Response {
+  return new Response(JSON.stringify(body), { status: 200, ...init });
+}
+
+function sseResponse(
+  events: unknown[],
+  lineEnding: "\n" | "\r\n" = "\n",
+): Response {
+  const encoder = new TextEncoder();
+
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const event of events) {
+          controller.enqueue(
+            encoder.encode(
+              `data: ${event === "[DONE]" ? event : JSON.stringify(event)}${lineEnding}${lineEnding}`,
+            ),
+          );
+        }
+        controller.close();
+      },
+    }),
+    {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    },
+  );
+}
+
+test("openRouterChatCompletion sends user trace identifiers", async () => {
   const requestBodies: Record<string, unknown>[] = [];
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-    return new Response(JSON.stringify({ choices: [] }), { status: 200 });
-  };
+    return jsonResponse({ choices: [] });
+  });
 
   try {
     await openRouterChatCompletion({
@@ -43,7 +80,7 @@ test("openRouterChatCompletion sends user trace identifiers", async () => {
       },
     });
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 
   const requestBody = requestBodies[0];
@@ -59,13 +96,12 @@ test("openRouterChatCompletion sends user trace identifiers", async () => {
 });
 
 test("openRouterChatCompletion preserves an explicit session id", async () => {
-  const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-    return new Response(JSON.stringify({ choices: [] }), { status: 200 });
-  };
+    return jsonResponse({ choices: [] });
+  });
 
   try {
     await openRouterChatCompletion({
@@ -82,7 +118,7 @@ test("openRouterChatCompletion preserves an explicit session id", async () => {
       },
     });
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 
   assert.equal(requestBodies[0]?.user, "user-123");
@@ -207,13 +243,12 @@ test("getOpenRouterEvaluationReasoning disables Mercury reasoning", () => {
 });
 
 test("openRouterEmbeddings sends user trace identifiers", async () => {
-  const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-    return new Response(JSON.stringify({ data: [] }), { status: 200 });
-  };
+    return jsonResponse({ data: [] });
+  });
 
   try {
     await openRouterEmbeddings({
@@ -229,7 +264,7 @@ test("openRouterEmbeddings sends user trace identifiers", async () => {
       },
     });
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 
   const requestBody = requestBodies[0];
@@ -244,13 +279,12 @@ test("openRouterEmbeddings sends user trace identifiers", async () => {
 });
 
 test("openRouterChatCompletion mirrors body user into trace metadata", async () => {
-  const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-    return new Response(JSON.stringify({ choices: [] }), { status: 200 });
-  };
+    return jsonResponse({ choices: [] });
+  });
 
   try {
     await openRouterChatCompletion({
@@ -266,7 +300,7 @@ test("openRouterChatCompletion mirrors body user into trace metadata", async () 
       },
     });
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 
   const requestBody = requestBodies[0];
@@ -278,12 +312,11 @@ test("openRouterChatCompletion mirrors body user into trace metadata", async () 
 });
 
 test("openRouterChatCompletion records actual request and response payloads", async () => {
-  const originalFetch = globalThis.fetch;
   const traceId = `trace-recording-${Date.now()}`;
 
-  globalThis.fetch = async () =>
-    new Response(
-      JSON.stringify({
+  const restoreFetch = installFetchMock(async () =>
+    jsonResponse(
+      {
         choices: [{ message: { content: "{\"score\":10}" } }],
         usage: {
           prompt_tokens: 12,
@@ -295,9 +328,10 @@ test("openRouterChatCompletion records actual request and response payloads", as
           total_tokens: 16,
           cost: 0.001,
         },
-      }),
+      },
       { status: 200, statusText: "OK" },
-    );
+    ),
+  );
 
   try {
     await openRouterChatCompletion({
@@ -315,7 +349,7 @@ test("openRouterChatCompletion records actual request and response payloads", as
       },
     });
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 
   const trace = (await listLlmTraceInteractions()).find(
@@ -335,14 +369,12 @@ test("openRouterChatCompletion records actual request and response payloads", as
 });
 
 test("listLlmTraceInteractions falls back to local traces when db read is unavailable", async () => {
-  const originalFetch = globalThis.fetch;
   const originalDatabaseUrl = process.env.DATABASE_URL;
   const originalConsoleError = console.error;
   const traceId = `trace-local-fallback-${Date.now()}`;
 
-  globalThis.fetch = async () =>
-    new Response(
-      JSON.stringify({
+  const restoreFetch = installFetchMock(async () =>
+    jsonResponse({
         choices: [{ message: { content: "{\"score\":10}" } }],
         usage: {
           prompt_tokens: 7,
@@ -350,8 +382,7 @@ test("listLlmTraceInteractions falls back to local traces when db read is unavai
           total_tokens: 10,
         },
       }),
-      { status: 200 },
-    );
+  );
 
   try {
     await openRouterChatCompletion({
@@ -378,7 +409,7 @@ test("listLlmTraceInteractions falls back to local traces when db read is unavai
     assert.ok(trace);
     assert.equal(trace.calls[0]?.inputTokens, 7);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
     console.error = originalConsoleError;
     if (originalDatabaseUrl === undefined) {
       delete process.env.DATABASE_URL;
@@ -415,49 +446,31 @@ test("recordFailedLlmTrace records an error trace for configuration failures", a
 });
 
 test("openRouterChatCompletion streams text chunks and reports activity", async () => {
-  const originalFetch = globalThis.fetch;
   const requestBodies: Record<string, unknown>[] = [];
   let activityCount = 0;
   const deltas: string[] = [];
-  const encoder = new TextEncoder();
 
-  globalThis.fetch = async (_url, init) => {
+  const restoreFetch = installFetchMock(async (_url, init) => {
     requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
 
-    return new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                choices: [{ delta: { content: "{\"score\"" } }],
-              })}\r\n\r\n`,
-            ),
-          );
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                choices: [{ delta: { content: ":10}" } }],
-                usage: {
-                  prompt_tokens: 8,
-                  completion_tokens: 4,
-                  total_tokens: 12,
-                },
-              })}\r\n\r\n`,
-            ),
-          );
-          controller.enqueue(encoder.encode("data: [DONE]\r\n\r\n"));
-          controller.close();
+    return sseResponse(
+      [
+        {
+          choices: [{ delta: { content: "{\"score\"" } }],
         },
-      }),
-      {
-        status: 200,
-        headers: {
-          "Content-Type": "text/event-stream",
+        {
+          choices: [{ delta: { content: ":10}" } }],
+          usage: {
+            prompt_tokens: 8,
+            completion_tokens: 4,
+            total_tokens: 12,
+          },
         },
-      },
+        "[DONE]",
+      ],
+      "\r\n",
     );
-  };
+  });
 
   try {
     const { body } = await openRouterChatCompletion({
@@ -484,79 +497,59 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
     assert.equal(body.usage?.completion_tokens, 4);
     assert.ok(activityCount >= 2);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });
 
 test("openRouterChatCompletion preserves streamed tool calls", async () => {
-  const originalFetch = globalThis.fetch;
-  const encoder = new TextEncoder();
   const streamedToolCallDeltas: unknown[] = [];
 
-  globalThis.fetch = async () =>
-    new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                choices: [
-                  {
-                    delta: {
-                      tool_calls: [
-                        {
-                          index: 0,
-                          id: "call_widget",
-                          type: "function",
-                          function: {
-                            name: "render_question_widget",
-                            arguments: "{\"type\":\"free_text\",",
-                          },
-                        },
-                      ],
-                    },
-                  },
-                ],
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                choices: [
-                  {
-                    delta: {
-                      tool_calls: [
-                        {
-                          index: 0,
-                          function: {
-                            arguments:
-                              "\"id\":\"check\",\"question\":\"What is PPO?\"}",
-                          },
-                        },
-                      ],
-                    },
-                  },
-                ],
-                usage: {
-                  prompt_tokens: 8,
-                  completion_tokens: 4,
-                  total_tokens: 12,
-                },
-              })}\n\n`,
-            ),
-          );
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
-        },
-      }),
+  const restoreFetch = installFetchMock(async () =>
+    sseResponse([
       {
-        status: 200,
-        headers: {
-          "Content-Type": "text/event-stream",
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_widget",
+                  type: "function",
+                  function: {
+                    name: "render_question_widget",
+                    arguments: "{\"type\":\"free_text\",",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  function: {
+                    arguments:
+                      "\"id\":\"check\",\"question\":\"What is PPO?\"}",
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        usage: {
+          prompt_tokens: 8,
+          completion_tokens: 4,
+          total_tokens: 12,
         },
       },
-    );
+      "[DONE]",
+    ]),
+  );
 
   try {
     const { body } = await openRouterChatCompletion({
@@ -586,6 +579,6 @@ test("openRouterChatCompletion preserves streamed tool calls", async () => {
       },
     ]);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   }
 });

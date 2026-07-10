@@ -12,6 +12,7 @@ import { courseQuestionWidgetsFromToolCalls } from "@/app/lib/courseQuestionWidg
 import {
   DEFAULT_OPENROUTER_LEARN_MODEL,
   getOpenRouterLearnModel,
+  OPENROUTER_CHAT_URL,
 } from "@/app/lib/openRouter";
 
 export const runtime = "nodejs";
@@ -122,7 +123,7 @@ export async function POST(request: Request) {
       pageTitle: requestPreview.pageTitle,
       nextPageTitle:
         "nextPageTitle" in requestPreview ? requestPreview.nextPageTitle : null,
-      endpoint: "https://openrouter.ai/api/v1/chat/completions",
+      endpoint: OPENROUTER_CHAT_URL,
       requestBody: requestPreview.requestBody,
     },
   });

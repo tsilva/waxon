@@ -20,6 +20,10 @@ import {
 } from "./evaluateAnswerParsing";
 import type { EvaluationResult } from "./evaluateAnswerParsing";
 import { buildSystemPrompt } from "./evaluateAnswerPrompt";
+import {
+  BROWSER_SMOKE_CORRECT_TOKEN,
+  isBrowserSmokeQuestion,
+} from "./browserSmokeSupport";
 
 export {
   failedEvaluation,
@@ -39,7 +43,6 @@ export type EvaluateAnswerInput = {
 };
 
 export const EVALUATION_TIMEOUT_MS = 60_000;
-const BROWSER_SMOKE_CORRECT_TOKEN = "browser-smoke-correct-token";
 
 function normalizeExactAnswer(value: string): string {
   return value.trim().replace(/\s+/g, " ").toLowerCase();
@@ -165,7 +168,10 @@ export async function evaluateAnswer(
     return exactEvaluation;
   }
 
-  if (isBrowserSmokeEvaluatorEnabled()) {
+  if (
+    isBrowserSmokeEvaluatorEnabled() &&
+    isBrowserSmokeQuestion(input.question)
+  ) {
     return await evaluateBrowserSmokeAnswer(input);
   }
 

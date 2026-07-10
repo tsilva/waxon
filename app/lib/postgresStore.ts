@@ -30,6 +30,7 @@ import {
 } from "./auth";
 import { scheduleNextReview, serializeReviews } from "./scheduler";
 import { questionSlug } from "./questionSlug";
+import { normalizeQuestionDraft } from "./questionDraft";
 import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
@@ -1404,33 +1405,19 @@ function normalizeGeneratedQuestions(
   const normalizedQuestions: QuestionInput[] = [];
 
   for (const item of generatedQuestions) {
-    const question = typeof item === "string" ? item : item.question;
-    const normalized = question.trim().replace(/\s+/g, " ");
-    const key = questionSlug(normalized);
+    const draft = normalizeQuestionDraft(item, { sourceText: 4_000 });
 
-    if (!normalized || seen.has(key)) {
+    if (!draft || seen.has(draft.questionIdentity)) {
       continue;
     }
 
-    seen.add(key);
+    seen.add(draft.questionIdentity);
     normalizedQuestions.push({
-      question: normalized,
-      conciseAnswer:
-        typeof item === "string"
-          ? ""
-          : (item.conciseAnswer ?? "").trim().replace(/\s+/g, " "),
-      questionProvenance:
-        typeof item === "string"
-          ? ""
-          : (item.questionProvenance ?? "").trim().replace(/\s+/g, " "),
-      proposedConceptSlugs:
-        typeof item === "string" || !Array.isArray(item.proposedConceptSlugs)
-          ? []
-          : item.proposedConceptSlugs,
-      sourceText:
-        typeof item === "string"
-          ? ""
-          : (item.sourceText ?? "").trim().slice(0, 4_000),
+      question: draft.question,
+      conciseAnswer: draft.conciseAnswer,
+      questionProvenance: draft.questionProvenance,
+      proposedConceptSlugs: draft.proposedConceptSlugs,
+      sourceText: draft.sourceText,
     });
   }
 

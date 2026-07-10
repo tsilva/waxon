@@ -4,13 +4,9 @@ import { eq } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import { authAccounts, users } from "@/app/db/schema";
 import { isLocalTestAuthEnabled, localTestUser } from "@/app/lib/localTestAuth";
+import type { UserProfile } from "@/app/lib/userProfile";
 
-export type AuthenticatedUser = {
-  id: string;
-  displayName: string;
-  email: string;
-  avatarUrl: string | null;
-};
+export type AuthenticatedUser = UserProfile;
 
 const CLERK_PROVIDER = "clerk";
 

@@ -1,7 +1,11 @@
 "use client";
 
 import { createAuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
-import type { Course, CourseListItem, UserProfile } from "./LearnPageClient";
+import type {
+  Course,
+  CourseListItem,
+  UserProfile,
+} from "./learnTypes";
 
 type LearnPageClientProps = {
   initialCourseId?: string;

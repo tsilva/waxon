@@ -25,7 +25,6 @@ import {
   type CourseMessageMetrics,
 } from "./courseMessageMetrics.ts";
 import {
-  parseCourseQuestionAttemptToolResult,
   parseCourseAnswerDecisionToolResult,
   type CourseQuestionAttemptToolResult,
   type CourseAnswerDecisionToolResult,
@@ -629,30 +628,6 @@ function parseCourseIntakeDecision(source: string): CourseIntakeDecision {
   throw new Error("Course intake action must be clarify or create_course.");
 }
 
-function parseCourseProgressDecision(source: string): CourseProgressDecision {
-  const value = extractJsonObject(source);
-
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Course progress response must be a JSON object.");
-  }
-
-  const record = value as Record<string, unknown>;
-  const toolCall = normalizeIntakeText(record.toolCall, 80);
-  const reason = normalizeIntakeText(record.reason, 500);
-
-  if (toolCall === "mark_milestone_done") {
-    return {
-      toolCall,
-      reason: reason || "The learner demonstrated enough understanding.",
-    };
-  }
-
-  return {
-    toolCall: "continue_current_milestone",
-    reason: reason || "The learner needs another short check.",
-  };
-}
-
 function currentCourseMilestone(course: CourseDetail) {
   const page = course.toc.pages[course.currentPageIndex];
 
@@ -661,16 +636,6 @@ function currentCourseMilestone(course: CourseDetail) {
   }
 
   return { page };
-}
-
-function compactCourseMessages(messages: CourseChatMessage[]) {
-  return messages.slice(-10).map((message) => ({
-    role: message.role,
-    content: excerptCourseMessageForPrompt(
-      courseMessagePromptContext(message),
-      1_200,
-    ),
-  }));
 }
 
 function courseChatMessagesForModel(
@@ -1015,55 +980,6 @@ export async function generateCourseIntakeDecision(input: {
   return parseCourseIntakeDecision(extractChatCompletionText(body));
 }
 
-export async function evaluateCourseChatProgress(input: {
-  apiKey: string;
-  model?: string;
-  userId: string;
-  course: CourseDetail;
-  messages: CourseChatMessage[];
-} & CourseCostObserver): Promise<CourseProgressDecision> {
-  const { page } = currentCourseMilestone(input.course);
-  const startedAt = Date.now();
-  const { body, response } = await openRouterChatCompletion({
-    apiKey: input.apiKey,
-    stream: false,
-    trace: {
-      operation: "course_chat_progress",
-      userId: input.userId,
-      question: page.title,
-    },
-    body: {
-      model: input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL,
-      response_format: COURSE_JSON_RESPONSE_FORMAT,
-      temperature: 0.15,
-      max_tokens: 320,
-      messages: [
-        {
-          role: "system",
-          content: loadPromptTemplate("course-progress-system.md"),
-        },
-        {
-          role: "user",
-          content: renderPromptTemplate(loadPromptTemplate("course-progress-user.md"), {
-            courseTitle: input.course.title,
-            currentMilestone: page.title,
-            milestoneObjective: page.objective,
-            conversationJson: JSON.stringify(compactCourseMessages(input.messages)),
-          }),
-        },
-      ],
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error("Course progress evaluation failed.");
-  }
-
-  reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
-
-  return parseCourseProgressDecision(extractChatCompletionText(body));
-}
-
 function latestAnsweredWidgetContext(messages: CourseChatMessage[]): {
   question: string | null;
   answer: string;
@@ -1239,99 +1155,6 @@ export async function generateCourseAnswerDecision(input: {
     extractChatCompletionText(body),
     answeredWidget?.answer ?? latestUserMessage.content,
     answeredWidget?.choiceSource ?? previousAssistantMessage.content,
-  );
-}
-
-export async function generateCourseQuestionAttemptToolResult(input: {
-  apiKey: string;
-  model?: string;
-  userId: string;
-  course: CourseDetail;
-  messages: CourseChatMessage[];
-} & CourseCostObserver): Promise<CourseQuestionAttemptToolResult> {
-  const latestUserMessage = [...input.messages]
-    .reverse()
-    .find((message) => message.role === "user");
-  const previousAssistantMessage = [...input.messages]
-    .reverse()
-    .find((message) => message.role === "assistant");
-
-  if (!latestUserMessage || !previousAssistantMessage) {
-    return {
-      toolCall: "skip_course_question_attempt",
-      reason: "No prior tutor question and learner answer pair exists.",
-    };
-  }
-
-  if (
-    normalizeIntakeText(previousAssistantMessage.content, 80).toLowerCase() ===
-    "what do you want to learn?"
-  ) {
-    return {
-      toolCall: "skip_course_question_attempt",
-      reason: "The initial course intake prompt is not a review question.",
-    };
-  }
-
-  const { page } = currentCourseMilestone(input.course);
-  const startedAt = Date.now();
-  const { body, response } = await openRouterChatCompletion({
-    apiKey: input.apiKey,
-    stream: false,
-    trace: {
-      operation: "course_question_attempt_tool",
-      userId: input.userId,
-      question: page.title,
-    },
-    body: {
-      model: input.model ?? DEFAULT_OPENROUTER_LEARN_MODEL,
-      response_format: COURSE_JSON_RESPONSE_FORMAT,
-      temperature: 0,
-      max_tokens: 700,
-      messages: [
-        {
-          role: "system",
-          content: loadPromptTemplate("course-question-attempt-system.md"),
-        },
-        {
-          role: "user",
-          content: renderPromptTemplate(
-            loadPromptTemplate("course-question-attempt-user.md"),
-            {
-              courseTitle: input.course.title,
-              currentMilestone: page.title,
-              milestoneObjective: page.objective,
-              previousAssistantMessage: excerptCourseMessageForPrompt(
-                courseMessagePromptContext(previousAssistantMessage),
-                4_000,
-              ),
-              latestWidgetAnswerMetadataBlock: latestUserMessage.widgetAnswer
-                ? `Latest widget answer metadata:\n${JSON.stringify(latestUserMessage.widgetAnswer)}`
-                : "",
-              latestLearnerAnswer: excerptCourseMessageForPrompt(
-                latestUserMessage.content,
-                4_000,
-              ),
-            },
-          ).replace(/\n{3,}/gu, "\n\n"),
-        },
-      ],
-    },
-  });
-
-  if (!response.ok) {
-    return {
-      toolCall: "skip_course_question_attempt",
-      reason: "Question attempt tool failed.",
-    };
-  }
-
-  reportResponseMetrics(input, body.usage, Date.now() - startedAt, input.model);
-
-  return parseCourseQuestionAttemptToolResult(
-    extractChatCompletionText(body),
-    latestUserMessage.content,
-    courseMessagePromptContext(previousAssistantMessage),
   );
 }
 

@@ -1,6 +1,18 @@
-export const OPENROUTER_CHAT_URL =
-  "https://openrouter.ai/api/v1/chat/completions";
-export const OPENROUTER_EMBEDDINGS_URL = "https://openrouter.ai/api/v1/embeddings";
+import {
+  buildOpenRouterHeaders,
+  DEFAULT_EMBEDDING_MODEL,
+  DEFAULT_OPENROUTER_CHAT_MODEL,
+  OPENROUTER_CHAT_URL,
+  OPENROUTER_EMBEDDINGS_URL,
+  resolveOpenRouterApiKey,
+  resolveOpenRouterModel,
+} from "../../shared/openrouter-config.mjs";
+
+export {
+  DEFAULT_EMBEDDING_MODEL,
+  OPENROUTER_CHAT_URL,
+  OPENROUTER_EMBEDDINGS_URL,
+};
 
 export function loadLocalEnvFiles(files = [".env", ".env.local"]) {
   for (const envFile of files) {
@@ -33,20 +45,24 @@ export function requireEnv(name, fallbackName) {
 }
 
 export function requireOpenRouterApiKey() {
-  return requireEnv("OPENROUTER_API_KEY", "LLM_API_KEY");
+  const apiKey = resolveOpenRouterApiKey();
+
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required");
+  }
+
+  return apiKey;
 }
 
 export function openRouterChatModel() {
-  return process.env.LLM_MODEL?.trim() || "google/gemini-3.5-flash";
+  return resolveOpenRouterModel({
+    variable: "LLM_MODEL",
+    fallback: DEFAULT_OPENROUTER_CHAT_MODEL,
+  });
 }
 
 export function openRouterHeaders(apiKey) {
-  return {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-    "HTTP-Referer": "http://localhost:3000",
-    "X-Title": "waxon",
-  };
+  return buildOpenRouterHeaders(apiKey);
 }
 
 export async function fetchOpenRouterJson(

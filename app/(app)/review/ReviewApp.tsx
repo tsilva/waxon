@@ -34,11 +34,8 @@ import {
 } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { localSettingsEvent } from "@/app/toolbarEvents";
-import {
-  KnowledgeEmbeddingPlot,
-  ScoreChart,
-} from "./ReviewVisualizations";
-import { formatDueBadge, formatDurationBadge } from "./reviewFormatting";
+import { ScoreChart } from "./ReviewVisualizations";
+import { formatDurationBadge } from "./reviewFormatting";
 import type {
   KnowledgeEmbeddingPlot as KnowledgeEmbeddingPlotResponse,
   EvaluationPhase,
@@ -47,28 +44,20 @@ import type {
   ReviewHistoryEntry,
   ReviewQueueItem,
 } from "@/app/lib/reviewTypes";
+import type { UserProfile } from "@/app/lib/userProfile";
 import {
-  Check,
-  ChevronDown,
-  FileText,
   Flag,
   Info,
-  Layers,
-  Plus,
-  Search,
   Sparkles,
   Trash2,
   Upload,
   User,
-  X,
 } from "lucide-react";
 import {
   ChangeEvent,
-  DragEvent,
   FormEvent,
   KeyboardEvent,
   type ComponentProps,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -119,13 +108,6 @@ type EvaluationStatusResponse = {
 
 type QuestionAttemptsResponse = {
   attempts: QuestionAttempt[];
-};
-
-type UserProfileResponse = {
-  id: string;
-  displayName: string;
-  email: string;
-  avatarUrl: string | null;
 };
 
 type ChatMessage =
@@ -182,10 +164,8 @@ type QuestionSwapLayer = {
   phase: "current" | "entering" | "exiting";
 };
 
-type ActiveTab = "review" | "queue";
-
 export type ReviewAppProps = {
-  initialCurrentUser?: UserProfileResponse | null;
+  initialCurrentUser?: UserProfile | null;
   initialPreviousAnswerStatus?: QueueStatusResponse | null;
   initialReviewSessionQueue?: ReviewQueueItem[] | null;
 };
@@ -202,50 +182,18 @@ type ReviewSessionSnapshot = {
   queueRemaining: number;
   evaluations: EvaluationQueueItem[];
   recentAttempts: QuestionAttempt[];
-  reviewQueue: ReviewQueueItem[];
-  reviewQueueTotal: number;
-  queueVirtualRange: {
-    start: number;
-    end: number;
-  };
-  queueSortKey: QueueSortKey;
-  queueSearchInput: string;
-  queueSearchQuery: string;
-  knowledgeEmbeddingPlot: KnowledgeEmbeddingPlotResponse;
   messages: ChatMessage[];
   isPreviousExpanded: boolean;
   expandedPreviousAnswerIds: Set<string>;
   selectedQuestionId: string | null;
   selectedQuestion: string | null;
-  currentUser: UserProfileResponse | null;
-  generatorScope: string;
-  generatorQuestionCount: number;
-  generatorFiles: GeneratorContextFile[];
-  generatedQuestions: GeneratedQuestionCandidate[];
-  generatorMessage: string | null;
+  currentUser: UserProfile | null;
   hasLoadedQuestion: boolean;
-  hasLoadedQueueStatus: boolean;
-  loadedQueueSortKey: QueueSortKey | null;
-  loadedQueueSearchQuery: string | null;
-  queueLoadedLimit: number;
 };
 
 let reviewSessionSnapshot: ReviewSessionSnapshot | null = null;
 
-const REVIEW_TAB_PATHS: Record<ActiveTab, string> = {
-  review: "/review",
-  queue: "/library",
-};
 const LEARN_TARGET_KNOWLEDGE_BASE_STORAGE_KEY = "waxon:learn-target-knowledgeBase-id";
-
-type ReviewRouteState = {
-  activeTab: ActiveTab;
-  knowledgeBaseSlug: string | null;
-};
-
-function knowledgeBasePath(): string {
-  return REVIEW_TAB_PATHS.queue;
-}
 
 function getStoredLearnTargetKnowledgeBaseId() {
   if (typeof window === "undefined") {
@@ -427,62 +375,6 @@ async function parseTopUpResponse(
   return completed;
 }
 
-function getReviewRouteStateFromPathname(pathname: string): ReviewRouteState | null {
-  if (pathname === REVIEW_TAB_PATHS.review) {
-    return {
-      activeTab: "review",
-      knowledgeBaseSlug: null,
-    };
-  }
-
-  if (pathname === REVIEW_TAB_PATHS.queue) {
-    return {
-      activeTab: "queue",
-      knowledgeBaseSlug: null,
-    };
-  }
-
-  return null;
-}
-
-type QueueSortKey = "review-date" | "creation-date";
-
-type GeneratedQuestionStatus = "new" | "selected" | "adding" | "added";
-
-type GeneratedQuestionCandidate = {
-  id: string;
-  question: string;
-  conciseAnswer: string;
-  coverageLabel: string;
-  proposedConceptSlugs: string[];
-  sourceText: string;
-  status: GeneratedQuestionStatus;
-};
-
-type GeneratorContextFile = {
-  id: string;
-  name: string;
-  content: string;
-  status: "ready" | "metadata-only";
-};
-
-type GenerateQuestionsResponse =
-  | {
-      ok: true;
-      model: string;
-        questions: Array<{
-          question: string;
-          conciseAnswer?: string;
-          coverageLabel?: string;
-          proposedConceptSlugs?: string[];
-          sourceText?: string;
-        }>;
-    }
-  | {
-      ok: false;
-      error?: string;
-    };
-
 type TopUpQuestionsResponse =
   | {
       ok: true;
@@ -627,10 +519,6 @@ type AnswerHistoryEntry = {
 
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
-const QUEUE_PAGE_SIZE = 48;
-const QUEUE_PAGE_GROWTH_FACTOR = 1.75;
-const QUEUE_ROW_ESTIMATED_HEIGHT = 132;
-const QUEUE_ROW_OVERSCAN = 14;
 const REVIEW_SESSION_FIRST_ITEM_LIMIT = 1;
 const REVIEW_SESSION_LOOKAHEAD_LIMIT = 4;
 const REVIEW_SESSION_LOOKAHEAD_LOW_WATERMARK = 2;
@@ -640,18 +528,8 @@ const EVALUATION_STATUS_POLL_MS = 750;
 const LEARN_TOP_UP_COOLDOWN_MS = 20_000;
 const QUESTION_SWAP_ANIMATION_MS = 140;
 
-function createEmptyKnowledgeEmbeddingPlot(): KnowledgeEmbeddingPlotResponse {
-  return {
-    model: null,
-    totalQuestions: 0,
-    embeddedQuestions: 0,
-    points: [],
-  };
-}
 const MAX_AVATAR_UPLOAD_BYTES = 512 * 1024;
 const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit)[.!?]*$/i;
-const DEFAULT_GENERATED_QUESTION_COUNT = 5;
-const MAX_GENERATED_QUESTION_COUNT = 10;
 
 function questionSwapLayerKey(
   questionId: string | null,
@@ -890,38 +768,6 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-function readFileAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("Could not read context file."));
-    reader.readAsText(file);
-  });
-}
-
-function createClientId(prefix: string): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function isTextContextFile(file: File): boolean {
-  const lowerName = file.name.toLowerCase();
-
-  return (
-    file.type.startsWith("text/") ||
-    lowerName.endsWith(".md") ||
-    lowerName.endsWith(".markdown") ||
-    lowerName.endsWith(".txt") ||
-    lowerName.endsWith(".csv") ||
-    lowerName.endsWith(".json") ||
-    lowerName.endsWith(".tex")
-  );
-}
-
 export default function ReviewApp({
   initialCurrentUser = null,
   initialPreviousAnswerStatus = null,
@@ -943,17 +789,8 @@ export default function ReviewApp({
   const hasLoadedQuestionRef = useRef(
     cachedHasLoadedQuestion || canUseInitialReviewSession,
   );
-  const hasLoadedQueueStatusRef = useRef(
-    cachedSessionRef.current?.hasLoadedQueueStatus ?? false,
-  );
   const hasLoadedPreviousAnswerStatusRef = useRef(
     initialPreviousAnswerStatus !== null,
-  );
-  const loadedQueueSortKeyRef = useRef<QueueSortKey | null>(
-    cachedSessionRef.current?.loadedQueueSortKey ?? null,
-  );
-  const loadedQueueSearchQueryRef = useRef<string | null>(
-    cachedSessionRef.current?.loadedQueueSearchQuery ?? null,
   );
   const [question, setQuestion] = useState<string | null>(
     () =>
@@ -1047,41 +884,12 @@ export default function ReviewApp({
       initialPreviousAnswerStatus?.recentAttempts ??
       [],
   );
-  const [reviewQueue, setReviewQueue] = useState<ReviewQueueItem[]>(
-    () => cachedSessionRef.current?.reviewQueue ?? [],
-  );
-  const [reviewQueueTotal, setReviewQueueTotal] = useState(
-    () => cachedSessionRef.current?.reviewQueueTotal ?? 0,
-  );
-  const [isQueuePageLoading, setIsQueuePageLoading] = useState(false);
-  const [isQueueStatusStreamActive, setIsQueueStatusStreamActive] =
-    useState(false);
   const [questionAttemptsByKey, setQuestionAttemptsByKey] = useState<
     Record<string, QuestionAttempt[]>
   >({});
-  const [queueVirtualRange, setQueueVirtualRange] = useState({
-    start: cachedSessionRef.current?.queueVirtualRange.start ?? 0,
-    end: cachedSessionRef.current?.queueVirtualRange.end ?? QUEUE_PAGE_SIZE,
-  });
-  const [queueSortKey, setQueueSortKey] = useState<QueueSortKey>(
-    () => cachedSessionRef.current?.queueSortKey ?? "review-date",
-  );
-  const [queueSearchInput, setQueueSearchInput] = useState(
-    () => cachedSessionRef.current?.queueSearchInput ?? "",
-  );
-  const [queueSearchQuery, setQueueSearchQuery] = useState(
-    () => cachedSessionRef.current?.queueSearchQuery ?? "",
-  );
-  const [knowledgeEmbeddingPlot, setKnowledgeEmbeddingPlot] =
-    useState<KnowledgeEmbeddingPlotResponse>(
-      () =>
-        cachedSessionRef.current?.knowledgeEmbeddingPlot ??
-        createEmptyKnowledgeEmbeddingPlot(),
-    );
   const [messages, setMessages] = useState<ChatMessage[]>(
     () => cachedSessionRef.current?.messages ?? [],
   );
-  const [activeTab, setActiveTab] = useState<ActiveTab>("review");
   const [isPreviousExpanded, setIsPreviousExpanded] = useState(
     () => cachedSessionRef.current?.isPreviousExpanded ?? false,
   );
@@ -1102,9 +910,7 @@ export default function ReviewApp({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFlaggingQuestion, setIsFlaggingQuestion] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isEmbeddingMapOpen, setIsEmbeddingMapOpen] = useState(false);
-  const [isQuestionGeneratorOpen, setIsQuestionGeneratorOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserProfileResponse | null>(
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(
     () => cachedSessionRef.current?.currentUser ?? initialCurrentUser,
   );
   const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
@@ -1120,24 +926,6 @@ export default function ReviewApp({
     localSignOutHref: "/",
     onLocalManageAccount: () => setIsSettingsOpen(true),
   });
-  const [generatorScope, setGeneratorScope] = useState(
-    () => cachedSessionRef.current?.generatorScope ?? "",
-  );
-  const [generatorQuestionCount, setGeneratorQuestionCount] = useState(
-    () =>
-      cachedSessionRef.current?.generatorQuestionCount ??
-      DEFAULT_GENERATED_QUESTION_COUNT,
-  );
-  const [generatorFiles, setGeneratorFiles] = useState<GeneratorContextFile[]>(
-    () => cachedSessionRef.current?.generatorFiles ?? [],
-  );
-  const [generatedQuestions, setGeneratedQuestions] = useState<
-    GeneratedQuestionCandidate[]
-  >(() => cachedSessionRef.current?.generatedQuestions ?? []);
-  const [generatorMessage, setGeneratorMessage] = useState<string | null>(
-    () => cachedSessionRef.current?.generatorMessage ?? null,
-  );
-  const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
   const [isLearnTopUpPending, setIsLearnTopUpPending] = useState(false);
   const [learnTopUpMessage, setLearnTopUpMessage] = useState<string | null>(null);
   const [learnGenerationStatus, setLearnGenerationStatus] = useState<string | null>(
@@ -1162,14 +950,6 @@ export default function ReviewApp({
   const deferredRetryItemsRef = useRef<ReviewQueueItem[]>([]);
   const processedEvaluationIdsRef = useRef(new Set<string>());
   const learnTargetKnowledgeBaseIdRef = useRef<string | null>(null);
-  const queueStageRef = useRef<HTMLElement | null>(null);
-  const queueListRef = useRef<HTMLOListElement | null>(null);
-  const queueLoadedLimitRef = useRef(
-    cachedSessionRef.current?.queueLoadedLimit ?? QUEUE_PAGE_SIZE,
-  );
-  const loadedKnowledgeEmbeddingPlotKeyRef = useRef<string | null>(null);
-  const isQueuePageLoadingRef = useRef(false);
-  const queueStatusRequestIdRef = useRef(0);
   const questionAttemptsRequestKeysRef = useRef(new Set<string>());
   const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -1208,49 +988,6 @@ export default function ReviewApp({
 
       return nextIds;
     });
-  }, []);
-
-  const navigateToTab = useCallback(
-    (
-      nextTab: ActiveTab,
-      event?: ReactMouseEvent<HTMLAnchorElement>,
-    ) => {
-      event?.preventDefault();
-      setActiveTab(nextTab);
-
-      const nextPath =
-        nextTab === "queue" ? knowledgeBasePath() : REVIEW_TAB_PATHS[nextTab];
-
-      if (window.location.pathname !== nextPath) {
-        window.history.pushState(
-          { activeTab: nextTab },
-          "",
-          nextPath,
-        );
-      }
-    },
-    [],
-  );
-
-  const openQueue = useCallback(() => {
-    navigateToTab("queue");
-  }, [navigateToTab]);
-
-  useEffect(() => {
-    function syncTabFromHistory() {
-      const nextRoute = getReviewRouteStateFromPathname(window.location.pathname);
-
-      if (nextRoute) {
-        setActiveTab(nextRoute.activeTab);
-        return;
-      }
-
-      window.location.reload();
-    }
-
-    window.addEventListener("popstate", syncTabFromHistory);
-
-    return () => window.removeEventListener("popstate", syncTabFromHistory);
   }, []);
 
   useEffect(() => {
@@ -1351,15 +1088,11 @@ export default function ReviewApp({
   }, [isLearnTopUpPending]);
 
   useEffect(() => {
-    isQueuePageLoadingRef.current = isQueuePageLoading;
-  }, [isQueuePageLoading]);
-
-  useEffect(() => {
     if (!shouldRefocusAnswerAfterSubmitRef.current) {
       return;
     }
 
-    if (activeTab !== "review" || (!isSubmitting && !question)) {
+    if (!isSubmitting && !question) {
       shouldRefocusAnswerAfterSubmitRef.current = false;
       return;
     }
@@ -1374,7 +1107,7 @@ export default function ReviewApp({
     });
 
     return () => window.cancelAnimationFrame(frameId);
-  }, [activeTab, isSubmitting, question]);
+  }, [isSubmitting, question]);
 
   useEffect(() => {
     reviewSessionSnapshot = {
@@ -1389,29 +1122,13 @@ export default function ReviewApp({
       queueRemaining,
       evaluations,
       recentAttempts,
-      reviewQueue,
-      reviewQueueTotal,
-      queueVirtualRange,
-      queueSortKey,
-      queueSearchInput,
-      queueSearchQuery,
-      knowledgeEmbeddingPlot,
       messages,
       isPreviousExpanded,
       expandedPreviousAnswerIds: new Set(expandedPreviousAnswerIds),
       selectedQuestionId,
       selectedQuestion,
       currentUser,
-      generatorScope,
-      generatorQuestionCount,
-      generatorFiles,
-      generatedQuestions,
-      generatorMessage,
       hasLoadedQuestion: hasLoadedQuestionRef.current,
-      hasLoadedQueueStatus: hasLoadedQueueStatusRef.current,
-      loadedQueueSortKey: loadedQueueSortKeyRef.current,
-      loadedQueueSearchQuery: loadedQueueSearchQueryRef.current,
-      queueLoadedLimit: queueLoadedLimitRef.current,
     };
   }, [
     answer,
@@ -1420,25 +1137,13 @@ export default function ReviewApp({
     currentKnowledgeBaseId,
     currentKnowledgeBaseName,
     currentUser,
-    knowledgeEmbeddingPlot,
     evaluations,
     expandedPreviousAnswerIds,
-    generatedQuestions,
-    generatorFiles,
-    generatorMessage,
-    generatorQuestionCount,
-    generatorScope,
     isPreviousExpanded,
     messages,
     question,
-    queueSearchInput,
-    queueSearchQuery,
     queueRemaining,
-    queueSortKey,
-    queueVirtualRange,
     recentAttempts,
-    reviewQueue,
-    reviewQueueTotal,
     selectedQuestionId,
     selectedQuestion,
     sessionQueue,
@@ -1533,28 +1238,6 @@ export default function ReviewApp({
     selectedQuestionId,
   ]);
 
-  const resetQuestionGenerator = useCallback(() => {
-    setGeneratorScope("");
-    setGeneratorQuestionCount(DEFAULT_GENERATED_QUESTION_COUNT);
-    setGeneratorFiles([]);
-    setGeneratedQuestions([]);
-    setGeneratorMessage(null);
-  }, []);
-
-  const closeQuestionGenerator = useCallback(() => {
-    if (isGeneratingQuestions) {
-      return;
-    }
-
-    setIsQuestionGeneratorOpen(false);
-    resetQuestionGenerator();
-  }, [isGeneratingQuestions, resetQuestionGenerator]);
-
-  const openQuestionGenerator = useCallback(() => {
-    resetQuestionGenerator();
-    setIsQuestionGeneratorOpen(true);
-  }, [resetQuestionGenerator]);
-
   const rememberLearnTargetKnowledgeBase = useCallback((knowledgeBaseId: string | null) => {
     learnTargetKnowledgeBaseIdRef.current = knowledgeBaseId;
     storeLearnTargetKnowledgeBaseId(knowledgeBaseId);
@@ -1587,7 +1270,7 @@ export default function ReviewApp({
       return;
     }
 
-    if (activeTab === "review" && !hasLoadedQuestionRef.current) {
+    if (!hasLoadedQuestionRef.current) {
       return;
     }
 
@@ -1603,7 +1286,7 @@ export default function ReviewApp({
           throw new Error("Could not load profile.");
         }
 
-        const data = (await response.json()) as UserProfileResponse;
+        const data = (await response.json()) as UserProfile;
 
         if (isActive) {
           setCurrentUser(data);
@@ -1620,7 +1303,7 @@ export default function ReviewApp({
     return () => {
       isActive = false;
     };
-  }, [activeTab, initialCurrentUser, question]);
+  }, [initialCurrentUser, question]);
 
   useEffect(() => {
     if (!isSettingsOpen) {
@@ -1648,45 +1331,6 @@ export default function ReviewApp({
     return () =>
       window.removeEventListener(localSettingsEvent, openLocalSettings);
   }, []);
-
-  useEffect(() => {
-    if (!isQuestionGeneratorOpen) {
-      return;
-    }
-
-    function closeGeneratorOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        if (isGeneratingQuestions) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-
-        closeQuestionGenerator();
-      }
-    }
-
-    window.addEventListener("keydown", closeGeneratorOnEscape);
-
-    return () => window.removeEventListener("keydown", closeGeneratorOnEscape);
-  }, [closeQuestionGenerator, isGeneratingQuestions, isQuestionGeneratorOpen]);
-
-  useEffect(() => {
-    if (!isEmbeddingMapOpen) {
-      return;
-    }
-
-    function closeEmbeddingMapOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsEmbeddingMapOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", closeEmbeddingMapOnEscape);
-
-    return () =>
-      window.removeEventListener("keydown", closeEmbeddingMapOnEscape);
-  }, [isEmbeddingMapOpen]);
 
   const clearPendingSpeechCommand = useCallback(() => {
     if (pendingSpeechCommandTimerRef.current) {
@@ -1909,36 +1553,6 @@ export default function ReviewApp({
     });
   }, [advanceReviewSessionQueue]);
 
-  const normalizedQueueSearchInput = useMemo(
-    () => queueSearchInput.trim().replace(/\s+/g, " "),
-    [queueSearchInput],
-  );
-  const isQueueSearchActive = queueSearchQuery.length > 0;
-
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      setQueueSearchQuery(normalizedQueueSearchInput);
-    }, 450);
-
-    return () => window.clearTimeout(timeout);
-  }, [normalizedQueueSearchInput]);
-
-  const queueStatusUrl = useCallback((limit: number) => {
-    const params = new URLSearchParams({
-      limit: String(Math.max(0, Math.floor(limit))),
-      offset: "0",
-      sort: queueSortKey,
-      includeQuestionAttempts: "0",
-      includeKnowledgeEmbeddingPlot: "0",
-    });
-
-    if (queueSearchQuery) {
-      params.set("query", queueSearchQuery);
-    }
-
-    return `/api/queue-status?${params.toString()}`;
-  }, [queueSearchQuery, queueSortKey]);
-
   const previousAnswerStatusUrl = useCallback((recentAttemptsLimit: number) => {
     const params = new URLSearchParams({
       limit: "0",
@@ -1954,108 +1568,6 @@ export default function ReviewApp({
 
     return `/api/queue-status?${params.toString()}`;
   }, []);
-
-  const queueStatusStreamUrl = useCallback((limit: number) => {
-    const params = new URLSearchParams({
-      limit: String(Math.max(0, Math.floor(limit))),
-      offset: "0",
-      sort: queueSortKey,
-      includeKnowledgeEmbeddingPlot: "0",
-    });
-
-    return `/api/queue-status/stream?${params.toString()}`;
-  }, [queueSortKey]);
-
-  const knowledgeEmbeddingPlotUrl = useCallback((limit: number) => {
-    const params = new URLSearchParams({
-      limit: String(Math.max(0, Math.floor(limit))),
-      offset: "0",
-      sort: queueSortKey,
-    });
-
-    return `/api/knowledge-embedding-plot?${params.toString()}`;
-  }, [queueSortKey]);
-
-  const applyQueueStatus = useCallback((
-    data: QueueStatusResponse,
-    options: {
-      preserveLoadedQueue?: boolean;
-      preserveRecentAttempts?: boolean;
-    } = {},
-  ) => {
-    const nextReviewQueueTotal = data.reviewQueueTotal ?? data.reviewQueue.length;
-    const nextReviewQueueLimit = Math.max(
-      QUEUE_PAGE_SIZE,
-      data.reviewQueueLimit ?? data.reviewQueue.length,
-    );
-    const shouldPreserveLoadedQueue =
-      options.preserveLoadedQueue &&
-      (nextReviewQueueLimit < queueLoadedLimitRef.current ||
-        (data.reviewQueue.length === 0 && nextReviewQueueTotal === 0));
-
-    setQueueRemaining(data.queueRemaining);
-    setEvaluations(data.evaluations);
-    if (!options.preserveRecentAttempts) {
-      setRecentAttempts(data.recentAttempts ?? []);
-    }
-    setReviewQueue((currentQueue) => {
-      if (!shouldPreserveLoadedQueue) {
-        return data.reviewQueue;
-      }
-
-      return currentQueue.length > nextReviewQueueTotal
-        ? currentQueue.slice(0, nextReviewQueueTotal)
-        : currentQueue;
-    });
-    if (!shouldPreserveLoadedQueue) {
-      setReviewQueueTotal(nextReviewQueueTotal);
-    }
-    if (!shouldPreserveLoadedQueue) {
-      queueLoadedLimitRef.current = nextReviewQueueLimit;
-    }
-    hasLoadedQueueStatusRef.current = true;
-    loadedQueueSortKeyRef.current = queueSortKey;
-    loadedQueueSearchQueryRef.current = queueSearchQuery;
-    if (
-      data.knowledgeEmbeddingPlot &&
-      (data.knowledgeEmbeddingPlot.model ||
-        data.knowledgeEmbeddingPlot.totalQuestions > 0 ||
-        data.knowledgeEmbeddingPlot.embeddedQuestions > 0 ||
-        data.knowledgeEmbeddingPlot.points.length > 0)
-    ) {
-      setKnowledgeEmbeddingPlot(data.knowledgeEmbeddingPlot);
-    }
-  }, [queueSearchQuery, queueSortKey]);
-
-  const loadStatus = useCallback(async (limit = QUEUE_PAGE_SIZE) => {
-    const requestId = queueStatusRequestIdRef.current + 1;
-
-    queueStatusRequestIdRef.current = requestId;
-    isQueuePageLoadingRef.current = true;
-    setIsQueuePageLoading(true);
-
-    try {
-      const response = await fetch(queueStatusUrl(limit), {
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        return;
-      }
-
-      const data = (await response.json()) as QueueStatusResponse;
-      if (queueStatusRequestIdRef.current === requestId) {
-        applyQueueStatus(data);
-      }
-    } catch {
-      // Status is informational; keep the review loop usable if polling fails.
-    } finally {
-      if (queueStatusRequestIdRef.current === requestId) {
-        isQueuePageLoadingRef.current = false;
-        setIsQueuePageLoading(false);
-      }
-    }
-  }, [applyQueueStatus, queueStatusUrl]);
 
   const loadPreviousAnswerStatus = useCallback(async (
     recentAttemptsLimit = COLLAPSED_PREVIOUS_ANSWER_LIMIT,
@@ -2095,155 +1607,23 @@ export default function ReviewApp({
     }
   }, [isLoadingMorePreviousAnswers, loadPreviousAnswerStatus]);
 
-  const loadKnowledgeEmbeddingPlot = useCallback(async (limit = QUEUE_PAGE_SIZE) => {
-    const normalizedLimit = Math.max(QUEUE_PAGE_SIZE, Math.floor(limit));
-    const plotKey = `${queueSortKey}:${normalizedLimit}`;
-
-    if (loadedKnowledgeEmbeddingPlotKeyRef.current === plotKey) {
-      return;
-    }
-
-    try {
-      const response = await fetch(knowledgeEmbeddingPlotUrl(normalizedLimit), {
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        return;
-      }
-
-      const data = (await response.json()) as KnowledgeEmbeddingPlotResponse;
-
-      loadedKnowledgeEmbeddingPlotKeyRef.current = plotKey;
-      setKnowledgeEmbeddingPlot(data);
-    } catch {
-      // The queue remains usable without the optional embedding map.
-    }
-  }, [knowledgeEmbeddingPlotUrl, queueSortKey]);
-
   useEffect(() => {
-    if (activeTab !== "review") {
-      return;
-    }
-
     if (hasLoadedQuestionRef.current) {
       return;
     }
 
     void loadNextQuestion({ surfaceError: false });
-  }, [
-    activeTab,
-    loadNextQuestion,
-    reviewQueueVersion,
-  ]);
+  }, [loadNextQuestion, reviewQueueVersion]);
 
   useEffect(() => {
-    if (activeTab !== "review" || !hasLoadedQuestionRef.current) {
+    if (!hasLoadedQuestionRef.current) {
       return;
     }
 
     if (!hasLoadedPreviousAnswerStatusRef.current) {
       void loadPreviousAnswerStatus();
     }
-  }, [
-    activeTab,
-    loadPreviousAnswerStatus,
-    question,
-    reviewQueueVersion,
-  ]);
-
-  useEffect(() => {
-    if (activeTab !== "queue") {
-      return;
-    }
-
-    const shouldLoadQueueStatus =
-      !hasLoadedQueueStatusRef.current ||
-      loadedQueueSortKeyRef.current !== queueSortKey ||
-      loadedQueueSearchQueryRef.current !== queueSearchQuery;
-
-    if (shouldLoadQueueStatus) {
-      queueLoadedLimitRef.current = QUEUE_PAGE_SIZE;
-      loadedKnowledgeEmbeddingPlotKeyRef.current = null;
-      setReviewQueue([]);
-      setRecentAttempts([]);
-      setReviewQueueTotal(0);
-      setKnowledgeEmbeddingPlot(createEmptyKnowledgeEmbeddingPlot());
-      setQueueVirtualRange({
-        start: 0,
-        end: QUEUE_PAGE_SIZE,
-      });
-      void loadStatus(QUEUE_PAGE_SIZE);
-    }
-
-    if (isQueueSearchActive) {
-      setIsQueueStatusStreamActive(false);
-      return;
-    }
-
-    let isStreamEffectActive = true;
-    const events = new EventSource(
-      queueStatusStreamUrl(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current)),
-    );
-
-    setIsQueueStatusStreamActive(true);
-
-    events.addEventListener("status", (event) => {
-      try {
-        const data = JSON.parse(
-          (event as MessageEvent<string>).data,
-        ) as QueueStatusResponse;
-        applyQueueStatus(data, {
-          preserveLoadedQueue: true,
-          preserveRecentAttempts: true,
-        });
-        if (isStreamEffectActive) {
-          setIsQueueStatusStreamActive(true);
-        }
-      } catch {
-        // Ignore malformed stream events; the connection can continue.
-      }
-    });
-
-    events.onerror = () => {
-      events.close();
-      if (isStreamEffectActive) {
-        setIsQueueStatusStreamActive(false);
-      }
-      void loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
-    };
-
-    return () => {
-      isStreamEffectActive = false;
-      events.close();
-      setIsQueueStatusStreamActive(false);
-    };
-  }, [
-    activeTab,
-    applyQueueStatus,
-    isQueueSearchActive,
-    loadStatus,
-    queueSearchQuery,
-    queueSortKey,
-    queueStatusStreamUrl,
-  ]);
-
-  useEffect(() => {
-    if (
-      activeTab !== "queue" ||
-      reviewQueue.length === 0
-    ) {
-      return;
-    }
-
-    void loadKnowledgeEmbeddingPlot(
-      Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current),
-    );
-  }, [
-    activeTab,
-    loadKnowledgeEmbeddingPlot,
-    reviewQueue.length,
-  ]);
+  }, [loadPreviousAnswerStatus, question, reviewQueueVersion]);
 
   const gradingEvaluationIds = useMemo(
     () =>
@@ -2264,7 +1644,7 @@ export default function ReviewApp({
   const gradingEvaluationIdsKey = gradingEvaluationIds.join(",");
 
   useEffect(() => {
-    if (!gradingEvaluationIdsKey || isQueueStatusStreamActive) {
+    if (!gradingEvaluationIdsKey) {
       return;
     }
 
@@ -2321,7 +1701,7 @@ export default function ReviewApp({
       isActive = false;
       window.clearInterval(interval);
     };
-  }, [gradingEvaluationIdsKey, isQueueStatusStreamActive]);
+  }, [gradingEvaluationIdsKey]);
 
   useEffect(() => {
     setMessages((current) => {
@@ -2917,7 +2297,7 @@ export default function ReviewApp({
         body: JSON.stringify({ avatarUrl }),
       });
       const data = (await response.json()) as
-        | UserProfileResponse
+        | UserProfile
         | { error?: string };
 
       if (!response.ok) {
@@ -2926,7 +2306,7 @@ export default function ReviewApp({
         );
       }
 
-      setCurrentUser(data as UserProfileResponse);
+      setCurrentUser(data as UserProfile);
       setAvatarMessage(avatarUrl ? "Avatar updated." : "Avatar removed.");
     } catch (avatarError) {
       setAvatarMessage(
@@ -2967,243 +2347,6 @@ export default function ReviewApp({
         avatarError instanceof Error
           ? avatarError.message
           : "Could not read avatar image.",
-      );
-    }
-  }
-
-  async function addGeneratorContextFiles(selectedFiles: File[]) {
-    if (selectedFiles.length === 0) {
-      return;
-    }
-
-    const contextFiles = await Promise.all(
-      selectedFiles.map(async (file) => {
-        if (!isTextContextFile(file)) {
-          return {
-            id: createClientId("context-file"),
-            name: file.name,
-            content: `${file.name} (${file.type || "file"})`,
-            status: "metadata-only" as const,
-          };
-        }
-
-        try {
-          return {
-            id: createClientId("context-file"),
-            name: file.name,
-            content: await readFileAsText(file),
-            status: "ready" as const,
-          };
-        } catch {
-          return {
-            id: createClientId("context-file"),
-            name: file.name,
-            content: file.name,
-            status: "metadata-only" as const,
-          };
-        }
-      }),
-    );
-
-    setGeneratorFiles((current) => [...current, ...contextFiles]);
-    setGeneratorMessage(null);
-  }
-
-  async function handleGeneratorFileDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-
-    if (isGeneratingQuestions) {
-      return;
-    }
-
-    await addGeneratorContextFiles(Array.from(event.dataTransfer.files ?? []));
-  }
-
-  function removeGeneratorFile(fileId: string) {
-    setGeneratorFiles((current) => current.filter((file) => file.id !== fileId));
-  }
-
-  async function generateQuestionBatch() {
-    if (generatedQuestions.length > 0) {
-      setGeneratorMessage("Clear the review queue before generating again.");
-      return;
-    }
-
-    const count = Math.min(
-      MAX_GENERATED_QUESTION_COUNT,
-      Math.max(1, generatorQuestionCount),
-    );
-    const hasContext =
-      generatorScope.trim().length > 0 || generatorFiles.length > 0;
-
-    if (!hasContext) {
-      setGeneratorMessage("Add a topic or attach context before generating.");
-      return;
-    }
-
-    setIsGeneratingQuestions(true);
-    setGeneratorMessage(null);
-
-    try {
-      const response = await fetch("/api/questions/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          scope: generatorScope,
-          files: generatorFiles,
-          count,
-          difficulty: "Mixed",
-          existingQuestions: [
-            ...reviewQueue.map((item) => item.question),
-          ],
-        }),
-      });
-      const data = (await response.json()) as GenerateQuestionsResponse;
-
-      if (!response.ok || !data.ok) {
-        throw new Error(
-          !data.ok && data.error ? data.error : "Could not generate questions.",
-        );
-      }
-
-      const candidates = data.questions.map((item) => ({
-        id: createClientId("generated-question"),
-        question: item.question,
-        conciseAnswer: item.conciseAnswer || "",
-        coverageLabel: item.coverageLabel || item.question,
-        proposedConceptSlugs: item.proposedConceptSlugs ?? [],
-        sourceText: item.sourceText ?? generatorScope,
-        status: "new" as const,
-      }));
-
-      setGeneratedQuestions((current) => [...candidates, ...current]);
-      setGeneratorMessage(
-        candidates.length > 0 ? null : "OpenRouter returned no new questions.",
-      );
-    } catch (generateError) {
-      setGeneratorMessage(
-        generateError instanceof Error
-          ? generateError.message
-          : "Could not generate questions.",
-      );
-    } finally {
-      setIsGeneratingQuestions(false);
-    }
-  }
-
-  function toggleGeneratedQuestionSelection(questionId: string) {
-    const questionToSelect = generatedQuestions.find(
-      (item) => item.id === questionId,
-    );
-
-    if (
-      !questionToSelect ||
-      (questionToSelect.status !== "new" &&
-        questionToSelect.status !== "selected")
-    ) {
-      return;
-    }
-
-    setGeneratedQuestions((current) =>
-      current.map((item) =>
-        item.id === questionId
-          ? {
-              ...item,
-              status: item.status === "selected" ? "new" : "selected",
-            }
-          : item,
-      ),
-    );
-    setGeneratorMessage(null);
-  }
-
-  async function addSelectedGeneratedQuestionsToKnowledgeBase() {
-    const questionsToAdd = generatedQuestions.filter(
-      (item) => item.status === "selected",
-    );
-
-    if (questionsToAdd.length === 0) {
-      return;
-    }
-
-    const questionIdsToAdd = new Set(questionsToAdd.map((item) => item.id));
-
-    setGeneratedQuestions((current) =>
-      current.map((item) =>
-        questionIdsToAdd.has(item.id)
-          ? {
-              ...item,
-              status: "adding",
-            }
-          : item,
-      ),
-    );
-    setGeneratorMessage(null);
-
-    try {
-      const response = await fetch("/api/questions/add", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          questions: questionsToAdd.map((item) => ({
-            question: item.question,
-            conciseAnswer: item.conciseAnswer,
-            proposedConceptSlugs: item.proposedConceptSlugs,
-            sourceText: item.sourceText,
-          })),
-        }),
-      });
-      const data = (await response.json()) as
-        | { ok: true; added: number; rejected?: number }
-        | { ok: false; error?: string };
-
-      if (!response.ok || !data.ok) {
-        throw new Error(!data.ok && data.error ? data.error : "Could not add questions.");
-      }
-
-      setGeneratedQuestions((current) =>
-        current.filter((item) => !questionIdsToAdd.has(item.id)),
-      );
-      setGeneratorMessage(
-        data.added > 0
-          ? `${data.added} ${
-              data.added === 1 ? "question" : "questions"
-            } added to your knowledge base${
-              data.rejected ? `, ${data.rejected} semantic duplicates rejected` : ""
-            }.`
-          : questionsToAdd.length === 1
-            ? "Question already exists or was rejected as a duplicate."
-            : "Questions already exist or were rejected as duplicates.",
-      );
-      await loadStatus();
-
-      if (!questionRef.current) {
-        await loadNextQuestion({ surfaceError: false });
-      }
-
-      if (data.added > 0) {
-        closeQuestionGenerator();
-      }
-    } catch (addError) {
-      setGeneratorMessage(
-        addError instanceof Error
-          ? addError.message
-          : "Could not add questions.",
-      );
-      setGeneratedQuestions((current) =>
-        current.map((item) =>
-          questionIdsToAdd.has(item.id)
-            ? {
-                ...item,
-                status: "selected",
-              }
-            : item,
-        ),
       );
     }
   }
@@ -3292,7 +2435,7 @@ export default function ReviewApp({
   const reviewHistoryPreviousSources = useMemo(() => {
     const byQuestionKey = new Map<string, ReviewQueueItem>();
 
-    for (const item of [currentSessionItem, ...sessionQueue, ...reviewQueue]) {
+    for (const item of [currentSessionItem, ...sessionQueue]) {
       if (!item || item.lastScore === null || item.lastAnswer === null) {
         continue;
       }
@@ -3310,7 +2453,7 @@ export default function ReviewApp({
     }
 
     return Array.from(byQuestionKey.values());
-  }, [currentSessionItem, reviewQueue, sessionQueue]);
+  }, [currentSessionItem, sessionQueue]);
 
   const recentAttemptPreviousAnswers: PreviousAnswerItem[] = recentAttempts
     .filter((attempt) => {
@@ -3520,99 +2663,12 @@ export default function ReviewApp({
       </div>
     );
   };
-  const scheduledReviewCount = reviewQueue.filter(
+  const scheduledReviewCount = sessionQueue.filter(
     (item) => item.status === "scheduled",
   ).length;
-  const nextScheduledReview = reviewQueue.find(
+  const nextScheduledReview = sessionQueue.find(
     (item) => item.status === "scheduled",
   );
-  const sortedReviewQueue = useMemo(() => {
-    if (isQueueSearchActive) {
-      return reviewQueue;
-    }
-
-    return [...reviewQueue].sort((a, b) => {
-      const dateComparison =
-        queueSortKey === "review-date"
-          ? a.nextDue - b.nextDue
-          : b.createdAt - a.createdAt;
-
-      return dateComparison || a.question.localeCompare(b.question);
-    });
-  }, [isQueueSearchActive, queueSortKey, reviewQueue]);
-  const hasMoreReviewQueue = reviewQueue.length < reviewQueueTotal;
-  const loadMoreQueueRows = useCallback(() => {
-    if (isQueuePageLoadingRef.current || !hasMoreReviewQueue) {
-      return;
-    }
-
-    const nextLimit = Math.min(
-      reviewQueueTotal,
-      Math.max(
-        reviewQueue.length + QUEUE_PAGE_SIZE,
-        Math.ceil(
-          Math.max(reviewQueue.length, QUEUE_PAGE_SIZE) *
-            QUEUE_PAGE_GROWTH_FACTOR,
-        ),
-      ),
-    );
-
-    if (nextLimit <= reviewQueue.length) {
-      return;
-    }
-
-    void loadStatus(nextLimit);
-  }, [
-    hasMoreReviewQueue,
-    loadStatus,
-    reviewQueue.length,
-    reviewQueueTotal,
-  ]);
-  const updateQueueVirtualRange = useCallback(() => {
-    const totalRows = sortedReviewQueue.length;
-    const list = queueListRef.current;
-
-    if (!list || totalRows === 0) {
-      setQueueVirtualRange({
-        start: 0,
-        end: Math.min(totalRows, QUEUE_PAGE_SIZE),
-      });
-      return;
-    }
-
-    const listTop = list.getBoundingClientRect().top + window.scrollY;
-    const viewportTop = window.scrollY;
-    const viewportBottom = viewportTop + window.innerHeight;
-    const visibleTop = Math.max(0, viewportTop - listTop);
-    const visibleBottom = Math.max(visibleTop, viewportBottom - listTop);
-    const nextStart = Math.max(
-      0,
-      Math.floor(visibleTop / QUEUE_ROW_ESTIMATED_HEIGHT) - QUEUE_ROW_OVERSCAN,
-    );
-    const nextEnd = Math.min(
-      totalRows,
-      Math.ceil(visibleBottom / QUEUE_ROW_ESTIMATED_HEIGHT) +
-        QUEUE_ROW_OVERSCAN,
-    );
-
-    setQueueVirtualRange((currentRange) =>
-      currentRange.start === nextStart && currentRange.end === nextEnd
-        ? currentRange
-        : {
-            start: nextStart,
-            end: nextEnd,
-          },
-    );
-  }, [sortedReviewQueue.length]);
-  const visibleQueueRows = sortedReviewQueue.slice(
-    queueVirtualRange.start,
-    queueVirtualRange.end,
-  );
-  const queueTopSpacerHeight =
-    queueVirtualRange.start * QUEUE_ROW_ESTIMATED_HEIGHT;
-  const queueBottomSpacerHeight =
-    Math.max(0, sortedReviewQueue.length - queueVirtualRange.end) *
-    QUEUE_ROW_ESTIMATED_HEIGHT;
   const shouldFillPreviousAnswerPlaceholders =
     !isPreviousExpanded &&
     (isLoadingQuestion || visiblePreviousAnswers.length === 0);
@@ -3682,8 +2738,6 @@ export default function ReviewApp({
           total: currentProgress?.total ?? count,
           latestQuestion: currentProgress?.latestQuestion ?? null,
         }));
-        await loadStatus(Math.max(QUEUE_PAGE_SIZE, queueLoadedLimitRef.current));
-
         setLearnGenerationStatus("Loading the next question");
         setLearnGenerationProgress((currentProgress) => ({
           phase: "complete",
@@ -3721,7 +2775,7 @@ export default function ReviewApp({
       setIsLearnTopUpPending(false);
       setLearnGenerationProgress(null);
     }
-  }, [loadNextQuestion, loadStatus]);
+  }, [loadNextQuestion]);
 
   useEffect(() => {
     topUpLearnQueueRef.current = topUpLearnQueue;
@@ -3740,7 +2794,9 @@ export default function ReviewApp({
         ? input.questionId === selectedQuestionId
         : input.question === selectedQuestion;
     const queueItem =
-      reviewQueue.find((item) => matchesSelectedQuestion(item)) ?? null;
+      [currentSessionItem, ...sessionQueue]
+        .filter((item): item is ReviewQueueItem => item !== null)
+        .find((item) => matchesSelectedQuestion(item)) ?? null;
     const recentQuestionAttempts = recentAttempts.filter(
       (attempt) => matchesSelectedQuestion(attempt),
     );
@@ -3953,34 +3009,14 @@ export default function ReviewApp({
     messages,
     questionAttemptsByKey,
     recentAttempts,
-    reviewQueue,
+    currentSessionItem,
     selectedQuestionAttemptKey,
     selectedQuestionId,
     selectedQuestion,
+    sessionQueue,
   ]);
 
-  usePageScrollLock(
-    isEmbeddingMapOpen ||
-      isQuestionGeneratorOpen ||
-      isSettingsOpen ||
-      Boolean(selectedQuestionStats),
-  );
-
-  const generatedQuestionCounts = generatedQuestions.reduce(
-    (counts, item) => {
-      counts[item.status] += 1;
-      return counts;
-    },
-    {
-      new: 0,
-      selected: 0,
-      adding: 0,
-      added: 0,
-    } satisfies Record<GeneratedQuestionStatus, number>,
-  );
-  const hasGeneratorContext =
-    generatorScope.trim().length > 0 || generatorFiles.length > 0;
-  const isGeneratorReviewStep = generatedQuestions.length > 0;
+  usePageScrollLock(isSettingsOpen || Boolean(selectedQuestionStats));
 
   useEffect(() => {
     if (!selectedQuestionStats) {
@@ -3998,72 +3034,17 @@ export default function ReviewApp({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [selectQuestion, selectedQuestionStats]);
 
-  useEffect(() => {
-    if (activeTab !== "queue") {
-      return;
-    }
-
-    updateQueueVirtualRange();
-
-    window.addEventListener("scroll", updateQueueVirtualRange, { passive: true });
-    window.addEventListener("resize", updateQueueVirtualRange);
-
-    return () => {
-      window.removeEventListener("scroll", updateQueueVirtualRange);
-      window.removeEventListener("resize", updateQueueVirtualRange);
-    };
-  }, [
-    activeTab,
-    sortedReviewQueue.length,
-    updateQueueVirtualRange,
-  ]);
-
-  useEffect(() => {
-    if (
-      activeTab !== "queue" ||
-      isQueuePageLoadingRef.current
-    ) {
-      return;
-    }
-
-    const stage = queueStageRef.current;
-
-    if (!stage || !hasMoreReviewQueue) {
-      return;
-    }
-
-    const distanceToBottom =
-      stage.getBoundingClientRect().bottom - window.innerHeight;
-
-    if (distanceToBottom < QUEUE_ROW_ESTIMATED_HEIGHT * 4) {
-      loadMoreQueueRows();
-    }
-  }, [
-    activeTab,
-    hasMoreReviewQueue,
-    loadMoreQueueRows,
-    queueVirtualRange.start,
-    queueVirtualRange.end,
-  ]);
-
   return (
-    <main
-      className={`page ${
-        activeTab === "review" && isPreviousExpanded
-          ? "page-previous-expanded"
-          : ""
-      } ${activeTab === "queue" ? "page-queue-active" : ""}`}
-    >
+    <main className={`page ${isPreviousExpanded ? "page-previous-expanded" : ""}`}>
       <section className="review-shell" aria-label="Flashcard learning">
         <ReviewToolbar
-          activeTab={activeTab === "queue" ? "tags" : "review"}
+          activeTab="review"
           dueCount={toolbarDueCount}
           dueCountSource="review-queue"
           showAdmin={canViewAdmin}
           menuAvatarUrl={menuAvatarUrl}
           menuDisplayName={menuDisplayName}
           menuEmail={menuEmail}
-          onReviewClick={(event) => navigateToTab("review", event)}
           onManageAccount={onManageAccount}
           onSignOut={onSignOut}
         />
@@ -4072,7 +3053,6 @@ export default function ReviewApp({
           className={`review-stage ${
             !isLoadingQuestion && !question ? "review-stage-resting" : ""
           }`}
-          hidden={activeTab !== "review"}
           id="review-panel"
           role="tabpanel"
           aria-labelledby="review-tab"
@@ -4195,14 +3175,13 @@ export default function ReviewApp({
                       <Sparkles aria-hidden="true" />
                       <span>Keep learning</span>
                     </button>
-                    <button
+                    <Link
                       className="resting-secondary"
-                      type="button"
-                      disabled={isLearnTopUpPending}
-                      onClick={openQueue}
+                      href="/library"
+                      aria-disabled={isLearnTopUpPending}
                     >
                       View queue
-                    </button>
+                    </Link>
                   </div>
 
                   {error ? (
@@ -4373,442 +3352,7 @@ export default function ReviewApp({
           </section>
         </div>
 
-        <section
-          className="queue-stage"
-          ref={queueStageRef}
-          hidden={activeTab !== "queue"}
-          id="queue-panel"
-          role="tabpanel"
-          aria-labelledby="queue-tab"
-        >
-          <>
-            <div className="queue-detail-header">
-              <div className="queue-detail-heading">
-                <h2>Knowledge base</h2>
-                <p>{reviewQueueTotal} {reviewQueueTotal === 1 ? "card" : "cards"}</p>
-              </div>
-            </div>
-
-              <div className="queue-toolbar">
-                <div className="queue-action-group">
-                  <button
-                    className="queue-generate-trigger"
-                    type="button"
-                    onClick={openQuestionGenerator}
-                  >
-                    <Sparkles aria-hidden="true" />
-                    <span>Generate</span>
-                  </button>
-                  <button
-                    className="queue-map-trigger"
-                    type="button"
-                    onClick={() => setIsEmbeddingMapOpen(true)}
-                  >
-                    <Layers aria-hidden="true" />
-                    <span>Map</span>
-                  </button>
-                </div>
-                <label className="queue-search-label">
-                  <span className="sr-only">Search cards by meaning</span>
-                  <span className="queue-search-shell">
-                    <Search aria-hidden="true" />
-                    <input
-                      className="queue-search-input"
-                      type="search"
-                      value={queueSearchInput}
-                      onChange={(event) => setQueueSearchInput(event.target.value)}
-                      placeholder="Search cards"
-                    />
-                  </span>
-                </label>
-                <label className="queue-sort-label">
-                  Sort by
-                  <span className="queue-sort-select-shell">
-                    <select
-                      className="queue-sort-select"
-                      value={isQueueSearchActive ? "proximity" : queueSortKey}
-                      onChange={(event: ChangeEvent<HTMLSelectElement>) => {
-                        const nextValue = event.target.value;
-
-                        if (
-                          nextValue === "review-date" ||
-                          nextValue === "creation-date"
-                        ) {
-                          setQueueSortKey(nextValue);
-                        }
-                      }}
-                      aria-label="Sort queue"
-                    >
-                      {isQueueSearchActive ? (
-                        <option value="proximity">Proximity</option>
-                      ) : null}
-                      <option value="review-date">Review date</option>
-                      <option value="creation-date">Creation date</option>
-                    </select>
-                    <ChevronDown aria-hidden="true" />
-                  </span>
-                </label>
-              </div>
-
-              {reviewQueue.length === 0 ? (
-                <p className="queue-empty">
-                  {isQueuePageLoading || !hasLoadedQueueStatusRef.current
-                    ? "Loading queue..."
-                    : isQueueSearchActive
-                      ? "No matching cards."
-                      : "No active cards."}
-                </p>
-              ) : (
-                <ol className="queue-list" ref={queueListRef}>
-                  {queueTopSpacerHeight > 0 ? (
-                    <li
-                      className="queue-spacer"
-                      style={{ height: queueTopSpacerHeight }}
-                      aria-hidden="true"
-                    />
-                  ) : null}
-
-                  {visibleQueueRows.map((item) => (
-                    <li
-                      className="queue-row"
-                      key={`${item.question}-${item.nextDue}`}
-                    >
-                      <div
-                        className="queue-row-card"
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`Open card details for ${item.question}`}
-                        onClick={() => selectQuestion(item.question, item.questionId)}
-                        onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            selectQuestion(item.question, item.questionId);
-                          }
-                        }}
-                      >
-                        <div className="queue-row-main">
-                          <MarkdownInline
-                            as="p"
-                            className="queue-question"
-                            text={item.question}
-                          />
-                          {item.questionProvenance || item.generatedFromQuestion ? (
-                            <MarkdownInline
-                              as="p"
-                              className="queue-origin"
-                              text={`Provenance: ${
-                                item.questionProvenance ??
-                                item.generatedFromQuestion
-                              }`}
-                            />
-                          ) : null}
-                          <div className="queue-metrics" aria-label="Card metrics">
-                            <PreviousAnswerScore
-                              className="queue-last-score"
-                              label={
-                                item.lastScore === null
-                                  ? "No previous score"
-                                  : `Last score ${item.lastScore} out of 10`
-                              }
-                              score={item.lastScore}
-                            />
-                            <span
-                              className={`due-badge ${
-                                item.status === "now" ? "now" : "scheduled"
-                              }`}
-                            >
-                              {formatDueBadge(item)}
-                            </span>
-                          </div>
-                        </div>
-                        {item.lastJustification ? (
-                          <p className="queue-justification">
-                            {item.lastJustification}
-                          </p>
-                        ) : null}
-                      </div>
-                    </li>
-                  ))}
-
-                  {queueBottomSpacerHeight > 0 ? (
-                    <li
-                      className="queue-spacer"
-                      style={{ height: queueBottomSpacerHeight }}
-                      aria-hidden="true"
-                    />
-                  ) : null}
-
-                  {hasMoreReviewQueue || isQueuePageLoading ? (
-                    <li className="queue-loading-row" aria-live="polite">
-                      {isQueuePageLoading
-                        ? "Loading more cards..."
-                        : isQueueSearchActive
-                          ? `${reviewQueue.length}/${reviewQueueTotal} matches loaded`
-                          : `${reviewQueue.length}/${reviewQueueTotal} loaded`}
-                    </li>
-                  ) : null}
-                </ol>
-              )}
-          </>
-        </section>
       </section>
-
-      {isQuestionGeneratorOpen ? (
-        <div
-          className="generator-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !isGeneratingQuestions) {
-              closeQuestionGenerator();
-            }
-          }}
-        >
-          <section
-            className="generator-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-busy={isGeneratingQuestions}
-            aria-labelledby="generator-modal-title"
-          >
-            {isGeneratingQuestions ? (
-              <div className="generator-progress-mask" role="status">
-                <div className="generator-progress-content">
-                  <Sparkles aria-hidden="true" />
-                  <strong>Generating questions</strong>
-                  <span>Please wait...</span>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="generator-modal-header">
-              <div>
-                <p className="generator-modal-kicker">
-                  {isGeneratorReviewStep ? "Step 2 of 2" : "Step 1 of 2"}
-                </p>
-                <h2 className="generator-modal-title" id="generator-modal-title">
-                  {isGeneratorReviewStep ? "Review questions" : "Generate questions"}
-                </h2>
-              </div>
-              <button
-                className="stats-modal-close"
-                type="button"
-                aria-label="Close generator"
-                disabled={isGeneratingQuestions}
-                onClick={closeQuestionGenerator}
-              />
-            </div>
-
-            <div
-              className={`generator-modal-grid ${
-                isGeneratorReviewStep
-                  ? "generator-modal-grid-review"
-                  : "generator-modal-grid-scope"
-              }`}
-            >
-              {!isGeneratorReviewStep ? (
-                <section className="generator-scope-panel" aria-label="Generation scope">
-                  <div className="generator-field">
-                    <label htmlFor="generator-scope-input">Cover</label>
-                    <div
-                      className="generator-scope-shell"
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        event.dataTransfer.dropEffect = isGeneratingQuestions
-                          ? "none"
-                          : "copy";
-                      }}
-                      onDrop={(event) => void handleGeneratorFileDrop(event)}
-                    >
-                      <textarea
-                        id="generator-scope-input"
-                        className="generator-scope-input"
-                        value={generatorScope}
-                        disabled={isGeneratingQuestions}
-                        onChange={(event) => {
-                          setGeneratorScope(event.target.value);
-                          setGeneratorMessage(null);
-                        }}
-                        placeholder="Core ideas from the attached lecture notes"
-                        rows={7}
-                      />
-                      <p className="generator-drop-hint">
-                        Drop files here to add them as context.
-                      </p>
-                      {generatorFiles.length > 0 ? (
-                        <ul className="generator-file-list" aria-label="Context files">
-                          {generatorFiles.map((file) => (
-                            <li className="generator-file-chip" key={file.id}>
-                              <FileText aria-hidden="true" />
-                              <span>{file.name}</span>
-                              {file.status === "metadata-only" ? (
-                                <em>name only</em>
-                              ) : null}
-                              <button
-                                type="button"
-                                aria-label={`Remove ${file.name}`}
-                                disabled={isGeneratingQuestions}
-                                onClick={() => removeGeneratorFile(file.id)}
-                              >
-                                <X aria-hidden="true" />
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="generator-controls">
-                    <label className="generator-slider-field">
-                      <span className="generator-slider-header">
-                        <span>Questions</span>
-                        <output>{generatorQuestionCount}</output>
-                      </span>
-                      <input
-                        className="generator-count-slider"
-                        type="range"
-                        min={1}
-                        max={MAX_GENERATED_QUESTION_COUNT}
-                        step={1}
-                        value={generatorQuestionCount}
-                        disabled={isGeneratingQuestions}
-                        onChange={(event) =>
-                          setGeneratorQuestionCount(
-                            Number.parseInt(event.target.value, 10),
-                          )
-                        }
-                      />
-                      <span className="generator-slider-scale" aria-hidden="true">
-                        <span>1</span>
-                        <span>{MAX_GENERATED_QUESTION_COUNT}</span>
-                      </span>
-                    </label>
-                  </div>
-
-                  <div className="generator-scope-footer">
-                    <p aria-live="polite">{generatorMessage}</p>
-                    <button
-                      className="generator-primary-action"
-                      type="button"
-                      onClick={() => void generateQuestionBatch()}
-                      disabled={!hasGeneratorContext || isGeneratingQuestions}
-                    >
-                      <Sparkles aria-hidden="true" />
-                      <span>{isGeneratingQuestions ? "Generating..." : "Generate"}</span>
-                    </button>
-                  </div>
-                </section>
-              ) : (
-                <section className="generator-review-panel" aria-label="Generated questions">
-                  <ol className="generator-question-list">
-                    {generatedQuestions.map((item) => (
-                      <li
-                        className={`generator-question-row generator-question-${item.status}`}
-                        key={item.id}
-                      >
-                        <button
-                          className="generator-question-status"
-                          type="button"
-                          aria-label={
-                            item.status === "new"
-                              ? `Select question for adding: ${item.question}`
-                              : item.status === "selected"
-                                ? `Remove question from add selection: ${item.question}`
-                                : "Adding question"
-                          }
-                          disabled={item.status === "adding"}
-                          onClick={() => toggleGeneratedQuestionSelection(item.id)}
-                        >
-                          {item.status === "selected" ? (
-                            <Check aria-hidden="true" />
-                          ) : (
-                            <Plus aria-hidden="true" />
-                          )}
-                        </button>
-                        <div className="generator-question-copy">
-                          <MarkdownInline
-                            as="p"
-                            className="generator-question-text"
-                            text={item.question}
-                          />
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-
-                  <div className="generator-review-footer">
-                    <p aria-live="polite">
-                      {generatorMessage ? `${generatorMessage} · ` : ""}
-                      {generatedQuestionCounts.selected} selected ·{" "}
-                      {generatedQuestionCounts.new} available
-                      {generatedQuestionCounts.adding > 0
-                        ? ` · ${generatedQuestionCounts.adding} adding`
-                        : ""}
-                    </p>
-                    <div className="generator-review-actions">
-                      <button
-                        className="generator-primary-action"
-                        type="button"
-                        onClick={() => void addSelectedGeneratedQuestionsToKnowledgeBase()}
-                        disabled={
-                          generatedQuestionCounts.selected === 0 ||
-                          generatedQuestionCounts.adding > 0
-                        }
-                      >
-                        {generatedQuestionCounts.adding > 0 ? "Adding..." : "Add"}
-                      </button>
-                    </div>
-                  </div>
-                </section>
-              )}
-            </div>
-          </section>
-        </div>
-      ) : null}
-
-      {isEmbeddingMapOpen ? (
-        <div
-          className="embedding-map-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setIsEmbeddingMapOpen(false);
-            }
-          }}
-        >
-          <section
-            className="embedding-map-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="embedding-map-modal-title"
-          >
-            <div className="embedding-map-modal-header">
-              <div>
-                <p className="embedding-map-modal-kicker">Knowledge base map</p>
-                <h2
-                  className="embedding-map-modal-title"
-                  id="embedding-map-modal-title"
-                >
-                  Knowledge base
-                </h2>
-              </div>
-              <button
-                className="stats-modal-close"
-                type="button"
-                aria-label="Close embedding map"
-                onClick={() => setIsEmbeddingMapOpen(false)}
-              />
-            </div>
-
-            <div className="embedding-map-modal-body">
-              <KnowledgeEmbeddingPlot
-                plot={knowledgeEmbeddingPlot}
-                reviewQueue={reviewQueue}
-              />
-            </div>
-          </section>
-        </div>
-      ) : null}
 
       {isSettingsOpen ? (
         <div

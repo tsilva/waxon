@@ -41,6 +41,7 @@ Learn must build understanding in the minimum effective time and interactions. E
 - Teaching, evaluation, and course progression must remain inside one tool-call conversation and must not be duplicated by hidden app-side workflows.
 - Background work may generate embeddings, tags, provenance, or other non-teaching metadata only when it neither alters the Learn transcript nor blocks the learner's next interaction.
 - Waxon must use one unified question bank, with tags and provenance distinguishing topics and sources.
+- Library must be the single question-bank management surface; Review must remain focused on due-item recall practice.
 - Every Learn question must enter the question bank after the learner answers it, never before, and the saved item must include the answer and evaluation data.
 - Learn question widgets may use multiple choice when it benefits instruction, but every saved and resurfaced review item must be a free-text recall question.
 - Tag and provenance generation must not block question saving or the next Learn interaction.

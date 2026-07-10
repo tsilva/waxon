@@ -20,25 +20,26 @@ import type {
 } from "@/app/lib/questionBank";
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
+import type { QuestionAttempt, ReviewQueueItem } from "@/app/lib/reviewTypes";
+import type { UserProfile, UserProfileSummary } from "@/app/lib/userProfile";
+import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
+import { ScoreChart } from "../review/ReviewVisualizations";
+import { LibraryManagementTools } from "./LibraryManagementTools";
 
-type UserProfileResponse = {
-  id: string;
-  displayName: string;
-  email: string;
-  avatarUrl: string | null;
+type SearchMode = "text" | "meaning";
+
+type QueueSearchResponse = {
+  reviewQueue: ReviewQueueItem[];
+  reviewQueueTotal: number;
 };
 
 type LibraryPageClientProps = {
   initialQuestionBank?: QuestionBankPage | null;
   initialConceptTags?: ConceptTagSummary[] | null;
-  initialUser?: {
-    displayName: string;
-    email: string;
-    avatarUrl: string | null;
-  } | null;
+  initialUser?: UserProfileSummary | null;
   showAdmin?: boolean;
 };
 
@@ -143,12 +144,72 @@ function questionBankParams(input: {
 
 async function fetchQuestionBankPage(input: {
   query: string;
+  searchMode: SearchMode;
   status: QuestionBankStatusFilter;
   tagSlugs: string[];
   sort: QuestionBankSort;
   offset: number;
   signal?: AbortSignal;
 }): Promise<QuestionBankPage> {
+  if (input.searchMode === "meaning" && input.query.trim()) {
+    const params = new URLSearchParams({
+      query: input.query.trim(),
+      limit: String(LIBRARY_PAGE_SIZE),
+      offset: String(Math.max(0, Math.floor(input.offset))),
+      includeQuestionAttempts: "0",
+      includeRecentAttempts: "0",
+      includeEvaluations: "0",
+      includeKnowledgeEmbeddingPlot: "0",
+      includeQueueCounts: "0",
+    });
+    const response = await fetch(`/api/queue-status?${params.toString()}`, {
+      cache: "no-store",
+      signal: input.signal,
+    });
+    const data = (await response.json()) as QueueSearchResponse & {
+      error?: string;
+    };
+
+    if (!response.ok) {
+      throw new Error(data.error || "Could not search question bank by meaning.");
+    }
+
+    const filteredItems = data.reviewQueue.filter((item) => {
+      if (
+        input.tagSlugs.some((slug) => !item.conceptSlugs.includes(slug))
+      ) {
+        return false;
+      }
+
+      if (input.status === "due" && item.status !== "now") {
+        return false;
+      }
+
+      if (input.status === "untagged" && item.conceptSlugs.length > 0) {
+        return false;
+      }
+
+      return input.status !== "flagged";
+    });
+
+    return {
+      items: filteredItems.map((item) => ({
+        questionId: item.questionId,
+        question: item.question,
+        conciseAnswer: item.conciseAnswer,
+        questionProvenance: item.questionProvenance,
+        nextDue: item.nextDue,
+        createdAt: item.createdAt,
+        updatedAt: item.createdAt,
+        flaggedAt: null,
+        conceptSlugs: item.conceptSlugs,
+      })),
+      total: data.reviewQueueTotal,
+      hasMore: false,
+      nextOffset: null,
+    };
+  }
+
   const response = await fetch(
     `/api/question-bank?${questionBankParams(input).toString()}`,
     {
@@ -205,6 +266,7 @@ export default function LibraryPageClient({
   const [conceptTags, setConceptTags] = useState(initialConceptTags ?? []);
   const [currentUser, setCurrentUser] = useState(initialUser ?? null);
   const [query, setQuery] = useState(() => searchParams.get("q")?.trim() ?? "");
+  const [searchMode, setSearchMode] = useState<SearchMode>("text");
   const [status, setStatus] = useState<QuestionBankStatusFilter>("all");
   const [selectedTagSlugs, setSelectedTagSlugs] = useState<string[]>(() =>
     uniqueTagSlugs(searchParams.getAll("tag")),
@@ -215,6 +277,12 @@ export default function LibraryPageClient({
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
   const [selectedQuestionDetails, setSelectedQuestionDetails] =
     useState<QuestionBankItem | null>(null);
+  const [selectedQuestionAttempts, setSelectedQuestionAttempts] = useState<
+    QuestionAttempt[]
+  >([]);
+  const [areQuestionAttemptsLoading, setAreQuestionAttemptsLoading] =
+    useState(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(initialQuestionBank === null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isMetadataLoading, setIsMetadataLoading] = useState(
@@ -259,6 +327,20 @@ export default function LibraryPageClient({
       : Math.min(activeTagOptionIndex, matchingTagOptions.length - 1);
   const isTagPickerOpen = tagDraft !== null;
   const searchInputValue = tagSearchInputValue(query, tagDraft);
+  const reviewHistory = useMemo(
+    () =>
+      selectedQuestionAttempts
+        .map((attempt) => ({ ts: attempt.resolvedAt, score: attempt.score }))
+        .sort((left, right) => left.ts - right.ts),
+    [selectedQuestionAttempts],
+  );
+  const averageScore =
+    reviewHistory.length > 0
+      ? reviewHistory.reduce((total, entry) => total + entry.score, 0) /
+        reviewHistory.length
+      : null;
+
+  usePageScrollLock(Boolean(selectedQuestionDetails));
 
   useEffect(() => {
     const nextQuery = searchParams.get("q")?.trim() ?? "";
@@ -379,7 +461,7 @@ export default function LibraryPageClient({
             signal: controller.signal,
           }),
         ]);
-        const userData = (await userResponse.json()) as UserProfileResponse & {
+        const userData = (await userResponse.json()) as UserProfile & {
           error?: string;
         };
         const tagsData = (await tagsResponse.json()) as {
@@ -434,6 +516,7 @@ export default function LibraryPageClient({
 
       fetchQuestionBankPage({
         query,
+        searchMode,
         status,
         tagSlugs: selectedTagSlugs,
         sort,
@@ -469,7 +552,45 @@ export default function LibraryPageClient({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [query, status, selectedTagSlugs, sort]);
+  }, [query, reloadVersion, searchMode, status, selectedTagSlugs, sort]);
+
+  useEffect(() => {
+    if (!selectedQuestionDetails) {
+      setSelectedQuestionAttempts([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    setAreQuestionAttemptsLoading(true);
+    fetch(
+      `/api/question-attempts?questionId=${encodeURIComponent(
+        selectedQuestionDetails.questionId,
+      )}`,
+      { cache: "no-store", signal: controller.signal },
+    )
+      .then(async (response) => {
+        const data = (await response.json()) as {
+          attempts?: QuestionAttempt[];
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(data.error ?? "Could not load question history.");
+        }
+
+        setSelectedQuestionAttempts(data.attempts ?? []);
+      })
+      .catch((error) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setMessage(
+            error instanceof Error ? error.message : "Could not load question history.",
+          );
+        }
+      })
+      .finally(() => setAreQuestionAttemptsLoading(false));
+
+    return () => controller.abort();
+  }, [selectedQuestionDetails]);
 
   const loadMoreQuestions = useCallback(async () => {
     if (questionBank.nextOffset === null || isLoadingMore) {
@@ -482,6 +603,7 @@ export default function LibraryPageClient({
     try {
       const data = await fetchQuestionBankPage({
         query,
+        searchMode,
         status,
         tagSlugs: selectedTagSlugs,
         sort,
@@ -511,6 +633,7 @@ export default function LibraryPageClient({
   }, [
     isLoadingMore,
     query,
+    searchMode,
     questionBank.nextOffset,
     selectedTagSlugs,
     status,
@@ -536,6 +659,10 @@ export default function LibraryPageClient({
           aria-label="Library"
         >
           <div className="library-filter-row" aria-label="Question bank filters">
+            <LibraryManagementTools
+              existingQuestions={questionBank.items.map((item) => item.question)}
+              onQuestionsAdded={() => setReloadVersion((current) => current + 1)}
+            />
             <label className="library-status-filter-label">
               <span>Status</span>
               <select
@@ -554,16 +681,30 @@ export default function LibraryPageClient({
             <label className="library-sort-filter-label">
               <span>Sort</span>
               <select
-                value={sort}
+                value={searchMode === "meaning" && query.trim() ? "similarity" : sort}
+                disabled={searchMode === "meaning" && Boolean(query.trim())}
                 onChange={(event) =>
                   setSort(event.target.value as QuestionBankSort)
                 }
               >
+                {searchMode === "meaning" && query.trim() ? (
+                  <option value="similarity">Similarity</option>
+                ) : null}
                 {sortOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="library-search-mode-label">
+              <span>Search</span>
+              <select
+                value={searchMode}
+                onChange={(event) => setSearchMode(event.target.value as SearchMode)}
+              >
+                <option value="text">Text</option>
+                <option value="meaning">Meaning</option>
               </select>
             </label>
             <div
@@ -611,7 +752,9 @@ export default function LibraryPageClient({
                     placeholder={
                       selectedTagSlugs.length > 0
                         ? "Search or type #"
-                        : "Search questions, IDs, or type #tag"
+                        : searchMode === "meaning"
+                          ? "Search questions by meaning"
+                          : "Search questions, IDs, or type #tag"
                     }
                     role="combobox"
                     aria-expanded={isTagPickerOpen}
@@ -855,23 +998,92 @@ export default function LibraryPageClient({
 
             <div className="stats-grid" aria-label="Question summary">
               <div className="stats-tile">
-                <span>Status</span>
-                <strong>{questionStatus(selectedQuestionDetails, now)}</strong>
+                <span>Attempts</span>
+                <strong>{selectedQuestionAttempts.length}</strong>
               </div>
               <div className="stats-tile">
-                <span>Next due</span>
+                <span>Average</span>
+                <strong>{averageScore === null ? "N/A" : `${averageScore.toFixed(1)}/10`}</strong>
+              </div>
+              <div className="stats-tile">
+                <span>Best</span>
                 <strong>
-                  {formatNextDue(selectedQuestionDetails.nextDue, now)}
+                  {reviewHistory.length === 0
+                    ? "N/A"
+                    : `${Math.max(...reviewHistory.map((entry) => entry.score))}/10`}
                 </strong>
               </div>
               <div className="stats-tile">
-                <span>Created</span>
-                <strong>{formatDate(selectedQuestionDetails.createdAt)}</strong>
+                <span>Last</span>
+                <strong>
+                  {reviewHistory.length === 0
+                    ? "N/A"
+                    : `${reviewHistory.at(-1)?.score ?? 0}/10`}
+                </strong>
               </div>
               <div className="stats-tile">
-                <span>Updated</span>
-                <strong>{formatDate(selectedQuestionDetails.updatedAt)}</strong>
+                <span>Next due</span>
+                <strong>{formatNextDue(selectedQuestionDetails.nextDue, now)}</strong>
               </div>
+              <div className="stats-tile">
+                <span>Status</span>
+                <strong>{questionStatus(selectedQuestionDetails, now)}</strong>
+              </div>
+            </div>
+
+            <div className="stats-chart-panel">
+              <div className="stats-section-heading">
+                <h3>Previous scores</h3>
+                <span>{areQuestionAttemptsLoading ? "Loading..." : `${reviewHistory.length} attempts`}</span>
+              </div>
+              <ScoreChart entries={reviewHistory} />
+            </div>
+
+            <div className="stats-history-panel">
+              <div className="stats-section-heading">
+                <h3>Answer history</h3>
+              </div>
+              {areQuestionAttemptsLoading ? (
+                <p className="stats-empty">Loading history...</p>
+              ) : selectedQuestionAttempts.length === 0 ? (
+                <p className="stats-empty">No answers recorded yet.</p>
+              ) : (
+                <ol className="stats-history-list">
+                  {[...selectedQuestionAttempts]
+                    .sort((left, right) => right.submittedAt - left.submittedAt)
+                    .map((attempt) => (
+                      <li className="stats-history-row stats-history-row-resolved" key={attempt.id}>
+                        <div className="stats-history-score-slot">
+                          <span className="previous-score" aria-label={`Score ${attempt.score} out of 10`}>
+                            {attempt.score}
+                          </span>
+                        </div>
+                        <div className="stats-history-copy">
+                          <div className="previous-field stats-history-answer-field">
+                            <span className="previous-field-label">Answer</span>
+                            <p className="stats-history-answer">{attempt.rawAnswer || "(blank)"}</p>
+                          </div>
+                          {attempt.answerSummary && attempt.answerSummary !== attempt.rawAnswer ? (
+                            <div className="previous-field">
+                              <span className="previous-field-label">Summary</span>
+                              <p className="stats-history-summary">{attempt.answerSummary}</p>
+                            </div>
+                          ) : null}
+                          <div className="previous-field">
+                            <span className="previous-field-label">Evaluation</span>
+                            <p className="stats-history-summary">{attempt.justification || "No feedback returned."}</p>
+                          </div>
+                        </div>
+                        <div className="stats-history-row-meta">
+                          <time className="previous-time" dateTime={new Date(attempt.resolvedAt).toISOString()}>
+                            {formatDate(attempt.resolvedAt)}
+                          </time>
+                          <span className="stats-history-status">Resolved</span>
+                        </div>
+                      </li>
+                    ))}
+                </ol>
+              )}
             </div>
 
             <div className="stats-history-panel">

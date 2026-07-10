@@ -515,13 +515,6 @@ function hydrateCourseListItem(input: {
   };
 }
 
-export async function listCourses(): Promise<CourseRecord[]> {
-  const user = await getCurrentUser();
-  const rows = await loadCourseRows(user.id);
-
-  return rows.map((row) => hydrateCourse({ row }));
-}
-
 export async function listCoursesPage(input: {
   cursor?: CourseListCursor | null;
   limit: number;
@@ -669,85 +662,6 @@ export async function updateCourseToc(input: {
   }
 
   return detail;
-}
-
-export async function replaceCourseChatMessages(input: {
-  courseId: string;
-  messages: Array<{
-    role: "assistant" | "user";
-    content: string;
-    toolCalls?: CourseToolCall[];
-    metrics?: CourseMessageMetrics | null;
-    evaluation?: CourseChatMessageEvaluation | null;
-    widgetAnswer?: CourseQuestionWidgetAnswerDetails | null;
-  }>;
-}): Promise<CourseChatMessageRecord[]> {
-  const course = await getCourse(input.courseId);
-
-  if (!course) {
-    throw new Error("Course could not be loaded.");
-  }
-
-  const now = Date.now();
-  const messages = input.messages
-    .map((message) => ({
-      role: message.role === "assistant" ? "assistant" : "user",
-      content: message.content.trim(),
-      toolCalls:
-        message.role === "assistant"
-          ? normalizeCourseToolCalls(message.toolCalls)
-          : [],
-      metrics: normalizeStoredMetrics(message.metrics),
-      evaluation:
-        message.role === "assistant"
-          ? normalizeStoredEvaluation(message.evaluation)
-          : null,
-      widgetAnswer:
-        message.role === "user"
-          ? normalizeCourseQuestionWidgetAnswerDetails(message.widgetAnswer)
-          : null,
-    }))
-    .filter((message) => message.content);
-
-  return db.transaction(async (tx) => {
-    await tx
-      .delete(courseChatMessages)
-      .where(eq(courseChatMessages.courseId, course.id));
-
-    if (messages.length === 0) {
-      await tx
-        .update(courses)
-        .set({ updatedAt: now })
-        .where(eq(courses.id, course.id));
-
-      return [];
-    }
-
-    const rows = await tx
-      .insert(courseChatMessages)
-      .values(
-        messages.map((message, index) => ({
-          courseId: course.id,
-          role: message.role,
-          content: message.content,
-          toolCalls: message.toolCalls,
-          metrics: message.metrics,
-          evaluation: message.evaluation,
-          widgetAnswer: message.widgetAnswer,
-          sequence: index,
-          createdAt: now + index,
-          updatedAt: now + index,
-        })),
-      )
-      .returning();
-
-    await tx
-      .update(courses)
-      .set({ updatedAt: now })
-      .where(eq(courses.id, course.id));
-
-    return rows.map(toCourseChatMessage);
-  });
 }
 
 type CourseChatMessageWrite = {
