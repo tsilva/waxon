@@ -7,9 +7,7 @@ import {
   getDueQuestions,
   getNextScheduledQuestionDue,
   getVisibleAnswerEvaluations,
-  getQuestionAttemptsByQuestionIds,
   getQueuedQuestionsPage,
-  getQueuedQuestionsByEmbeddingProximityPage,
   getQuestionSnapshotById,
   getRecentQuestionAttempts,
   resolveAnswerEvaluationRecord,
@@ -19,7 +17,6 @@ import {
   upsertQuestionEmbeddings,
   type DueQuestion,
   type QuestionInput,
-  type QueuedQuestionsSortKey,
 } from "./postgresStore";
 import { questionHasActiveConceptTag } from "./conceptTags";
 import {
@@ -31,21 +28,15 @@ import {
 import { recordPendingLlmTrace } from "./llmTraceStore";
 import { parseReviews } from "./scheduler";
 import {
-  DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
-  DEFAULT_EMBEDDING_MODEL,
-  normalizeEmbeddingText,
+  resolveEmbeddingModel,
 } from "./embeddingSource";
 import {
   getCurrentUser,
   type AuthenticatedUser,
 } from "./auth";
 import { gateNovelQuestions } from "./semanticDedupe";
-import {
-  getOpenRouterApiKey,
-  openRouterEmbeddings,
-} from "./openRouter";
 import { questionSlug } from "./questionSlug";
 import type {
   KnowledgeEmbeddingPlot,
@@ -53,15 +44,15 @@ import type {
   EvaluationPhase,
   EvaluationQueueItem,
   QuestionAttempt,
-  QueueStatusSnapshot,
+  ReviewActivity,
   ReviewQueueItem,
+  ReviewSummary,
 } from "./reviewTypes";
 import type { NovelQuestionGateResult } from "./semanticDedupe";
 
 export const RESOLVED_JUDGING_VISIBLE_MS = 5 * 60_000;
 const EVALUATION_PROCESSING_TIMEOUT_MS = EVALUATION_TIMEOUT_MS;
 const ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS = 5 * 60_000;
-const QUEUE_SEARCH_TOP_K = 200;
 const REVIEW_SESSION_QUEUE_LIMIT = 200;
 const KNOWLEDGE_EMBEDDING_PLOT_LIMIT = 500;
 
@@ -77,20 +68,6 @@ type Submission = {
   expectedAnswer: string | null;
   submittedAt: number;
   previousReviews: string;
-};
-
-type QueueStatusInput = {
-  limit?: number;
-  offset?: number;
-  sortKey?: QueuedQuestionsSortKey;
-  query?: string;
-  includeReviewQueue?: boolean;
-  includeQuestionAttempts?: boolean;
-  includeRecentAttempts?: boolean;
-  recentAttemptsLimit?: number;
-  includeEvaluations?: boolean;
-  includeKnowledgeEmbeddingPlot?: boolean;
-  includeQueueCounts?: boolean;
 };
 
 type LatestEvaluation = {
@@ -398,7 +375,7 @@ async function getKnowledgeEmbeddingPlot(input: {
   const questions = await readQuestionEmbeddingProjections({
     userId: input.userId,
     questions: input.questions,
-    embeddingModel: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+    embeddingModel: resolveEmbeddingModel(),
     embeddingKind: DEDUPE_EMBEDDING_KIND,
     currentOnly: true,
     limit: input.questions ? undefined : input.limit,
@@ -474,124 +451,6 @@ async function getKnowledgeEmbeddingPlot(input: {
   };
 }
 
-async function getReviewQueueItems(
-  userId: string,
-  state: QueueState,
-  input: {
-    limit: number;
-    offset: number;
-    sortKey: QueuedQuestionsSortKey;
-    query?: string;
-    includeQuestionAttempts?: boolean;
-  },
-  now = Date.now(),
-): Promise<{
-  items: ReviewQueueItem[];
-  total: number;
-}> {
-  const searchQuery = normalizeEmbeddingText(input.query ?? "");
-  const excludeQuestionIds = Array.from(state.inFlightQuestionKeys).filter(
-    (key) => !key.startsWith("question:"),
-  );
-  const queuedQuestionsPage = searchQuery
-    ? await getQueuedQuestionsByEmbeddingProximityPage({
-        userId,
-        excludeQuestionIds,
-        queryEmbedding: await embedQueueSearchQuery({
-          query: searchQuery,
-          userId,
-        }),
-        limit: input.limit,
-        offset: input.offset,
-        maxResults: QUEUE_SEARCH_TOP_K,
-      })
-    : await getQueuedQuestionsPage({
-        userId,
-        excludeQuestionIds,
-        limit: input.limit,
-        offset: input.offset,
-        sortKey: input.sortKey,
-      });
-  const queuedQuestions = queuedQuestionsPage.items;
-  const attemptsByQuestionId = input.includeQuestionAttempts === false
-    ? new Map<string, QuestionAttempt[]>()
-    : await getQuestionAttemptsByQuestionIds({
-        userId,
-        questionIds: queuedQuestions.map((item) => item.questionId),
-      });
-  const items = queuedQuestions.map((item) => {
-    const latest = state.latestByQuestionKey[questionKey(item)];
-
-    return toReviewQueueItem(item, {
-      now,
-      latest,
-      attempts: attemptsByQuestionId.get(item.questionId) ?? [],
-    });
-  });
-
-  return {
-    total: queuedQuestionsPage.total,
-    items: searchQuery
-      ? items
-      : items.sort((a, b) => {
-        if (input.sortKey === "creation-date") {
-          return b.createdAt - a.createdAt || a.question.localeCompare(b.question);
-        }
-
-        return (
-          a.nextDue - b.nextDue ||
-          a.createdAt - b.createdAt ||
-          a.question.localeCompare(b.question)
-        );
-      }),
-  };
-}
-
-async function embedQueueSearchQuery(input: {
-  query: string;
-  userId: string;
-}): Promise<number[]> {
-  const apiKey = getOpenRouterApiKey();
-
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required.");
-  }
-
-  const { response, body } = await openRouterEmbeddings({
-    apiKey,
-    trace: {
-      operation: "queue_search_embedding",
-      userId: input.userId,
-      question: input.query,
-    },
-    body: {
-      model: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
-      input: [input.query],
-      encoding_format: "float",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenRouter embedding request failed (${response.status}).`);
-  }
-
-  const embedding = body.data?.[0]?.embedding;
-
-  if (!Array.isArray(embedding) || embedding.length !== DEDUPE_EMBEDDING_DIMENSIONS) {
-    throw new Error("OpenRouter returned an unexpected search embedding.");
-  }
-
-  return embedding.map((component, index) => {
-    const value = Number(component);
-
-    if (!Number.isFinite(value)) {
-      throw new Error(`Search embedding contains a non-finite value at ${index}.`);
-    }
-
-    return value;
-  });
-}
-
 function toReviewQueueItem(
   item: DueQuestion,
   input: {
@@ -627,7 +486,6 @@ function toReviewQueueItem(
       item.conciseAnswer ??
       latestAttempt?.correctAnswer ??
       null,
-    referenceAnswer: item.referenceAnswer,
     lastJustification: input.latest?.justification ?? latestAttempt?.justification ?? null,
     attempts: input.attempts ?? [],
     conceptSlugs: item.conceptSlugs,
@@ -1254,7 +1112,7 @@ export async function addQuestionsToKnowledgeBase(input: {
       .filter((candidate) => candidate.embedding.length > 0)
       .map((candidate) => ({
         question: candidate.question,
-        embeddingModel: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+        embeddingModel: resolveEmbeddingModel(),
         embeddingKind: DEDUPE_EMBEDDING_KIND,
         sourceVersion: DEDUPE_SOURCE_VERSION,
         sourceHash: candidate.sourceHash,
@@ -1270,19 +1128,9 @@ export async function addQuestionsToKnowledgeBase(input: {
   };
 }
 
-function emptyKnowledgeEmbeddingPlot(): KnowledgeEmbeddingPlot {
-  return {
-    model: null,
-    totalQuestions: 0,
-    embeddedQuestions: 0,
-    points: [],
-  };
-}
-
 export async function knowledgeEmbeddingPlotStatus(input: {
   limit?: number;
   offset?: number;
-  sortKey?: QueuedQuestionsSortKey;
 } = {}): Promise<KnowledgeEmbeddingPlot> {
   const user = await getCurrentUser();
   const limit = Math.min(
@@ -1297,108 +1145,66 @@ export async function knowledgeEmbeddingPlotStatus(input: {
   });
 }
 
-export async function queueStatusForUser(
+export async function reviewSummaryForUser(
   userId: string,
-  input: QueueStatusInput = {},
-): Promise<QueueStatusSnapshot> {
+): Promise<ReviewSummary> {
   const state = getQueueStateForUser(userId);
   const now = Date.now();
-  const query = normalizeEmbeddingText(input.query ?? "");
-  const limitCap = query ? QUEUE_SEARCH_TOP_K : 2_000;
-  const limit = Math.min(limitCap, Math.max(0, Math.floor(input.limit ?? 24)));
-  const offset = Math.max(0, Math.floor(input.offset ?? 0));
-  const sortKey = input.sortKey ?? "review-date";
-  const includeReviewQueue = input.includeReviewQueue ?? true;
-  const includeRecentAttempts = input.includeRecentAttempts ?? true;
-  const includeEvaluations = input.includeEvaluations ?? true;
-  const includeQueueCounts = input.includeQueueCounts ?? true;
   const excludeQuestionIds = Array.from(state.inFlightQuestionKeys).filter(
     (key) => !key.startsWith("question:"),
   );
-  const emptyReviewQueuePage = { items: [], total: 0 };
-  const reviewQueuePagePromise = includeReviewQueue
-    ? getReviewQueueItems(userId, state, {
-        limit,
-        offset,
-        sortKey,
-        query,
-        includeQuestionAttempts: input.includeQuestionAttempts,
-      })
-    : Promise.resolve(emptyReviewQueuePage);
-  const recentAttemptsPromise = includeRecentAttempts
-    ? getRecentQuestionAttempts({
-        userId,
-        limit: Math.max(0, Math.floor(input.recentAttemptsLimit ?? 24)),
-      })
-    : Promise.resolve([]);
-  const persistedEvaluationsPromise = includeEvaluations
-    ? getVisibleAnswerEvaluations({
-        userId,
-        activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
-        resolvedSince: now - RESOLVED_JUDGING_VISIBLE_MS,
-        limit: 50,
-      })
-    : Promise.resolve([]);
-  const queueRemainingPromise = includeQueueCounts
-    ? countDueQuestions(now, {
-        userId,
-      })
-    : Promise.resolve(null);
-  const nextScheduledDuePromise = includeQueueCounts
-    ? getNextScheduledQuestionDue(now, {
-        userId,
-        excludeQuestionIds,
-      })
-    : Promise.resolve(null);
-  const knowledgeEmbeddingPlotPromise =
-    input.includeKnowledgeEmbeddingPlot
-      ? getKnowledgeEmbeddingPlot({
-          userId,
-        })
-      : Promise.resolve(emptyKnowledgeEmbeddingPlot());
-  const [
-    reviewQueuePage,
-    recentAttempts,
-    persistedEvaluations,
-    queueRemaining,
-    nextScheduledDueFromDb,
-    knowledgeEmbeddingPlot,
-  ] = await Promise.all([
-    reviewQueuePagePromise,
-    recentAttemptsPromise,
-    persistedEvaluationsPromise,
-    queueRemainingPromise,
-    nextScheduledDuePromise,
-    knowledgeEmbeddingPlotPromise,
+  const [queueRemaining, nextScheduledDue] = await Promise.all([
+    countDueQuestions(now, { userId }),
+    getNextScheduledQuestionDue(now, { userId, excludeQuestionIds }),
   ]);
-  const nextScheduledDue =
-    queueRemaining === null
-      ? null
-      : (reviewQueuePage.items.find((item) => item.nextDue > now)?.nextDue ??
-        nextScheduledDueFromDb);
 
   return {
-    queueRemaining: queueRemaining ?? 0,
+    queueRemaining,
     nextScheduledDue,
-    pendingEvaluations: includeEvaluations ? state.pendingEvaluations : 0,
-    evaluations: includeEvaluations
-      ? mergeEvaluationItems(getVisibleEvaluations(state, now), persistedEvaluations)
-      : [],
-    recentAttempts,
-    reviewQueue: reviewQueuePage.items,
-    reviewQueueTotal: reviewQueuePage.total,
-    reviewQueueOffset: offset,
-    reviewQueueLimit: limit,
-    reviewQueueHasMore:
-      offset + reviewQueuePage.items.length < reviewQueuePage.total,
-    knowledgeEmbeddingPlot,
   };
 }
 
-export async function queueStatus(
-  input: QueueStatusInput = {},
-): Promise<QueueStatusSnapshot> {
+export async function reviewSummary(): Promise<ReviewSummary> {
   const user = await getCurrentUser();
 
-  return queueStatusForUser(user.id, input);
+  return reviewSummaryForUser(user.id);
+}
+
+export async function reviewActivityForUser(
+  userId: string,
+  input: { recentAttemptsLimit?: number } = {},
+): Promise<ReviewActivity> {
+  const state = getQueueStateForUser(userId);
+  const now = Date.now();
+  const [summary, recentAttempts, persistedEvaluations] = await Promise.all([
+    reviewSummaryForUser(userId),
+    getRecentQuestionAttempts({
+      userId,
+      limit: Math.max(0, Math.floor(input.recentAttemptsLimit ?? 24)),
+    }),
+    getVisibleAnswerEvaluations({
+      userId,
+      activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
+      resolvedSince: now - RESOLVED_JUDGING_VISIBLE_MS,
+      limit: 50,
+    }),
+  ]);
+
+  return {
+    ...summary,
+    pendingEvaluations: state.pendingEvaluations,
+    evaluations: mergeEvaluationItems(
+      getVisibleEvaluations(state, now),
+      persistedEvaluations,
+    ),
+    recentAttempts,
+  };
+}
+
+export async function reviewActivity(
+  input: { recentAttemptsLimit?: number } = {},
+): Promise<ReviewActivity> {
+  const user = await getCurrentUser();
+
+  return reviewActivityForUser(user.id, input);
 }

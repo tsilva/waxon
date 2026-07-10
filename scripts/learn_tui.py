@@ -561,10 +561,7 @@ def load_boot_context(client: WaxonClient, state: CourseState) -> None:
     try:
         queue = client.request_json(
             "GET",
-            "/api/queue-status?"
-            "mode=review&includeReviewQueue=0&includeRecentAttempts=0&"
-            "includeQuestionAttempts=0&includeKnowledgeEmbeddingPlot=0&"
-            "includeQueueCounts=1",
+            "/api/review-summary",
         )
         state.due_count = int_or(queue.get("queueRemaining"), 0)
     except WaxonApiError:

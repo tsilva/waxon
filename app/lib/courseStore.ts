@@ -2,7 +2,6 @@ import { and, asc, desc, eq, ilike, lt, or, sql } from "drizzle-orm";
 import { db } from "@/app/db/client";
 import {
   courseChatMessages,
-  coursePages,
   courses,
 } from "@/app/db/schema";
 import { getCurrentUser } from "./auth";
@@ -12,8 +11,6 @@ import {
   flatCoursePageIndex,
   nextCoursePosition,
   validateCourseToc,
-  type CourseChoice,
-  type CourseMultipleChoiceWidget,
   type CourseToc,
 } from "./courseContent";
 import {
@@ -34,25 +31,6 @@ import {
 } from "./courseChatTurn";
 
 export type CourseStatus = "active" | "completed";
-
-export type CoursePageRecord = {
-  id: string;
-  courseId: string;
-  questionId: string | null;
-  chapterIndex: number;
-  pageIndex: number;
-  title: string;
-  body: string;
-  summary: string;
-  question: string;
-  choices: CourseChoice[];
-  correctChoiceId: string;
-  correctAnswer: string;
-  explanation: string;
-  widget: CourseMultipleChoiceWidget;
-  createdAt: number;
-  updatedAt: number;
-};
 
 export type CourseChatMessageRecord = {
   id: string;
@@ -87,17 +65,15 @@ export type CourseRecord = {
   currentChapterIndex: number;
   currentPageIndex: number;
   totalPages: number;
-  generatedPages: number;
   chatMessageCount: number;
   conversationCost: number;
   createdAt: number;
   updatedAt: number;
 };
 
-export type CourseListItem = Omit<CourseRecord, "toc">;
+export type CourseListItem = Omit<CourseRecord, "toc" | "userId">;
 
 export type CourseDetail = CourseRecord & {
-  pages: CoursePageRecord[];
   chatMessages: CourseChatMessageRecord[];
 };
 
@@ -135,22 +111,6 @@ function toCourseStatus(value: string): CourseStatus {
 
 function toCourseChatRole(value: string): CourseChatMessageRecord["role"] {
   return value === "assistant" ? "assistant" : "user";
-}
-
-function toChoices(value: unknown): CourseChoice[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((choice) => {
-      const record = choice as { id?: unknown; text?: unknown };
-      return {
-        id: typeof record.id === "string" ? record.id : "",
-        text: typeof record.text === "string" ? record.text : "",
-      };
-    })
-    .filter((choice) => choice.id && choice.text);
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -248,51 +208,6 @@ function toCourseChatMessage(row: {
   };
 }
 
-function toCoursePage(row: {
-  id: string;
-  courseId: string;
-  questionId: string | null;
-  chapterIndex: number;
-  pageIndex: number;
-  title: string;
-  body: string;
-  summary: string;
-  question: string;
-  choices: unknown;
-  correctChoiceId: string;
-  correctAnswer: string;
-  explanation: string;
-  createdAt: number;
-  updatedAt: number;
-}): CoursePageRecord {
-  return {
-    id: row.id,
-    courseId: row.courseId,
-    questionId: row.questionId,
-    chapterIndex: row.chapterIndex,
-    pageIndex: row.pageIndex,
-    title: row.title,
-    body: row.body,
-    summary: row.summary,
-    question: row.question,
-    choices: toChoices(row.choices),
-    correctChoiceId: row.correctChoiceId,
-    correctAnswer: row.correctAnswer,
-    explanation: row.explanation,
-    widget: {
-      type: "multiple_choice",
-      id: `page-${row.id}-check`,
-      question: row.question,
-      choices: toChoices(row.choices),
-      correctChoiceId: row.correctChoiceId,
-      correctAnswer: row.correctAnswer,
-      explanation: row.explanation,
-    },
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
 async function loadCourseRows(
   userId: string,
   options: {
@@ -348,11 +263,6 @@ async function loadCourseRows(
       conversationCost: courses.conversationCost,
       createdAt: courses.createdAt,
       updatedAt: courses.updatedAt,
-      generatedPages: sql<number>`(
-        SELECT count(*)::int
-        FROM ${coursePages}
-        WHERE ${coursePages.courseId} = ${courses.id}
-      )`,
       chatMessageCount: sql<number>`(
         SELECT count(*)::int
         FROM ${courseChatMessages}
@@ -432,11 +342,6 @@ async function loadCourseListRows(
         )
         ELSE 0
       END)`,
-      generatedPages: sql<number>`(
-        SELECT count(*)::int
-        FROM ${coursePages}
-        WHERE ${coursePages.courseId} = ${courses.id}
-      )`,
       chatMessageCount: sql<number>`(
         SELECT count(*)::int
         FROM ${courseChatMessages}
@@ -481,7 +386,6 @@ function hydrateCourse(input: {
     currentChapterIndex: position.chapterIndex,
     currentPageIndex: position.pageIndex,
     totalPages: coursePageCount(toc),
-    generatedPages: Number(input.row.generatedPages ?? 0),
     chatMessageCount: Number(input.row.chatMessageCount ?? 0),
     conversationCost: Math.max(0, Number(input.row.conversationCost ?? 0)),
     createdAt: input.row.createdAt,
@@ -496,7 +400,6 @@ function hydrateCourseListItem(input: {
 
   return {
     id: input.row.id,
-    userId: input.row.userId,
     topicPrompt: input.row.topicPrompt,
     title: input.row.title,
     description: input.row.description,
@@ -507,7 +410,6 @@ function hydrateCourseListItem(input: {
       Math.max(totalPages - 1, 0),
     ),
     totalPages,
-    generatedPages: Number(input.row.generatedPages ?? 0),
     chatMessageCount: Number(input.row.chatMessageCount ?? 0),
     conversationCost: Math.max(0, Number(input.row.conversationCost ?? 0)),
     createdAt: input.row.createdAt,
@@ -551,37 +453,15 @@ export async function getCourse(courseId: string): Promise<CourseDetail | null> 
     return null;
   }
 
-  const rawToc = row.toc;
   const course = hydrateCourse({ row });
-  const [pageRows, chatRows] = await Promise.all([
-    db
-      .select()
-      .from(coursePages)
-      .where(eq(coursePages.courseId, course.id))
-      .orderBy(asc(coursePages.chapterIndex), asc(coursePages.pageIndex)),
-    db
-      .select()
-      .from(courseChatMessages)
-      .where(eq(courseChatMessages.courseId, course.id))
-      .orderBy(asc(courseChatMessages.sequence)),
-  ]);
+  const chatRows = await db
+    .select()
+    .from(courseChatMessages)
+    .where(eq(courseChatMessages.courseId, course.id))
+    .orderBy(asc(courseChatMessages.sequence));
 
   return {
     ...course,
-    pages: pageRows.map((row) => {
-      const page = toCoursePage(row);
-      const pageIndex = flatCoursePageIndex({
-        tocValue: rawToc,
-        chapterIndex: row.chapterIndex,
-        pageIndex: row.pageIndex,
-      });
-
-      return {
-        ...page,
-        chapterIndex: 0,
-        pageIndex,
-      };
-    }),
     chatMessages: chatRows.map(toCourseChatMessage),
   };
 }

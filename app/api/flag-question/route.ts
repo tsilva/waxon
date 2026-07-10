@@ -3,6 +3,7 @@ import {
   normalizeBoundedText,
   readJsonBodyWithLimit,
 } from "@/app/lib/apiLimits";
+import { QUESTION_TEXT_MAX_CHARS } from "@/app/lib/questionContract";
 import { flagQuestion } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
@@ -10,7 +11,6 @@ export const dynamic = "force-dynamic";
 
 const MAX_FLAG_BODY_BYTES = 4 * 1024;
 const MAX_QUESTION_ID_CHARS = 80;
-const MAX_QUESTION_CHARS = 1_200;
 
 export async function POST(request: Request) {
   const parsed = await readJsonBodyWithLimit(request, MAX_FLAG_BODY_BYTES);
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
 
   const question = normalizeBoundedText(payload?.question, {
     field: "question",
-    maxLength: MAX_QUESTION_CHARS,
+    maxLength: QUESTION_TEXT_MAX_CHARS,
     required: true,
   });
 

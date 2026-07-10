@@ -18,6 +18,8 @@ export function resolveOpenRouterModel(input: {
   requireConfigured?: boolean;
 }): string | null;
 
+export function resolveEmbeddingModel(env?: OpenRouterEnvironment): string;
+
 export function buildOpenRouterHeaders(
   apiKey: string,
   env?: OpenRouterEnvironment,

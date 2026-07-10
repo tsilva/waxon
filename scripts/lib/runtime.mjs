@@ -5,13 +5,17 @@ import {
   OPENROUTER_CHAT_URL,
   OPENROUTER_EMBEDDINGS_URL,
   resolveOpenRouterApiKey,
+  resolveEmbeddingModel,
   resolveOpenRouterModel,
 } from "../../shared/openrouter-config.mjs";
+export { extractOpenRouterChatText } from "../../shared/openrouter-chat-text.mjs";
+export { vectorLiteral } from "../../shared/vector-literal.mjs";
 
 export {
   DEFAULT_EMBEDDING_MODEL,
   OPENROUTER_CHAT_URL,
   OPENROUTER_EMBEDDINGS_URL,
+  resolveEmbeddingModel,
 };
 
 export function loadLocalEnvFiles(files = [".env", ".env.local"]) {
@@ -88,37 +92,6 @@ export async function fetchOpenRouterJson(
   return response.json();
 }
 
-export function extractOpenRouterChatText(body) {
-  const content = body?.choices?.[0]?.message?.content;
-
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  return content
-    .map((part) => {
-      if (typeof part === "string") {
-        return part;
-      }
-
-      if (part && typeof part === "object") {
-        return typeof part.text === "string"
-          ? part.text
-          : typeof part.content === "string"
-            ? part.content
-            : "";
-      }
-
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
 export function createDatabasePool(Pool) {
   const connectionString = requireEnv("DATABASE_URL_UNPOOLED", "DATABASE_URL");
 
@@ -137,8 +110,4 @@ export function chunks(items, size) {
   }
 
   return result;
-}
-
-export function vectorLiteral(embedding) {
-  return `[${embedding.join(",")}]`;
 }

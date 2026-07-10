@@ -9,10 +9,9 @@ import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
-  DEFAULT_EMBEDDING_MODEL,
+  resolveEmbeddingModel,
 } from "@/app/lib/embeddingSource";
 import { getCurrentUser } from "@/app/lib/auth";
-import { ensureQuestionsDatabase } from "@/app/lib/postgresStore";
 import {
   extractChatCompletionText,
   getOpenRouterChatConfig,
@@ -21,6 +20,12 @@ import {
 } from "@/app/lib/openRouter";
 import { extractJsonObject } from "@/app/lib/jsonObject";
 import { getQuestionQualityReference } from "@/app/lib/questionQualityReference";
+import {
+  CONCISE_ANSWER_MAX_CHARS,
+  QUESTION_GENERATION_DEFAULT_COUNT,
+  QUESTION_GENERATION_MAX_COUNT,
+  QUESTION_TEXT_MAX_CHARS,
+} from "@/app/lib/questionContract";
 import { normalizeQuestionDraft } from "@/app/lib/questionDraft";
 import { vectorLiteral } from "@/app/lib/vectorLiteral";
 
@@ -35,16 +40,14 @@ const MAX_FILE_CONTENT_CHARS = 20_000;
 const MAX_TOTAL_FILE_CONTENT_CHARS = 32_000;
 const MAX_DIFFICULTY_CHARS = 40;
 const MAX_EXISTING_QUESTION_COUNT = 200;
-const MAX_EXISTING_QUESTION_CHARS = 1_200;
+const MAX_EXISTING_QUESTION_CHARS = QUESTION_TEXT_MAX_CHARS;
 const MAX_MODAL_QUESTION_COUNT = 120;
-const MAX_MODAL_CONCISE_ANSWER_CHARS = 800;
+const MAX_MODAL_CONCISE_ANSWER_CHARS = CONCISE_ANSWER_MAX_CHARS;
 const MAX_MODAL_COVERAGE_LABEL_CHARS = 240;
 const MAX_CONTEXT_CHARS = 32_000;
 const MAX_SUMMARY_CHARS = 1_600;
 const MAX_DIRECT_GENERATION_CONTEXT_CHARS = 6_000;
 const MAX_GENERATION_CONTEXT_EXCERPT_CHARS = 12_000;
-const DEFAULT_QUESTION_COUNT = 5;
-const MAX_QUESTION_COUNT = 10;
 const GENERATION_NEIGHBOR_COUNT = 32;
 const GENERATION_CONTEXT_SUMMARY_SYSTEM_PROMPT = [
   "Summarize desired flashcard coverage scope for semantic retrieval.",
@@ -90,13 +93,16 @@ function normalizeQuestionCount(value: unknown): number {
       ? value
       : typeof value === "string"
         ? Number.parseInt(value, 10)
-        : DEFAULT_QUESTION_COUNT;
+        : QUESTION_GENERATION_DEFAULT_COUNT;
 
   if (!Number.isFinite(numericValue)) {
-    return DEFAULT_QUESTION_COUNT;
+    return QUESTION_GENERATION_DEFAULT_COUNT;
   }
 
-  return Math.min(MAX_QUESTION_COUNT, Math.max(1, Math.round(numericValue)));
+  return Math.min(
+    QUESTION_GENERATION_MAX_COUNT,
+    Math.max(1, Math.round(numericValue)),
+  );
 }
 
 function normalizeText(value: unknown): string {
@@ -432,7 +438,7 @@ async function fetchSummaryEmbedding(input: {
       userId: input.userId,
     },
     body: {
-      model: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+      model: resolveEmbeddingModel(),
       input: [input.summary],
       encoding_format: "float",
     },
@@ -493,7 +499,7 @@ async function loadGenerationNeighbors(input: {
     [
       vectorLiteral(embedding),
       input.userId,
-      process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+      resolveEmbeddingModel(),
       DEDUPE_EMBEDDING_KIND,
       DEDUPE_SOURCE_VERSION,
       GENERATION_NEIGHBOR_COUNT,
@@ -586,8 +592,6 @@ export async function POST(request: Request) {
   if (rateLimitResponse) {
     return rateLimitResponse;
   }
-
-  await ensureQuestionsDatabase();
 
   const context = buildContext({ scope: scope.value, files: files.value });
   const contextSummary =

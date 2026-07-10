@@ -12,6 +12,7 @@ import {
   resolveOpenRouterApiKey,
   resolveOpenRouterModel,
 } from "../../shared/openrouter-config.mjs";
+export { extractChatCompletionText } from "../../shared/openrouter-chat-text.mjs";
 
 export {
   DEFAULT_OPENROUTER_CHAT_MODEL,
@@ -210,33 +211,6 @@ export function getOpenRouterLearnConfig(input: {
   }
 
   return { ok: true, apiKey, model };
-}
-
-export function extractChatCompletionText(response: unknown): string {
-  const body = response as {
-    choices?: Array<{
-      message?: {
-        content?: unknown;
-      };
-    }>;
-  };
-  const content = body.choices?.[0]?.message?.content;
-
-  if (typeof content === "string") {
-    return content.trim();
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        const candidate = part as { text?: unknown };
-        return typeof candidate.text === "string" ? candidate.text : "";
-      })
-      .join("")
-      .trim();
-  }
-
-  return "";
 }
 
 export function extractChatCompletionToolCalls(

@@ -12,9 +12,9 @@ import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
-  DEFAULT_EMBEDDING_MODEL,
   buildQuestionDedupeSource,
   questionDedupeSourceHash,
+  resolveEmbeddingModel,
 } from "./embeddingSource";
 import { generateConciseAnswers } from "./conciseAnswer";
 import { extractJsonObject } from "./jsonObject";
@@ -144,7 +144,7 @@ async function fetchEmbeddings(
       question: trace.question,
     },
     body: {
-      model: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+      model: resolveEmbeddingModel(),
       input,
       encoding_format: "float",
     },
@@ -255,7 +255,7 @@ async function loadExternalNeighbors(
 
   params.push(
     userId,
-    process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+    resolveEmbeddingModel(),
     DEDUPE_EMBEDDING_KIND,
     DEDUPE_SOURCE_VERSION,
     NEIGHBOR_COUNT,
