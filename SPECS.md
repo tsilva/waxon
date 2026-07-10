@@ -1,86 +1,58 @@
-# Project Specs
+## PURPOSE
 
-Durable product requirements for this project. Read this file before every task in this repo. After every task, update it when a durable requirement was learned, changed, or dropped.
+Waxon is a multi-user, chat-first LLM tutor for people learning any technical or non-technical topic. A learner states a goal, and the tutor turns that goal into an adaptive course that teaches one section at a time, checks understanding with questions, and advances only when the learner is ready.
 
-## Product Summary
+Learn must build understanding in the minimum effective time and interactions. Every answered Learn question must become a durable review item in one unified question bank, and Review must resurface free-text recall questions according to the learner's past performance so that daily practice maintains a large body of knowledge with minimal effort.
 
-This project is a chat-first LLM tutor for learning any topic. The user says what they want to learn; the tutor clarifies if needed, generates a table of contents, teaches one section at a time, asks a fresh question through a tool-rendered widget, evaluates the answer, and advances only when the tutor judges the learner is ready. The Learn flow should feel like one fast, natural LLM conversation with tool access, not a set of hidden app-side workflows.
+## REQUIREMENTS
 
-Every answered Learn question becomes a durable review item in one unified, tagged question bank with its evaluation data. Review then resurfaces due free-text recall questions on a performance-based retention schedule, so the user can build and retain a large body of knowledge with the minimum effective learning and review time.
-
-## Spec Maintenance Rules
-
-- Keep this file compact, product-facing, and non-redundant.
-- Keep the product summary accurate as the product direction changes.
-- Add new durable requirements when the user states them or a task reveals them.
-- Remove or rewrite requirements when they are dropped, superseded, duplicated, or stale.
-- Prefer merging related bullets over appending near-duplicates.
-- Keep transient implementation notes, experiments, and one-off debugging details out of this file.
-- Move detailed guidance to linked references or skills when detail is still needed.
-
-## Product Scope
-
-- The product should support learning any topic, including technical topics like AI/ML and non-technical topics like languages.
-- Current testing is mostly deep learning and AI/ML, but product decisions should not overfit to that domain.
-- The learner should learn content in the minimum effective time and interactions.
-- Production should support multiple users.
-- Local agent testing should use the local TCLV/Tiago test account and the current shared production database unless explicitly changed.
-- Because local testing uses the shared production database for now, agents must avoid destructive data actions unless the user explicitly allows them.
-
-## Learn Flow
-
-- Learn is driven by a generated table of contents for the requested topic.
-- The Learn transcript is the source of truth; do not rewrite, fork, summarize, compact, or otherwise hack the conversation.
-- If context is exhausted, show a clear "course is too long to continue" error.
-- Tutor prose should be informal, direct, accurate, simple, structured, sequential, and use helpful metaphors when they clarify.
-- Internal course objectives, widget-planning directives, and next-question targets must not be shown as learner-facing prose.
-- Tutor turns with question widgets must include substantive visible teaching prose; do not accept or store objective-only fallback text as a completed lesson.
-- The tutor should generally ask one fresh question per turn; do not add a special resurfacing flow for previous Learn questions.
-- Weak answers should keep the tutor on the same section or revisit prior prerequisite ideas before returning to the current section.
-- Advancement is based on tutor judgment that the learner is ready, not on a hard score threshold.
-- Section advancement only moves forward. A course completes when the tutor advances past the final table-of-contents section.
-- Learn optimizes for completing the table of contents; durable retention drilling belongs to Review.
-- After a learner answers a widget, render that answered turn as a pending or resolved question-evaluation row rather than leaving the answer widget visible; the newest unanswered widget should remain enabled.
-
-## Learn Architecture
-
-- Learn should be very fast; keep system prompts and stable instructions as small as possible.
-- Preserve a stable conversation prefix to maximize prompt caching, reduce cost, and reduce latency.
-- Prompt-cache optimization is important but must not degrade teaching quality, accuracy, section-readiness decisions, or the conversation model.
-- Rendering should be an intelligent interpretation of the conversation: assistant messages, tool calls, and tool responses determine what the UI shows.
-- The LLM interacts with the app through tool calls: generate the table of contents, render a question widget, save/evaluate a review question, record section advancement, and complete the course.
-- User answers to question widgets should enter the conversation as tool responses to the question tool call.
-- Answer evaluation and lesson continuation should use the fewest LLM calls possible; prefer one call when the tool protocol can support it.
-- Evaluation/persistence should be represented through tool calls that store a free-text review question plus answer/evaluation data after the learner answers.
-- Section advancement should be emitted by the LLM through the conversation's tool protocol, preferably in the same call as the next teaching/question turn when possible.
-- Keep Learn orchestration inside the tool-call conversation model; avoid app-side workarounds that create hidden parallel teaching or evaluation flows.
-- Non-teaching background jobs are allowed for embeddings, tags, provenance, and other persistence work when they reduce latency and do not alter the Learn transcript or block the UX.
-
-## Question Library
-
-- The app uses one unified question bank; topics and sources are organized with tags and provenance.
-- Learn questions should be added to the question library only after the learner answers them, so the stored review item already has answer/evaluation data and the flow can remain a single-call continuation.
-- Learn widgets may use multiple choice when useful, but durable review questions should be stored and resurfaced as free-text recall prompts.
-- Tags and provenance can be generated after the question is saved and must not delay the learning flow.
-- Question provenance should make it clear where a question came from, including Learn course and section context.
-- Knowledge-base questions and probing questions must follow `reference/question-quality.md`.
-
-## Review
-
-- Review presents questions from the question library when they are due.
-- Review questions should be free-text recall only for now.
-- Scheduling should push repeatedly correct answers farther into the future and bring failed or weak answers back sooner.
-- Failed review questions should reappear later in the same session, but not immediately as the next question.
-- Review should prioritize questions the user is likely to have forgotten or not fully understood.
-
-## Auth
-
-- Sign-in and sign-up routes must render functional Clerk hosted UI components.
-- Auth fixes should be verified on the actual sign-in/sign-up flow before treating the issue as resolved.
-- Local product-flow checks do not need to verify sign-in or sign-up; they should use the local TCLV/Tiago user and verify access to Review, Learn, Tags, and Admin when those areas are relevant.
-
-## UI
-
-- UI changes must follow `design-reference/design-system.md`.
-- Visual fidelity changes must compare against `design-reference/waxon-approved-ui.png` and update `design-reference/fidelity-ledger.md` when the comparison changes.
-- Tag badges should be squared with only a tiny corner radius, not pill-shaped.
+- This file must contain only durable, product-facing requirements; transient implementation notes, experiments, and debugging details must remain outside it.
+- A durable requirement must be added, rewritten, or removed when product intent changes, and overlapping requirements must be consolidated rather than duplicated.
+- Detailed operational guidance must live in the relevant reference or skill when it is necessary but too specific for this contract.
+- Waxon must support learning any topic, and product behavior must not be specialized to the AI/ML topics used most often during current testing.
+- Production must support multiple users without mixing their learning data.
+- Local agent product testing must use the local TCLV/Tiago account and the current shared production database unless the user explicitly chooses another setup.
+- Agents must not perform destructive actions against the shared production database without explicit user authorization.
+- The tutor must ask for clarification when the learner's goal is too ambiguous to generate a coherent course structure.
+- Learn must generate a table of contents for the learner's requested topic and use it as the forward course structure.
+- The Learn transcript must remain the source of truth and must not be rewritten, forked, summarized, compacted, or replaced by a parallel representation.
+- When the transcript can no longer fit within the available model context, Learn must show a clear "course is too long to continue" error rather than altering the transcript.
+- Learner-facing tutor prose must be accurate, direct, informal, written in plain language, and ordered so that each idea prepares the learner for the next; metaphors must appear only when they clarify the material.
+- Learner-facing prose must not expose internal objectives, widget-planning instructions, or next-question targets.
+- A tutor turn that renders a question widget must also contain substantive teaching prose; objective-only or planning-only fallback text must not be accepted or stored as a completed lesson.
+- A normal tutor turn must default to one fresh question, and Learn must not add a separate flow for resurfacing previously asked Learn questions.
+- After a weak answer, the tutor must remain on the current section or revisit a missing prerequisite before returning to that section.
+- The tutor must decide section readiness from the learner's demonstrated understanding rather than from a fixed numeric score threshold.
+- Section progress must move only forward through the table of contents.
+- A course must complete only after the tutor advances beyond the final table-of-contents section.
+- Learn must optimize for completing the table of contents; repeated retention practice must remain the responsibility of Review.
+- After the learner answers a widget, that turn must render as a pending or resolved question-evaluation row rather than as an answerable widget.
+- Only the newest unanswered question widget may remain enabled.
+- Learn prompts and stable instructions must not contain redundant content that adds latency or reduces prompt-cache reuse.
+- Learn must preserve a stable conversation prefix across turns so the model provider can reuse cached prompt content.
+- Latency, cost, or prompt-cache optimizations must not weaken teaching accuracy, teaching quality, readiness decisions, or the single-conversation model.
+- The rendered Learn UI must be derived from assistant messages, tool calls, and tool responses in the transcript.
+- The tutor must use conversation tool calls to generate the table of contents, render a question widget, save and evaluate a review question, record section advancement, and complete the course.
+- A learner's widget answer must enter the transcript as the tool response to that widget's tool call.
+- When the tool protocol can return evaluation, persistence, advancement, and lesson continuation together, Learn must handle them in one LLM call rather than adding separate calls.
+- Evaluation persistence must store a free-text review question together with the learner's answer and its evaluation through the conversation tool protocol.
+- Section advancement must be emitted by the tutor through the conversation tool protocol and included with the next teaching turn when the protocol can carry both.
+- Teaching, evaluation, and course progression must remain inside one tool-call conversation and must not be duplicated by hidden app-side workflows.
+- Background work may generate embeddings, tags, provenance, or other non-teaching metadata only when it neither alters the Learn transcript nor blocks the learner's next interaction.
+- Waxon must use one unified question bank, with tags and provenance distinguishing topics and sources.
+- Every Learn question must enter the question bank after the learner answers it, never before, and the saved item must include the answer and evaluation data.
+- Learn question widgets may use multiple choice when it benefits instruction, but every saved and resurfaced review item must be a free-text recall question.
+- Tag and provenance generation must not block question saving or the next Learn interaction.
+- A saved question's provenance must identify its source, including its Learn course and section when it originated in Learn.
+- Knowledge-base and probing questions must satisfy `reference/question-quality.md`.
+- Review must present question-bank items when they are due under the retention schedule.
+- Review must accept free-text recall answers only.
+- The retention schedule must assign longer intervals after repeated correct answers and shorter intervals after failed or weak answers.
+- A failed Review question must reappear later in the same session but must not be the immediately following question.
+- Review ordering must prioritize due questions whose performance history indicates that the learner is most likely to have forgotten or incompletely understood them.
+- Sign-in and sign-up routes must render functional Clerk-hosted authentication components.
+- An authentication fix is not accepted until the actual sign-in and sign-up flows have been verified.
+- Local product-flow checks may bypass sign-in and sign-up, but they must use the local TCLV/Tiago user and verify access to Review, Learn, Tags, and Admin whenever those areas are in scope.
+- UI changes must conform to `design-reference/design-system.md`.
+- Visual-fidelity changes must be compared with `design-reference/waxon-approved-ui.png`, and `design-reference/fidelity-ledger.md` must be updated whenever that comparison changes.
+- Tag badges must have square proportions with only a minimal corner radius and must not use a pill shape.

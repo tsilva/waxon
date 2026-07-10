@@ -119,6 +119,10 @@ export async function GET(request: Request) {
       url.searchParams.get("includeRecentAttempts"),
       false,
     ),
+    includeEvaluations: isEnabled(
+      url.searchParams.get("includeEvaluations"),
+      true,
+    ),
     includeKnowledgeEmbeddingPlot: isEnabled(
       url.searchParams.get("includeKnowledgeEmbeddingPlot"),
       false,

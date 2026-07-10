@@ -368,6 +368,11 @@ export const courses = pgTable(
       table.status,
       table.updatedAt.desc(),
     ),
+    index("courses_user_updated_id_idx").on(
+      table.userId,
+      table.updatedAt.desc(),
+      table.id.desc(),
+    ),
     check("courses_topic_prompt_nonempty_check", sql`length(trim(${table.topicPrompt})) > 0`),
     check("courses_title_nonempty_check", sql`length(trim(${table.title})) > 0`),
     check(

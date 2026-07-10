@@ -91,6 +91,7 @@ type QueueStatusInput = {
   includeQuestionAttempts?: boolean;
   includeRecentAttempts?: boolean;
   recentAttemptsLimit?: number;
+  includeEvaluations?: boolean;
   includeKnowledgeEmbeddingPlot?: boolean;
   includeQueueCounts?: boolean;
 };
@@ -1348,6 +1349,7 @@ export async function queueStatusForUser(
   const sortKey = input.sortKey ?? "review-date";
   const includeReviewQueue = input.includeReviewQueue ?? true;
   const includeRecentAttempts = input.includeRecentAttempts ?? true;
+  const includeEvaluations = input.includeEvaluations ?? true;
   const includeQueueCounts = input.includeQueueCounts ?? true;
   const excludeQuestionIds = Array.from(state.inFlightQuestionKeys).filter(
     (key) => !key.startsWith("question:"),
@@ -1368,12 +1370,14 @@ export async function queueStatusForUser(
         limit: Math.max(0, Math.floor(input.recentAttemptsLimit ?? 24)),
       })
     : Promise.resolve([]);
-  const persistedEvaluationsPromise = getVisibleAnswerEvaluations({
-    userId,
-    activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
-    resolvedSince: now - RESOLVED_JUDGING_VISIBLE_MS,
-    limit: 50,
-  });
+  const persistedEvaluationsPromise = includeEvaluations
+    ? getVisibleAnswerEvaluations({
+        userId,
+        activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
+        resolvedSince: now - RESOLVED_JUDGING_VISIBLE_MS,
+        limit: 50,
+      })
+    : Promise.resolve([]);
   const queueRemainingPromise = includeQueueCounts
     ? countDueQuestions(now, {
         userId,
@@ -1415,11 +1419,10 @@ export async function queueStatusForUser(
   return {
     queueRemaining: queueRemaining ?? 0,
     nextScheduledDue,
-    pendingEvaluations: state.pendingEvaluations,
-    evaluations: mergeEvaluationItems(
-      getVisibleEvaluations(state, now),
-      persistedEvaluations,
-    ),
+    pendingEvaluations: includeEvaluations ? state.pendingEvaluations : 0,
+    evaluations: includeEvaluations
+      ? mergeEvaluationItems(getVisibleEvaluations(state, now), persistedEvaluations)
+      : [],
     recentAttempts,
     reviewQueue: reviewQueuePage.items,
     reviewQueueTotal: reviewQueuePage.total,

@@ -50,12 +50,11 @@ export type CourseToc = {
   }>;
 };
 
-export type Course = {
+export type CourseListItem = {
   id: string;
   topicPrompt: string;
   title: string;
   description: string;
-  toc: CourseToc;
   status: "active" | "completed";
   currentChapterIndex: number;
   currentPageIndex: number;
@@ -65,10 +64,14 @@ export type Course = {
   conversationCost: number;
   createdAt: number;
   updatedAt: number;
+};
+
+export type Course = CourseListItem & {
+  toc: CourseToc;
   chatMessages?: StoredCourseChatMessage[];
 };
 
-type StoredCourseChatMessage = {
+export type StoredCourseChatMessage = {
   id?: string;
   role: "assistant" | "user";
   content: string;
@@ -79,7 +82,7 @@ type StoredCourseChatMessage = {
   createdAt?: number;
 };
 
-type StoredCourseChatEvaluation = {
+export type StoredCourseChatEvaluation = {
   questionId: string | null;
   question: string;
   correctAnswer: string | null;
@@ -109,12 +112,13 @@ type LearnChatMessage = {
   createdAt?: number;
 };
 
-type LearnPageClientProps = {
+export type LearnPageClientProps = {
   initialCourseId?: string;
   initialCoursesArePartial?: boolean;
-  initialCourses?: Course[] | null;
+  initialCourses?: CourseListItem[] | null;
   initialCurrentUser?: UserProfile | null;
-  initialDueCount?: number;
+  initialDueCount?: number | null;
+  initialIsStartingNewCourse?: boolean;
   initialSelectedCourse?: Course | null;
 };
 
@@ -124,7 +128,7 @@ type CourseListCursor = {
 };
 
 type CoursesPageResponse = {
-  courses?: Course[];
+  courses?: CourseListItem[];
   hasMore?: boolean;
   nextCursor?: CourseListCursor | null;
 };
@@ -176,6 +180,8 @@ const COURSE_LIST_DESKTOP_VERTICAL_CHROME_PX = 195;
 const COURSE_LIST_MOBILE_VERTICAL_CHROME_PX = 208;
 const COURSE_LIST_DESKTOP_ROW_PITCH_PX = 80;
 const COURSE_LIST_MOBILE_ROW_PITCH_PX = 150;
+const REVIEW_COUNT_URL =
+  "/api/queue-status?mode=review&includeReviewQueue=0&includeRecentAttempts=0&includeQuestionAttempts=0&includeEvaluations=0&includeKnowledgeEmbeddingPlot=0&includeQueueCounts=1";
 
 const COURSE_UPDATED_FORMATTER = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -628,7 +634,7 @@ function storedMessageToLearnMessage(
   };
 }
 
-function courseProgressLabel(course: Course): string {
+function courseProgressLabel(course: CourseListItem): string {
   if (course.status === "completed") {
     return "Completed";
   }
@@ -1020,6 +1026,7 @@ export default function LearnPageClient({
   initialCourses,
   initialCurrentUser,
   initialDueCount,
+  initialIsStartingNewCourse = false,
   initialSelectedCourse,
 }: LearnPageClientProps = {}) {
   const [topic, setTopic] = useState("");
@@ -1031,7 +1038,7 @@ export default function LearnPageClient({
   const [expandedLearnEvaluationIds, setExpandedLearnEvaluationIds] = useState<
     Set<string>
   >(() => new Set());
-  const [courses, setCourses] = useState<Course[]>(() => initialCourses ?? []);
+  const [courses, setCourses] = useState<CourseListItem[]>(() => initialCourses ?? []);
   const [courseListCursor, setCourseListCursor] =
     useState<CourseListCursor | null>(null);
   const [hasMoreCourses, setHasMoreCourses] = useState(false);
@@ -1050,11 +1057,13 @@ export default function LearnPageClient({
   const [rawPromptPreviewError, setRawPromptPreviewError] =
     useState<string | null>(null);
   const [draftCourseToc, setDraftCourseToc] = useState<CourseToc | null>(null);
-  const [isStartingNewCourse, setIsStartingNewCourse] = useState(false);
+  const [isStartingNewCourse, setIsStartingNewCourse] = useState(
+    initialIsStartingNewCourse,
+  );
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(
     initialCurrentUser ?? null,
   );
-  const [dueCount, setDueCount] = useState(initialDueCount ?? 0);
+  const [dueCount, setDueCount] = useState<number | null>(initialDueCount ?? null);
   const [isBooting, setIsBooting] = useState(!initialCourses);
   const [loadingCourseId, setLoadingCourseId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -1311,20 +1320,10 @@ export default function LearnPageClient({
               cache: "no-store",
             })
           : Promise.resolve(null);
-        const [userResponse, queueResponse, coursesResponse, courseResponse] =
-          await Promise.all([
-            fetch("/api/user", { cache: "no-store" }),
-            fetch(
-              "/api/queue-status?mode=review&includeReviewQueue=0&includeRecentAttempts=0&includeQuestionAttempts=0&includeKnowledgeEmbeddingPlot=0&includeQueueCounts=1",
-              { cache: "no-store" },
-            ),
-            coursesResponsePromise,
-            courseResponsePromise,
-          ]);
-        const userData = await readApiJson<UserProfile>(userResponse);
-        const queueData = (await readApiJson<{ queueRemaining?: number }>(
-          queueResponse,
-        )) as { queueRemaining?: number };
+        const [coursesResponse, courseResponse] = await Promise.all([
+          coursesResponsePromise,
+          courseResponsePromise,
+        ]);
         const coursesData = coursesResponse
           ? await readApiJson<CoursesPageResponse>(coursesResponse)
           : null;
@@ -1336,8 +1335,6 @@ export default function LearnPageClient({
           return;
         }
 
-        setCurrentUser(userData);
-        setDueCount(queueData.queueRemaining ?? 0);
         if (coursesData) {
           applyCoursesPage(coursesData, "replace");
           setActiveCourseSearchQuery("");
@@ -1371,9 +1368,69 @@ export default function LearnPageClient({
     initialCourseId,
     initialCourses,
     initialCoursesArePartial,
-    initialCurrentUser,
+    initialIsStartingNewCourse,
     initialSelectedCourse,
   ]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (initialCurrentUser) {
+      setCurrentUser(initialCurrentUser);
+    }
+
+    if (initialDueCount !== undefined) {
+      setDueCount(initialDueCount);
+    }
+
+    async function bootToolbarMetadata() {
+      const shouldFetchUser = !initialCurrentUser;
+      const shouldFetchQueueCount = initialDueCount === undefined;
+
+      if (!shouldFetchUser && !shouldFetchQueueCount) {
+        return;
+      }
+
+      try {
+        const [userResponse, queueResponse] = await Promise.all([
+          shouldFetchUser
+            ? fetch("/api/user", { cache: "no-store" })
+            : Promise.resolve(null),
+          shouldFetchQueueCount
+            ? fetch(REVIEW_COUNT_URL, { cache: "no-store" })
+            : Promise.resolve(null),
+        ]);
+        const userData = userResponse
+          ? await readApiJson<UserProfile>(userResponse)
+          : null;
+        const queueData = queueResponse
+          ? await readApiJson<{ queueRemaining?: number }>(queueResponse)
+          : null;
+
+        if (isCancelled) {
+          return;
+        }
+
+        if (userData) {
+          setCurrentUser(userData);
+        }
+
+        if (queueData) {
+          setDueCount(queueData.queueRemaining ?? 0);
+        }
+      } catch {
+        if (!isCancelled && initialDueCount === undefined) {
+          setDueCount(null);
+        }
+      }
+    }
+
+    void bootToolbarMetadata();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [initialCurrentUser, initialDueCount]);
 
   useEffect(() => {
     if (isBooting) {
@@ -1764,7 +1821,7 @@ export default function LearnPageClient({
     updateLearnHistory("/learn", "push");
   }
 
-  function openCourseSettings(course: Course) {
+  function openCourseSettings(course: CourseListItem) {
     if (isStreaming || loadingCourseId) {
       return;
     }
