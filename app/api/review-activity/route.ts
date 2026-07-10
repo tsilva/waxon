@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { reviewActivity } from "@/app/lib/reviewQueue";
+import { getCurrentUser } from "@/app/lib/auth";
+import { reviewActivityForUser } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,9 +11,10 @@ export async function GET(request: Request) {
     url.searchParams.get("recentAttemptsLimit") ?? "",
     10,
   );
+  const user = await getCurrentUser();
 
   return NextResponse.json(
-    await reviewActivity({
+    await reviewActivityForUser(user.id, {
       recentAttemptsLimit: Number.isFinite(recentAttemptsLimit)
         ? recentAttemptsLimit
         : undefined,

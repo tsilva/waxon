@@ -31,8 +31,12 @@ import {
 } from "./courseQuestionAttemptParsing.ts";
 import {
   COURSE_ANSWER_DECISION_TOOL_NAME,
+  COURSE_ANSWER_DECISION_TOOL,
+  COURSE_JSON_RESPONSE_FORMAT,
   COURSE_QUESTION_WIDGET_TOOL_NAME,
+  COURSE_QUESTION_WIDGET_TOOL,
   COURSE_TOC_TOOL_NAME,
+  COURSE_TOC_TOOL,
   courseQuestionWidgetToolCallFromWidget,
   courseQuestionWidgetsFromToolCalls,
   formatCourseQuestionWidgetsForPrompt,
@@ -40,6 +44,7 @@ import {
   type CourseAnswerDecisionToolCall,
   type CourseQuestionWidget,
   type CourseQuestionWidgetAnswerDetails,
+  type CourseProgressDecision,
   type CourseToolCall,
   type CourseQuestionWidgetToolCall,
 } from "./courseQuestionWidget.ts";
@@ -52,206 +57,11 @@ import type {
   CourseChatMessageEvaluation,
   CourseDetail,
 } from "./courseStore";
-import type { CourseProgressDecision } from "./courseProgress.ts";
 import {
   loadPromptTemplate,
   renderPromptTemplate,
 } from "./promptTemplates.ts";
 
-const COURSE_JSON_RESPONSE_FORMAT = { type: "json_object" };
-const COURSE_QUESTION_WIDGET_TOOL = {
-  type: "function",
-  function: {
-    name: COURSE_QUESTION_WIDGET_TOOL_NAME,
-    description:
-      "Render one learner-facing question widget after the tutor explanation.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        type: {
-          type: "string",
-          enum: ["free_text", "multiple_choice"],
-        },
-        id: {
-          type: "string",
-          description: "Short stable identifier for this question.",
-        },
-        question: {
-          type: "string",
-          description: "Self-contained learner-facing question.",
-        },
-        placeholder: {
-          type: "string",
-          description: "Placeholder text for free-text widgets.",
-        },
-        choices: {
-          type: "array",
-          description:
-            "Answer choices for multiple-choice widgets. Use A, B, C, D ids.",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              id: {
-                type: "string",
-                description: "Choice id such as A, B, C, or D.",
-              },
-              text: {
-                type: "string",
-                description: "Choice text.",
-              },
-            },
-            required: ["id", "text"],
-          },
-        },
-      },
-      required: ["type", "id", "question"],
-    },
-  },
-} as const;
-const COURSE_TOC_TOOL = {
-  type: "function",
-  function: {
-    name: COURSE_TOC_TOOL_NAME,
-    description:
-      "Generate the learner-facing table of contents for a new Learn course.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        topic: {
-          type: "string",
-          description: "The learner's requested course topic.",
-        },
-        toc: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            title: {
-              type: "string",
-              description: "Specific course title.",
-            },
-            description: {
-              type: "string",
-              description: "Short course description.",
-            },
-            pages: {
-              type: "array",
-              description:
-                "Flat course pages. Do not group pages into chapters or sections.",
-              minItems: 6,
-              maxItems: 16,
-              items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  title: {
-                    type: "string",
-                    description: "Specific page title.",
-                  },
-                  objective: {
-                    type: "string",
-                    description:
-                      "Learner-facing objective for this page.",
-                  },
-                },
-                required: ["title", "objective"],
-              },
-            },
-          },
-          required: ["title", "description", "pages"],
-        },
-      },
-      required: ["topic", "toc"],
-    },
-  },
-} as const;
-const COURSE_ANSWER_DECISION_TOOL = {
-  type: "function",
-  function: {
-    name: COURSE_ANSWER_DECISION_TOOL_NAME,
-    description:
-      "Record the learner's latest answer evaluation and decide whether the current course milestone is complete.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        questionAttempt: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            toolCall: {
-              type: "string",
-              enum: [
-                "record_course_question_attempt",
-                "skip_course_question_attempt",
-              ],
-            },
-            question: {
-              type: "string",
-              description: "Self-contained recall prompt being answered.",
-            },
-            answer: {
-              type: "string",
-              description: "Learner's submitted answer.",
-            },
-            answerSummary: {
-              type: "string",
-              description: "Short summary of the learner answer.",
-            },
-            conciseAnswer: {
-              type: "string",
-              description: "Concise model-normalized answer.",
-            },
-            correctAnswer: {
-              type: "string",
-              description: "Concise ideal answer.",
-            },
-            justification: {
-              type: "string",
-              description: "Brief grading reason.",
-            },
-            score: {
-              type: "number",
-              minimum: 0,
-              maximum: 10,
-            },
-            reason: {
-              type: "string",
-              description: "Reason when skipping.",
-            },
-          },
-          required: [
-            "toolCall",
-            "question",
-            "answer",
-            "answerSummary",
-            "conciseAnswer",
-            "correctAnswer",
-            "justification",
-            "score",
-          ],
-        },
-        progressDecision: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            toolCall: {
-              type: "string",
-              enum: ["mark_milestone_done", "continue_current_milestone"],
-            },
-            reason: {
-              type: "string",
-            },
-          },
-          required: ["toolCall", "reason"],
-        },
-      },
-      required: ["questionAttempt", "progressDecision"],
-    },
-  },
-} as const;
 const MAX_INTAKE_MESSAGE_CHARS = 500;
 const MAX_INTAKE_TOPIC_CHARS = 800;
 const COURSE_CHAT_TURN_MAX_TOKENS = 1_200;

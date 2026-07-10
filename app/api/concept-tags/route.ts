@@ -8,7 +8,6 @@ import {
   renameConceptTag,
   setConceptTagActive,
 } from "@/app/lib/conceptTags";
-import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 import { readJsonBodyWithLimit } from "@/app/lib/apiLimits";
 
 export const runtime = "nodejs";
@@ -59,7 +58,6 @@ export async function PATCH(request: Request) {
         active,
       });
 
-      invalidateReviewQueue(user.id);
       return NextResponse.json({ ok: true, conceptTag });
     }
 
@@ -70,7 +68,6 @@ export async function PATCH(request: Request) {
         toSlug: normalizeConceptSlug(payload.toSlug),
       });
 
-      invalidateReviewQueue(user.id);
       return NextResponse.json({ ok: true, conceptTag });
     }
 
@@ -81,7 +78,6 @@ export async function PATCH(request: Request) {
         toSlug: normalizeConceptSlug(payload.toSlug),
       });
 
-      invalidateReviewQueue(user.id);
       return NextResponse.json({ ok: true, conceptTag });
     }
 

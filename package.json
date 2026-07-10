@@ -8,7 +8,6 @@
   "scripts": {
     "dev": "node scripts/next-server.mjs dev",
     "build": "next build",
-    "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "answers:backfill-concise": "node scripts/backfill-concise-answers.mjs",

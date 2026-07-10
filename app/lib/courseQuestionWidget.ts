@@ -1,4 +1,8 @@
-import type { CourseToc } from "./courseContent";
+import {
+  COURSE_TOC_LIMITS,
+  STORED_COURSE_TOC_LIMITS,
+  type CourseToc,
+} from "./courseContent.ts";
 
 export type CourseQuestionWidgetChoice = {
   id: string;
@@ -23,6 +27,203 @@ export const COURSE_QUESTION_WIDGET_TOOL_NAME = "render_question_widget";
 export const COURSE_TOC_TOOL_NAME = "generate_course_toc";
 export const COURSE_ANSWER_DECISION_TOOL_NAME =
   "record_course_answer_decision";
+
+export const COURSE_JSON_RESPONSE_FORMAT = { type: "json_object" } as const;
+
+export const COURSE_QUESTION_WIDGET_TOOL = {
+  type: "function",
+  function: {
+    name: COURSE_QUESTION_WIDGET_TOOL_NAME,
+    description:
+      "Render one learner-facing question widget after the tutor explanation.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        type: {
+          type: "string",
+          enum: ["free_text", "multiple_choice"],
+        },
+        id: {
+          type: "string",
+          description: "Short stable identifier for this question.",
+        },
+        question: {
+          type: "string",
+          description: "Self-contained learner-facing question.",
+        },
+        placeholder: {
+          type: "string",
+          description: "Placeholder text for free-text widgets.",
+        },
+        choices: {
+          type: "array",
+          description:
+            "Answer choices for multiple-choice widgets. Use A, B, C, D ids.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: {
+                type: "string",
+                description: "Choice id such as A, B, C, or D.",
+              },
+              text: {
+                type: "string",
+                description: "Choice text.",
+              },
+            },
+            required: ["id", "text"],
+          },
+        },
+      },
+      required: ["type", "id", "question"],
+    },
+  },
+} as const;
+
+export const COURSE_TOC_TOOL = {
+  type: "function",
+  function: {
+    name: COURSE_TOC_TOOL_NAME,
+    description:
+      "Generate the learner-facing table of contents for a new Learn course.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        topic: {
+          type: "string",
+          description: "The learner's requested course topic.",
+        },
+        toc: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            title: {
+              type: "string",
+              description: "Specific course title.",
+            },
+            description: {
+              type: "string",
+              description: "Short course description.",
+            },
+            pages: {
+              type: "array",
+              description:
+                "Flat course pages. Do not group pages into chapters or sections.",
+              minItems: 6,
+              maxItems: COURSE_TOC_LIMITS.pages,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  title: {
+                    type: "string",
+                    description: "Specific page title.",
+                  },
+                  objective: {
+                    type: "string",
+                    description: "Learner-facing objective for this page.",
+                  },
+                },
+                required: ["title", "objective"],
+              },
+            },
+          },
+          required: ["title", "description", "pages"],
+        },
+      },
+      required: ["topic", "toc"],
+    },
+  },
+} as const;
+
+export const COURSE_ANSWER_DECISION_TOOL = {
+  type: "function",
+  function: {
+    name: COURSE_ANSWER_DECISION_TOOL_NAME,
+    description:
+      "Record the learner's latest answer evaluation and decide whether the current course milestone is complete.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        questionAttempt: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            toolCall: {
+              type: "string",
+              enum: [
+                "record_course_question_attempt",
+                "skip_course_question_attempt",
+              ],
+            },
+            question: {
+              type: "string",
+              description: "Self-contained recall prompt being answered.",
+            },
+            answer: {
+              type: "string",
+              description: "Learner's submitted answer.",
+            },
+            answerSummary: {
+              type: "string",
+              description: "Short summary of the learner answer.",
+            },
+            conciseAnswer: {
+              type: "string",
+              description: "Concise model-normalized answer.",
+            },
+            correctAnswer: {
+              type: "string",
+              description: "Concise ideal answer.",
+            },
+            justification: {
+              type: "string",
+              description: "Brief grading reason.",
+            },
+            score: {
+              type: "number",
+              minimum: 0,
+              maximum: 10,
+            },
+            reason: {
+              type: "string",
+              description: "Reason when skipping.",
+            },
+          },
+          required: [
+            "toolCall",
+            "question",
+            "answer",
+            "answerSummary",
+            "conciseAnswer",
+            "correctAnswer",
+            "justification",
+            "score",
+          ],
+        },
+        progressDecision: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            toolCall: {
+              type: "string",
+              enum: ["mark_milestone_done", "continue_current_milestone"],
+            },
+            reason: {
+              type: "string",
+            },
+          },
+          required: ["toolCall", "reason"],
+        },
+      },
+      required: ["questionAttempt", "progressDecision"],
+    },
+  },
+} as const;
 
 export type CourseQuestionWidgetToolCall = {
   id: string;
@@ -73,6 +274,9 @@ export type CourseAnswerDecisionToolCall = {
     };
   };
 };
+
+export type CourseProgressDecision =
+  CourseAnswerDecisionToolCall["function"]["arguments"]["progressDecision"];
 
 export type CourseToolCall =
   | CourseQuestionWidgetToolCall
@@ -198,7 +402,7 @@ function normalizeCourseTocToolCallArguments(value: unknown): CourseTocToolCall[
   }
 
   const record = parsed as Record<string, unknown>;
-  const topic = normalizeText(record.topic, 800);
+  const topic = normalizeText(record.topic, STORED_COURSE_TOC_LIMITS.topicChars);
   const toc = record.toc;
 
   if (!toc || typeof toc !== "object" || Array.isArray(toc)) {
@@ -206,8 +410,14 @@ function normalizeCourseTocToolCallArguments(value: unknown): CourseTocToolCall[
   }
 
   const tocRecord = toc as Record<string, unknown>;
-  const title = normalizeText(tocRecord.title, 240);
-  const description = normalizeText(tocRecord.description, 1_200);
+  const title = normalizeText(
+    tocRecord.title,
+    STORED_COURSE_TOC_LIMITS.titleChars,
+  );
+  const description = normalizeText(
+    tocRecord.description,
+    STORED_COURSE_TOC_LIMITS.descriptionChars,
+  );
   const pages = Array.isArray(tocRecord.pages)
     ? tocRecord.pages.flatMap((page) => {
         if (!page || typeof page !== "object" || Array.isArray(page)) {
@@ -215,8 +425,14 @@ function normalizeCourseTocToolCallArguments(value: unknown): CourseTocToolCall[
         }
 
         const pageRecord = page as Record<string, unknown>;
-        const pageTitle = normalizeText(pageRecord.title, 240);
-        const objective = normalizeText(pageRecord.objective, 1_200);
+        const pageTitle = normalizeText(
+          pageRecord.title,
+          STORED_COURSE_TOC_LIMITS.pageTitleChars,
+        );
+        const objective = normalizeText(
+          pageRecord.objective,
+          STORED_COURSE_TOC_LIMITS.objectiveChars,
+        );
 
         return pageTitle && objective
           ? [{ title: pageTitle, objective }]

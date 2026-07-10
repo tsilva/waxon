@@ -7,12 +7,6 @@ import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import type { UserProfile } from "@/app/lib/userProfile";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
-type StatsPageClientProps = {
-  currentUser?: UserProfile | null;
-  showAdmin?: boolean;
-  stats?: StatsResponse | null;
-};
-
 type DailyCountBucket = {
   dayStart: number;
   label: string;
@@ -398,14 +392,10 @@ function StatsDashboardSkeleton() {
   );
 }
 
-export default function StatsPageClient({
-  currentUser: initialCurrentUser = null,
-  showAdmin = false,
-  stats: initialStats = null,
-}: StatsPageClientProps) {
-  const [currentUser, setCurrentUser] = useState(initialCurrentUser);
-  const [stats, setStats] = useState(initialStats);
-  const [isStatsLoading, setIsStatsLoading] = useState(initialStats === null);
+export default function StatsPageClient() {
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [isStatsLoading, setIsStatsLoading] = useState(true);
   const [statsMessage, setStatsMessage] = useState<string | null>(null);
   const emptyStats = useMemo(() => createEmptyStats(), []);
   const renderedStats = stats ?? emptyStats;
@@ -422,7 +412,6 @@ export default function StatsPageClient({
     onSignOut,
   } = useToolbarAccount(currentUser, {
     localSignOutHref: "/",
-    showAdmin,
   });
 
   useEffect(() => {

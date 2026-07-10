@@ -155,12 +155,6 @@ type QuestionSwapLayer = {
   phase: "current" | "entering" | "exiting";
 };
 
-export type ReviewAppProps = {
-  initialCurrentUser?: UserProfile | null;
-  initialPreviousAnswerStatus?: QueueStatusResponse | null;
-  initialReviewSessionQueue?: ReviewQueueItem[] | null;
-};
-
 type ReviewSessionSnapshot = {
   currentQuestionId: string | null;
   question: string | null;
@@ -543,62 +537,31 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
-export default function ReviewApp({
-  initialCurrentUser = null,
-  initialPreviousAnswerStatus = null,
-  initialReviewSessionQueue = null,
-}: ReviewAppProps) {
+export default function ReviewApp() {
   const cachedSessionRef = useRef(reviewSessionSnapshot);
   const cachedHasLoadedQuestion =
     cachedSessionRef.current?.hasLoadedQuestion ?? false;
-  const canUseInitialReviewSession =
-    !cachedHasLoadedQuestion &&
-    initialReviewSessionQueue !== null;
-  const initialReviewSessionItem = canUseInitialReviewSession
-    ? initialReviewSessionQueue[0] ?? null
-    : null;
-  const initialReviewSessionRemainingQueue =
-    canUseInitialReviewSession && initialReviewSessionItem
-      ? initialReviewSessionQueue.slice(1)
-      : [];
-  const hasLoadedQuestionRef = useRef(
-    cachedHasLoadedQuestion || canUseInitialReviewSession,
-  );
-  const hasLoadedPreviousAnswerStatusRef = useRef(
-    initialPreviousAnswerStatus !== null,
-  );
+  const hasLoadedQuestionRef = useRef(cachedHasLoadedQuestion);
+  const hasLoadedPreviousAnswerStatusRef = useRef(false);
   const [question, setQuestion] = useState<string | null>(
-    () =>
-      cachedSessionRef.current?.question ??
-      initialReviewSessionItem?.question ??
-      null,
+    () => cachedSessionRef.current?.question ?? null,
   );
   const [questionSwapLayers, setQuestionSwapLayers] = useState<
     QuestionSwapLayer[]
   >(() => {
-    const cachedQuestion =
-      cachedSessionRef.current?.question ??
-      initialReviewSessionItem?.question ??
-      null;
+    const cachedQuestion = cachedSessionRef.current?.question ?? null;
 
     return cachedQuestion
       ? [
           {
             key: questionSwapLayerKey(
-              cachedSessionRef.current?.currentQuestionId ??
-                initialReviewSessionItem?.questionId ??
-                null,
+              cachedSessionRef.current?.currentQuestionId ?? null,
               cachedQuestion,
             ),
-            questionId:
-              cachedSessionRef.current?.currentQuestionId ??
-              initialReviewSessionItem?.questionId ??
-              null,
+            questionId: cachedSessionRef.current?.currentQuestionId ?? null,
             question: cachedQuestion,
             conceptSlugs:
-              cachedSessionRef.current?.currentSessionItem?.conceptSlugs ??
-              initialReviewSessionItem?.conceptSlugs ??
-              [],
+              cachedSessionRef.current?.currentSessionItem?.conceptSlugs ?? [],
             phase: "current",
           },
         ]
@@ -606,20 +569,13 @@ export default function ReviewApp({
   });
   const [currentSessionItem, setCurrentSessionItem] =
     useState<ReviewQueueItem | null>(
-      () =>
-        cachedSessionRef.current?.currentSessionItem ??
-        initialReviewSessionItem,
+      () => cachedSessionRef.current?.currentSessionItem ?? null,
     );
   const [sessionQueue, setSessionQueue] = useState<ReviewQueueItem[]>(
-    () =>
-      cachedSessionRef.current?.sessionQueue ??
-      initialReviewSessionRemainingQueue,
+    () => cachedSessionRef.current?.sessionQueue ?? [],
   );
   const [currentQuestionId, setCurrentQuestionId] = useState<string | null>(
-    () =>
-      cachedSessionRef.current?.currentQuestionId ??
-      initialReviewSessionItem?.questionId ??
-      null,
+    () => cachedSessionRef.current?.currentQuestionId ?? null,
   );
   const [answer, setAnswer] = useState(
     () => cachedSessionRef.current?.answer ?? "",
@@ -630,28 +586,16 @@ export default function ReviewApp({
   const [speechStatus, setSpeechStatus] = useState<SpeechStatus>("idle");
   const [speechMessage, setSpeechMessage] = useState<string | null>(null);
   const [queueRemaining, setQueueRemaining] = useState(
-    () =>
-      cachedSessionRef.current?.queueRemaining ??
-      initialPreviousAnswerStatus?.queueRemaining ??
-      0,
+    () => cachedSessionRef.current?.queueRemaining ?? 0,
   );
   const [toolbarDueCount, setToolbarDueCount] = useState<number | null>(
-    () =>
-      cachedSessionRef.current?.queueRemaining ??
-      initialPreviousAnswerStatus?.queueRemaining ??
-      null,
+    () => cachedSessionRef.current?.queueRemaining ?? null,
   );
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>(
-    () =>
-      cachedSessionRef.current?.evaluations ??
-      initialPreviousAnswerStatus?.evaluations ??
-      [],
+    () => cachedSessionRef.current?.evaluations ?? [],
   );
   const [recentAttempts, setRecentAttempts] = useState<QuestionAttempt[]>(
-    () =>
-      cachedSessionRef.current?.recentAttempts ??
-      initialPreviousAnswerStatus?.recentAttempts ??
-      [],
+    () => cachedSessionRef.current?.recentAttempts ?? [],
   );
   const [questionAttemptsByKey, setQuestionAttemptsByKey] = useState<
     Record<string, QuestionAttempt[]>
@@ -680,7 +624,7 @@ export default function ReviewApp({
   const [isFlaggingQuestion, setIsFlaggingQuestion] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(
-    () => cachedSessionRef.current?.currentUser ?? initialCurrentUser,
+    () => cachedSessionRef.current?.currentUser ?? null,
   );
   const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
   const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
@@ -1002,7 +946,7 @@ export default function ReviewApp({
   }, [hasPendingEvaluationActivity]);
 
   useEffect(() => {
-    if (cachedSessionRef.current?.currentUser || initialCurrentUser) {
+    if (cachedSessionRef.current?.currentUser) {
       return;
     }
 
@@ -1039,7 +983,7 @@ export default function ReviewApp({
     return () => {
       isActive = false;
     };
-  }, [initialCurrentUser, question]);
+  }, [question]);
 
   useEffect(() => {
     if (!isSettingsOpen) {

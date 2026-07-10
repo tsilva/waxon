@@ -25,7 +25,7 @@ import {
   getCurrentUser,
   type AuthenticatedUser,
 } from "./auth";
-import { scheduleNextReview, serializeReviews } from "./scheduler";
+import { scheduleNextReview, type ReviewEntry } from "./scheduler";
 import { questionSlug } from "./questionSlug";
 import { normalizeQuestionDraft } from "./questionDraft";
 import {
@@ -51,7 +51,7 @@ export type QuestionRow = {
   question_id: string;
   user_id: string;
   question: string;
-  reviews: string;
+  review_history: ReviewEntry[];
   next_due: number;
   generated_from_question: string | null;
   question_provenance: string;
@@ -67,7 +67,7 @@ export type DueQuestion = {
   questionId: string;
   userId: string;
   question: string;
-  reviews: string;
+  reviewHistory: ReviewEntry[];
   nextDue: number;
   generatedFromQuestion: string | null;
   questionProvenance: string | null;
@@ -95,7 +95,7 @@ export type QuestionEmbedding = {
 
 export type QuestionEmbeddingProjection = {
   question: string;
-  reviews: string;
+  lastScore: number | null;
   embeddingModel: string | null;
   embeddingKind: string | null;
   isCurrent: boolean | null;
@@ -150,7 +150,7 @@ function toDueQuestion(row: QuestionRow): DueQuestion {
     questionId: row.question_id,
     userId: row.user_id,
     question: row.question,
-    reviews: row.reviews,
+    reviewHistory: normalizeReviewHistory(row.review_history),
     nextDue: row.next_due,
     generatedFromQuestion: row.generated_from_question || null,
     questionProvenance: row.question_provenance || null,
@@ -162,6 +162,40 @@ function toDueQuestion(row: QuestionRow): DueQuestion {
     conceptSlugs: row.concept_slugs ?? [],
   };
 }
+
+function normalizeReviewHistory(value: unknown): ReviewEntry[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+
+    const record = entry as Record<string, unknown>;
+    const ts = Number(record.ts);
+    const score = Number(record.score);
+
+    return Number.isFinite(ts) && ts > 0 && Number.isFinite(score) && score >= 0 && score <= 10
+      ? [{ ts, score }]
+      : [];
+  });
+}
+
+const reviewHistorySql = sql<ReviewEntry[]>`COALESCE((
+  SELECT jsonb_agg(
+    jsonb_build_object('ts', recent.resolved_at, 'score', recent.score)
+    ORDER BY recent.resolved_at, recent.id
+  )
+  FROM (
+    SELECT attempt.id, attempt.resolved_at, attempt.score
+    FROM question_attempts attempt
+    WHERE attempt.question_id = "questions"."id"
+    ORDER BY attempt.resolved_at DESC, attempt.id DESC
+    LIMIT 10
+  ) recent
+), '[]'::jsonb)`;
 
 async function enrichDueQuestionsWithConceptSlugs(
   userId: string,
@@ -219,7 +253,7 @@ async function selectQuestionRows(
       question_id: questions.id,
       user_id: questions.userId,
       question: questions.question,
-      reviews: questions.reviews,
+      review_history: reviewHistorySql,
       next_due: questions.nextDue,
       generated_from_question: questions.generatedFromQuestion,
       question_provenance: questions.questionProvenance,
@@ -232,12 +266,6 @@ async function selectQuestionRows(
     .from(questions)
     .where(and(eq(questions.userId, context.userId), whereClause))
     .orderBy(asc(questions.nextDue), asc(questions.createdAt), asc(questions.question));
-}
-
-export async function readQuestions(
-  input: UserContextInput = {},
-): Promise<QuestionRow[]> {
-  return selectQuestionRows(sql`true`, input);
 }
 
 export async function readQuestionEmbeddingProjections(input: {
@@ -275,7 +303,13 @@ export async function readQuestionEmbeddingProjections(input: {
   const rows = await db
     .select({
       question: questions.question,
-      reviews: questions.reviews,
+      last_score: sql<number | null>`(
+        SELECT attempt.score
+        FROM question_attempts attempt
+        WHERE attempt.question_id = "questions"."id"
+        ORDER BY attempt.resolved_at DESC, attempt.id DESC
+        LIMIT 1
+      )`,
       next_due: questions.nextDue,
       embedding_model: questionEmbeddings.embeddingModel,
       embedding_kind: questionEmbeddings.embeddingKind,
@@ -317,7 +351,7 @@ export async function readQuestionEmbeddingProjections(input: {
 
   return rows.map((row) => ({
     question: row.question,
-    reviews: row.reviews,
+    lastScore: row.last_score,
     embeddingModel: row.embedding_model,
     embeddingKind: row.embedding_kind,
     isCurrent: row.is_current,
@@ -477,7 +511,7 @@ export async function getDueQuestions(
       question_id: questions.id,
       user_id: questions.userId,
       question: questions.question,
-      reviews: questions.reviews,
+      review_history: reviewHistorySql,
       next_due: questions.nextDue,
       generated_from_question: questions.generatedFromQuestion,
       question_provenance: questions.questionProvenance,
@@ -593,7 +627,7 @@ export async function getQueuedQuestionsPage(
       question_id: questions.id,
       user_id: questions.userId,
       question: questions.question,
-      reviews: questions.reviews,
+      review_history: reviewHistorySql,
       next_due: questions.nextDue,
       generated_from_question: questions.generatedFromQuestion,
       question_provenance: questions.questionProvenance,
@@ -622,7 +656,7 @@ function rawQuestionRowToDueQuestion(row: {
   question_id: string;
   user_id: string;
   question: string;
-  reviews: string;
+  review_history: ReviewEntry[];
   next_due: number | string;
   generated_from_question: string | null;
   question_provenance: string;
@@ -726,7 +760,19 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
         q.id AS question_id,
         q.user_id,
         q.question,
-        q.reviews,
+        COALESCE((
+          SELECT jsonb_agg(
+            jsonb_build_object('ts', recent.resolved_at, 'score', recent.score)
+            ORDER BY recent.resolved_at, recent.id
+          )
+          FROM (
+            SELECT attempt.id, attempt.resolved_at, attempt.score
+            FROM question_attempts attempt
+            WHERE attempt.question_id = q.id
+            ORDER BY attempt.resolved_at DESC, attempt.id DESC
+            LIMIT 10
+          ) recent
+        ), '[]'::jsonb) AS review_history,
         q.next_due,
         q.generated_from_question,
         q.question_provenance,
@@ -985,6 +1031,7 @@ function totalTraceCost(callsJson: string | null): number | null {
 function toEvaluationQueueItem(row: {
   id: string;
   traceId: string;
+  questionId: string | null;
   question: string;
   answer: string;
   status: string;
@@ -1004,7 +1051,7 @@ function toEvaluationQueueItem(row: {
   return {
     id: row.id,
     traceId: row.traceId,
-    questionId: null,
+    questionId: row.questionId,
     question: row.question,
     answer: row.answer,
     status,
@@ -1108,6 +1155,7 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
     .select({
       id: answerEvaluations.id,
       traceId: answerEvaluations.traceId,
+      questionId: questions.id,
       question: answerEvaluations.question,
       answer: answerEvaluations.rawAnswer,
       status: answerEvaluations.status,
@@ -1161,6 +1209,31 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
     .map(toEvaluationQueueItem);
 }
 
+export async function getActiveAnswerEvaluationQuestionIds(
+  input: UserContextInput & { activeSince: number },
+): Promise<string[]> {
+  const context = await resolveUserContext(input);
+  const rows = await db
+    .select({ questionId: questions.id })
+    .from(answerEvaluations)
+    .innerJoin(
+      questions,
+      and(
+        eq(questions.userId, answerEvaluations.userId),
+        eq(questions.question, answerEvaluations.question),
+      ),
+    )
+    .where(
+      and(
+        eq(answerEvaluations.userId, context.userId),
+        eq(answerEvaluations.status, "grading"),
+        gte(answerEvaluations.submittedAt, Math.round(input.activeSince)),
+      ),
+    );
+
+  return Array.from(new Set(rows.map((row) => row.questionId)));
+}
+
 export async function getAnswerEvaluationsByIds(input: UserContextInput & {
   ids: string[];
 }): Promise<EvaluationQueueItem[]> {
@@ -1175,6 +1248,7 @@ export async function getAnswerEvaluationsByIds(input: UserContextInput & {
     .select({
       id: answerEvaluations.id,
       traceId: answerEvaluations.traceId,
+      questionId: questions.id,
       question: answerEvaluations.question,
       answer: answerEvaluations.rawAnswer,
       status: answerEvaluations.status,
@@ -1351,7 +1425,6 @@ export async function applyEvaluationToPostgres(input: {
         question_id: questions.id,
         user_id: questions.userId,
         question: questions.question,
-        reviews: questions.reviews,
         next_due: questions.nextDue,
         generated_from_question: questions.generatedFromQuestion,
         question_provenance: questions.questionProvenance,
@@ -1395,15 +1468,13 @@ export async function applyEvaluationToPostgres(input: {
           entry.score >= 0 &&
           entry.score <= 10,
       );
-    const reviews = serializeReviews(
-      [
-        ...previousReviews,
-        {
-          ts: Math.round(input.now),
-          score: input.score,
-        },
-      ].slice(-10),
-    );
+    const reviewHistory = [
+      ...previousReviews,
+      {
+        ts: Math.round(input.now),
+        score: input.score,
+      },
+    ].slice(-10);
     const nextDue = scheduleNextReview({
       previousReviews,
       newScore: input.score,
@@ -1417,7 +1488,6 @@ export async function applyEvaluationToPostgres(input: {
     await tx
       .update(questions)
       .set({
-        reviews,
         nextDue: roundedNextDue,
         lastAnswer: input.answer,
         lastAnswerSummary: input.answerSummary,
@@ -1454,7 +1524,7 @@ export async function applyEvaluationToPostgres(input: {
       questionId: row.question_id,
       userId: row.user_id,
       question: row.question,
-      reviews,
+      reviewHistory,
       nextDue: roundedNextDue,
       generatedFromQuestion: row.generated_from_question || null,
       questionProvenance: row.question_provenance || null,

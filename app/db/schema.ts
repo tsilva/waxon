@@ -107,14 +107,12 @@ export const questions = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     question: text("question").notNull(),
     questionSlug: text("question_slug").notNull(),
-    reviews: text("reviews").notNull().default(""),
     nextDue: bigint("next_due", { mode: "number" }).notNull().default(0),
     generatedFromQuestion: text("generated_from_question"),
     questionProvenance: text("question_provenance").notNull().default(""),
     lastAnswer: text("last_answer").notNull().default(""),
     lastAnswerSummary: text("last_answer_summary").notNull().default(""),
     conciseAnswer: text("concise_answer").notNull().default(""),
-    referenceAnswer: text("reference_answer").notNull().default(""),
     flaggedAt: bigint("flagged_at", { mode: "number" }),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
     updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
@@ -142,10 +140,6 @@ export const questions = pgTable(
       sql`length(trim(${table.questionSlug})) > 0`,
     ),
     check("questions_next_due_check", sql`${table.nextDue} >= 0`),
-    check(
-      "questions_reviews_format_check",
-      sql`${table.reviews} = '' OR ${table.reviews} ~ '^[0-9]+:(10|[0-9])(\\|[0-9]+:(10|[0-9]))*$'`,
-    ),
     check("questions_created_at_check", sql`${table.createdAt} >= 0`),
     check(
       "questions_updated_at_check",
@@ -356,7 +350,6 @@ export const courses = pgTable(
     description: text("description").notNull().default(""),
     toc: jsonb("toc").notNull(),
     status: text("status").notNull().default("active"),
-    currentChapterIndex: integer("current_chapter_index").notNull().default(0),
     currentPageIndex: integer("current_page_index").notNull().default(0),
     conversationCost: doublePrecision("conversation_cost").notNull().default(0),
     createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
@@ -379,7 +372,6 @@ export const courses = pgTable(
       "courses_status_check",
       sql`${table.status} IN ('active', 'completed')`,
     ),
-    check("courses_current_chapter_index_check", sql`${table.currentChapterIndex} >= 0`),
     check("courses_current_page_index_check", sql`${table.currentPageIndex} >= 0`),
     check("courses_conversation_cost_check", sql`${table.conversationCost} >= 0`),
     check("courses_created_at_check", sql`${table.createdAt} >= 0`),
@@ -430,87 +422,6 @@ export const courseChatMessages = pgTable(
       "course_chat_messages_updated_at_check",
       sql`${table.updatedAt} >= ${table.createdAt}`,
     ),
-  ],
-);
-
-export const coursePages = pgTable(
-  "course_pages",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    courseId: uuid("course_id")
-      .notNull()
-      .references(() => courses.id, { onDelete: "cascade" }),
-    questionId: uuid("question_id").references(() => questions.id, {
-      onDelete: "set null",
-    }),
-    chapterIndex: integer("chapter_index").notNull(),
-    pageIndex: integer("page_index").notNull(),
-    title: text("title").notNull(),
-    body: text("body").notNull(),
-    summary: text("summary").notNull(),
-    question: text("question").notNull(),
-    choices: jsonb("choices").notNull(),
-    correctChoiceId: text("correct_choice_id").notNull(),
-    correctAnswer: text("correct_answer").notNull(),
-    explanation: text("explanation").notNull().default(""),
-    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
-    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
-  },
-  (table) => [
-    uniqueIndex("course_pages_course_position_idx").on(
-      table.courseId,
-      table.chapterIndex,
-      table.pageIndex,
-    ),
-    index("course_pages_question_id_idx").on(table.questionId),
-    check("course_pages_chapter_index_check", sql`${table.chapterIndex} >= 0`),
-    check("course_pages_page_index_check", sql`${table.pageIndex} >= 0`),
-    check("course_pages_title_nonempty_check", sql`length(trim(${table.title})) > 0`),
-    check("course_pages_body_nonempty_check", sql`length(trim(${table.body})) > 0`),
-    check("course_pages_summary_nonempty_check", sql`length(trim(${table.summary})) > 0`),
-    check("course_pages_question_nonempty_check", sql`length(trim(${table.question})) > 0`),
-    check(
-      "course_pages_correct_choice_id_nonempty_check",
-      sql`length(trim(${table.correctChoiceId})) > 0`,
-    ),
-    check(
-      "course_pages_correct_answer_nonempty_check",
-      sql`length(trim(${table.correctAnswer})) > 0`,
-    ),
-    check("course_pages_created_at_check", sql`${table.createdAt} >= 0`),
-    check(
-      "course_pages_updated_at_check",
-      sql`${table.updatedAt} >= ${table.createdAt}`,
-    ),
-  ],
-);
-
-export const coursePageAttempts = pgTable(
-  "course_page_attempts",
-  {
-    id: serial("id").primaryKey(),
-    courseId: uuid("course_id")
-      .notNull()
-      .references(() => courses.id, { onDelete: "cascade" }),
-    pageId: uuid("page_id")
-      .notNull()
-      .references(() => coursePages.id, { onDelete: "cascade" }),
-    selectedChoiceId: text("selected_choice_id").notNull(),
-    isCorrect: boolean("is_correct").notNull(),
-    feedback: text("feedback").notNull().default(""),
-    attemptedAt: bigint("attempted_at", { mode: "number" }).notNull(),
-  },
-  (table) => [
-    index("course_page_attempts_course_page_idx").on(
-      table.courseId,
-      table.pageId,
-      table.attemptedAt.desc(),
-    ),
-    check(
-      "course_page_attempts_selected_choice_id_nonempty_check",
-      sql`length(trim(${table.selectedChoiceId})) > 0`,
-    ),
-    check("course_page_attempts_attempted_at_check", sql`${table.attemptedAt} >= 0`),
   ],
 );
 

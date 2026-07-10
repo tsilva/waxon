@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { addQuestionsToKnowledgeBase } from "@/app/lib/reviewQueue";
+import { addQuestionsToKnowledgeBase } from "@/app/lib/questionBank";
 import {
   consumeUserRateLimit,
   normalizeBoundedText,
@@ -163,7 +163,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await addQuestionsToKnowledgeBase({ questions });
+    const result = await addQuestionsToKnowledgeBase({
+      questions,
+      userId: user.id,
+    });
 
     return NextResponse.json({
       ok: true,

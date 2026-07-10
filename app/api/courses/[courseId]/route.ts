@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/app/lib/auth";
 import { deleteCourse, getCourse } from "@/app/lib/courseStore";
-import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +17,8 @@ export async function GET(_request: Request, context: RouteContext) {
   let course;
 
   try {
-    course = await getCourse(courseId);
+    const user = await getCurrentUser();
+    course = await getCourse({ courseId, userId: user.id });
   } catch (error) {
     console.info("[waxon] course load failed", {
       courseId,
@@ -47,8 +48,8 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const { courseId } = await context.params;
 
   try {
-    await deleteCourse(courseId);
-    invalidateReviewQueue();
+    const user = await getCurrentUser();
+    await deleteCourse({ courseId, userId: user.id });
 
     return NextResponse.json({
       ok: true,

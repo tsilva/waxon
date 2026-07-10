@@ -111,7 +111,6 @@ pnpm start --port auto   # run the production build on an available port
 pnpm test                # run the Node test suite
 pnpm lint                # run ESLint
 pnpm typecheck           # run TypeScript without emitting files
-pnpm db:generate         # generate Drizzle migrations
 pnpm db:migrate          # apply pending migrations
 pnpm db:studio           # open Drizzle Studio
 ```
@@ -122,8 +121,13 @@ Codex in-app Browser and a development-only deterministic evaluator.
 
 ## Implementation notes
 
-- Postgres schema declarations live in `app/db/schema.ts`; generated migrations
-  live in `drizzle/`.
+- Postgres schema declarations live in `app/db/schema.ts`; reviewed SQL
+  migrations and their ordered journal live in `drizzle/`.
+- Migration authoring is intentionally SQL-first because the checked-in Drizzle
+  snapshot lineage stops before the current custom migrations. Add the next SQL
+  file and matching `drizzle/meta/_journal.json` entry together. Do not use
+  `drizzle-kit generate` until the snapshot lineage has been rebuilt and
+  verified against a scratch database.
 - Questions are user-owned. `question_attempts` stores resolved answers and
   scores, while the question row stores current scheduling state.
 - Review queue state and pending evaluations are kept in memory for the current

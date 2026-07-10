@@ -80,6 +80,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await submitAnswer({
+      userId: user.id,
       questionId: questionId.value,
       question: question.value,
       answer: answer.value,

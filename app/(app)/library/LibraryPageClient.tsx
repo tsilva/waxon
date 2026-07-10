@@ -21,7 +21,7 @@ import type {
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import type { QuestionAttempt } from "@/app/lib/reviewTypes";
-import type { UserProfile, UserProfileSummary } from "@/app/lib/userProfile";
+import type { UserProfile } from "@/app/lib/userProfile";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
@@ -30,13 +30,6 @@ import { ScoreChart } from "../review/ReviewVisualizations";
 import { LibraryManagementTools } from "./LibraryManagementTools";
 
 type SearchMode = "text" | "meaning";
-
-type LibraryPageClientProps = {
-  initialQuestionBank?: QuestionBankPage | null;
-  initialConceptTags?: ConceptTagSummary[] | null;
-  initialUser?: UserProfileSummary | null;
-  showAdmin?: boolean;
-};
 
 const statusOptions: Array<{
   value: QuestionBankStatusFilter;
@@ -194,18 +187,11 @@ function stringArraysEqual(left: string[], right: string[]): boolean {
   );
 }
 
-export default function LibraryPageClient({
-  initialQuestionBank = null,
-  initialConceptTags = null,
-  initialUser,
-  showAdmin = false,
-}: LibraryPageClientProps) {
+export default function LibraryPageClient() {
   const searchParams = useSearchParams();
-  const [questionBank, setQuestionBank] = useState(
-    initialQuestionBank ?? EMPTY_QUESTION_BANK,
-  );
-  const [conceptTags, setConceptTags] = useState(initialConceptTags ?? []);
-  const [currentUser, setCurrentUser] = useState(initialUser ?? null);
+  const [questionBank, setQuestionBank] = useState(EMPTY_QUESTION_BANK);
+  const [conceptTags, setConceptTags] = useState<ConceptTagSummary[]>([]);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [query, setQuery] = useState(() => searchParams.get("q")?.trim() ?? "");
   const [searchMode, setSearchMode] = useState<SearchMode>("text");
   const [status, setStatus] = useState<QuestionBankStatusFilter>("all");
@@ -224,11 +210,9 @@ export default function LibraryPageClient({
   const [areQuestionAttemptsLoading, setAreQuestionAttemptsLoading] =
     useState(false);
   const [reloadVersion, setReloadVersion] = useState(0);
-  const [isLoading, setIsLoading] = useState(initialQuestionBank === null);
+  const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [isMetadataLoading, setIsMetadataLoading] = useState(
-    initialConceptTags === null || initialUser === null,
-  );
+  const [isMetadataLoading, setIsMetadataLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const now = Date.now();
   const activeTags = conceptTags.filter((tag) => tag.active);
@@ -243,7 +227,6 @@ export default function LibraryPageClient({
   } = useToolbarAccount(currentUser, {
     localManageHref: "/review",
     localSignOutHref: "/",
-    showAdmin,
   });
   const isInitialQuestionBankLoading =
     isLoading && questionBank.items.length === 0 && questionBank.total === 0;

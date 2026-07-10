@@ -4,19 +4,16 @@ import {
   countDueQuestions,
   createAnswerEvaluationRecord,
   flagQuestionForReview,
+  getActiveAnswerEvaluationQuestionIds,
   getDueQuestions,
   getNextScheduledQuestionDue,
   getVisibleAnswerEvaluations,
-  getQueuedQuestionsPage,
   getQuestionSnapshotById,
   getRecentQuestionAttempts,
   resolveAnswerEvaluationRecord,
   readQuestionEmbeddingProjections,
   updateAnswerEvaluationPhase,
-  upsertDueQuestions,
-  upsertQuestionEmbeddings,
   type DueQuestion,
-  type QuestionInput,
 } from "./postgresStore";
 import { questionHasActiveConceptTag } from "./conceptTags";
 import {
@@ -26,29 +23,20 @@ import {
   type EvaluationResult,
 } from "./evaluateAnswer";
 import { recordPendingLlmTrace } from "./llmTraceStore";
-import { parseReviews } from "./scheduler";
+import { serializeReviews } from "./scheduler";
 import {
   DEDUPE_EMBEDDING_KIND,
-  DEDUPE_SOURCE_VERSION,
   resolveEmbeddingModel,
 } from "./embeddingSource";
-import {
-  getCurrentUser,
-  type AuthenticatedUser,
-} from "./auth";
-import { gateNovelQuestions } from "./semanticDedupe";
-import { questionSlug } from "./questionSlug";
 import type {
   KnowledgeEmbeddingPlot,
   KnowledgeEmbeddingPlotPoint,
   EvaluationPhase,
-  EvaluationQueueItem,
   QuestionAttempt,
   ReviewActivity,
   ReviewQueueItem,
   ReviewSummary,
 } from "./reviewTypes";
-import type { NovelQuestionGateResult } from "./semanticDedupe";
 
 export const RESOLVED_JUDGING_VISIBLE_MS = 5 * 60_000;
 const EVALUATION_PROCESSING_TIMEOUT_MS = EVALUATION_TIMEOUT_MS;
@@ -57,267 +45,16 @@ const REVIEW_SESSION_QUEUE_LIMIT = 200;
 const KNOWLEDGE_EMBEDDING_PLOT_LIMIT = 500;
 
 type Submission = {
-  state: QueueState;
   evaluationId: string;
   traceId: string;
-  questionId: string | null;
+  questionId: string;
   question: string;
-  queuedQuestion: DueQuestion | null;
-  userId: string | null;
+  userId: string;
   answer: string;
   expectedAnswer: string | null;
   submittedAt: number;
   previousReviews: string;
 };
-
-type LatestEvaluation = {
-  score: number;
-  justification: string;
-  answerSummary: string;
-  correctAnswer: string | null;
-  resolvedAt: number;
-};
-
-type QueueState = {
-  userId: string | null;
-  initialized: boolean;
-  initializing: Promise<void> | null;
-  queue: DueQuestion[];
-  pendingEvaluations: number;
-  inFlightQuestionKeys: Set<string>;
-  evaluations: EvaluationQueueItem[];
-  latestByQuestionKey: Record<string, LatestEvaluation>;
-};
-
-const globalForQueue = globalThis as typeof globalThis & {
-  waxonQueueStates?: Map<string, QueueState>;
-};
-
-function createQueueState(userId: string | null): QueueState {
-  return {
-    userId,
-    initialized: false,
-    initializing: null,
-    queue: [],
-    pendingEvaluations: 0,
-    inFlightQuestionKeys: new Set<string>(),
-    evaluations: [],
-    latestByQuestionKey: {},
-  };
-}
-
-const queueStates =
-  globalForQueue.waxonQueueStates ?? new Map<string, QueueState>();
-
-globalForQueue.waxonQueueStates = queueStates;
-
-function getQueueStateForUser(userId: string): QueueState {
-  const existing = queueStates.get(userId);
-
-  if (existing) {
-    return existing;
-  }
-
-  const state = createQueueState(userId);
-
-  queueStates.set(userId, state);
-  return state;
-}
-
-type QueueContext = {
-  user: AuthenticatedUser;
-  state: QueueState;
-};
-
-function questionKey(input: {
-  questionId?: string | null;
-  question: string;
-}): string {
-  return input.questionId ?? `question:${input.question}`;
-}
-
-export function invalidateReviewQueue(userId?: string): void {
-  const states = userId
-    ? [getQueueStateForUser(userId)]
-    : Array.from(queueStates.values());
-
-  for (const state of states) {
-    state.initialized = false;
-    state.initializing = null;
-    state.queue = [];
-    logQueueFlushStatus(state, "invalidated-review-queue");
-  }
-}
-
-async function ensureQueueContext(): Promise<QueueContext> {
-  const user = await getCurrentUser();
-  const state = getQueueStateForUser(user.id);
-
-  state.userId = user.id;
-
-  return { user, state };
-}
-
-function logQueueFlushStatus(state: QueueState, action: string): void {
-  console.info("[waxon] queue flush status", {
-    action,
-    userId: state.userId,
-    queueRemaining: state.queue.length,
-    pendingEvaluations: state.pendingEvaluations,
-    inFlightQuestions: state.inFlightQuestionKeys.size,
-    evaluationsTracked: state.evaluations.length,
-    initialized: state.initialized,
-  });
-}
-
-function createEvaluationItem(input: {
-  traceId: string;
-  questionId: string | null;
-  question: string;
-  answer: string;
-  submittedAt: number;
-}): EvaluationQueueItem {
-  const id = `${input.submittedAt}-${Math.random().toString(36).slice(2, 10)}`;
-
-  return {
-    id,
-    traceId: input.traceId,
-    questionId: input.questionId,
-    question: input.question,
-    answer: input.answer,
-    status: "grading",
-    phase: "queued",
-    lastActivityAt: input.submittedAt,
-    submittedAt: input.submittedAt,
-    score: null,
-    justification: null,
-    answerSummary: null,
-    correctAnswer: null,
-    resolvedAt: null,
-    nextDue: null,
-    cost: null,
-  };
-}
-
-function resolveEvaluationItem(
-  state: QueueState,
-  evaluationId: string,
-  result: EvaluationResult,
-  nextDue: number | null,
-): void {
-  const item = state.evaluations.find(
-    (evaluation) => evaluation.id === evaluationId,
-  );
-
-  if (!item) {
-    return;
-  }
-
-  item.status = "resolved";
-  item.phase = null;
-  item.score = result.score;
-  item.justification = result.justification;
-  item.answerSummary = result.answerSummary;
-  item.correctAnswer = result.correctAnswer;
-  item.resolvedAt = Date.now();
-  item.nextDue = nextDue;
-
-  if (result.status === "graded") {
-    state.latestByQuestionKey[questionKey(item)] = {
-      score: result.score,
-      justification: result.justification,
-      answerSummary: result.answerSummary,
-      correctAnswer: result.correctAnswer,
-      resolvedAt: item.resolvedAt,
-    };
-  }
-}
-
-function updateEvaluationPhase(
-  state: QueueState,
-  evaluationId: string,
-  phase: EvaluationPhase,
-): void {
-  const item = state.evaluations.find(
-    (evaluation) => evaluation.id === evaluationId,
-  );
-
-  if (!item || item.status !== "grading" || item.phase === phase) {
-    return;
-  }
-
-  item.phase = phase;
-  item.lastActivityAt = Date.now();
-}
-
-function touchEvaluationActivity(
-  state: QueueState,
-  evaluationId: string,
-  phase: EvaluationPhase,
-): boolean {
-  const item = state.evaluations.find(
-    (evaluation) => evaluation.id === evaluationId,
-  );
-
-  if (!item || item.status !== "grading") {
-    return false;
-  }
-
-  const now = Date.now();
-
-  if (item.phase !== phase) {
-    item.phase = phase;
-    item.lastActivityAt = now;
-    return true;
-  }
-
-  if (now - item.lastActivityAt < 1_000) {
-    return false;
-  }
-
-  item.lastActivityAt = now;
-  return true;
-}
-
-function getVisibleEvaluations(
-  state: QueueState,
-  now = Date.now(),
-): EvaluationQueueItem[] {
-  state.evaluations = state.evaluations.filter(
-    (evaluation) =>
-      evaluation.status === "grading" ||
-      evaluation.resolvedAt === null ||
-      now - evaluation.resolvedAt < RESOLVED_JUDGING_VISIBLE_MS,
-  );
-
-  return state.evaluations;
-}
-
-function mergeEvaluationItems(
-  memoryItems: EvaluationQueueItem[],
-  persistedItems: EvaluationQueueItem[],
-): EvaluationQueueItem[] {
-  const byId = new Map<string, EvaluationQueueItem>();
-
-  for (const item of memoryItems) {
-    byId.set(item.id, item);
-  }
-
-  for (const item of persistedItems) {
-    const existing = byId.get(item.id);
-
-    if (!existing || item.status === "resolved" || existing.status !== "resolved") {
-      byId.set(item.id, item);
-    }
-  }
-
-  return [...byId.values()].sort((left, right) => {
-    const leftTime = left.resolvedAt ?? left.submittedAt;
-    const rightTime = right.resolvedAt ?? right.submittedAt;
-
-    return leftTime - rightTime || left.id.localeCompare(right.id);
-  });
-}
 
 function normalizeProjectionValue(value: number, min: number, max: number): number {
   if (max - min <= Number.EPSILON) {
@@ -425,7 +162,7 @@ async function getKnowledgeEmbeddingPlot(input: {
         question.projectionY !== null
         ? {
             question: question.question,
-            lastScore: parseReviews(question.reviews).at(-1)?.score ?? null,
+            lastScore: question.lastScore,
             projectionX: question.projectionX,
             projectionY: question.projectionY,
           }
@@ -455,12 +192,11 @@ function toReviewQueueItem(
   item: DueQuestion,
   input: {
     now: number;
-    latest?: LatestEvaluation;
     attempts?: QuestionAttempt[];
   },
 ): ReviewQueueItem {
   const msUntilDue = item.nextDue - input.now;
-  const reviewHistory = parseReviews(item.reviews);
+  const reviewHistory = item.reviewHistory;
   const lastReview = reviewHistory.at(-1);
   const latestAttempt = input.attempts?.at(-1);
 
@@ -474,139 +210,48 @@ function toReviewQueueItem(
     generatedFromQuestion: item.generatedFromQuestion,
     questionProvenance: item.questionProvenance,
     reviewHistory,
-    lastScore: input.latest?.score ?? latestAttempt?.score ?? lastReview?.score ?? null,
+    lastScore: latestAttempt?.score ?? lastReview?.score ?? null,
     lastAnswer: item.lastAnswer ?? latestAttempt?.rawAnswer ?? null,
     lastAnswerSummary:
-      input.latest?.answerSummary ??
-      item.lastAnswerSummary ??
-      latestAttempt?.answerSummary ??
-      null,
+      item.lastAnswerSummary ?? latestAttempt?.answerSummary ?? null,
     conciseAnswer:
-      input.latest?.correctAnswer ??
-      item.conciseAnswer ??
-      latestAttempt?.correctAnswer ??
-      null,
-    lastJustification: input.latest?.justification ?? latestAttempt?.justification ?? null,
+      item.conciseAnswer ?? latestAttempt?.correctAnswer ?? null,
+    lastJustification: latestAttempt?.justification ?? null,
     attempts: input.attempts ?? [],
     conceptSlugs: item.conceptSlugs,
   };
 }
 
 export async function loadReviewSessionQueue(input: {
+  userId: string;
   excludeQuestionIds?: string[];
   limit?: number;
   offset?: number;
-} = {}): Promise<{
+}): Promise<{
   items: ReviewQueueItem[];
 }> {
-  const user = await getCurrentUser();
-  const state = getQueueStateForUser(user.id);
   const now = Date.now();
   const limit = Math.min(
     REVIEW_SESSION_QUEUE_LIMIT,
     Math.max(0, Math.floor(input.limit ?? REVIEW_SESSION_QUEUE_LIMIT)),
   );
+  const activeEvaluationQuestionIds = await getActiveAnswerEvaluationQuestionIds({
+    userId: input.userId,
+    activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
+  });
+  const excludeQuestionIds = Array.from(
+    new Set([...(input.excludeQuestionIds ?? []), ...activeEvaluationQuestionIds]),
+  );
   const dueQuestions = await getDueQuestions(now, {
-    userId: user.id,
-    excludeQuestionIds: input.excludeQuestionIds,
+    userId: input.userId,
+    excludeQuestionIds,
     limit,
     offset: input.offset,
   });
 
   return {
-    items: dueQuestions.map((item) =>
-      toReviewQueueItem(item, {
-        now,
-        latest: state.latestByQuestionKey[questionKey(item)],
-      }),
-    ),
+    items: dueQuestions.map((item) => toReviewQueueItem(item, { now })),
   };
-}
-
-async function initializeQueue(): Promise<QueueContext> {
-  const { user, state } = await ensureQueueContext();
-
-  if (state.initialized) {
-    return { user, state };
-  }
-
-  if (!state.initializing) {
-    state.initializing = getDueQuestions(Date.now(), {
-      userId: user.id,
-      limit: REVIEW_SESSION_QUEUE_LIMIT,
-    }).then((dueQuestions) => {
-      state.queue = dueQuestions;
-      state.initialized = true;
-      state.initializing = null;
-      logQueueFlushStatus(state, "initialized");
-    });
-  }
-
-  await state.initializing;
-  return { user, state };
-}
-
-async function refreshIfEmpty(state: QueueState, userId: string): Promise<void> {
-  if (state.queue.length > 0) {
-    return;
-  }
-
-  const dueQuestions = await getDueQuestions(Date.now(), {
-    userId,
-    excludeQuestionIds: Array.from(state.inFlightQuestionKeys).filter(
-      (key) => !key.startsWith("question:"),
-    ),
-    limit: REVIEW_SESSION_QUEUE_LIMIT,
-  });
-  state.queue = dueQuestions.filter(
-    (question) => !state.inFlightQuestionKeys.has(questionKey(question)),
-  );
-  logQueueFlushStatus(state, "refreshed-empty-queue");
-}
-
-function removeFromQueue(state: QueueState, input: {
-  questionId?: string | null;
-  question: string;
-}): DueQuestion | null {
-  const targetKey = questionKey(input);
-  const index = state.queue.findIndex((item) => questionKey(item) === targetKey);
-
-  if (index === -1) {
-    return null;
-  }
-
-  const [removed] = state.queue.splice(index, 1);
-  return removed ?? null;
-}
-
-function restoreFailedQuestion(
-  state: QueueState,
-  question: DueQuestion | null,
-): void {
-  if (!question) {
-    return;
-  }
-
-  state.queue = [
-    question,
-    ...state.queue.filter((item) => questionKey(item) !== questionKey(question)),
-  ];
-  logQueueFlushStatus(state, "restored-failed-evaluation-question");
-}
-
-function prependRetryQuestion(
-  state: QueueState,
-  question: DueQuestion | null,
-): void {
-  if (!question || question.flaggedAt !== null) {
-    return;
-  }
-
-  state.queue = [
-    question,
-    ...state.queue.filter((item) => questionKey(item) !== questionKey(question)),
-  ];
-  logQueueFlushStatus(state, "prepended-retry-question");
 }
 
 function persistEvaluationFailure(
@@ -653,7 +298,6 @@ async function persistEvaluationResolution(input: {
 }
 
 async function processEvaluation(submission: Submission): Promise<void> {
-  const state = submission.state;
   const startedAt = Date.now();
   let currentPhase: EvaluationPhase = "queued";
   let phaseStartedAt = startedAt;
@@ -661,6 +305,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
   let savedEvaluationResult: EvaluationResult | null = null;
   let savedEvaluationNextDue: number | null = null;
   const phaseTimingsMs: Partial<Record<EvaluationPhase, number>> = {};
+  let lastPersistedActivityAt = 0;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
   const clearWatchdog = () => {
     if (watchdog !== null) {
@@ -673,7 +318,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
     watchdog = setTimeout(() => {
       if (savedEvaluationResult) {
         finishEvaluation(savedEvaluationResult, savedEvaluationNextDue, {
-          restoreQuestion: false,
           logAction: "evaluation-finished-before-enrichment-timeout",
         });
         return;
@@ -688,7 +332,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
         ),
         null,
         {
-          restoreQuestion: true,
           logAction: "evaluation-timeout",
         },
       );
@@ -700,7 +343,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
     currentPhase = phase;
     phaseStartedAt = Date.now();
     resetWatchdog();
-    updateEvaluationPhase(state, submission.evaluationId, phase);
     void updateAnswerEvaluationPhase({
       id: submission.evaluationId,
       phase,
@@ -708,13 +350,23 @@ async function processEvaluation(submission: Submission): Promise<void> {
   };
   const markActivity = () => {
     resetWatchdog();
-    touchEvaluationActivity(state, submission.evaluationId, currentPhase);
+    const now = Date.now();
+
+    if (now - lastPersistedActivityAt < 1_000) {
+      return;
+    }
+
+    lastPersistedActivityAt = now;
+    void updateAnswerEvaluationPhase({
+      id: submission.evaluationId,
+      phase: currentPhase,
+      now,
+    });
   };
   const finishEvaluation = (
     result: EvaluationResult,
     nextDue: number | null,
     options: {
-      restoreQuestion: boolean;
       logAction: string;
       error?: unknown;
     },
@@ -734,10 +386,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
     clearWatchdog();
     phaseTimingsMs[currentPhase] =
       (phaseTimingsMs[currentPhase] ?? 0) + Date.now() - phaseStartedAt;
-
-    if (options.restoreQuestion) {
-      restoreFailedQuestion(state, submission.queuedQuestion);
-    }
 
     if (result.status === "failed") {
       persistEvaluationFailure(submission.evaluationId, result);
@@ -772,10 +420,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
       });
     }
 
-    resolveEvaluationItem(state, submission.evaluationId, result, nextDue);
-    state.pendingEvaluations = Math.max(0, state.pendingEvaluations - 1);
-    state.inFlightQuestionKeys.delete(questionKey(submission));
-    logQueueFlushStatus(state, options.logAction);
     return true;
   };
   resetWatchdog();
@@ -798,7 +442,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
 
     if (result.status === "failed") {
       finishEvaluation(result, null, {
-        restoreQuestion: true,
         logAction: "evaluation-failed",
       });
       return;
@@ -817,7 +460,7 @@ async function processEvaluation(submission: Submission): Promise<void> {
       score: result.score,
       submittedAt: submission.submittedAt,
       now: resolvedAt,
-      userId: submission.userId ?? undefined,
+      userId: submission.userId,
     });
 
     if (isFinished) {
@@ -835,9 +478,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
       });
       savedEvaluationNextDue = evaluationNextDue;
 
-      if (evaluationNextDue <= resolvedAt) {
-        prependRetryQuestion(state, persisted);
-      }
     } else {
       await persistEvaluationResolution({
         evaluationId: submission.evaluationId,
@@ -849,7 +489,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
 
     setPhase("finalizing");
     finishEvaluation(result, savedEvaluationNextDue, {
-      restoreQuestion: false,
       logAction: "evaluation-finished",
     });
   } catch (error) {
@@ -860,7 +499,6 @@ async function processEvaluation(submission: Submission): Promise<void> {
       ),
       null,
       {
-        restoreQuestion: true,
         logAction: "evaluation-processing-failed",
         error,
       },
@@ -868,28 +506,31 @@ async function processEvaluation(submission: Submission): Promise<void> {
   }
 }
 
-export async function peekNextQuestion(): Promise<{
+async function nextQuestionForUser(userId: string): Promise<{
   questionId: string | null;
   question: string | null;
   queueRemaining: number;
 }> {
-  const { user, state } = await initializeQueue();
-  await refreshIfEmpty(state, user.id);
-  const availableQueue = state.queue.filter(
-    (item) => !state.inFlightQuestionKeys.has(questionKey(item)),
-  );
-  const nextQuestion = availableQueue[0] ?? null;
+  const now = Date.now();
+  const activeEvaluationQuestionIds = await getActiveAnswerEvaluationQuestionIds({
+    userId,
+    activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
+  });
+  const [nextQuestion] = await getDueQuestions(now, {
+    userId,
+    excludeQuestionIds: activeEvaluationQuestionIds,
+    limit: 1,
+  });
 
   return {
     questionId: nextQuestion?.questionId ?? null,
     question: nextQuestion?.question ?? null,
-    queueRemaining: await countDueQuestions(Date.now(), {
-      userId: user.id,
-    }),
+    queueRemaining: await countDueQuestions(now, { userId }),
   };
 }
 
 export async function flagQuestion(input: {
+  userId: string;
   questionId: string;
   question: string;
 }): Promise<{
@@ -897,33 +538,21 @@ export async function flagQuestion(input: {
   question: string | null;
   queueRemaining: number;
 }> {
-  const { user, state } = await initializeQueue();
-  await refreshIfEmpty(state, user.id);
-
-  const flagged = await flagQuestionForReview({
-    userId: user.id,
+  await flagQuestionForReview({
+    userId: input.userId,
     questionId: input.questionId,
     question: input.question,
   });
 
-  if (flagged) {
-    state.queue = state.queue.filter(
-      (item) => questionKey(item) !== questionKey(flagged),
-    );
-    state.inFlightQuestionKeys.delete(questionKey(flagged));
-    logQueueFlushStatus(state, "flagged-question");
-  }
-
-  return peekNextQuestion();
+  return nextQuestionForUser(input.userId);
 }
 
 export async function submitAnswer(input: {
+  userId: string;
   questionId: string;
   question: string;
   answer: string;
 }): Promise<{ evaluationId: string; traceId: string }> {
-  const user = await getCurrentUser();
-  const state = getQueueStateForUser(user.id);
   const requestedQuestionId = input.questionId.trim();
 
   if (!requestedQuestionId) {
@@ -931,7 +560,7 @@ export async function submitAnswer(input: {
   }
 
   const snapshot = await getQuestionSnapshotById(requestedQuestionId, {
-    userId: user.id,
+    userId: input.userId,
   });
 
   if (!snapshot) {
@@ -940,7 +569,7 @@ export async function submitAnswer(input: {
 
   if (
     !(await questionHasActiveConceptTag({
-      userId: user.id,
+      userId: input.userId,
       questionId: snapshot.questionId,
     }))
   ) {
@@ -961,13 +590,7 @@ export async function submitAnswer(input: {
   const submittedAt = Date.now();
   const traceId = crypto.randomUUID();
   const questionId = snapshot.questionId;
-  const evaluation = createEvaluationItem({
-    traceId,
-    questionId,
-    question: snapshot.question,
-    answer: input.answer,
-    submittedAt,
-  });
+  const evaluationId = `${submittedAt}-${Math.random().toString(36).slice(2, 10)}`;
 
   await recordPendingLlmTrace({
     traceId,
@@ -975,171 +598,51 @@ export async function submitAnswer(input: {
     model: "pending-evaluation",
     question: snapshot.question,
     requestBody: {
-      evaluationId: evaluation.id,
+      evaluationId,
       questionId,
       submittedAt,
     },
   });
   await createAnswerEvaluationRecord({
-    id: evaluation.id,
+    id: evaluationId,
     traceId,
     userId: snapshot.userId,
     question: snapshot.question,
     answer: input.answer,
     submittedAt,
   });
-  state.evaluations = [...state.evaluations, evaluation].slice(-50);
-  const queuedQuestion = removeFromQueue(state, snapshot);
-  state.inFlightQuestionKeys.add(questionKey(snapshot));
-  state.pendingEvaluations += 1;
-  logQueueFlushStatus(state, "submitted-answer");
-
   const submission = {
-    state,
-    evaluationId: evaluation.id,
+    evaluationId,
     traceId,
     questionId,
     question: snapshot.question,
-    queuedQuestion: queuedQuestion ?? snapshot,
     userId: snapshot.userId,
     answer: input.answer,
     expectedAnswer: snapshot.conciseAnswer || null,
     submittedAt,
-    previousReviews: snapshot.reviews,
+    previousReviews: serializeReviews(snapshot.reviewHistory),
   } satisfies Submission;
 
   after(() => processEvaluation(submission));
 
   return {
-    evaluationId: evaluation.id,
+    evaluationId,
     traceId,
   };
 }
 
-function acceptQuestionsWithoutNoveltyGate(
-  input: Array<string | QuestionInput>,
-): NovelQuestionGateResult {
-  const seen = new Set<string>();
-  const accepted: NovelQuestionGateResult["accepted"] = [];
-
-  for (const item of input) {
-    const question = typeof item === "string" ? item : item.question;
-    const normalizedQuestion = question.trim().replace(/\s+/g, " ");
-    const slug = questionSlug(normalizedQuestion);
-
-    if (!normalizedQuestion || seen.has(slug)) {
-      continue;
-    }
-
-    seen.add(slug);
-    accepted.push({
-      question: normalizedQuestion,
-      conciseAnswer:
-        typeof item === "string"
-          ? ""
-          : (item.conciseAnswer ?? "").trim().replace(/\s+/g, " "),
-      embedding: [],
-      sourceHash: "",
-    });
-  }
-
-  return {
-    accepted,
-    rejected: [],
-  };
-}
-
-export async function addQuestionsToKnowledgeBase(input: {
-  questions: Array<string | QuestionInput>;
-  sourceQuestion?: string | null;
-}): Promise<{ added: number; rejected: number }> {
-  const user = await getCurrentUser();
-  const { total: userCardCount } = await getQueuedQuestionsPage({
-    userId: user.id,
-    limit: 0,
-    offset: 0,
-    sortKey: "creation-date",
-  });
-  const gateResult =
-    userCardCount === 0
-      ? acceptQuestionsWithoutNoveltyGate(input.questions)
-      : await gateNovelQuestions(input.questions, {
-          operation: "add_questions_gate",
-          userId: user.id,
-        });
-  const provenanceByQuestion = new Map(
-    input.questions
-      .filter((question): question is QuestionInput => typeof question !== "string")
-      .map((question) => [
-        question.question.trim().replace(/\s+/g, " ").toLowerCase(),
-        question.questionProvenance?.trim().replace(/\s+/g, " ") ?? "",
-      ]),
-  );
-  const proposedSlugsByQuestion = new Map(
-    input.questions
-      .filter((question): question is QuestionInput => typeof question !== "string")
-      .map((question) => [
-        question.question.trim().replace(/\s+/g, " ").toLowerCase(),
-        question.proposedConceptSlugs ?? [],
-      ]),
-  );
-  const sourceTextByQuestion = new Map(
-    input.questions
-      .filter((question): question is QuestionInput => typeof question !== "string")
-      .map((question) => [
-        question.question.trim().replace(/\s+/g, " ").toLowerCase(),
-        question.sourceText ?? "",
-      ]),
-  );
-
-  const addedQuestions = await upsertDueQuestions({
-    questions: gateResult.accepted.map((candidate) => ({
-      question: candidate.question,
-      conciseAnswer: candidate.conciseAnswer,
-      questionProvenance:
-        provenanceByQuestion.get(candidate.question.toLowerCase()) ?? "",
-      proposedConceptSlugs:
-        proposedSlugsByQuestion.get(candidate.question.toLowerCase()) ?? [],
-      sourceText: sourceTextByQuestion.get(candidate.question.toLowerCase()) ?? "",
-    })),
-    sourceQuestion: input.sourceQuestion ?? null,
-    now: Date.now(),
-    userId: user.id,
-  });
-
-  await upsertQuestionEmbeddings({
-    embeddings: gateResult.accepted
-      .filter((candidate) => candidate.embedding.length > 0)
-      .map((candidate) => ({
-        question: candidate.question,
-        embeddingModel: resolveEmbeddingModel(),
-        embeddingKind: DEDUPE_EMBEDDING_KIND,
-        sourceVersion: DEDUPE_SOURCE_VERSION,
-        sourceHash: candidate.sourceHash,
-        embedding: candidate.embedding,
-      })),
-    userId: user.id,
-  });
-
-
-  return {
-    added: addedQuestions.length,
-    rejected: gateResult.rejected.length,
-  };
-}
-
 export async function knowledgeEmbeddingPlotStatus(input: {
+  userId: string;
   limit?: number;
   offset?: number;
-} = {}): Promise<KnowledgeEmbeddingPlot> {
-  const user = await getCurrentUser();
+}): Promise<KnowledgeEmbeddingPlot> {
   const limit = Math.min(
     KNOWLEDGE_EMBEDDING_PLOT_LIMIT,
     Math.max(0, Math.floor(input.limit ?? KNOWLEDGE_EMBEDDING_PLOT_LIMIT)),
   );
 
   return getKnowledgeEmbeddingPlot({
-    userId: user.id,
+    userId: input.userId,
     limit,
     offset: input.offset,
   });
@@ -1148,11 +651,11 @@ export async function knowledgeEmbeddingPlotStatus(input: {
 export async function reviewSummaryForUser(
   userId: string,
 ): Promise<ReviewSummary> {
-  const state = getQueueStateForUser(userId);
   const now = Date.now();
-  const excludeQuestionIds = Array.from(state.inFlightQuestionKeys).filter(
-    (key) => !key.startsWith("question:"),
-  );
+  const excludeQuestionIds = await getActiveAnswerEvaluationQuestionIds({
+    userId,
+    activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
+  });
   const [queueRemaining, nextScheduledDue] = await Promise.all([
     countDueQuestions(now, { userId }),
     getNextScheduledQuestionDue(now, { userId, excludeQuestionIds }),
@@ -1164,17 +667,10 @@ export async function reviewSummaryForUser(
   };
 }
 
-export async function reviewSummary(): Promise<ReviewSummary> {
-  const user = await getCurrentUser();
-
-  return reviewSummaryForUser(user.id);
-}
-
 export async function reviewActivityForUser(
   userId: string,
   input: { recentAttemptsLimit?: number } = {},
 ): Promise<ReviewActivity> {
-  const state = getQueueStateForUser(userId);
   const now = Date.now();
   const [summary, recentAttempts, persistedEvaluations] = await Promise.all([
     reviewSummaryForUser(userId),
@@ -1192,19 +688,10 @@ export async function reviewActivityForUser(
 
   return {
     ...summary,
-    pendingEvaluations: state.pendingEvaluations,
-    evaluations: mergeEvaluationItems(
-      getVisibleEvaluations(state, now),
-      persistedEvaluations,
-    ),
+    pendingEvaluations: persistedEvaluations.filter(
+      (evaluation) => evaluation.status === "grading",
+    ).length,
+    evaluations: persistedEvaluations.toReversed(),
     recentAttempts,
   };
-}
-
-export async function reviewActivity(
-  input: { recentAttemptsLimit?: number } = {},
-): Promise<ReviewActivity> {
-  const user = await getCurrentUser();
-
-  return reviewActivityForUser(user.id, input);
 }
