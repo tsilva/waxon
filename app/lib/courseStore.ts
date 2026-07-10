@@ -7,6 +7,7 @@ import {
 } from "@/app/db/schema";
 import { getCurrentUser } from "./auth";
 import {
+  MAX_COURSE_PAGES,
   coursePageCount,
   flatCoursePageIndex,
   nextCoursePosition,
@@ -93,6 +94,8 @@ export type CourseRecord = {
   updatedAt: number;
 };
 
+export type CourseListItem = Omit<CourseRecord, "toc">;
+
 export type CourseDetail = CourseRecord & {
   pages: CoursePageRecord[];
   chatMessages: CourseChatMessageRecord[];
@@ -104,7 +107,7 @@ export type CourseListCursor = {
 };
 
 export type CourseListPage = {
-  courses: CourseRecord[];
+  courses: CourseListItem[];
   hasMore: boolean;
   nextCursor: CourseListCursor | null;
 };
@@ -367,6 +370,90 @@ async function loadCourseRows(
   return query;
 }
 
+async function loadCourseListRows(
+  userId: string,
+  options: {
+    cursor?: CourseListCursor | null;
+    limit?: number;
+    search?: string;
+  } = {},
+) {
+  const filters = [eq(courses.userId, userId)];
+  const normalizedSearch = options.search?.trim();
+
+  if (options.cursor) {
+    filters.push(
+      or(
+        lt(courses.updatedAt, options.cursor.updatedAt),
+        and(
+          eq(courses.updatedAt, options.cursor.updatedAt),
+          lt(courses.id, options.cursor.id),
+        ),
+      )!,
+    );
+  }
+
+  if (normalizedSearch) {
+    const pattern = `%${normalizedSearch}%`;
+
+    filters.push(
+      or(
+        ilike(courses.title, pattern),
+        ilike(courses.description, pattern),
+        ilike(courses.topicPrompt, pattern),
+        sql`${courses.toc}::text ILIKE ${pattern}`,
+      )!,
+    );
+  }
+
+  const query = db
+    .select({
+      id: courses.id,
+      userId: courses.userId,
+      topicPrompt: courses.topicPrompt,
+      title: courses.title,
+      description: courses.description,
+      status: courses.status,
+      currentChapterIndex: courses.currentChapterIndex,
+      currentPageIndex: courses.currentPageIndex,
+      conversationCost: courses.conversationCost,
+      createdAt: courses.createdAt,
+      updatedAt: courses.updatedAt,
+      totalPages: sql<number>`LEAST(${MAX_COURSE_PAGES}, CASE
+        WHEN jsonb_typeof(${courses.toc}->'pages') = 'array' THEN
+          jsonb_array_length(${courses.toc}->'pages')
+        WHEN jsonb_typeof(${courses.toc}->'chapters') = 'array' THEN (
+          SELECT COALESCE(SUM(CASE
+            WHEN jsonb_typeof(chapter.value->'pages') = 'array' THEN
+              jsonb_array_length(chapter.value->'pages')
+            ELSE 0
+          END), 0)::int
+          FROM jsonb_array_elements(${courses.toc}->'chapters') AS chapter(value)
+        )
+        ELSE 0
+      END)`,
+      generatedPages: sql<number>`(
+        SELECT count(*)::int
+        FROM ${coursePages}
+        WHERE ${coursePages.courseId} = ${courses.id}
+      )`,
+      chatMessageCount: sql<number>`(
+        SELECT count(*)::int
+        FROM ${courseChatMessages}
+        WHERE ${courseChatMessages.courseId} = ${courses.id}
+      )`,
+    })
+    .from(courses)
+    .where(and(...filters))
+    .orderBy(desc(courses.updatedAt), desc(courses.id));
+
+  if (typeof options.limit === "number") {
+    return query.limit(options.limit);
+  }
+
+  return query;
+}
+
 function hydrateCourse(input: {
   row: Awaited<ReturnType<typeof loadCourseRows>>[number];
 }): CourseRecord {
@@ -402,6 +489,32 @@ function hydrateCourse(input: {
   };
 }
 
+function hydrateCourseListItem(input: {
+  row: Awaited<ReturnType<typeof loadCourseListRows>>[number];
+}): CourseListItem {
+  const totalPages = Math.max(0, Number(input.row.totalPages ?? 0));
+
+  return {
+    id: input.row.id,
+    userId: input.row.userId,
+    topicPrompt: input.row.topicPrompt,
+    title: input.row.title,
+    description: input.row.description,
+    status: toCourseStatus(input.row.status),
+    currentChapterIndex: 0,
+    currentPageIndex: Math.min(
+      Math.max(0, input.row.currentPageIndex),
+      Math.max(totalPages - 1, 0),
+    ),
+    totalPages,
+    generatedPages: Number(input.row.generatedPages ?? 0),
+    chatMessageCount: Number(input.row.chatMessageCount ?? 0),
+    conversationCost: Math.max(0, Number(input.row.conversationCost ?? 0)),
+    createdAt: input.row.createdAt,
+    updatedAt: input.row.updatedAt,
+  };
+}
+
 export async function listCourses(): Promise<CourseRecord[]> {
   const user = await getCurrentUser();
   const rows = await loadCourseRows(user.id);
@@ -416,7 +529,7 @@ export async function listCoursesPage(input: {
 }): Promise<CourseListPage> {
   const user = await getCurrentUser();
   const limit = Math.max(1, Math.min(50, Math.floor(input.limit)));
-  const rows = await loadCourseRows(user.id, {
+  const rows = await loadCourseListRows(user.id, {
     cursor: input.cursor ?? null,
     limit: limit + 1,
     search: input.search,
@@ -425,7 +538,7 @@ export async function listCoursesPage(input: {
   const nextRow = pageRows.at(-1);
 
   return {
-    courses: pageRows.map((row) => hydrateCourse({ row })),
+    courses: pageRows.map((row) => hydrateCourseListItem({ row })),
     hasMore: rows.length > limit,
     nextCursor:
       rows.length > limit && nextRow

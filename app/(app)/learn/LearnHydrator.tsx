@@ -1,14 +1,15 @@
 "use client";
 
 import { createAuthenticatedClientHydrator } from "../AuthenticatedClientHydrator";
-import type { Course, UserProfile } from "./LearnPageClient";
+import type { Course, CourseListItem, UserProfile } from "./LearnPageClient";
 
 type LearnPageClientProps = {
   initialCourseId?: string;
   initialCoursesArePartial?: boolean;
-  initialCourses?: Course[] | null;
+  initialCourses?: CourseListItem[] | null;
   initialCurrentUser?: UserProfile | null;
-  initialDueCount?: number;
+  initialDueCount?: number | null;
+  initialIsStartingNewCourse?: boolean;
   initialSelectedCourse?: Course | null;
 };
 

@@ -45,6 +45,10 @@ export async function GET(request: Request) {
       recentAttemptsLimit: Number.isFinite(recentAttemptsLimit)
         ? recentAttemptsLimit
         : undefined,
+      includeEvaluations: isEnabled(
+        url.searchParams.get("includeEvaluations"),
+        true,
+      ),
       includeKnowledgeEmbeddingPlot: isEnabled(
         url.searchParams.get("includeKnowledgeEmbeddingPlot"),
         false,
