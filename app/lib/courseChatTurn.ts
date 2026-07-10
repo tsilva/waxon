@@ -42,8 +42,8 @@ export function ensureCourseChatTurnHasLearnerQuestion(input: {
   };
 
   if (inputWidgets.length > 0) {
-    const cleanedVisibleContent = stripInvalidRepairParagraphs(
-      generatedText,
+    const cleanedVisibleContent = stripTrailingQuestion(
+      stripInvalidRepairParagraphs(generatedText),
     );
     const visibleContent = stripDanglingTailIfNeeded(cleanedVisibleContent);
 

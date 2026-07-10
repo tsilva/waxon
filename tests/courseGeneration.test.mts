@@ -245,6 +245,33 @@ test("ensureCourseChatTurnHasLearnerQuestion preserves a complete learner questi
   assert.equal(result.appendedText, "");
 });
 
+test("ensureCourseChatTurnHasLearnerQuestion removes a trailing visible question when a widget exists", () => {
+  const question = "Why can a large policy update be risky?";
+  const result = ensureCourseChatTurnHasLearnerQuestion({
+    text: [
+      "A noisy batch can point the policy in an unhelpful direction.",
+      "What could go wrong after one unusually large update?",
+    ].join("\n\n"),
+    pageTitle: "Policy Stability",
+    pageObjective: "Explain why large policy updates can be unstable.",
+    widgets: [
+      {
+        type: "free_text",
+        id: "policy-stability",
+        question,
+        placeholder: "Type your answer here...",
+      },
+    ],
+    requireVisibleTeachingTextWithWidgets: true,
+  });
+
+  assert.equal(
+    result.text,
+    "A noisy batch can point the policy in an unhelpful direction.",
+  );
+  assert.equal(result.widgets[0]?.question, question);
+});
+
 test("ensureCourseChatTurnHasLearnerQuestion requires widgets for learn turns", () => {
   const result = ensureCourseChatTurnHasLearnerQuestion({
     text: "R-squared explains how much variation the model accounts for.\n\nHow would you interpret an R-squared value of 0.85?",

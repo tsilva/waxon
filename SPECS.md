@@ -20,6 +20,7 @@ Learn must build understanding in the minimum effective time and interactions. E
 - Learner-facing tutor prose must be accurate, direct, informal, written in plain language, and ordered so that each idea prepares the learner for the next; metaphors must appear only when they clarify the material.
 - Learner-facing prose must not expose internal objectives, widget-planning instructions, or next-question targets.
 - A tutor turn that renders a question widget must also contain substantive teaching prose; objective-only or planning-only fallback text must not be accepted or stored as a completed lesson.
+- A tutor turn that renders a question widget must keep the learner-facing question and answer choices in the widget rather than repeating them in the teaching prose.
 - A normal tutor turn must default to one fresh question, and Learn must not add a separate flow for resurfacing previously asked Learn questions.
 - After a weak answer, the tutor must remain on the current section or revisit a missing prerequisite before returning to that section.
 - The tutor must decide section readiness from the learner's demonstrated understanding rather than from a fixed numeric score threshold.
