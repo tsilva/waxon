@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
-import { DEFAULT_EMBEDDING_MODEL } from "../../shared/openrouter-config.mjs";
+import {
+  DEFAULT_EMBEDDING_MODEL,
+  resolveEmbeddingModel,
+} from "../../shared/openrouter-config.mjs";
 
-export { DEFAULT_EMBEDDING_MODEL };
+export { DEFAULT_EMBEDDING_MODEL, resolveEmbeddingModel };
 export const DEDUPE_EMBEDDING_DIMENSIONS = 3072;
 export const DEDUPE_EMBEDDING_KIND = "dedupe_v1";
 export const DEDUPE_SOURCE_VERSION = 1;

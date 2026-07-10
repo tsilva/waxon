@@ -55,7 +55,6 @@ export type ReviewQueueItem = {
   lastAnswer: string | null;
   lastAnswerSummary: string | null;
   conciseAnswer: string | null;
-  referenceAnswer: string | null;
   lastJustification: string | null;
   attempts: QuestionAttempt[];
   conceptSlugs: string[];
@@ -75,16 +74,13 @@ export type KnowledgeEmbeddingPlot = {
   points: KnowledgeEmbeddingPlotPoint[];
 };
 
-export type QueueStatusSnapshot = {
+export type ReviewSummary = {
   queueRemaining: number;
   nextScheduledDue: number | null;
+};
+
+export type ReviewActivity = ReviewSummary & {
   pendingEvaluations: number;
   evaluations: EvaluationQueueItem[];
   recentAttempts: QuestionAttempt[];
-  reviewQueue: ReviewQueueItem[];
-  reviewQueueTotal: number;
-  reviewQueueOffset: number;
-  reviewQueueLimit: number;
-  reviewQueueHasMore: boolean;
-  knowledgeEmbeddingPlot: KnowledgeEmbeddingPlot;
 };

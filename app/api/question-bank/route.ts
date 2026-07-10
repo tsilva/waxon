@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/app/lib/auth";
 import {
   listQuestionBankItems,
   normalizeQuestionBankSort,
+  searchQuestionBankItemsByMeaning,
   type QuestionBankStatusFilter,
 } from "@/app/lib/questionBank";
 
@@ -30,16 +31,28 @@ function readStatus(value: string | null): QuestionBankStatusFilter {
 export async function GET(request: Request) {
   const user = await getCurrentUser();
   const url = new URL(request.url);
+  const input = {
+    userId: user.id,
+    query: url.searchParams.get("q"),
+    tagSlugs: url.searchParams.getAll("tag"),
+    status: readStatus(url.searchParams.get("status")),
+    limit: readPositiveInteger(url.searchParams.get("limit"), 50),
+    offset: readNonNegativeInteger(url.searchParams.get("offset")),
+  };
+
+  if (url.searchParams.get("searchMode") === "meaning" && input.query) {
+    return NextResponse.json(
+      await searchQuestionBankItemsByMeaning({
+        ...input,
+        query: input.query,
+      }),
+    );
+  }
 
   return NextResponse.json(
     await listQuestionBankItems({
-      userId: user.id,
-      query: url.searchParams.get("q"),
-      tagSlugs: url.searchParams.getAll("tag"),
-      status: readStatus(url.searchParams.get("status")),
+      ...input,
       sort: normalizeQuestionBankSort(url.searchParams.get("sort")),
-      limit: readPositiveInteger(url.searchParams.get("limit"), 50),
-      offset: readNonNegativeInteger(url.searchParams.get("offset")),
     }),
   );
 }

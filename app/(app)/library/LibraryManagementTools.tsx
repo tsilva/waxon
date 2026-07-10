@@ -17,6 +17,10 @@ import {
 } from "react";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import type { KnowledgeEmbeddingPlot as KnowledgeEmbeddingPlotResponse } from "@/app/lib/reviewTypes";
+import {
+  QUESTION_GENERATION_DEFAULT_COUNT,
+  QUESTION_GENERATION_MAX_COUNT,
+} from "@/app/lib/questionContract";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { KnowledgeEmbeddingPlot } from "../review/ReviewVisualizations";
 
@@ -56,8 +60,6 @@ const EMPTY_EMBEDDING_PLOT: KnowledgeEmbeddingPlotResponse = {
   embeddedQuestions: 0,
   points: [],
 };
-const DEFAULT_GENERATED_QUESTION_COUNT = 5;
-const MAX_GENERATED_QUESTION_COUNT = 10;
 
 function createClientId(prefix: string): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -107,7 +109,7 @@ export function LibraryManagementTools({
   const [mapMessage, setMapMessage] = useState<string | null>(null);
   const [scope, setScope] = useState("");
   const [questionCount, setQuestionCount] = useState(
-    DEFAULT_GENERATED_QUESTION_COUNT,
+    QUESTION_GENERATION_DEFAULT_COUNT,
   );
   const [files, setFiles] = useState<GeneratorContextFile[]>([]);
   const [generatedQuestions, setGeneratedQuestions] = useState<
@@ -135,7 +137,7 @@ export function LibraryManagementTools({
 
   const resetGenerator = useCallback(() => {
     setScope("");
-    setQuestionCount(DEFAULT_GENERATED_QUESTION_COUNT);
+    setQuestionCount(QUESTION_GENERATION_DEFAULT_COUNT);
     setFiles([]);
     setGeneratedQuestions([]);
     setGeneratorMessage(null);
@@ -234,7 +236,7 @@ export function LibraryManagementTools({
           scope,
           files,
           count: Math.min(
-            MAX_GENERATED_QUESTION_COUNT,
+            QUESTION_GENERATION_MAX_COUNT,
             Math.max(1, questionCount),
           ),
           difficulty: "Mixed",
@@ -510,14 +512,14 @@ export function LibraryManagementTools({
                         className="generator-count-slider"
                         type="range"
                         min={1}
-                        max={MAX_GENERATED_QUESTION_COUNT}
+                        max={QUESTION_GENERATION_MAX_COUNT}
                         step={1}
                         value={questionCount}
                         onChange={(event) => setQuestionCount(Number(event.target.value))}
                       />
                       <span className="generator-slider-scale" aria-hidden="true">
                         <span>1</span>
-                        <span>{MAX_GENERATED_QUESTION_COUNT}</span>
+                        <span>{QUESTION_GENERATION_MAX_COUNT}</span>
                       </span>
                     </label>
                   </div>

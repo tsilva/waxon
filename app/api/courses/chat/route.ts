@@ -181,12 +181,10 @@ function buildDraftCourseDetail(input: {
     currentChapterIndex: 0,
     currentPageIndex: 0,
     totalPages: input.toc.pages.length,
-    generatedPages: 0,
     chatMessageCount: 0,
     conversationCost: 0,
     createdAt: now,
     updatedAt: now,
-    pages: [],
     chatMessages: [],
   };
 }

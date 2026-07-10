@@ -1,3 +1,1 @@
-export function vectorLiteral(embedding: number[]): string {
-  return `[${embedding.join(",")}]`;
-}
+export { vectorLiteral } from "../../shared/vector-literal.mjs";

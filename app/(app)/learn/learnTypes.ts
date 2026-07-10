@@ -1,34 +1,18 @@
 import type { CourseMessageMetrics } from "@/app/lib/courseMessageMetrics";
+import type { CourseToc as StoredCourseToc } from "@/app/lib/courseContent";
+import type {
+  CourseListCursor as StoredCourseListCursor,
+  CourseListItem as StoredCourseListItem,
+} from "@/app/lib/courseStore";
 import type {
   CourseQuestionWidgetAnswerDetails,
   CourseToolCall,
 } from "@/app/lib/courseQuestionWidget";
 import type { UserProfileSummary } from "@/app/lib/userProfile";
 
-export type CourseToc = {
-  title: string;
-  description: string;
-  pages: Array<{
-    title: string;
-    objective: string;
-  }>;
-};
+export type CourseToc = StoredCourseToc;
 
-export type CourseListItem = {
-  id: string;
-  topicPrompt: string;
-  title: string;
-  description: string;
-  status: "active" | "completed";
-  currentChapterIndex: number;
-  currentPageIndex: number;
-  totalPages: number;
-  generatedPages: number;
-  chatMessageCount: number;
-  conversationCost: number;
-  createdAt: number;
-  updatedAt: number;
-};
+export type CourseListItem = StoredCourseListItem;
 
 export type Course = CourseListItem & {
   toc: CourseToc;
@@ -66,10 +50,7 @@ export type LearnPageClientProps = {
   initialSelectedCourse?: Course | null;
 };
 
-export type CourseListCursor = {
-  updatedAt: number;
-  id: string;
-};
+export type CourseListCursor = StoredCourseListCursor;
 
 export type CoursesPageResponse = {
   courses?: CourseListItem[];

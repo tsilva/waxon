@@ -24,7 +24,6 @@ function reviewItem(id: string, question = `Question ${id}`): ReviewQueueItem {
     lastAnswer: null,
     lastAnswerSummary: null,
     conciseAnswer: null,
-    referenceAnswer: null,
     lastJustification: null,
     attempts: [],
     conceptSlugs: [],

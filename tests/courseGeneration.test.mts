@@ -58,7 +58,6 @@ function courseFixture({
     | "title"
     | "description"
     | "toc"
-    | "pages"
     | "chatMessages"
   >
 >): CourseDetail {
@@ -73,12 +72,10 @@ function courseFixture({
     currentChapterIndex: 0,
     currentPageIndex: 0,
     totalPages: pages.length,
-    generatedPages: pages.length,
     chatMessageCount: 0,
     conversationCost: 0,
     createdAt: 1,
     updatedAt: 1,
-    pages: [],
     chatMessages: [],
     ...overrides,
   };

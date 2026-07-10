@@ -28,6 +28,10 @@ export function resolveOpenRouterModel({
   return requireConfigured ? null : fallback;
 }
 
+export function resolveEmbeddingModel(env = process.env) {
+  return env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL;
+}
+
 export function buildOpenRouterHeaders(apiKey, env = process.env) {
   return {
     Authorization: `Bearer ${apiKey}`,

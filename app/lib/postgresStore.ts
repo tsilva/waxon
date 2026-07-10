@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import {
   and,
   asc,
@@ -22,7 +20,6 @@ import {
   questionAttempts,
   questionEmbeddings,
   questions,
-  users,
 } from "@/app/db/schema";
 import {
   getCurrentUser,
@@ -35,8 +32,8 @@ import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
-  DEFAULT_EMBEDDING_MODEL,
   projectEmbeddingForPlot,
+  resolveEmbeddingModel,
 } from "./embeddingSource";
 import type {
   EvaluationPhase,
@@ -47,7 +44,6 @@ import { vectorLiteral } from "./vectorLiteral";
 import {
   activeConceptEligibilityClause,
   assignConceptSlugsForQuestions,
-  ensureFallbackConceptTagForUser,
   getQuestionConceptSlugs,
 } from "./conceptTags";
 
@@ -62,7 +58,6 @@ export type QuestionRow = {
   last_answer: string;
   last_answer_summary: string;
   concise_answer: string;
-  reference_answer: string;
   flagged_at: number | null;
   created_at: number;
   concept_slugs?: string[];
@@ -79,7 +74,6 @@ export type DueQuestion = {
   lastAnswer: string | null;
   lastAnswerSummary: string | null;
   conciseAnswer: string | null;
-  referenceAnswer: string | null;
   flaggedAt: number | null;
   createdAt: number;
   conceptSlugs: string[];
@@ -136,91 +130,9 @@ export type DueQuestionsInput = UserContextInput & {
   offset?: number;
 };
 
-const LEGACY_QUESTIONS_FILE = path.join(process.cwd(), "data", "questions.csv");
-const seededUserIds = new Set<string>();
-
 type UserContext = {
-  user: AuthenticatedUser | null;
   userId: string;
 };
-
-function parseCsvRows(source: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index];
-
-    if (inQuotes) {
-      if (character === '"' && source[index + 1] === '"') {
-        field += '"';
-        index += 1;
-      } else if (character === '"') {
-        inQuotes = false;
-      } else {
-        field += character;
-      }
-
-      continue;
-    }
-
-    if (character === '"') {
-      inQuotes = true;
-    } else if (character === ",") {
-      row.push(field);
-      field = "";
-    } else if (character === "\n") {
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = "";
-    } else if (character !== "\r") {
-      field += character;
-    }
-  }
-
-  if (field || row.length > 0) {
-    row.push(field);
-    rows.push(row);
-  }
-
-  return rows;
-}
-
-function readLegacyCsvQuestions(): Array<{
-  question: string;
-  reviews: string;
-  nextDue: number;
-}> {
-  if (!existsSync(LEGACY_QUESTIONS_FILE)) {
-    return [];
-  }
-
-  const rows = parseCsvRows(readFileSync(LEGACY_QUESTIONS_FILE, "utf8"));
-  const header = rows[0] ?? [];
-  const questionIndex = header.indexOf("question");
-  const reviewsIndex = header.indexOf("reviews");
-  const nextDueIndex = header.indexOf("next_due");
-
-  if (questionIndex === -1) {
-    return [];
-  }
-
-  return rows
-    .slice(1)
-    .filter((row) => row[questionIndex]?.trim())
-    .map((row) => {
-      const nextDue = Number(nextDueIndex === -1 ? 0 : row[nextDueIndex]);
-
-      return {
-        question: row[questionIndex] ?? "",
-        reviews: reviewsIndex === -1 ? "" : (row[reviewsIndex] ?? ""),
-        nextDue: Number.isFinite(nextDue) ? Math.round(nextDue) : 0,
-      };
-    });
-}
 
 async function resolveUserContext(input: UserContextInput = {}): Promise<UserContext> {
   const user = input.user ?? (input.userId ? null : await getCurrentUser());
@@ -230,7 +142,7 @@ async function resolveUserContext(input: UserContextInput = {}): Promise<UserCon
     throw new Error("User id is required.");
   }
 
-  return { user, userId };
+  return { userId };
 }
 
 function toDueQuestion(row: QuestionRow): DueQuestion {
@@ -245,7 +157,6 @@ function toDueQuestion(row: QuestionRow): DueQuestion {
     lastAnswer: row.last_answer || null,
     lastAnswerSummary: row.last_answer_summary || null,
     conciseAnswer: row.concise_answer || null,
-    referenceAnswer: row.reference_answer || null,
     flaggedAt: row.flagged_at,
     createdAt: row.created_at,
     conceptSlugs: row.concept_slugs ?? [],
@@ -297,85 +208,11 @@ function toQuestionEmbedding(row: {
   return row;
 }
 
-async function seedCurrentUser(context: UserContext): Promise<void> {
-  const now = Date.now();
-
-  if (!context.user) {
-    return;
-  }
-
-  await db
-    .insert(users)
-    .values({
-      id: context.user.id,
-      displayName: context.user.displayName,
-      email: context.user.email,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: users.id,
-      set: {
-        displayName: context.user.displayName,
-        email: context.user.email,
-        updatedAt: now,
-      },
-    });
-}
-
-async function ensureSeedData(input: UserContextInput = {}): Promise<UserContext> {
-  const context = await resolveUserContext(input);
-
-  if (seededUserIds.has(context.userId)) {
-    return context;
-  }
-
-  await seedCurrentUser(context);
-
-  const [{ value: questionCount = 0 } = { value: 0 }] = await db
-    .select({ value: count() })
-    .from(questions)
-    .where(eq(questions.userId, context.userId));
-
-  if (questionCount > 0) {
-    seededUserIds.add(context.userId);
-    return context;
-  }
-
-  const seedRows = readLegacyCsvQuestions();
-
-  if (seedRows.length === 0) {
-    seededUserIds.add(context.userId);
-    return context;
-  }
-
-  await db
-    .insert(questions)
-    .values(
-      seedRows.map((row) => ({
-        userId: context.userId,
-        question: row.question,
-        questionSlug: questionSlug(row.question),
-        reviews: row.reviews,
-        nextDue: row.nextDue,
-      })),
-    )
-    .onConflictDoNothing();
-
-  await ensureFallbackConceptTagForUser({
-    userId: context.userId,
-    slug: "deep-learning",
-  });
-
-  seededUserIds.add(context.userId);
-  return context;
-}
-
 async function selectQuestionRows(
   whereClause = sql`true`,
   input: UserContextInput = {},
 ): Promise<QuestionRow[]> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
 
   return db
     .select({
@@ -389,17 +226,12 @@ async function selectQuestionRows(
       last_answer: questions.lastAnswer,
       last_answer_summary: questions.lastAnswerSummary,
       concise_answer: questions.conciseAnswer,
-      reference_answer: questions.referenceAnswer,
       flagged_at: questions.flaggedAt,
       created_at: questions.createdAt,
     })
     .from(questions)
     .where(and(eq(questions.userId, context.userId), whereClause))
     .orderBy(asc(questions.nextDue), asc(questions.createdAt), asc(questions.question));
-}
-
-export async function ensureQuestionsDatabase(): Promise<void> {
-  await ensureSeedData();
 }
 
 export async function readQuestions(
@@ -417,7 +249,7 @@ export async function readQuestionEmbeddingProjections(input: {
   offset?: number;
   userId?: string;
 } = {}): Promise<QuestionEmbeddingProjection[]> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const questionFilter =
     input.questions === undefined
       ? null
@@ -506,7 +338,7 @@ export async function upsertQuestionEmbeddings(input: {
   now?: number;
   userId?: string;
 }): Promise<QuestionEmbedding[]> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
 
   if (input.embeddings.length === 0) {
     return [];
@@ -633,7 +465,7 @@ export async function getDueQuestions(
   now = Date.now(),
   input: DueQuestionsInput = {},
 ): Promise<DueQuestion[]> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const excludeQuestionIds = Array.from(
     new Set(input.excludeQuestionIds ?? []),
   ).filter(Boolean);
@@ -652,7 +484,6 @@ export async function getDueQuestions(
       last_answer: questions.lastAnswer,
       last_answer_summary: questions.lastAnswerSummary,
       concise_answer: questions.conciseAnswer,
-      reference_answer: questions.referenceAnswer,
       flagged_at: questions.flaggedAt,
       created_at: questions.createdAt,
     })
@@ -684,7 +515,7 @@ export async function countDueQuestions(
   now = Date.now(),
   input: UserContextInput = {},
 ): Promise<number> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const [{ value = 0 } = { value: 0 }] = await db
     .select({ value: count() })
     .from(questions)
@@ -704,7 +535,7 @@ export async function getNextScheduledQuestionDue(
   now = Date.now(),
   input: DueQuestionsInput = {},
 ): Promise<number | null> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const excludeQuestionIds = Array.from(
     new Set(input.excludeQuestionIds ?? []),
   ).filter(Boolean);
@@ -736,7 +567,7 @@ export async function getQueuedQuestionsPage(
     sortKey: QueuedQuestionsSortKey;
   },
 ): Promise<QueuedQuestionsPage> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const excludeQuestionIds = Array.from(
     new Set(input.excludeQuestionIds ?? []),
   ).filter(Boolean);
@@ -769,7 +600,6 @@ export async function getQueuedQuestionsPage(
       last_answer: questions.lastAnswer,
       last_answer_summary: questions.lastAnswerSummary,
       concise_answer: questions.conciseAnswer,
-      reference_answer: questions.referenceAnswer,
       flagged_at: questions.flaggedAt,
       created_at: questions.createdAt,
     })
@@ -799,7 +629,6 @@ function rawQuestionRowToDueQuestion(row: {
   last_answer: string;
   last_answer_summary: string;
   concise_answer: string;
-  reference_answer: string;
   flagged_at: number | string | null;
   created_at: number | string;
 }): DueQuestion {
@@ -823,7 +652,7 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
     sourceVersion?: number;
   },
 ): Promise<QueuedQuestionsPage> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const queryEmbedding = normalizeEmbedding(input.queryEmbedding);
 
   if (queryEmbedding.length !== DEDUPE_EMBEDDING_DIMENSIONS) {
@@ -831,7 +660,7 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
   }
 
   const model = normalizeEmbeddingModel(
-    input.embeddingModel ?? process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+    input.embeddingModel ?? resolveEmbeddingModel(),
   );
   const embeddingKind = input.embeddingKind?.trim() || DEDUPE_EMBEDDING_KIND;
   const sourceVersion = input.sourceVersion ?? DEDUPE_SOURCE_VERSION;
@@ -904,7 +733,6 @@ export async function getQueuedQuestionsByEmbeddingProximityPage(
         q.last_answer,
         q.last_answer_summary,
         q.concise_answer,
-        q.reference_answer,
         q.flagged_at,
         q.created_at,
         qe.embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
@@ -932,7 +760,7 @@ export async function getQuestionSnapshot(
   question: string,
   input: UserContextInput = {},
 ): Promise<DueQuestion | null> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const [row] = await selectQuestionRows(eq(questions.question, question), {
     userId: context.userId,
   });
@@ -946,7 +774,7 @@ export async function getQuestionSnapshotById(
   questionId: string,
   input: UserContextInput = {},
 ): Promise<DueQuestion | null> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const [row] = await selectQuestionRows(eq(questions.id, questionId), {
     userId: context.userId,
   });
@@ -1002,7 +830,7 @@ export async function flagQuestionForReview(input: {
 export async function getQuestionAttemptsByQuestionIds(
   input: UserContextInput & { questionIds: string[] },
 ): Promise<Map<string, QuestionAttempt[]>> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const questionIds = Array.from(new Set(input.questionIds)).filter(Boolean);
 
   if (questionIds.length === 0) {
@@ -1065,7 +893,7 @@ export async function getRecentQuestionAttempts(
     limit: 24,
   },
 ): Promise<QuestionAttempt[]> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const excludeQuestions = Array.from(
     new Set(input.excludeQuestions ?? []),
   ).filter(Boolean);
@@ -1201,7 +1029,7 @@ export async function createAnswerEvaluationRecord(input: {
   answer: string;
   submittedAt: number;
 }): Promise<void> {
-  await ensureSeedData({ userId: input.userId });
+  await resolveUserContext({ userId: input.userId });
   const now = Math.round(input.submittedAt);
 
   await db.insert(answerEvaluations).values({
@@ -1272,7 +1100,7 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
   resolvedSince: number;
   limit: number;
 }): Promise<EvaluationQueueItem[]> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const activeSince = Math.round(input.activeSince);
   const resolvedSince = Math.round(input.resolvedSince);
 
@@ -1336,7 +1164,7 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
 export async function getAnswerEvaluationsByIds(input: UserContextInput & {
   ids: string[];
 }): Promise<EvaluationQueueItem[]> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const ids = Array.from(new Set(input.ids.map((id) => id.trim()).filter(Boolean)));
 
   if (ids.length === 0) {
@@ -1430,7 +1258,7 @@ export async function upsertDueQuestions(input: {
   now: number;
   userId?: string;
 }): Promise<DueQuestion[]> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
   const generatedQuestions = normalizeGeneratedQuestions(input.questions);
 
   if (generatedQuestions.length === 0) {
@@ -1515,7 +1343,7 @@ export async function applyEvaluationToPostgres(input: {
   now: number;
   userId?: string;
 }): Promise<PersistedEvaluation> {
-  const context = await ensureSeedData(input);
+  const context = await resolveUserContext(input);
 
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -1530,7 +1358,6 @@ export async function applyEvaluationToPostgres(input: {
         last_answer: questions.lastAnswer,
         last_answer_summary: questions.lastAnswerSummary,
         concise_answer: questions.conciseAnswer,
-        reference_answer: questions.referenceAnswer,
         flagged_at: questions.flaggedAt,
         created_at: questions.createdAt,
       })
@@ -1633,7 +1460,6 @@ export async function applyEvaluationToPostgres(input: {
       questionProvenance: row.question_provenance || null,
       lastAnswer: input.answer || null,
       lastAnswerSummary: input.answerSummary || null,
-      referenceAnswer: row.reference_answer || null,
       conciseAnswer,
       flaggedAt: row.flagged_at,
       createdAt: row.created_at,

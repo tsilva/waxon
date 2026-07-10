@@ -1,8 +1,21 @@
 import { pool } from "@/app/db/client";
 import { normalizeConceptSlug } from "./conceptSlug";
+import {
+  DEDUPE_EMBEDDING_DIMENSIONS,
+  DEDUPE_EMBEDDING_KIND,
+  DEDUPE_SOURCE_VERSION,
+  normalizeEmbeddingText,
+  resolveEmbeddingModel,
+} from "./embeddingSource";
+import {
+  getQueuedQuestionsByEmbeddingProximityPage,
+  type DueQuestion,
+} from "./postgresStore";
+import { getOpenRouterApiKey, openRouterEmbeddings } from "./openRouter";
 
 const DEFAULT_QUESTION_BANK_LIMIT = 50;
 const MAX_QUESTION_BANK_LIMIT = 100;
+const MAX_MEANING_SEARCH_RESULTS = 200;
 
 export type QuestionBankStatusFilter = "all" | "due" | "flagged" | "untagged";
 export type QuestionBankSort =
@@ -67,6 +80,128 @@ export function normalizeQuestionBankSort(value: unknown): QuestionBankSort {
     value === "updated-asc"
     ? value
     : "due";
+}
+
+function dueQuestionToQuestionBankItem(item: DueQuestion): QuestionBankItem {
+  return {
+    questionId: item.questionId,
+    question: item.question,
+    conciseAnswer: item.conciseAnswer,
+    questionProvenance: item.questionProvenance,
+    nextDue: item.nextDue,
+    createdAt: item.createdAt,
+    updatedAt: item.createdAt,
+    flaggedAt: item.flaggedAt,
+    conceptSlugs: item.conceptSlugs,
+  };
+}
+
+async function embedQuestionBankSearchQuery(input: {
+  query: string;
+  userId: string;
+}): Promise<number[]> {
+  const apiKey = getOpenRouterApiKey();
+
+  if (!apiKey) {
+    throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required.");
+  }
+
+  const { response, body } = await openRouterEmbeddings({
+    apiKey,
+    trace: {
+      operation: "question_bank_search_embedding",
+      userId: input.userId,
+      question: input.query,
+    },
+    body: {
+      model: resolveEmbeddingModel(),
+      input: [input.query],
+      encoding_format: "float",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenRouter embedding request failed (${response.status}).`);
+  }
+
+  const embedding = body.data?.[0]?.embedding;
+
+  if (!Array.isArray(embedding) || embedding.length !== DEDUPE_EMBEDDING_DIMENSIONS) {
+    throw new Error("OpenRouter returned an unexpected search embedding.");
+  }
+
+  return embedding.map((component, index) => {
+    const value = Number(component);
+
+    if (!Number.isFinite(value)) {
+      throw new Error(`Search embedding contains a non-finite value at ${index}.`);
+    }
+
+    return value;
+  });
+}
+
+export async function searchQuestionBankItemsByMeaning(input: {
+  userId: string;
+  query: string;
+  tagSlugs?: string[] | null;
+  status?: QuestionBankStatusFilter | null;
+  limit?: number | null;
+  offset?: number | null;
+}): Promise<QuestionBankPage> {
+  const query = normalizeEmbeddingText(input.query);
+
+  if (!query) {
+    return { items: [], total: 0, hasMore: false, nextOffset: null };
+  }
+
+  const tagSlugs = normalizeQuestionBankTagSlugs(input.tagSlugs ?? []);
+  const status = normalizeStatus(input.status);
+  const limit = Math.max(
+    1,
+    Math.min(
+      MAX_QUESTION_BANK_LIMIT,
+      Math.floor(input.limit ?? DEFAULT_QUESTION_BANK_LIMIT),
+    ),
+  );
+  const offset = Math.max(0, Math.floor(input.offset ?? 0));
+  const page = await getQueuedQuestionsByEmbeddingProximityPage({
+    userId: input.userId,
+    queryEmbedding: await embedQuestionBankSearchQuery({
+      query,
+      userId: input.userId,
+    }),
+    embeddingModel: resolveEmbeddingModel(),
+    embeddingKind: DEDUPE_EMBEDDING_KIND,
+    sourceVersion: DEDUPE_SOURCE_VERSION,
+    limit,
+    offset,
+    maxResults: MAX_MEANING_SEARCH_RESULTS,
+  });
+  const now = Date.now();
+  const items = page.items
+    .filter((item) =>
+      tagSlugs.every((slug) => item.conceptSlugs.includes(slug)),
+    )
+    .filter((item) => {
+      if (status === "due") {
+        return item.nextDue <= now;
+      }
+
+      if (status === "untagged") {
+        return item.conceptSlugs.length === 0;
+      }
+
+      return status !== "flagged";
+    })
+    .map(dueQuestionToQuestionBankItem);
+
+  return {
+    items,
+    total: page.total,
+    hasMore: false,
+    nextOffset: null,
+  };
 }
 
 export async function listQuestionBankItems(input: {

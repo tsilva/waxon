@@ -1,10 +1,11 @@
-export type CallType =
-  | "answer_eval"
-  | "question_generation"
-  | "embedding"
-  | "summarization";
+import type {
+  LlmTraceCallType,
+  LlmTraceStatus,
+} from "@/app/lib/llmTraceStore";
 
-export type TraceStatus = "ok" | "pending" | "error";
+export type CallType = LlmTraceCallType;
+
+export type TraceStatus = LlmTraceStatus;
 
 export type SortKey =
   | "startedAt"

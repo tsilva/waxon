@@ -8,10 +8,6 @@ This project is an app for learning any topic through adaptive question-and-answ
 
 Every question is stored and resurfaced later based on the user's past performance. Once a user answers a question correctly, the app should help make that knowledge durable: if the user returns daily and completes their exercises, the system should schedule reviews near the point where mastery is likely to fade. This lets users maintain a large body of knowledge through short sessions focused on the questions most at risk of being forgotten.
 
-## Project Specs
-
-Before any task in this repo, read the compact product specs in [SPECS.md](SPECS.md). Treat those specs as required contracts and preserve them while working. After any task, update [SPECS.md](SPECS.md) when the user states a durable requirement, a requirement changes or is dropped, or the work reveals a durable product contract. Keep the file compact, accurate, and non-redundant.
-
 ## Issue Threading
 
 Before any fix or behavior-changing edit in this repo, especially behavior regressions, product-flow issues, Learn/auth/deploy/UI bugs, or user-reported breakage, use the project-level skill in [.codex/skills/waxon-issue-threading/SKILL.md](.codex/skills/waxon-issue-threading/SKILL.md).

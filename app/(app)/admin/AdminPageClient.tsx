@@ -19,6 +19,10 @@ import {
   type CSSProperties,
 } from "react";
 import type { AuthenticatedUser } from "@/app/lib/auth";
+import type {
+  LlmTraceCall,
+  LlmTraceInteraction,
+} from "@/app/lib/llmTraceStore";
 import { JsonSyntaxBlock } from "@/app/JsonSyntaxBlock";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
@@ -41,41 +45,9 @@ import type {
   TraceStatus,
 } from "./adminTypes";
 
-type LlmCall = {
-  id: string;
-  operation: string;
-  model: string;
-  callType: CallType;
-  inputTokens: number;
-  outputTokens: number;
-  cachedPromptTokens?: number;
-  uncachedPromptTokens?: number;
-  cacheWriteTokens?: number;
-  cacheHitPercent?: number | null;
-  cost: number;
-  latencyMs: number;
-  status: TraceStatus;
-  startedAt: string;
-  requestPayload?: string;
-  responsePayload?: string;
-};
+type LlmCall = LlmTraceCall;
 
-type TraceInteraction = {
-  id: string;
-  title: string;
-  kind:
-    | "Answer evaluation"
-    | "Question generation"
-    | "Reference answer"
-    | "Embedding"
-    | "Knowledge memory"
-    | "Quality gate"
-    | "Summarization"
-    | "Other";
-  startedAt: string;
-  status: TraceStatus;
-  calls: LlmCall[];
-};
+type TraceInteraction = LlmTraceInteraction;
 
 type AdminPageClientProps = {
   currentUser: Pick<AuthenticatedUser, "displayName" | "email" | "avatarUrl">;

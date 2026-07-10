@@ -6,16 +6,18 @@ import {
   readJsonBodyWithLimit,
 } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
+import {
+  CONCISE_ANSWER_MAX_CHARS,
+  QUESTION_ADD_MAX_COUNT,
+  QUESTION_PROVENANCE_MAX_CHARS,
+  QUESTION_TEXT_MAX_CHARS,
+} from "@/app/lib/questionContract";
 import type { QuestionInput } from "@/app/lib/postgresStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_ADD_QUESTIONS_BODY_BYTES = 64 * 1024;
-const MAX_ADD_QUESTION_COUNT = 80;
-const MAX_QUESTION_CHARS = 1_200;
-const MAX_CONCISE_ANSWER_CHARS = 800;
-const MAX_PROVENANCE_CHARS = 360;
 const MAX_SOURCE_TEXT_CHARS = 4_000;
 const MAX_PROPOSED_CONCEPT_SLUGS = 8;
 const MAX_PROPOSED_CONCEPT_SLUG_CHARS = 120;
@@ -51,11 +53,11 @@ export async function POST(request: Request) {
     );
   }
 
-  if (payload.questions.length > MAX_ADD_QUESTION_COUNT) {
+  if (payload.questions.length > QUESTION_ADD_MAX_COUNT) {
     return NextResponse.json(
       {
         ok: false,
-        error: `questions must include ${MAX_ADD_QUESTION_COUNT} items or fewer`,
+        error: `questions must include ${QUESTION_ADD_MAX_COUNT} items or fewer`,
       },
       { status: 400 },
     );
@@ -67,7 +69,7 @@ export async function POST(request: Request) {
     if (typeof question === "string") {
       const normalizedQuestion = normalizeBoundedText(question, {
         field: "question",
-        maxLength: MAX_QUESTION_CHARS,
+        maxLength: QUESTION_TEXT_MAX_CHARS,
         required: true,
       });
 
@@ -88,7 +90,7 @@ export async function POST(request: Request) {
     };
     const normalizedQuestion = normalizeBoundedText(record.question, {
       field: "question",
-      maxLength: MAX_QUESTION_CHARS,
+      maxLength: QUESTION_TEXT_MAX_CHARS,
       required: true,
     });
 
@@ -98,7 +100,7 @@ export async function POST(request: Request) {
 
     const conciseAnswer = normalizeBoundedText(record.conciseAnswer, {
       field: "conciseAnswer",
-      maxLength: MAX_CONCISE_ANSWER_CHARS,
+      maxLength: CONCISE_ANSWER_MAX_CHARS,
       required: false,
     });
 
@@ -108,7 +110,7 @@ export async function POST(request: Request) {
 
     const questionProvenance = normalizeBoundedText(record.questionProvenance, {
       field: "questionProvenance",
-      maxLength: MAX_PROVENANCE_CHARS,
+      maxLength: QUESTION_PROVENANCE_MAX_CHARS,
       required: false,
     });
 

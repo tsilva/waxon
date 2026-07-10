@@ -8,7 +8,6 @@ import {
   chunks,
   configureNeonWebSocket,
   createDatabasePool,
-  DEFAULT_EMBEDDING_MODEL,
   extractOpenRouterChatText,
   fetchOpenRouterJson,
   loadLocalEnvFiles,
@@ -16,6 +15,7 @@ import {
   OPENROUTER_EMBEDDINGS_URL,
   openRouterChatModel,
   requireOpenRouterApiKey,
+  resolveEmbeddingModel,
   vectorLiteral,
 } from "./lib/runtime.mjs";
 
@@ -357,7 +357,7 @@ async function fetchConceptEmbeddings(slugs, apiKey) {
     errorPrefix: "Concept embedding request failed",
     errorTextLength: 400,
     body: {
-      model: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+      model: resolveEmbeddingModel(),
       input: uniqueSlugs.map(titleCaseSlug),
       encoding_format: "float",
     },

@@ -6,8 +6,8 @@ import {
   questions,
 } from "@/app/db/schema";
 import {
-  DEFAULT_EMBEDDING_MODEL,
   DEDUPE_EMBEDDING_DIMENSIONS,
+  resolveEmbeddingModel,
 } from "./embeddingSource";
 import { extractJsonObject } from "./jsonObject";
 import {
@@ -148,7 +148,7 @@ async function fetchEmbeddings(input: {
       question: input.texts[0]?.slice(0, 240),
     },
     body: {
-      model: process.env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL,
+      model: resolveEmbeddingModel(),
       input: input.texts,
       encoding_format: "float",
     },

@@ -31,7 +31,7 @@ const COURSE_UPDATED_TITLE_FORMATTER = new Intl.DateTimeFormat("en-US", {
 });
 
 export const REVIEW_COUNT_URL =
-  "/api/queue-status?mode=review&includeReviewQueue=0&includeRecentAttempts=0&includeQuestionAttempts=0&includeEvaluations=0&includeKnowledgeEmbeddingPlot=0&includeQueueCounts=1";
+  "/api/review-summary";
 
 export function coursesPageUrl(input: {
   cursor?: CourseListCursor | null;
@@ -273,7 +273,7 @@ export function LearnCourseList({
                 <span>
                   {loadingCourseId === course.id
                     ? "Loading"
-                    : `${course.generatedPages}/${course.totalPages} generated`}
+                    : `${course.chatMessageCount} messages`}
                 </span>
                 <time
                   className="learn-course-updated"
@@ -366,8 +366,8 @@ export function CourseSettingsModal({
 
         <dl className="course-settings-summary" aria-label="Course summary">
           <div>
-            <dt>{course.generatedPages}</dt>
-            <dd>generated pages</dd>
+            <dt>{course.totalPages}</dt>
+            <dd>course sections</dd>
           </div>
           <div>
             <dt>{course.chatMessageCount}</dt>
@@ -383,8 +383,7 @@ export function CourseSettingsModal({
           <div>
             <h3>Delete course</h3>
             <p>
-              This removes the course, its chat, generated pages, page attempts,
-              and generated review questions.
+              This removes the course, its chat, and generated review questions.
             </p>
           </div>
           <button

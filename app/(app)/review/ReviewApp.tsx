@@ -7,7 +7,6 @@ import {
 } from "@/app/AnswerComposer";
 import { useAppError } from "@/app/AppErrorModal";
 import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
-import { calculateQuestionExtractionProgress } from "@/app/lib/questionGenerationProgress";
 import { SCHEDULED_SCORE_THRESHOLD } from "@/app/lib/scheduler";
 import {
   deferredReviewRetryQuestionIds,
@@ -37,7 +36,6 @@ import { localSettingsEvent } from "@/app/toolbarEvents";
 import { ScoreChart } from "./ReviewVisualizations";
 import { formatDurationBadge } from "./reviewFormatting";
 import type {
-  KnowledgeEmbeddingPlot as KnowledgeEmbeddingPlotResponse,
   EvaluationPhase,
   EvaluationQueueItem,
   QuestionAttempt,
@@ -48,7 +46,6 @@ import type { UserProfile } from "@/app/lib/userProfile";
 import {
   Flag,
   Info,
-  Sparkles,
   Trash2,
   Upload,
   User,
@@ -90,12 +87,6 @@ type QueueStatusResponse = {
   pendingEvaluations: number;
   evaluations: EvaluationQueueItem[];
   recentAttempts?: QuestionAttempt[];
-  reviewQueue: ReviewQueueItem[];
-  reviewQueueTotal?: number;
-  reviewQueueOffset?: number;
-  reviewQueueLimit?: number;
-  reviewQueueHasMore?: boolean;
-  knowledgeEmbeddingPlot: KnowledgeEmbeddingPlotResponse;
 };
 
 type ReviewSessionQueueResponse = {
@@ -175,8 +166,6 @@ type ReviewSessionSnapshot = {
   question: string | null;
   currentSessionItem: ReviewQueueItem | null;
   sessionQueue: ReviewQueueItem[];
-  currentKnowledgeBaseId: string | null;
-  currentKnowledgeBaseName: string | null;
   answer: string;
   speechPreview: string;
   queueRemaining: number;
@@ -192,28 +181,6 @@ type ReviewSessionSnapshot = {
 };
 
 let reviewSessionSnapshot: ReviewSessionSnapshot | null = null;
-
-const LEARN_TARGET_KNOWLEDGE_BASE_STORAGE_KEY = "waxon:learn-target-knowledgeBase-id";
-
-function getStoredLearnTargetKnowledgeBaseId() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  return window.sessionStorage.getItem(LEARN_TARGET_KNOWLEDGE_BASE_STORAGE_KEY);
-}
-
-function storeLearnTargetKnowledgeBaseId(knowledgeBaseId: string | null) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  if (knowledgeBaseId) {
-    window.sessionStorage.setItem(LEARN_TARGET_KNOWLEDGE_BASE_STORAGE_KEY, knowledgeBaseId);
-  } else {
-    window.sessionStorage.removeItem(LEARN_TARGET_KNOWLEDGE_BASE_STORAGE_KEY);
-  }
-}
 
 async function readJsonResponse<T>(
   response: Response,
@@ -242,191 +209,6 @@ async function readJsonResponse<T>(
   return data as T;
 }
 
-function toLearnGenerationProgress(
-  payload: Extract<TopUpStreamPayload, { ok: true }>,
-  fallbackTotal: number,
-  fallbackLatestQuestion: string | null = null,
-): LearnGenerationProgress | null {
-  if (!payload.phase || !payload.status) {
-    return null;
-  }
-
-  const generated = Math.max(0, Math.round(payload.generated ?? 0));
-  const total = Math.max(1, Math.round(payload.total ?? fallbackTotal));
-  const latestQuestion = payload.latestQuestion ?? fallbackLatestQuestion;
-
-  return {
-    phase: payload.phase,
-    status: payload.status,
-    progress: calculateQuestionExtractionProgress({ generated, total }),
-    generated,
-    total,
-    latestQuestion,
-  };
-}
-
-async function parseTopUpResponse(
-  response: Response,
-  fallbackTotal: number,
-  onProgress: (progress: LearnGenerationProgress) => void,
-): Promise<Extract<TopUpQuestionsResponse, { ok: true }>> {
-  const contentType = response.headers.get("content-type") ?? "";
-
-  if (!response.body || !contentType.includes("text/event-stream")) {
-    const data = await readJsonResponse<TopUpQuestionsResponse>(
-      response,
-      "Could not generate questions.",
-    );
-
-    if (!data.ok) {
-      throw new Error(
-        data.error ? data.error : "Could not generate questions.",
-      );
-    }
-
-    return data;
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let completed: Extract<TopUpQuestionsResponse, { ok: true }> | null = null;
-  let latestQuestion: string | null = null;
-
-  const parseEvent = (eventText: string) => {
-    const lines = eventText.split("\n");
-    const eventName =
-      lines
-        .find((line) => line.startsWith("event:"))
-        ?.slice("event:".length)
-        .trim() ?? "message";
-    const dataText = lines
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice("data:".length).trimStart())
-      .join("\n");
-
-    if (!dataText) {
-      return;
-    }
-
-    const payload = JSON.parse(dataText) as TopUpStreamPayload;
-
-    if (!payload.ok) {
-      throw new Error(payload.error ?? "Could not generate questions.");
-    }
-
-    const progress = toLearnGenerationProgress(
-      payload,
-      fallbackTotal,
-      latestQuestion,
-    );
-
-    if (progress) {
-      latestQuestion = progress.latestQuestion;
-      onProgress(progress);
-    }
-
-    if (eventName === "complete") {
-      completed = {
-        ok: true,
-        model: payload.model ?? "",
-        knowledgeBaseId: payload.knowledgeBaseId ?? "",
-        knowledgeBaseName: payload.knowledgeBaseName ?? "knowledgeBase",
-        memoryUpdated: Boolean(payload.memoryUpdated),
-        generated: Math.max(0, Math.round(payload.generated ?? 0)),
-        added: Math.max(0, Math.round(payload.added ?? 0)),
-        rejected: Math.max(0, Math.round(payload.rejected ?? 0)),
-      };
-    }
-  };
-
-  while (true) {
-    const { done, value } = await reader.read();
-
-    if (done) {
-      break;
-    }
-
-    buffer += decoder.decode(value, { stream: true });
-
-    let eventBoundary = buffer.indexOf("\n\n");
-
-    while (eventBoundary !== -1) {
-      parseEvent(buffer.slice(0, eventBoundary));
-      buffer = buffer.slice(eventBoundary + 2);
-      eventBoundary = buffer.indexOf("\n\n");
-    }
-  }
-
-  buffer += decoder.decode();
-
-  if (buffer.trim()) {
-    parseEvent(buffer);
-  }
-
-  if (!response.ok) {
-    throw new Error("Could not generate questions.");
-  }
-
-  if (!completed) {
-    throw new Error("Question generation stream ended before completion.");
-  }
-
-  return completed;
-}
-
-type TopUpQuestionsResponse =
-  | {
-      ok: true;
-      model: string;
-      knowledgeBaseId: string;
-      knowledgeBaseName: string;
-      memoryUpdated: boolean;
-      generated: number;
-      added: number;
-      rejected: number;
-    }
-  | {
-      ok: false;
-      error?: string;
-    };
-
-type LearnGenerationPhase =
-  | "memory"
-  | "generating"
-  | "processing"
-  | "complete";
-
-type LearnGenerationProgress = {
-  phase: LearnGenerationPhase;
-  status: string;
-  progress: number;
-  generated: number;
-  total: number;
-  latestQuestion: string | null;
-};
-
-type TopUpStreamPayload =
-  | {
-      ok: true;
-      phase?: LearnGenerationPhase;
-      status?: string;
-      progress?: number;
-      generated?: number;
-      total?: number;
-      latestQuestion?: string | null;
-      model?: string;
-      knowledgeBaseId?: string;
-      knowledgeBaseName?: string;
-      memoryUpdated?: boolean;
-      added?: number;
-      rejected?: number;
-    }
-  | {
-      ok: false;
-      error?: string;
-    };
-
 type PendingSpeechCommand = {
   command: "submit";
   heldText: string;
@@ -434,7 +216,6 @@ type PendingSpeechCommand = {
 };
 
 async function fetchReviewSessionQueue(input: {
-  knowledgeBaseId?: string | null;
   excludeQuestionId?: string | null;
   excludeQuestionIds?: Array<string | null | undefined>;
   limit?: number;
@@ -442,10 +223,6 @@ async function fetchReviewSessionQueue(input: {
   signal?: AbortSignal;
 } = {}): Promise<ReviewQueueItem[]> {
   const params = new URLSearchParams();
-
-  if (input.knowledgeBaseId) {
-    params.set("knowledgeBaseId", input.knowledgeBaseId);
-  }
 
   if (input.excludeQuestionId) {
     params.append("excludeQuestionId", input.excludeQuestionId);
@@ -497,7 +274,6 @@ type QuestionStats = {
   generatedFromQuestion: string | null;
   questionProvenance: string | null;
   conciseAnswer: string | null;
-  referenceAnswer: string | null;
   lastJustification: string | null;
   conceptSlugs: string[];
 };
@@ -525,7 +301,6 @@ const REVIEW_SESSION_LOOKAHEAD_LOW_WATERMARK = 2;
 const SPEECH_COMMAND_SETTLE_MS = 1000;
 const STALE_EVALUATION_GRADING_MS = 120_000;
 const EVALUATION_STATUS_POLL_MS = 750;
-const LEARN_TOP_UP_COOLDOWN_MS = 20_000;
 const QUESTION_SWAP_ANIMATION_MS = 140;
 
 const MAX_AVATAR_UPLOAD_BYTES = 512 * 1024;
@@ -846,12 +621,6 @@ export default function ReviewApp({
       initialReviewSessionItem?.questionId ??
       null,
   );
-  const [currentKnowledgeBaseName, setCurrentKnowledgeBaseName] = useState<string | null>(
-    () => cachedSessionRef.current?.currentKnowledgeBaseName ?? null,
-  );
-  const [currentKnowledgeBaseId, setCurrentKnowledgeBaseId] = useState<string | null>(
-    () => cachedSessionRef.current?.currentKnowledgeBaseId ?? null,
-  );
   const [answer, setAnswer] = useState(
     () => cachedSessionRef.current?.answer ?? "",
   );
@@ -926,13 +695,6 @@ export default function ReviewApp({
     localSignOutHref: "/",
     onLocalManageAccount: () => setIsSettingsOpen(true),
   });
-  const [isLearnTopUpPending, setIsLearnTopUpPending] = useState(false);
-  const [learnTopUpMessage, setLearnTopUpMessage] = useState<string | null>(null);
-  const [learnGenerationStatus, setLearnGenerationStatus] = useState<string | null>(
-    null,
-  );
-  const [learnGenerationProgress, setLearnGenerationProgress] =
-    useState<LearnGenerationProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { showError } = useAppError();
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -949,7 +711,6 @@ export default function ReviewApp({
   const pendingRetryItemsRef = useRef(new Map<string, ReviewQueueItem>());
   const deferredRetryItemsRef = useRef<ReviewQueueItem[]>([]);
   const processedEvaluationIdsRef = useRef(new Set<string>());
-  const learnTargetKnowledgeBaseIdRef = useRef<string | null>(null);
   const questionAttemptsRequestKeysRef = useRef(new Set<string>());
   const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
@@ -972,9 +733,6 @@ export default function ReviewApp({
   const pendingSpeechCommandTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const isLearnTopUpPendingRef = useRef(false);
-  const topUpLearnQueueRef = useRef<(() => Promise<void>) | null>(null);
-  const learnTopUpCooldownUntilRef = useRef(0);
 
   const togglePreviousAnswerDetails = useCallback((id: string) => {
     setExpandedPreviousAnswerIds((currentIds) => {
@@ -1056,7 +814,6 @@ export default function ReviewApp({
       questionSwapTimerRef.current = null;
     }, QUESTION_SWAP_ANIMATION_MS);
   }, [
-    currentKnowledgeBaseName,
     currentQuestionId,
     currentSessionItem,
     isLoadingQuestion,
@@ -1082,10 +839,6 @@ export default function ReviewApp({
   useEffect(() => {
     isFlaggingQuestionRef.current = isFlaggingQuestion;
   }, [isFlaggingQuestion]);
-
-  useEffect(() => {
-    isLearnTopUpPendingRef.current = isLearnTopUpPending;
-  }, [isLearnTopUpPending]);
 
   useEffect(() => {
     if (!shouldRefocusAnswerAfterSubmitRef.current) {
@@ -1115,8 +868,6 @@ export default function ReviewApp({
       question,
       currentSessionItem,
       sessionQueue,
-      currentKnowledgeBaseId,
-      currentKnowledgeBaseName,
       answer,
       speechPreview,
       queueRemaining,
@@ -1134,8 +885,6 @@ export default function ReviewApp({
     answer,
     currentQuestionId,
     currentSessionItem,
-    currentKnowledgeBaseId,
-    currentKnowledgeBaseName,
     currentUser,
     evaluations,
     expandedPreviousAnswerIds,
@@ -1237,19 +986,6 @@ export default function ReviewApp({
     selectedQuestionAttemptKey,
     selectedQuestionId,
   ]);
-
-  const rememberLearnTargetKnowledgeBase = useCallback((knowledgeBaseId: string | null) => {
-    learnTargetKnowledgeBaseIdRef.current = knowledgeBaseId;
-    storeLearnTargetKnowledgeBaseId(knowledgeBaseId);
-  }, []);
-
-  useEffect(() => {
-    if (learnTargetKnowledgeBaseIdRef.current) {
-      return;
-    }
-
-    learnTargetKnowledgeBaseIdRef.current = getStoredLearnTargetKnowledgeBaseId();
-  }, []);
 
   const hasPendingEvaluationActivity =
     evaluations.some((evaluation) => evaluation.status === "grading") ||
@@ -1378,8 +1114,6 @@ export default function ReviewApp({
     questionIdRef.current = data.questionId;
     setQuestion(data.question);
     questionRef.current = data.question;
-    setCurrentKnowledgeBaseId(null);
-    setCurrentKnowledgeBaseName(null);
     setQueueRemaining(data.queueRemaining);
     setToolbarDueCount(data.queueRemaining);
 
@@ -1399,8 +1133,6 @@ export default function ReviewApp({
     questionIdRef.current = item?.questionId ?? null;
     setQuestion(item?.question ?? null);
     questionRef.current = item?.question ?? null;
-    setCurrentKnowledgeBaseId(null);
-    setCurrentKnowledgeBaseName(null);
 
     if (item?.question && options?.appendToMessages !== false) {
       appendQuestion(item.question);
@@ -1555,18 +1287,10 @@ export default function ReviewApp({
 
   const previousAnswerStatusUrl = useCallback((recentAttemptsLimit: number) => {
     const params = new URLSearchParams({
-      limit: "0",
-      offset: "0",
-      mode: "review",
-      includeReviewQueue: "0",
-      includeQuestionAttempts: "0",
-      includeRecentAttempts: "1",
       recentAttemptsLimit: String(Math.max(0, Math.floor(recentAttemptsLimit))),
-      includeKnowledgeEmbeddingPlot: "0",
-      includeQueueCounts: "1",
     });
 
-    return `/api/queue-status?${params.toString()}`;
+    return `/api/review-activity?${params.toString()}`;
   }, []);
 
   const loadPreviousAnswerStatus = useCallback(async (
@@ -1875,8 +1599,6 @@ export default function ReviewApp({
 
     const submittedQuestion = activeQuestion;
     const submittedQuestionId = questionIdRef.current;
-    const submittedKnowledgeBaseId = currentKnowledgeBaseId;
-    const submittedKnowledgeBaseName = currentKnowledgeBaseName;
     const submittedSessionItem = currentSessionItemRef.current;
     const submittedAnswer = (answerOverride ?? answerRef.current).trim();
 
@@ -1965,18 +1687,9 @@ export default function ReviewApp({
         ),
       );
 
-      const nextSessionItem = await advanceReviewSessionQueue({
+      await advanceReviewSessionQueue({
         appendToMessages: true,
       });
-
-      if (!nextSessionItem) {
-        if (submittedKnowledgeBaseId) {
-          rememberLearnTargetKnowledgeBase(submittedKnowledgeBaseId);
-        }
-
-        learnTopUpCooldownUntilRef.current = 0;
-        await topUpLearnQueueRef.current?.();
-      }
 
       return true;
     } catch (submitError) {
@@ -1993,8 +1706,6 @@ export default function ReviewApp({
       currentSessionItemRef.current = submittedSessionItem;
       setQuestion(submittedQuestion);
       questionRef.current = submittedQuestion;
-      setCurrentKnowledgeBaseId(submittedKnowledgeBaseId);
-      setCurrentKnowledgeBaseName(submittedKnowledgeBaseName);
       setAnswer(submittedAnswer);
       answerRef.current = submittedAnswer;
       surfaceReviewError(
@@ -2020,9 +1731,6 @@ export default function ReviewApp({
   }, [
     advanceReviewSessionQueue,
     clearPendingSpeechCommand,
-    currentKnowledgeBaseId,
-    currentKnowledgeBaseName,
-    rememberLearnTargetKnowledgeBase,
     surfaceReviewError,
   ]);
 
@@ -2576,22 +2284,6 @@ export default function ReviewApp({
       recentAttempts.length >= COLLAPSED_PREVIOUS_ANSWER_LIMIT ||
       previousAnswers.length >= COLLAPSED_PREVIOUS_ANSWER_LIMIT);
   const isReviewResting = !isLoadingQuestion && !question;
-  const activeLearnGenerationProgress =
-    learnGenerationProgress ??
-    ({
-      phase: "memory",
-      status: learnGenerationStatus ?? "Preparing new questions",
-      progress: 0,
-      generated: 0,
-      total: 50,
-      latestQuestion: null,
-    } satisfies LearnGenerationProgress);
-  const activeLearnGenerationStreamText =
-    activeLearnGenerationProgress.latestQuestion ??
-    (activeLearnGenerationProgress.phase === "memory" ||
-    activeLearnGenerationProgress.generated === 0
-      ? "Waiting for the first complete streamed question."
-      : "Finalizing generated questions.");
   const hasQuestionSwapLayers = questionSwapLayers.length > 0;
   const renderQuestionSwapLayer = (layer: QuestionSwapLayer) => {
     const isExiting = layer.phase === "exiting";
@@ -2678,109 +2370,6 @@ export default function ReviewApp({
         COLLAPSED_PREVIOUS_ANSWER_LIMIT - visiblePreviousAnswers.length,
       )
     : 0;
-  const topUpLearnQueue = useCallback(async () => {
-    const now = Date.now();
-    const count = 50;
-    if (isLearnTopUpPendingRef.current) {
-      return;
-    }
-
-    if (now < learnTopUpCooldownUntilRef.current) {
-      setLearnGenerationStatus(null);
-      setLearnTopUpMessage("Waiting to retry");
-      return;
-    }
-
-    isLearnTopUpPendingRef.current = true;
-    setIsLearnTopUpPending(true);
-    setLearnTopUpMessage(null);
-    setLearnGenerationStatus("Updating knowledge memory");
-    setLearnGenerationProgress({
-      phase: "memory",
-      status: "Updating knowledge memory",
-      progress: 0,
-      generated: 0,
-      total: count,
-      latestQuestion: null,
-    });
-
-    try {
-      const response = await fetch("/api/questions/top-up", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "text/event-stream",
-        },
-        body: JSON.stringify({
-          count,
-        }),
-      });
-      const data = await parseTopUpResponse(response, count, (progress) => {
-        setLearnGenerationProgress(progress);
-        setLearnGenerationStatus(progress.status);
-      });
-
-      if (data.added > 0) {
-        setLearnTopUpMessage(
-          data.added === 1
-            ? "1 question added to your knowledge base"
-            : `${data.added} questions added to your knowledge base`,
-        );
-        setLearnGenerationStatus("Refreshing the queue");
-        setLearnGenerationProgress((currentProgress) => ({
-          phase: "complete",
-          status: "Refreshing the queue",
-          progress: calculateQuestionExtractionProgress({
-            generated: data.generated,
-            total: currentProgress?.total ?? count,
-          }),
-          generated: data.generated,
-          total: currentProgress?.total ?? count,
-          latestQuestion: currentProgress?.latestQuestion ?? null,
-        }));
-        setLearnGenerationStatus("Loading the next question");
-        setLearnGenerationProgress((currentProgress) => ({
-          phase: "complete",
-          status: "Loading the next question",
-          progress: calculateQuestionExtractionProgress({
-            generated: data.generated,
-            total: currentProgress?.total ?? count,
-          }),
-          generated: data.generated,
-          total: currentProgress?.total ?? count,
-          latestQuestion: currentProgress?.latestQuestion ?? null,
-        }));
-        await loadNextQuestion({ surfaceError: false });
-      } else {
-        learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
-        setLearnGenerationStatus(null);
-        setLearnGenerationProgress(null);
-        setLearnTopUpMessage(
-          data.rejected > 0
-            ? "Generated questions were duplicates"
-            : "No new questions generated",
-        );
-      }
-    } catch (topUpError) {
-      learnTopUpCooldownUntilRef.current = Date.now() + LEARN_TOP_UP_COOLDOWN_MS;
-      setLearnGenerationStatus(null);
-      setLearnGenerationProgress(null);
-      setLearnTopUpMessage(
-        topUpError instanceof Error
-          ? topUpError.message
-          : "Could not generate questions.",
-      );
-    } finally {
-      isLearnTopUpPendingRef.current = false;
-      setIsLearnTopUpPending(false);
-      setLearnGenerationProgress(null);
-    }
-  }, [loadNextQuestion]);
-
-  useEffect(() => {
-    topUpLearnQueueRef.current = topUpLearnQueue;
-  }, [topUpLearnQueue]);
-
   const selectedQuestionStats = useMemo<QuestionStats | null>(() => {
     if (!selectedQuestion) {
       return null;
@@ -2996,7 +2585,6 @@ export default function ReviewApp({
       generatedFromQuestion: queueItem?.generatedFromQuestion ?? null,
       questionProvenance: queueItem?.questionProvenance ?? null,
       conciseAnswer: queueItem?.conciseAnswer ?? null,
-      referenceAnswer: queueItem?.referenceAnswer ?? null,
       lastJustification:
         queueItem?.lastJustification ??
         latestResolvedEvaluation?.justification ??
@@ -3067,70 +2655,6 @@ export default function ReviewApp({
                 <div className="question-swap-stack">
                   {questionSwapLayers.map(renderQuestionSwapLayer)}
                 </div>
-              ) : isLearnTopUpPending ? (
-                <div
-                  className="learn-generation-panel"
-                  aria-busy="true"
-                  aria-labelledby="learn-generation-title"
-                >
-                  <div className="learn-generation-header">
-                    <p className="learn-generation-kicker">
-                      Preparing questions
-                    </p>
-                    <h2
-                      className="learn-generation-title"
-                      id="learn-generation-title"
-                    >
-                      Making the next batch.
-                    </h2>
-                    <p className="learn-generation-status" aria-live="polite">
-                      {activeLearnGenerationProgress.status}
-                    </p>
-                  </div>
-
-                  <div
-                    className="learn-generation-progress"
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={activeLearnGenerationProgress.progress}
-                    aria-label="Question extraction progress"
-                  >
-                    <span
-                      style={{
-                        width: `${activeLearnGenerationProgress.progress}%`,
-                      }}
-                    />
-                  </div>
-
-                  <dl className="learn-generation-detail-grid">
-                    <div>
-                      <dt>{activeLearnGenerationProgress.generated}</dt>
-                      <dd>extracted</dd>
-                    </div>
-                    <div>
-                      <dt>{activeLearnGenerationProgress.total}</dt>
-                      <dd>requested</dd>
-                    </div>
-                    <div>
-                      <dt>{activeLearnGenerationProgress.progress}%</dt>
-                      <dd>of requested</dd>
-                    </div>
-                  </dl>
-
-                  <div className="learn-generation-stream">
-                    <MarkdownInline
-                      as="p"
-                      className="learn-generation-stream-text"
-                      text={activeLearnGenerationStreamText}
-                    />
-                    <span className="progress-dot-suffix" aria-hidden="true">
-                      <span />
-                      <span />
-                      <span />
-                    </span>
-                  </div>
-                </div>
               ) : (
                 <div className="resting-state">
                   <p className="resting-kicker">
@@ -3140,7 +2664,7 @@ export default function ReviewApp({
                     {"You're caught up."}
                   </h2>
                   <p className="resting-copy">
-                    {learnTopUpMessage ?? "No questions are due right now."}
+                    No questions are due right now.
                   </p>
 
                   <dl className="resting-metrics" aria-label="Review status">
@@ -3163,24 +2687,17 @@ export default function ReviewApp({
                   </dl>
 
                   <div className="resting-actions">
-                    <button
+                    <Link
                       className="resting-primary"
-                      type="button"
-                      disabled={isLearnTopUpPending}
-                      onClick={() => {
-                        learnTopUpCooldownUntilRef.current = 0;
-                        void topUpLearnQueue();
-                      }}
+                      href="/learn"
                     >
-                      <Sparkles aria-hidden="true" />
-                      <span>Keep learning</span>
-                    </button>
+                      Continue learning
+                    </Link>
                     <Link
                       className="resting-secondary"
                       href="/library"
-                      aria-disabled={isLearnTopUpPending}
                     >
-                      View queue
+                      View Library
                     </Link>
                   </div>
 

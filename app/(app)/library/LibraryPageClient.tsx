@@ -20,7 +20,7 @@ import type {
 } from "@/app/lib/questionBank";
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
-import type { QuestionAttempt, ReviewQueueItem } from "@/app/lib/reviewTypes";
+import type { QuestionAttempt } from "@/app/lib/reviewTypes";
 import type { UserProfile, UserProfileSummary } from "@/app/lib/userProfile";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { MarkdownInline } from "@/app/MarkdownContent";
@@ -30,11 +30,6 @@ import { ScoreChart } from "../review/ReviewVisualizations";
 import { LibraryManagementTools } from "./LibraryManagementTools";
 
 type SearchMode = "text" | "meaning";
-
-type QueueSearchResponse = {
-  reviewQueue: ReviewQueueItem[];
-  reviewQueueTotal: number;
-};
 
 type LibraryPageClientProps = {
   initialQuestionBank?: QuestionBankPage | null;
@@ -111,6 +106,7 @@ function questionStatus(item: QuestionBankItem, now: number): string {
 
 function questionBankParams(input: {
   query: string;
+  searchMode: SearchMode;
   status: QuestionBankStatusFilter;
   tagSlugs: string[];
   sort: QuestionBankSort;
@@ -123,6 +119,10 @@ function questionBankParams(input: {
 
   if (input.query.trim()) {
     params.set("q", input.query.trim());
+
+    if (input.searchMode === "meaning") {
+      params.set("searchMode", "meaning");
+    }
   }
 
   if (input.status !== "all") {
@@ -151,65 +151,6 @@ async function fetchQuestionBankPage(input: {
   offset: number;
   signal?: AbortSignal;
 }): Promise<QuestionBankPage> {
-  if (input.searchMode === "meaning" && input.query.trim()) {
-    const params = new URLSearchParams({
-      query: input.query.trim(),
-      limit: String(LIBRARY_PAGE_SIZE),
-      offset: String(Math.max(0, Math.floor(input.offset))),
-      includeQuestionAttempts: "0",
-      includeRecentAttempts: "0",
-      includeEvaluations: "0",
-      includeKnowledgeEmbeddingPlot: "0",
-      includeQueueCounts: "0",
-    });
-    const response = await fetch(`/api/queue-status?${params.toString()}`, {
-      cache: "no-store",
-      signal: input.signal,
-    });
-    const data = (await response.json()) as QueueSearchResponse & {
-      error?: string;
-    };
-
-    if (!response.ok) {
-      throw new Error(data.error || "Could not search question bank by meaning.");
-    }
-
-    const filteredItems = data.reviewQueue.filter((item) => {
-      if (
-        input.tagSlugs.some((slug) => !item.conceptSlugs.includes(slug))
-      ) {
-        return false;
-      }
-
-      if (input.status === "due" && item.status !== "now") {
-        return false;
-      }
-
-      if (input.status === "untagged" && item.conceptSlugs.length > 0) {
-        return false;
-      }
-
-      return input.status !== "flagged";
-    });
-
-    return {
-      items: filteredItems.map((item) => ({
-        questionId: item.questionId,
-        question: item.question,
-        conciseAnswer: item.conciseAnswer,
-        questionProvenance: item.questionProvenance,
-        nextDue: item.nextDue,
-        createdAt: item.createdAt,
-        updatedAt: item.createdAt,
-        flaggedAt: null,
-        conceptSlugs: item.conceptSlugs,
-      })),
-      total: data.reviewQueueTotal,
-      hasMore: false,
-      nextOffset: null,
-    };
-  }
-
   const response = await fetch(
     `/api/question-bank?${questionBankParams(input).toString()}`,
     {
