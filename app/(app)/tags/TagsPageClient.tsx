@@ -16,18 +16,9 @@ import type {
 } from "@/app/lib/conceptTags";
 import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
 import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
-import type {
-  UserProfile,
-  UserProfileSummary,
-} from "@/app/lib/userProfile";
+import type { UserProfile } from "@/app/lib/userProfile";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
-
-type TagsPageClientProps = {
-  initialConceptTags?: ConceptTagSummary[] | null;
-  initialUser?: UserProfileSummary | null;
-  showAdmin?: boolean;
-};
 
 type ConceptTagMutationResponse =
   | {
@@ -60,14 +51,10 @@ async function patchConceptTag(payload: Record<string, unknown>) {
   return data.conceptTag;
 }
 
-export default function TagsPageClient({
-  initialConceptTags = null,
-  initialUser = null,
-  showAdmin = false,
-}: TagsPageClientProps) {
-  const [conceptTags, setConceptTags] = useState(initialConceptTags ?? []);
-  const [currentUser, setCurrentUser] = useState(initialUser);
-  const [isTagsLoading, setIsTagsLoading] = useState(initialConceptTags === null);
+export default function TagsPageClient() {
+  const [conceptTags, setConceptTags] = useState<ConceptTagSummary[]>([]);
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
+  const [isTagsLoading, setIsTagsLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [draftSlug, setDraftSlug] = useState("");
@@ -97,7 +84,6 @@ export default function TagsPageClient({
     onSignOut,
   } = useToolbarAccount(currentUser, {
     localSignOutHref: "/",
-    showAdmin,
   });
 
   useEffect(() => {

@@ -8,10 +8,22 @@ import {
   resolveEmbeddingModel,
 } from "./embeddingSource";
 import {
+  applyEvaluationToPostgres,
   getQueuedQuestionsByEmbeddingProximityPage,
+  getQueuedQuestionsPage,
+  upsertDueQuestions,
+  upsertQuestionEmbeddings,
   type DueQuestion,
+  type QuestionInput,
 } from "./postgresStore";
 import { getOpenRouterApiKey, openRouterEmbeddings } from "./openRouter";
+import { reformatMultipleChoiceQuestionForReview } from "./courseQuestionAttemptParsing";
+import type { CourseDetail } from "./courseStore";
+import { questionSlug } from "./questionSlug";
+import {
+  gateNovelQuestions,
+  type NovelQuestionGateResult,
+} from "./semanticDedupe";
 
 const DEFAULT_QUESTION_BANK_LIMIT = 50;
 const MAX_QUESTION_BANK_LIMIT = 100;
@@ -43,6 +55,201 @@ export type QuestionBankPage = {
   hasMore: boolean;
   nextOffset: number | null;
 };
+
+export type CourseChatQuestionAttemptInput = {
+  course: CourseDetail;
+  question: string;
+  answer: string;
+  answerSummary: string;
+  conciseAnswer: string;
+  correctAnswer: string | null;
+  justification: string;
+  score: number;
+  submittedAt: number;
+};
+
+export type CourseChatQuestionAttemptResult = {
+  questionId: string;
+  attemptSaved: boolean;
+};
+
+function courseChatQuestionProvenance(course: CourseDetail): string {
+  const page = course.toc.pages[course.currentPageIndex];
+
+  return [
+    `Course chat: ${course.title}`,
+    page ? `Milestone ${course.currentPageIndex + 1}: ${page.title}` : "",
+  ]
+    .filter(Boolean)
+    .join(" | ");
+}
+
+export async function recordCourseChatQuestionAttempt(
+  input: CourseChatQuestionAttemptInput,
+): Promise<CourseChatQuestionAttemptResult | null> {
+  const question = reformatMultipleChoiceQuestionForReview(input.question)
+    .trim()
+    .replace(/\s+/g, " ");
+  const answer = input.answer.trim();
+  const score = Math.max(0, Math.min(10, Math.round(input.score)));
+
+  if (!question || !answer || !Number.isFinite(score)) {
+    return null;
+  }
+
+  const now = Date.now();
+  const [dueQuestion] = await upsertDueQuestions({
+    userId: input.course.userId,
+    sourceQuestion: null,
+    now,
+    questions: [
+      {
+        question,
+        conciseAnswer:
+          input.conciseAnswer.trim().replace(/\s+/g, " ") ||
+          input.correctAnswer?.trim().replace(/\s+/g, " ") ||
+          "",
+        questionProvenance: courseChatQuestionProvenance(input.course),
+      },
+    ],
+  });
+
+  if (!dueQuestion) {
+    return null;
+  }
+
+  const persisted = await applyEvaluationToPostgres({
+    questionId: dueQuestion.questionId,
+    question: dueQuestion.question,
+    answer,
+    answerSummary:
+      input.answerSummary.trim().replace(/\s+/g, " ") || answer.slice(0, 240),
+    correctAnswer:
+      input.correctAnswer?.trim().replace(/\s+/g, " ") ||
+      input.conciseAnswer.trim().replace(/\s+/g, " ") ||
+      null,
+    justification:
+      input.justification.trim().replace(/\s+/g, " ") ||
+      "Recorded from course chat.",
+    score,
+    submittedAt: input.submittedAt,
+    now,
+    userId: input.course.userId,
+  });
+
+  return {
+    questionId: dueQuestion.questionId,
+    attemptSaved: Boolean(persisted),
+  };
+}
+
+function acceptQuestionsWithoutNoveltyGate(
+  input: Array<string | QuestionInput>,
+): NovelQuestionGateResult {
+  const seen = new Set<string>();
+  const accepted: NovelQuestionGateResult["accepted"] = [];
+
+  for (const item of input) {
+    const question = typeof item === "string" ? item : item.question;
+    const normalizedQuestion = question.trim().replace(/\s+/g, " ");
+    const slug = questionSlug(normalizedQuestion);
+
+    if (!normalizedQuestion || seen.has(slug)) {
+      continue;
+    }
+
+    seen.add(slug);
+    accepted.push({
+      question: normalizedQuestion,
+      conciseAnswer:
+        typeof item === "string"
+          ? ""
+          : (item.conciseAnswer ?? "").trim().replace(/\s+/g, " "),
+      embedding: [],
+      sourceHash: "",
+    });
+  }
+
+  return {
+    accepted,
+    rejected: [],
+  };
+}
+
+export async function addQuestionsToKnowledgeBase(input: {
+  userId: string;
+  questions: Array<string | QuestionInput>;
+  sourceQuestion?: string | null;
+}): Promise<{ added: number; rejected: number }> {
+  const { total: userCardCount } = await getQueuedQuestionsPage({
+    userId: input.userId,
+    limit: 0,
+    offset: 0,
+    sortKey: "creation-date",
+  });
+  const gateResult =
+    userCardCount === 0
+      ? acceptQuestionsWithoutNoveltyGate(input.questions)
+      : await gateNovelQuestions(input.questions, {
+          operation: "add_questions_gate",
+          userId: input.userId,
+        });
+  const objectQuestions = input.questions.filter(
+    (question): question is QuestionInput => typeof question !== "string",
+  );
+  const provenanceByQuestion = new Map(
+    objectQuestions.map((question) => [
+      question.question.trim().replace(/\s+/g, " ").toLowerCase(),
+      question.questionProvenance?.trim().replace(/\s+/g, " ") ?? "",
+    ]),
+  );
+  const proposedSlugsByQuestion = new Map(
+    objectQuestions.map((question) => [
+      question.question.trim().replace(/\s+/g, " ").toLowerCase(),
+      question.proposedConceptSlugs ?? [],
+    ]),
+  );
+  const sourceTextByQuestion = new Map(
+    objectQuestions.map((question) => [
+      question.question.trim().replace(/\s+/g, " ").toLowerCase(),
+      question.sourceText ?? "",
+    ]),
+  );
+
+  const addedQuestions = await upsertDueQuestions({
+    questions: gateResult.accepted.map((candidate) => ({
+      question: candidate.question,
+      conciseAnswer: candidate.conciseAnswer,
+      questionProvenance:
+        provenanceByQuestion.get(candidate.question.toLowerCase()) ?? "",
+      proposedConceptSlugs:
+        proposedSlugsByQuestion.get(candidate.question.toLowerCase()) ?? [],
+      sourceText: sourceTextByQuestion.get(candidate.question.toLowerCase()) ?? "",
+    })),
+    sourceQuestion: input.sourceQuestion ?? null,
+    now: Date.now(),
+    userId: input.userId,
+  });
+
+  await upsertQuestionEmbeddings({
+    embeddings: gateResult.accepted
+      .filter((candidate) => candidate.embedding.length > 0)
+      .map((candidate) => ({
+        question: candidate.question,
+        embeddingModel: resolveEmbeddingModel(),
+        embeddingKind: DEDUPE_EMBEDDING_KIND,
+        sourceVersion: DEDUPE_SOURCE_VERSION,
+        sourceHash: candidate.sourceHash,
+        embedding: candidate.embedding,
+      })),
+    userId: input.userId,
+  });
+
+  return {
+    added: addedQuestions.length,
+    rejected: gateResult.rejected.length,
+  };
+}
 
 function normalizeQuestionBankTagSlugs(value: unknown): string[] {
   const values = Array.isArray(value) ? value : [value];

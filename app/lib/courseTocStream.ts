@@ -1,4 +1,7 @@
-import { type CourseTocPage, MAX_COURSE_PAGES } from "./courseContent.ts";
+import {
+  COURSE_TOC_LIMITS,
+  type CourseTocPage,
+} from "./courseContent.ts";
 import { extractCompleteJsonObjectsFromArrayProperty } from "./streamedJsonArray.ts";
 
 export type PartialCourseToc = {
@@ -42,7 +45,12 @@ function extractCompleteJsonStringProperty(
 
     if (char === "\"") {
       try {
-        return normalizeText(JSON.parse(text.slice(valueStart, index + 1)), 320);
+        return normalizeText(
+          JSON.parse(text.slice(valueStart, index + 1)),
+          propertyName === "title"
+            ? COURSE_TOC_LIMITS.titleChars
+            : COURSE_TOC_LIMITS.descriptionChars,
+        );
       } catch {
         return "";
       }
@@ -64,14 +72,20 @@ export function normalizePartialCourseToc(text: string): PartialCourseToc {
     }
 
     const record = rawPage as Record<string, unknown>;
-    const title = normalizeText(record.title, 120);
-    const objective = normalizeText(record.objective, 260);
+    const title = normalizeText(
+      record.title,
+      COURSE_TOC_LIMITS.pageTitleChars,
+    );
+    const objective = normalizeText(
+      record.objective,
+      COURSE_TOC_LIMITS.objectiveChars,
+    );
 
     if (title && objective) {
       pages.push({ title, objective });
     }
 
-    if (pages.length >= MAX_COURSE_PAGES) {
+    if (pages.length >= COURSE_TOC_LIMITS.pages) {
       break;
     }
   }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { getCurrentUser } from "@/app/lib/auth";
 import { listLlmTraceInteractions } from "@/app/lib/llmTraceStore";
-import { peekNextQuestion } from "@/app/lib/reviewQueue";
+import { reviewSummaryForUser } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export async function GET() {
 
   const [interactions, queueStatus] = await Promise.all([
     listLlmTraceInteractions(),
-    peekNextQuestion(),
+    reviewSummaryForUser(currentUser.id),
   ]);
 
   return NextResponse.json({

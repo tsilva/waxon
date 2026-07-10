@@ -6,7 +6,6 @@ import { getCurrentUser } from "@/app/lib/auth";
 import { BROWSER_SMOKE_QUESTIONS } from "@/app/lib/browserSmokeSupport";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { questionSlug } from "@/app/lib/questionSlug";
-import { invalidateReviewQueue } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,7 +75,6 @@ export async function POST() {
     );
   });
 
-  invalidateReviewQueue();
 
   return NextResponse.json({
     ok: true,
@@ -96,7 +94,6 @@ export async function GET() {
   const rows = await db
     .select({
       question: questions.question,
-      reviews: questions.reviews,
       nextDue: questions.nextDue,
       lastAnswer: questions.lastAnswer,
       lastAnswerSummary: questions.lastAnswerSummary,

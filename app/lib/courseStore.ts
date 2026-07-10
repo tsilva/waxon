@@ -4,20 +4,13 @@ import {
   courseChatMessages,
   courses,
 } from "@/app/db/schema";
-import { getCurrentUser } from "./auth";
 import {
   MAX_COURSE_PAGES,
   coursePageCount,
-  flatCoursePageIndex,
   nextCoursePosition,
   validateCourseToc,
   type CourseToc,
 } from "./courseContent";
-import {
-  applyEvaluationToPostgres,
-  upsertDueQuestions,
-} from "./postgresStore";
-import { reformatMultipleChoiceQuestionForReview } from "./courseQuestionAttemptParsing";
 import type { CourseMessageMetrics } from "./courseMessageMetrics";
 import {
   normalizeCourseQuestionWidgetAnswerDetails,
@@ -62,7 +55,6 @@ export type CourseRecord = {
   description: string;
   toc: CourseToc;
   status: CourseStatus;
-  currentChapterIndex: number;
   currentPageIndex: number;
   totalPages: number;
   chatMessageCount: number;
@@ -86,23 +78,6 @@ export type CourseListPage = {
   courses: CourseListItem[];
   hasMore: boolean;
   nextCursor: CourseListCursor | null;
-};
-
-export type CourseChatQuestionAttemptInput = {
-  course: CourseDetail;
-  question: string;
-  answer: string;
-  answerSummary: string;
-  conciseAnswer: string;
-  correctAnswer: string | null;
-  justification: string;
-  score: number;
-  submittedAt: number;
-};
-
-export type CourseChatQuestionAttemptResult = {
-  questionId: string;
-  attemptSaved: boolean;
 };
 
 function toCourseStatus(value: string): CourseStatus {
@@ -258,7 +233,6 @@ async function loadCourseRows(
       description: courses.description,
       toc: courses.toc,
       status: courses.status,
-      currentChapterIndex: courses.currentChapterIndex,
       currentPageIndex: courses.currentPageIndex,
       conversationCost: courses.conversationCost,
       createdAt: courses.createdAt,
@@ -324,7 +298,6 @@ async function loadCourseListRows(
       title: courses.title,
       description: courses.description,
       status: courses.status,
-      currentChapterIndex: courses.currentChapterIndex,
       currentPageIndex: courses.currentPageIndex,
       conversationCost: courses.conversationCost,
       createdAt: courses.createdAt,
@@ -363,17 +336,10 @@ function hydrateCourse(input: {
   row: Awaited<ReturnType<typeof loadCourseRows>>[number];
 }): CourseRecord {
   const toc = validateCourseToc(input.row.toc);
-  const position = {
-    chapterIndex: 0,
-    pageIndex: Math.min(
-      flatCoursePageIndex({
-        tocValue: input.row.toc,
-        chapterIndex: input.row.currentChapterIndex,
-        pageIndex: input.row.currentPageIndex,
-      }),
-      Math.max(toc.pages.length - 1, 0),
-    ),
-  };
+  const pageIndex = Math.min(
+    Math.max(0, input.row.currentPageIndex),
+    Math.max(toc.pages.length - 1, 0),
+  );
 
   return {
     id: input.row.id,
@@ -383,8 +349,7 @@ function hydrateCourse(input: {
     description: input.row.description,
     toc,
     status: toCourseStatus(input.row.status),
-    currentChapterIndex: position.chapterIndex,
-    currentPageIndex: position.pageIndex,
+    currentPageIndex: pageIndex,
     totalPages: coursePageCount(toc),
     chatMessageCount: Number(input.row.chatMessageCount ?? 0),
     conversationCost: Math.max(0, Number(input.row.conversationCost ?? 0)),
@@ -404,7 +369,6 @@ function hydrateCourseListItem(input: {
     title: input.row.title,
     description: input.row.description,
     status: toCourseStatus(input.row.status),
-    currentChapterIndex: 0,
     currentPageIndex: Math.min(
       Math.max(0, input.row.currentPageIndex),
       Math.max(totalPages - 1, 0),
@@ -418,13 +382,13 @@ function hydrateCourseListItem(input: {
 }
 
 export async function listCoursesPage(input: {
+  userId: string;
   cursor?: CourseListCursor | null;
   limit: number;
   search?: string;
 }): Promise<CourseListPage> {
-  const user = await getCurrentUser();
   const limit = Math.max(1, Math.min(50, Math.floor(input.limit)));
-  const rows = await loadCourseListRows(user.id, {
+  const rows = await loadCourseListRows(input.userId, {
     cursor: input.cursor ?? null,
     limit: limit + 1,
     search: input.search,
@@ -445,9 +409,13 @@ export async function listCoursesPage(input: {
   };
 }
 
-export async function getCourse(courseId: string): Promise<CourseDetail | null> {
-  const user = await getCurrentUser();
-  const [row] = await loadCourseRows(user.id, { courseId });
+export async function getCourse(input: {
+  courseId: string;
+  userId: string;
+}): Promise<CourseDetail | null> {
+  const [row] = await loadCourseRows(input.userId, {
+    courseId: input.courseId,
+  });
 
   if (!row) {
     return null;
@@ -466,8 +434,11 @@ export async function getCourse(courseId: string): Promise<CourseDetail | null> 
   };
 }
 
-export async function deleteCourse(courseId: string): Promise<void> {
-  const course = await getCourse(courseId);
+export async function deleteCourse(input: {
+  courseId: string;
+  userId: string;
+}): Promise<void> {
+  const course = await getCourse(input);
 
   if (!course) {
     throw new Error("Course not found.");
@@ -477,22 +448,21 @@ export async function deleteCourse(courseId: string): Promise<void> {
 }
 
 export async function createCourse(input: {
+  userId: string;
   topic: string;
   toc: CourseToc;
 }): Promise<CourseDetail> {
-  const user = await getCurrentUser();
   const toc = validateCourseToc(input.toc);
   const now = Date.now();
   const [course] = await db
     .insert(courses)
     .values({
-      userId: user.id,
+      userId: input.userId,
       topicPrompt: input.topic,
       title: toc.title,
       description: toc.description,
       toc,
       status: "active",
-      currentChapterIndex: 0,
       currentPageIndex: 0,
       createdAt: now,
       updatedAt: now,
@@ -503,7 +473,10 @@ export async function createCourse(input: {
     throw new Error("Could not create course.");
   }
 
-  const detail = await getCourse(course.id);
+  const detail = await getCourse({
+    courseId: course.id,
+    userId: input.userId,
+  });
 
   if (!detail) {
     throw new Error("Created course could not be loaded.");
@@ -513,10 +486,10 @@ export async function createCourse(input: {
 }
 
 export async function updateCourseToc(input: {
+  userId: string;
   courseId: string;
   toc: CourseToc;
 }): Promise<CourseDetail> {
-  const user = await getCurrentUser();
   const toc = validateCourseToc(input.toc);
   const now = Date.now();
 
@@ -528,14 +501,17 @@ export async function updateCourseToc(input: {
       toc,
       updatedAt: now,
     })
-    .where(and(eq(courses.userId, user.id), eq(courses.id, input.courseId)))
+    .where(and(eq(courses.userId, input.userId), eq(courses.id, input.courseId)))
     .returning({ id: courses.id });
 
   if (!course) {
     throw new Error("Course could not be updated.");
   }
 
-  const detail = await getCourse(course.id);
+  const detail = await getCourse({
+    courseId: course.id,
+    userId: input.userId,
+  });
 
   if (!detail) {
     throw new Error("Updated course could not be loaded.");
@@ -574,11 +550,11 @@ function normalizeCourseChatMessageWrite(message: CourseChatMessageWrite) {
 }
 
 export async function appendCourseChatMessages(input: {
+  userId: string;
   courseId: string;
   messages: CourseChatMessageWrite[];
   maxMessages?: number;
 }): Promise<CourseChatMessageRecord[]> {
-  const user = await getCurrentUser();
   const now = Date.now();
   const messages = input.messages
     .map(normalizeCourseChatMessageWrite)
@@ -591,7 +567,7 @@ export async function appendCourseChatMessages(input: {
   const [course] = await db
     .select({ id: courses.id })
     .from(courses)
-    .where(and(eq(courses.userId, user.id), eq(courses.id, input.courseId)))
+    .where(and(eq(courses.userId, input.userId), eq(courses.id, input.courseId)))
     .limit(1);
 
   if (!course) {
@@ -656,14 +632,13 @@ export async function appendCourseChatMessages(input: {
 }
 
 export async function addCourseConversationCost(input: {
+  userId: string;
   courseId: string;
   cost: number;
 }): Promise<void> {
   if (!Number.isFinite(input.cost) || input.cost <= 0) {
     return;
   }
-
-  const user = await getCurrentUser();
 
   const now = Date.now();
 
@@ -673,83 +648,14 @@ export async function addCourseConversationCost(input: {
       conversationCost: sql`${courses.conversationCost} + ${input.cost}`,
       updatedAt: now,
     })
-    .where(and(eq(courses.userId, user.id), eq(courses.id, input.courseId)));
+    .where(and(eq(courses.userId, input.userId), eq(courses.id, input.courseId)));
 }
 
-function courseChatQuestionProvenance(course: CourseDetail): string {
-  const page = course.toc.pages[course.currentPageIndex];
-
-  return [
-    `Course chat: ${course.title}`,
-    page ? `Milestone ${course.currentPageIndex + 1}: ${page.title}` : "",
-  ]
-    .filter(Boolean)
-    .join(" | ");
-}
-
-export async function recordCourseChatQuestionAttempt(
-  input: CourseChatQuestionAttemptInput,
-): Promise<CourseChatQuestionAttemptResult | null> {
-  const question = reformatMultipleChoiceQuestionForReview(input.question)
-    .trim()
-    .replace(/\s+/g, " ");
-  const answer = input.answer.trim();
-  const score = Math.max(0, Math.min(10, Math.round(input.score)));
-
-  if (!question || !answer || !Number.isFinite(score)) {
-    return null;
-  }
-
-  const now = Date.now();
-  const [dueQuestion] = await upsertDueQuestions({
-    userId: input.course.userId,
-    sourceQuestion: null,
-    now,
-    questions: [
-      {
-        question,
-        conciseAnswer:
-          input.conciseAnswer.trim().replace(/\s+/g, " ") ||
-          input.correctAnswer?.trim().replace(/\s+/g, " ") ||
-          "",
-        questionProvenance: courseChatQuestionProvenance(input.course),
-      },
-    ],
-  });
-
-  if (!dueQuestion) {
-    return null;
-  }
-
-  const persisted = await applyEvaluationToPostgres({
-    questionId: dueQuestion.questionId,
-    question: dueQuestion.question,
-    answer,
-    answerSummary:
-      input.answerSummary.trim().replace(/\s+/g, " ") || answer.slice(0, 240),
-    correctAnswer:
-      input.correctAnswer?.trim().replace(/\s+/g, " ") ||
-      input.conciseAnswer.trim().replace(/\s+/g, " ") ||
-      null,
-    justification:
-      input.justification.trim().replace(/\s+/g, " ") ||
-      "Recorded from course chat.",
-    score,
-    submittedAt: input.submittedAt,
-    now,
-    userId: input.course.userId,
-  });
-
-  return {
-    questionId: dueQuestion.questionId,
-    attemptSaved: Boolean(persisted),
-  };
-}
-
-export async function advanceCourseProgress(
-  courseId: string,
-): Promise<CourseDetail | null> {
-  const course = await getCourse(courseId);
+export async function advanceCourseProgress(input: {
+  courseId: string;
+  userId: string;
+}): Promise<CourseDetail | null> {
+  const course = await getCourse(input);
 
   if (!course) {
     return null;
@@ -761,7 +667,6 @@ export async function advanceCourseProgress(
 
   const nextPosition = nextCoursePosition({
     toc: course.toc,
-    chapterIndex: course.currentChapterIndex,
     pageIndex: course.currentPageIndex,
   });
   const now = Date.now();
@@ -770,14 +675,15 @@ export async function advanceCourseProgress(
     .update(courses)
     .set({
       status: nextPosition ? "active" : "completed",
-      currentChapterIndex:
-        nextPosition?.chapterIndex ?? course.currentChapterIndex,
       currentPageIndex: nextPosition?.pageIndex ?? course.currentPageIndex,
       updatedAt: now,
     })
     .where(eq(courses.id, course.id));
 
-  const updated = await getCourse(course.id);
+  const updated = await getCourse({
+    courseId: course.id,
+    userId: input.userId,
+  });
 
   if (!updated) {
     throw new Error("Could not reload course.");

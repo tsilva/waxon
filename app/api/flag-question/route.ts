@@ -4,6 +4,7 @@ import {
   readJsonBodyWithLimit,
 } from "@/app/lib/apiLimits";
 import { QUESTION_TEXT_MAX_CHARS } from "@/app/lib/questionContract";
+import { getCurrentUser } from "@/app/lib/auth";
 import { flagQuestion } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
@@ -43,8 +44,11 @@ export async function POST(request: Request) {
     return question.response;
   }
 
+  const user = await getCurrentUser();
+
   return NextResponse.json(
     await flagQuestion({
+      userId: user.id,
       questionId: questionId.value,
       question: question.value,
     }),

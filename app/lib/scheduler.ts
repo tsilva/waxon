@@ -18,30 +18,6 @@ const FIRST_EXCELLENT_RECALL_AFTER_FAILURE_INTERVAL = 2 * DAY;
 const RECENT_FAILURE_LOOKBACK = 3;
 const RECENT_FAILURE_INTERVAL_PENALTY = 0.5;
 
-export function parseReviews(reviews: string): ReviewEntry[] {
-  if (!reviews.trim()) {
-    return [];
-  }
-
-  return reviews
-    .split("|")
-    .map((entry) => {
-      const [ts, score] = entry.split(":");
-      return {
-        ts: Number(ts),
-        score: Number(score),
-      };
-    })
-    .filter(
-      (entry) =>
-        Number.isFinite(entry.ts) &&
-        Number.isFinite(entry.score) &&
-        entry.ts > 0 &&
-        entry.score >= 0 &&
-        entry.score <= 10,
-    );
-}
-
 export function serializeReviews(entries: ReviewEntry[]): string {
   return entries.map((entry) => `${entry.ts}:${entry.score}`).join("|");
 }

@@ -18,14 +18,14 @@ import {
   type CourseAnswerDecisionToolResult,
   type CourseChatMessage,
 } from "@/app/lib/courseGeneration";
-import type { CourseProgressDecision } from "@/app/lib/courseProgress";
+import type { CourseProgressDecision } from "@/app/lib/courseQuestionWidget";
+import { recordCourseChatQuestionAttempt } from "@/app/lib/questionBank";
 import {
   appendCourseChatMessages,
   addCourseConversationCost,
   advanceCourseProgress,
   createCourse,
   getCourse,
-  recordCourseChatQuestionAttempt,
   updateCourseToc,
   type CourseDetail,
 } from "@/app/lib/courseStore";
@@ -178,7 +178,6 @@ function buildDraftCourseDetail(input: {
     description: input.toc.description,
     toc: input.toc,
     status: "active",
-    currentChapterIndex: 0,
     currentPageIndex: 0,
     totalPages: input.toc.pages.length,
     chatMessageCount: 0,
@@ -358,7 +357,10 @@ export async function POST(request: Request) {
           });
 
           if (answerDecision.progressDecision.toolCall === "mark_milestone_done") {
-            course = await advanceCourseProgress(course.id);
+            course = await advanceCourseProgress({
+              courseId: course.id,
+              userId: user.id,
+            });
 
             if (!course) {
               throw new Error("Course could not be advanced.");
@@ -375,7 +377,7 @@ export async function POST(request: Request) {
         try {
           if (courseId) {
             send("status", { status: "Checking answer" });
-            course = await getCourse(courseId);
+            course = await getCourse({ courseId, userId: user.id });
 
             if (!course) {
               throw new Error("Course could not be loaded.");
@@ -599,6 +601,7 @@ export async function POST(request: Request) {
                   ? [buildCourseTocGeneratedMessage(course)]
                   : [];
                 const chatMessages = await appendCourseChatMessages({
+                  userId: user.id,
                   courseId: course.id,
                   messages: [
                     userMessage,
@@ -617,10 +620,15 @@ export async function POST(request: Request) {
                   ],
                 });
                 await addCourseConversationCost({
+                  userId: user.id,
                   courseId: course.id,
                   cost: turnCost,
                 });
-                const updatedCourse = (await getCourse(course.id)) ?? course;
+                const updatedCourse =
+                  (await getCourse({
+                    courseId: course.id,
+                    userId: user.id,
+                  })) ?? course;
 
                 send("done", {
                   ok: true,
@@ -704,6 +712,7 @@ export async function POST(request: Request) {
                 provisionalToc = toc;
                 createdFromCompleteToc = options.complete;
                 courseCreationPromise = createCourse({
+                  userId: user.id,
                   topic: intakeDecision.topic,
                   toc,
                 }).then(
@@ -760,6 +769,7 @@ export async function POST(request: Request) {
               }
 
               const updatedCourse = await updateCourseToc({
+                userId: user.id,
                 courseId: createdCourse.id,
                 toc,
               });
@@ -824,6 +834,7 @@ export async function POST(request: Request) {
               ]
             : [userMessage];
           const chatMessages = await appendCourseChatMessages({
+            userId: user.id,
             courseId: course.id,
             messages: [
               ...courseStartMessages,
@@ -839,10 +850,15 @@ export async function POST(request: Request) {
             ],
           });
           await addCourseConversationCost({
+            userId: user.id,
             courseId: course.id,
             cost: turnCost,
           });
-          const updatedCourse = (await getCourse(course.id)) ?? course;
+          const updatedCourse =
+            (await getCourse({
+              courseId: course.id,
+              userId: user.id,
+            })) ?? course;
 
           send("done", {
             ok: true,

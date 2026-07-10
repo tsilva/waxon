@@ -69,7 +69,6 @@ function courseFixture({
     description,
     toc: { title, description, pages },
     status: "active",
-    currentChapterIndex: 0,
     currentPageIndex: 0,
     totalPages: pages.length,
     chatMessageCount: 0,

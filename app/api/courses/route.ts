@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getCurrentUser } from "@/app/lib/auth";
 import { listCoursesPage, type CourseListCursor } from "@/app/lib/courseStore";
 
 export const runtime = "nodejs";
@@ -45,7 +46,9 @@ export async function GET(request: Request) {
       MAX_COURSE_PAGE_SIZE,
     );
     const search = searchParams.get("search")?.trim().slice(0, 160) ?? "";
+    const user = await getCurrentUser();
     const page = await listCoursesPage({
+      userId: user.id,
       cursor: parseCourseCursor(searchParams),
       limit,
       search,

@@ -204,6 +204,27 @@
       "when": 1783679261161,
       "tag": "0029_knowledge_memory_trace_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1783688637000,
+      "tag": "0030_flat_course_transcripts",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1783688637001,
+      "tag": "0031_retire_decks",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1783688637002,
+      "tag": "0032_attempt_history_authority",
+      "breakpoints": true
     }
   ]
 }

@@ -11,26 +11,23 @@ export type CourseToc = {
   pages: CourseTocPage[];
 };
 
-export type CourseChoice = {
-  id: string;
-  text: string;
-};
+export const COURSE_TOC_LIMITS = {
+  titleChars: 90,
+  descriptionChars: 320,
+  pages: 16,
+  pageTitleChars: 120,
+  objectiveChars: 260,
+} as const;
 
-export type CourseMultipleChoiceWidget = {
-  type: "multiple_choice";
-  id: string;
-  question: string;
-  choices: CourseChoice[];
-  correctChoiceId: string;
-  correctAnswer: string;
-  explanation: string;
-};
+export const STORED_COURSE_TOC_LIMITS = {
+  topicChars: 800,
+  titleChars: 240,
+  descriptionChars: 1_200,
+  pageTitleChars: 240,
+  objectiveChars: 1_200,
+} as const;
 
-const MAX_COURSE_TITLE_CHARS = 90;
-const MAX_COURSE_DESCRIPTION_CHARS = 320;
-export const MAX_COURSE_PAGES = 16;
-const MAX_PAGE_TITLE_CHARS = 120;
-const MAX_OBJECTIVE_CHARS = 260;
+export const MAX_COURSE_PAGES = COURSE_TOC_LIMITS.pages;
 
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
@@ -58,10 +55,13 @@ export function parseCourseTocJson(source: string): CourseToc {
 
 export function validateCourseToc(value: unknown): CourseToc {
   const record = readObject(value);
-  const title = truncateText(normalizeText(record.title), MAX_COURSE_TITLE_CHARS);
+  const title = truncateText(
+    normalizeText(record.title),
+    COURSE_TOC_LIMITS.titleChars,
+  );
   const description = truncateText(
     normalizeText(record.description),
-    MAX_COURSE_DESCRIPTION_CHARS,
+    COURSE_TOC_LIMITS.descriptionChars,
   );
 
   if (!title) {
@@ -84,11 +84,11 @@ export function validateCourseToc(value: unknown): CourseToc {
     const page = readObject(rawPage);
     const pageTitle = truncateText(
       normalizeText(page.title),
-      MAX_PAGE_TITLE_CHARS,
+      COURSE_TOC_LIMITS.pageTitleChars,
     );
     const objective = truncateText(
       normalizeText(page.objective),
-      MAX_OBJECTIVE_CHARS,
+      COURSE_TOC_LIMITS.objectiveChars,
     );
 
     if (pageTitle && objective) {
@@ -113,50 +113,17 @@ export function coursePageCount(toc: CourseToc): number {
 
 export function nextCoursePosition(input: {
   toc: CourseToc;
-  chapterIndex: number;
   pageIndex: number;
-}): { chapterIndex: number; pageIndex: number } | null {
-  if (input.chapterIndex !== 0 || !input.toc.pages[input.pageIndex]) {
+}): { pageIndex: number } | null {
+  if (!input.toc.pages[input.pageIndex]) {
     return null;
   }
 
   if (input.pageIndex + 1 < input.toc.pages.length) {
     return {
-      chapterIndex: 0,
       pageIndex: input.pageIndex + 1,
     };
   }
 
   return null;
-}
-
-export function flatCoursePageIndex(input: {
-  tocValue: unknown;
-  chapterIndex: number;
-  pageIndex: number;
-}): number {
-  const record = readObject(input.tocValue);
-
-  if (Array.isArray(record.pages)) {
-    return Math.max(0, input.pageIndex);
-  }
-
-  const rawChapters = readOptionalArray(record.chapters);
-  let index = Math.max(0, input.pageIndex);
-
-  for (
-    let chapterIndex = 0;
-    chapterIndex < Math.max(0, input.chapterIndex);
-    chapterIndex += 1
-  ) {
-    const chapter = rawChapters[chapterIndex];
-
-    if (!chapter || typeof chapter !== "object" || Array.isArray(chapter)) {
-      continue;
-    }
-
-    index += readOptionalArray((chapter as Record<string, unknown>).pages).length;
-  }
-
-  return index;
 }

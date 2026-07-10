@@ -58,13 +58,11 @@ test("nextCoursePosition advances through flat pages", () => {
     ],
   });
 
-  assert.deepEqual(nextCoursePosition({ toc, chapterIndex: 0, pageIndex: 0 }), {
-    chapterIndex: 0,
+  assert.deepEqual(nextCoursePosition({ toc, pageIndex: 0 }), {
     pageIndex: 1,
   });
-  assert.deepEqual(nextCoursePosition({ toc, chapterIndex: 0, pageIndex: 1 }), {
-    chapterIndex: 0,
+  assert.deepEqual(nextCoursePosition({ toc, pageIndex: 1 }), {
     pageIndex: 2,
   });
-  assert.equal(nextCoursePosition({ toc, chapterIndex: 0, pageIndex: 2 }), null);
+  assert.equal(nextCoursePosition({ toc, pageIndex: 2 }), null);
 });

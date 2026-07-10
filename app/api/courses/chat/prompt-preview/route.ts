@@ -74,7 +74,7 @@ export async function POST(request: Request) {
   }
 
   const user = await getCurrentUser();
-  const course = await getCourse(courseId);
+  const course = await getCourse({ courseId, userId: user.id });
 
   if (!course) {
     return Response.json(
