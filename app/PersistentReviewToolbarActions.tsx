@@ -23,7 +23,6 @@ type CachedToolbarData = {
 };
 
 const toolbarRoutes = [
-  "/learn",
   "/review",
   "/library",
   "/tags",
@@ -67,10 +66,6 @@ function writeCachedToolbarData(data: CachedToolbarData) {
 }
 
 function activeTabFromPathname(pathname: string): ReviewToolbarTab {
-  if (pathname.startsWith("/learn")) {
-    return "learn";
-  }
-
   if (pathname.startsWith("/library")) {
     return "library";
   }

@@ -2,12 +2,11 @@ import Image from "next/image";
 import Link from "next/link";
 
 type AppStaticLoadingViewProps = {
-  staticView?: "review" | "learn" | "library" | "tags" | "admin";
+  staticView?: "review" | "library" | "tags" | "admin";
 };
 
 const staticViewAttributes = {
   review: { "data-review-static": true },
-  learn: { "data-learn-static": true },
   library: { "data-library-static": true },
   tags: { "data-tags-static": true },
   admin: { "data-admin-static": true },
@@ -15,7 +14,6 @@ const staticViewAttributes = {
 
 const readerTabs = [
   ["Review", "/review"],
-  ["Learn", "/learn"],
   ["Library", "/library"],
   ["Tags", "/tags"],
 ] as const;

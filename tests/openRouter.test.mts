@@ -3,12 +3,10 @@ import test from "node:test";
 import {
   DEFAULT_OPENROUTER_CHAT_MODEL,
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
-  DEFAULT_OPENROUTER_LEARN_MODEL,
   extractAffordableOpenRouterMaxTokens,
   getOpenRouterChatModel,
   getOpenRouterEvaluationModel,
   getOpenRouterEvaluationReasoning,
-  getOpenRouterLearnModel,
   openRouterChatCompletion,
   openRouterEmbeddings,
 } from "../app/lib/openRouter.ts";
@@ -113,7 +111,7 @@ test("openRouterChatCompletion preserves an explicit session id", async () => {
       },
       body: {
         model: "google/gemini-3.1-flash-lite",
-        session_id: "learn:user-123:course-456",
+        session_id: "review:user-123:attempt-456",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -122,7 +120,7 @@ test("openRouterChatCompletion preserves an explicit session id", async () => {
   }
 
   assert.equal(requestBodies[0]?.user, "user-123");
-  assert.equal(requestBodies[0]?.session_id, "learn:user-123:course-456");
+  assert.equal(requestBodies[0]?.session_id, "review:user-123:attempt-456");
 });
 
 test("classifyLlmInteractionKind uses explicit non-answer trace kinds", () => {
@@ -200,33 +198,6 @@ test("getOpenRouterEvaluationModel defaults to the configured evaluation model a
       delete process.env.LLM_EVALUATION_MODEL;
     } else {
       process.env.LLM_EVALUATION_MODEL = originalModel;
-    }
-  }
-});
-
-test("getOpenRouterLearnModel defaults to the configured Learn model and ignores global chat model", () => {
-  const originalChatModel = process.env.LLM_MODEL;
-  const originalLearnModel = process.env.LLM_LEARN_MODEL;
-
-  try {
-    process.env.LLM_MODEL = "openai/gpt-5.5";
-    delete process.env.LLM_LEARN_MODEL;
-
-    assert.equal(getOpenRouterLearnModel(), DEFAULT_OPENROUTER_LEARN_MODEL);
-
-    process.env.LLM_LEARN_MODEL = "google/gemini-3.1-flash-lite";
-    assert.equal(getOpenRouterLearnModel(), "google/gemini-3.1-flash-lite");
-  } finally {
-    if (originalChatModel === undefined) {
-      delete process.env.LLM_MODEL;
-    } else {
-      process.env.LLM_MODEL = originalChatModel;
-    }
-
-    if (originalLearnModel === undefined) {
-      delete process.env.LLM_LEARN_MODEL;
-    } else {
-      process.env.LLM_LEARN_MODEL = originalLearnModel;
     }
   }
 });

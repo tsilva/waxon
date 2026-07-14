@@ -1,21 +1,15 @@
 <div align="center">
   <img src="./public/brand/logo/logo-1024.png" alt="Waxon" width="512" />
 
-  **Learn anything. Remember it.**
+  **Build knowledge. Keep it.**
 </div>
 
-Waxon is a multi-user, chat-first LLM tutor. A learner describes a goal, and
-Waxon turns it into an adaptive course that teaches one section at a time,
-checks understanding, and advances when the learner is ready.
-
-Every answered Learn question also becomes a free-text recall item in one
-question bank. Review schedules those items around the point when the learner
-is likely to forget them, so short daily sessions make knowledge durable.
+Waxon is a multi-user question bank and adaptive review system. Learners answer
+in their own words, get concise model feedback, and rely on Review to schedule
+the next recall attempt from past performance.
 
 ## Product flow
 
-- **Learn** builds a course outline, teaches through one continuous tutor
-  conversation, and adapts to the learner's answers.
 - **Review** grades typed recall answers and schedules the next review from the
   learner's performance.
 - **Library** provides the unified question bank, with source and concept
@@ -56,13 +50,11 @@ OPENROUTER_API_KEY=your-api-key
 
 # Optional model overrides
 LLM_MODEL=google/gemini-3.5-flash
-LLM_LEARN_MODEL=google/gemini-3.5-flash
 LLM_EVALUATION_MODEL=google/gemini-3.5-flash
-LLM_CONTEXT_WINDOW_TOKENS=1000000
 ```
 
 `LLM_API_KEY` is accepted when `OPENROUTER_API_KEY` is not set. The model
-variables are optional; generic chat, Learn, and answer evaluation currently
+variables are optional; generic chat and answer evaluation currently
 default to `google/gemini-3.5-flash`.
 
 Start a development server on an available port:
@@ -94,7 +86,7 @@ eng.tiago.silva@gmail.com
 ```
 
 When that email already exists in the configured database, Waxon reuses the
-existing app user so their courses and questions remain visible. Otherwise it
+existing app user so their questions remain visible. Otherwise it
 creates a local fallback user. To exercise the real Clerk flow locally, disable
 the local test identity:
 

@@ -32,7 +32,7 @@ import {
   normalizeTokenCount,
   promptCacheMetricsFromOpenRouterUsage,
   toFiniteNumber,
-} from "@/app/lib/courseMessageMetrics";
+} from "@/app/lib/openRouterUsageMetrics";
 import {
   ADMIN_VIEW_STATE_COOKIE,
   type AdminCachedViewState,

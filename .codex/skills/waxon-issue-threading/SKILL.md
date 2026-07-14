@@ -1,6 +1,6 @@
 ---
 name: waxon-issue-threading
-description: Use before any Waxon fix or behavior-changing edit, especially behavior regressions, product-flow issues, Learn/auth/deploy/UI bugs, or changes where user-stated specs or the overarching product objective could be lost. Reads SPECS.md and keeps the objective, failure, causal hypothesis, non-goals, and proof path aligned before editing.
+description: Use before any Waxon fix or behavior-changing edit, especially behavior regressions, product-flow issues, auth/deploy/UI bugs, or changes where user-stated specs or the overarching product objective could be lost. Reads SPECS.md and keeps the objective, failure, causal hypothesis, non-goals, and proof path aligned before editing.
 ---
 
 # Waxon Issue Threading

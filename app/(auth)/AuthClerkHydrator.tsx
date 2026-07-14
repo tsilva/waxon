@@ -31,14 +31,14 @@ const copyByMode = {
   "sign-in": {
     kicker: "Welcome back",
     title: "Sign in to waxon",
-    body: "Continue to your recall queue, learning courses, and question library.",
+    body: "Continue to your recall queue and question library.",
     action: "Continue to sign in",
     loading: "Loading sign in",
   },
   "sign-up": {
     kicker: "Start practicing",
     title: "Create a waxon account",
-    body: "Save your learning goal and build a durable review schedule.",
+    body: "Build a question bank and a durable review schedule.",
     action: "Continue to sign up",
     loading: "Loading sign up",
   },

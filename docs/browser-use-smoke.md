@@ -14,7 +14,7 @@ Prove that the local TCLV/Tiago user can:
 4. see scores `10` and `2` with their expected feedback; and
 5. find the resulting deterministic answer-evaluation traces in Admin.
 
-This suite does not test Clerk sign-in, Learn, question generation, deletion,
+This suite does not test Clerk sign-in, question generation, deletion,
 archiving, tagging, or production deployment.
 
 ## Safety contract
@@ -30,7 +30,7 @@ Browser smoke incorrect card: what exact token is intentionally omitted?
 
 Do not invoke fixture setup until the user has explicitly authorized replacing
 those two fixture records in the configured database. Never delete or reset any
-other question, course, trace, tag, attempt, or user. Do not clean up fixture
+other question, trace, tag, attempt, or user. Do not clean up fixture
 data after the run unless the user separately authorizes it.
 
 If authorization is absent, mark tests 1-5 `skipped` and report the missing

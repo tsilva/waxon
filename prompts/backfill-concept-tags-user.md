@@ -8,7 +8,7 @@ Prefer candidateExistingSlugs when one accurately describes the tested concept.
 
 Create a new slug only when no candidate fits.
 
-Never return course titles, lesson titles, source labels, or broad container labels.
+Never return source labels or broad container labels.
 
 Do not use acronym-only slugs such as ppo, rl, cnn, or kl unless globally unambiguous.
 

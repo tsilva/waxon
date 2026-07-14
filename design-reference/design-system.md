@@ -24,7 +24,7 @@ Avoid:
 ## Source Files
 
 - Public landing UI: `app/page.tsx`
-- Authenticated app UI: `app/(app)/review/ReviewApp.tsx`, `app/(app)/learn/LearnPageClient.tsx`, `app/(app)/library/LibraryPageClient.tsx`
+- Authenticated app UI: `app/(app)/review/ReviewApp.tsx`, `app/(app)/library/LibraryPageClient.tsx`
 - Public/authenticated styling: `app/globals.css`, `app/(app)/app-globals.css`, `app/(auth)/auth-globals.css`
 - Approved visual reference: `design-reference/waxon-approved-ui.png`
 - Visual comparison notes: `design-reference/fidelity-ledger.md`
