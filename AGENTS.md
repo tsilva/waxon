@@ -8,9 +8,9 @@ This project is an app for building and retaining knowledge through adaptive que
 
 Every question is stored and resurfaced later based on the user's past performance. Once a user answers a question correctly, the app should help make that knowledge durable: if the user returns daily and completes their exercises, the system should schedule reviews near the point where mastery is likely to fade. This lets users maintain a large body of knowledge through short sessions focused on the questions most at risk of being forgotten.
 
-## Product Specification
+## Product Specifications
 
-Before any task, read [SPECS.md](SPECS.md).
+Before any task in this repository, use the `$specs-author` skill to read the root `SPECS.md`. Use `$specs-author` whenever reading or writing `SPECS.md`.
 
 ## Issue Threading
 
