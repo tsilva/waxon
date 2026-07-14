@@ -10,7 +10,7 @@ Slugs must be full, self-disambiguating concept phrases.
 
 Do not use acronym-only slugs such as ppo, rl, cnn, or kl unless the acronym is globally unambiguous.
 
-Do not use source, course, lesson, or container labels as concept slugs.
+Do not use source or container labels as concept slugs.
 
 Return strict JSON only: {"assignments":[{"questionId":"...","conceptSlugs":["..."]}]}
 

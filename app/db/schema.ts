@@ -7,7 +7,6 @@ import {
   doublePrecision,
   index,
   integer,
-  jsonb,
   primaryKey,
   pgTable,
   serial,
@@ -334,93 +333,6 @@ export const questionConceptTags = pgTable(
     check(
       "question_concept_tags_created_at_check",
       sql`${table.createdAt} >= 0`,
-    ),
-  ],
-);
-
-export const courses = pgTable(
-  "courses",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    topicPrompt: text("topic_prompt").notNull(),
-    title: text("title").notNull(),
-    description: text("description").notNull().default(""),
-    toc: jsonb("toc").notNull(),
-    status: text("status").notNull().default("active"),
-    currentPageIndex: integer("current_page_index").notNull().default(0),
-    conversationCost: doublePrecision("conversation_cost").notNull().default(0),
-    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
-    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
-  },
-  (table) => [
-    index("courses_user_status_updated_idx").on(
-      table.userId,
-      table.status,
-      table.updatedAt.desc(),
-    ),
-    index("courses_user_updated_id_idx").on(
-      table.userId,
-      table.updatedAt.desc(),
-      table.id.desc(),
-    ),
-    check("courses_topic_prompt_nonempty_check", sql`length(trim(${table.topicPrompt})) > 0`),
-    check("courses_title_nonempty_check", sql`length(trim(${table.title})) > 0`),
-    check(
-      "courses_status_check",
-      sql`${table.status} IN ('active', 'completed')`,
-    ),
-    check("courses_current_page_index_check", sql`${table.currentPageIndex} >= 0`),
-    check("courses_conversation_cost_check", sql`${table.conversationCost} >= 0`),
-    check("courses_created_at_check", sql`${table.createdAt} >= 0`),
-    check(
-      "courses_updated_at_check",
-      sql`${table.updatedAt} >= ${table.createdAt}`,
-    ),
-  ],
-);
-
-export const courseChatMessages = pgTable(
-  "course_chat_messages",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    courseId: uuid("course_id")
-      .notNull()
-      .references(() => courses.id, { onDelete: "cascade" }),
-    role: text("role").notNull(),
-    content: text("content").notNull(),
-    toolCalls: jsonb("tool_calls").notNull().default(sql`'[]'::jsonb`),
-    metrics: jsonb("metrics"),
-    evaluation: jsonb("evaluation"),
-    widgetAnswer: jsonb("widget_answer"),
-    sequence: integer("sequence").notNull(),
-    createdAt: bigint("created_at", { mode: "number" }).notNull().default(nowMs),
-    updatedAt: bigint("updated_at", { mode: "number" }).notNull().default(nowMs),
-  },
-  (table) => [
-    uniqueIndex("course_chat_messages_course_sequence_idx").on(
-      table.courseId,
-      table.sequence,
-    ),
-    index("course_chat_messages_course_created_idx").on(
-      table.courseId,
-      table.createdAt,
-    ),
-    check(
-      "course_chat_messages_role_check",
-      sql`${table.role} IN ('assistant', 'user')`,
-    ),
-    check(
-      "course_chat_messages_content_nonempty_check",
-      sql`length(trim(${table.content})) > 0`,
-    ),
-    check("course_chat_messages_sequence_check", sql`${table.sequence} >= 0`),
-    check("course_chat_messages_created_at_check", sql`${table.createdAt} >= 0`),
-    check(
-      "course_chat_messages_updated_at_check",
-      sql`${table.updatedAt} >= ${table.createdAt}`,
     ),
   ],
 );

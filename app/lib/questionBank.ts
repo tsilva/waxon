@@ -8,7 +8,6 @@ import {
   resolveEmbeddingModel,
 } from "./embeddingSource";
 import {
-  applyEvaluationToPostgres,
   getQueuedQuestionsByEmbeddingProximityPage,
   getQueuedQuestionsPage,
   upsertDueQuestions,
@@ -17,8 +16,6 @@ import {
   type QuestionInput,
 } from "./postgresStore";
 import { getOpenRouterApiKey, openRouterEmbeddings } from "./openRouter";
-import { reformatMultipleChoiceQuestionForReview } from "./courseQuestionAttemptParsing";
-import type { CourseDetail } from "./courseStore";
 import { questionSlug } from "./questionSlug";
 import {
   gateNovelQuestions,
@@ -55,93 +52,6 @@ export type QuestionBankPage = {
   hasMore: boolean;
   nextOffset: number | null;
 };
-
-export type CourseChatQuestionAttemptInput = {
-  course: CourseDetail;
-  question: string;
-  answer: string;
-  answerSummary: string;
-  conciseAnswer: string;
-  correctAnswer: string | null;
-  justification: string;
-  score: number;
-  submittedAt: number;
-};
-
-export type CourseChatQuestionAttemptResult = {
-  questionId: string;
-  attemptSaved: boolean;
-};
-
-function courseChatQuestionProvenance(course: CourseDetail): string {
-  const page = course.toc.pages[course.currentPageIndex];
-
-  return [
-    `Course chat: ${course.title}`,
-    page ? `Milestone ${course.currentPageIndex + 1}: ${page.title}` : "",
-  ]
-    .filter(Boolean)
-    .join(" | ");
-}
-
-export async function recordCourseChatQuestionAttempt(
-  input: CourseChatQuestionAttemptInput,
-): Promise<CourseChatQuestionAttemptResult | null> {
-  const question = reformatMultipleChoiceQuestionForReview(input.question)
-    .trim()
-    .replace(/\s+/g, " ");
-  const answer = input.answer.trim();
-  const score = Math.max(0, Math.min(10, Math.round(input.score)));
-
-  if (!question || !answer || !Number.isFinite(score)) {
-    return null;
-  }
-
-  const now = Date.now();
-  const [dueQuestion] = await upsertDueQuestions({
-    userId: input.course.userId,
-    sourceQuestion: null,
-    now,
-    questions: [
-      {
-        question,
-        conciseAnswer:
-          input.conciseAnswer.trim().replace(/\s+/g, " ") ||
-          input.correctAnswer?.trim().replace(/\s+/g, " ") ||
-          "",
-        questionProvenance: courseChatQuestionProvenance(input.course),
-      },
-    ],
-  });
-
-  if (!dueQuestion) {
-    return null;
-  }
-
-  const persisted = await applyEvaluationToPostgres({
-    questionId: dueQuestion.questionId,
-    question: dueQuestion.question,
-    answer,
-    answerSummary:
-      input.answerSummary.trim().replace(/\s+/g, " ") || answer.slice(0, 240),
-    correctAnswer:
-      input.correctAnswer?.trim().replace(/\s+/g, " ") ||
-      input.conciseAnswer.trim().replace(/\s+/g, " ") ||
-      null,
-    justification:
-      input.justification.trim().replace(/\s+/g, " ") ||
-      "Recorded from course chat.",
-    score,
-    submittedAt: input.submittedAt,
-    now,
-    userId: input.course.userId,
-  });
-
-  return {
-    questionId: dueQuestion.questionId,
-    attemptSaved: Boolean(persisted),
-  };
-}
 
 function acceptQuestionsWithoutNoveltyGate(
   input: Array<string | QuestionInput>,

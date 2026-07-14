@@ -3,7 +3,6 @@ export const OPENROUTER_CHAT_URL =
 export const OPENROUTER_EMBEDDINGS_URL =
   "https://openrouter.ai/api/v1/embeddings";
 export const DEFAULT_OPENROUTER_CHAT_MODEL = "google/gemini-3.5-flash";
-export const DEFAULT_OPENROUTER_LEARN_MODEL = "google/gemini-3.5-flash";
 export const DEFAULT_OPENROUTER_EVALUATION_MODEL = "google/gemini-3.5-flash";
 export const DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-2";
 

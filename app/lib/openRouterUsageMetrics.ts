@@ -1,23 +1,5 @@
-export type CourseMessageMetrics = {
-  cost: number | null;
-  promptTokens: number | null;
-  cachedPromptTokens: number | null;
-  uncachedPromptTokens: number | null;
-  cacheWriteTokens: number | null;
-  cacheHitPercent: number | null;
-  outputTokens: number | null;
-  totalTokens: number | null;
-  latencyMs: number | null;
-  tokensPerSecond: number | null;
-  contextWindowTokens: number | null;
-  contextPercent: number | null;
-};
-
 export type OpenRouterUsageMetrics = {
   prompt_tokens?: unknown;
-  completion_tokens?: unknown;
-  total_tokens?: unknown;
-  cost?: unknown;
   prompt_tokens_details?: unknown;
   cache_read_tokens?: unknown;
   cached_tokens?: unknown;
@@ -46,10 +28,7 @@ export function toFiniteNumber(value: unknown): number | null {
     : null;
 }
 
-function readNumberProperty(
-  source: unknown,
-  key: string,
-): number | null {
+function readNumberProperty(source: unknown, key: string): number | null {
   if (!source || typeof source !== "object") {
     return null;
   }
@@ -112,61 +91,5 @@ export function promptCacheMetricsFromOpenRouterUsage(
     uncachedPromptTokens,
     cacheWriteTokens,
     cacheHitPercent,
-  };
-}
-
-export function metricsFromOpenRouterUsage(
-  usage: OpenRouterUsageMetrics | undefined,
-  latencyMs: number,
-  contextWindowTokens: number | null = null,
-): CourseMessageMetrics | null {
-  const cost = toFiniteNumber(usage?.cost);
-  const cacheMetrics = promptCacheMetricsFromOpenRouterUsage(usage);
-  const outputTokens = toFiniteNumber(usage?.completion_tokens);
-  const totalTokens = toFiniteNumber(usage?.total_tokens);
-  const roundedLatencyMs =
-    Number.isFinite(latencyMs) && latencyMs > 0 ? Math.round(latencyMs) : null;
-  const tokensPerSecond =
-    outputTokens !== null && outputTokens > 0 && roundedLatencyMs !== null
-      ? outputTokens / (roundedLatencyMs / 1000)
-      : null;
-  const roundedContextWindowTokens =
-    contextWindowTokens !== null &&
-    Number.isFinite(contextWindowTokens) &&
-    contextWindowTokens > 0
-      ? Math.round(contextWindowTokens)
-      : null;
-  const contextPercent =
-    cacheMetrics.promptTokens !== null &&
-    cacheMetrics.promptTokens >= 0 &&
-    roundedContextWindowTokens !== null
-      ? (cacheMetrics.promptTokens / roundedContextWindowTokens) * 100
-      : null;
-
-  if (
-    (cost === null || cost < 0) &&
-    cacheMetrics.cachedPromptTokens === null &&
-    cacheMetrics.cacheWriteTokens === null &&
-    tokensPerSecond === null &&
-    contextPercent === null
-  ) {
-    return null;
-  }
-
-  return {
-    cost: cost !== null && cost >= 0 ? cost : null,
-    promptTokens: cacheMetrics.promptTokens,
-    cachedPromptTokens: cacheMetrics.cachedPromptTokens,
-    uncachedPromptTokens: cacheMetrics.uncachedPromptTokens,
-    cacheWriteTokens: cacheMetrics.cacheWriteTokens,
-    cacheHitPercent: cacheMetrics.cacheHitPercent,
-    outputTokens:
-      outputTokens !== null && outputTokens >= 0 ? Math.round(outputTokens) : null,
-    totalTokens:
-      totalTokens !== null && totalTokens >= 0 ? Math.round(totalTokens) : null,
-    latencyMs: roundedLatencyMs,
-    tokensPerSecond,
-    contextWindowTokens: roundedContextWindowTokens,
-    contextPercent,
   };
 }

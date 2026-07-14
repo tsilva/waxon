@@ -1,7 +1,6 @@
 export const OPENROUTER_CHAT_URL: string;
 export const OPENROUTER_EMBEDDINGS_URL: string;
 export const DEFAULT_OPENROUTER_CHAT_MODEL: string;
-export const DEFAULT_OPENROUTER_LEARN_MODEL: string;
 export const DEFAULT_OPENROUTER_EVALUATION_MODEL: string;
 export const DEFAULT_EMBEDDING_MODEL: string;
 

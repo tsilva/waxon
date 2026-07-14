@@ -3,7 +3,7 @@ import type { llmTraceInteractions } from "../db/schema";
 import {
   promptCacheMetricsFromOpenRouterUsage,
   toFiniteNumber,
-} from "./courseMessageMetrics.ts";
+} from "./openRouterUsageMetrics.ts";
 
 export type LlmTraceCallType =
   | "answer_eval"

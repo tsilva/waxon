@@ -13,7 +13,6 @@ import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 
 const authRoutes = ["/sign-in", "/sign-up"];
 const reviewShellRoutes = [
-  "/learn",
   "/review",
   "/library",
   "/queue",

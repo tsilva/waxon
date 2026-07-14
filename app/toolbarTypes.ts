@@ -1,5 +1,4 @@
 export type ReviewToolbarTab =
-  | "learn"
   | "review"
   | "library"
   | "tags"

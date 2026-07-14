@@ -4,7 +4,7 @@
 
 Do not change this section unless the user explicitly asks to update the project goal.
 
-This project is an app for learning any topic through adaptive question-and-answer practice. A user states learning goals through courses or question-generation prompts, and the app expands from those goals into targeted questions that match the user's current knowledge while gradually covering the full topic.
+This project is an app for building and retaining knowledge through adaptive question-and-answer practice. Users create or generate a question bank, answer from memory in their own words, and rely on Review to decide what to practice and when.
 
 Every question is stored and resurfaced later based on the user's past performance. Once a user answers a question correctly, the app should help make that knowledge durable: if the user returns daily and completes their exercises, the system should schedule reviews near the point where mastery is likely to fade. This lets users maintain a large body of knowledge through short sessions focused on the questions most at risk of being forgotten.
 
@@ -14,17 +14,11 @@ Before any task, read [SPECS.md](SPECS.md).
 
 ## Issue Threading
 
-Before any fix or behavior-changing edit in this repo, especially behavior regressions, product-flow issues, Learn/auth/deploy/UI bugs, or user-reported breakage, use the project-level skill in [.codex/skills/waxon-issue-threading/SKILL.md](.codex/skills/waxon-issue-threading/SKILL.md).
+Before any fix or behavior-changing edit in this repo, especially behavior regressions, product-flow issues, auth/deploy/UI bugs, or user-reported breakage, use the project-level skill in [.codex/skills/waxon-issue-threading/SKILL.md](.codex/skills/waxon-issue-threading/SKILL.md).
 
 ## Questions
 
 When creating, cleaning up, deduplicating, or generating knowledge-base questions and probing questions, use the shared question-quality reference in [reference/question-quality.md](reference/question-quality.md).
-
-## Learn Experience Evaluation
-
-When evaluating or tuning the Learn course experience for teaching quality, factual accuracy, beginner clarity, answer-to-next-material latency, or tutor/evaluator model choice, use the project-level skill in [.codex/skills/evaluate-learn-experience/SKILL.md](.codex/skills/evaluate-learn-experience/SKILL.md).
-For TUI-only Learn audits or terminal learner runs, use the project-level skill in [.codex/skills/evaluate-learn-experience-tui/SKILL.md](.codex/skills/evaluate-learn-experience-tui/SKILL.md).
-When measuring a specific model's effective blended Learn stats through fresh TUI courses, including latency, throughput, total cost, and prompt-cache percentages, use the project-level skill in [.codex/skills/measure-model-effective-stats-tui/SKILL.md](.codex/skills/measure-model-effective-stats-tui/SKILL.md).
 
 ## UI Design
 

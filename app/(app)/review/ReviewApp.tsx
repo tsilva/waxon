@@ -2633,15 +2633,9 @@ export default function ReviewApp() {
                   <div className="resting-actions">
                     <Link
                       className="resting-primary"
-                      href="/learn"
-                    >
-                      Continue learning
-                    </Link>
-                    <Link
-                      className="resting-secondary"
                       href="/library"
                     >
-                      View Library
+                      Open Library
                     </Link>
                   </div>
 

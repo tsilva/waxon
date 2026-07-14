@@ -6,7 +6,6 @@ import {
   buildOpenRouterHeaders,
   DEFAULT_OPENROUTER_CHAT_MODEL,
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
-  DEFAULT_OPENROUTER_LEARN_MODEL,
   OPENROUTER_CHAT_URL,
   OPENROUTER_EMBEDDINGS_URL,
   resolveOpenRouterApiKey,
@@ -17,7 +16,6 @@ export { extractChatCompletionText } from "../../shared/openrouter-chat-text.mjs
 export {
   DEFAULT_OPENROUTER_CHAT_MODEL,
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
-  DEFAULT_OPENROUTER_LEARN_MODEL,
   OPENROUTER_CHAT_URL,
   OPENROUTER_EMBEDDINGS_URL,
 };
@@ -128,16 +126,6 @@ export function getOpenRouterChatModel(input: {
   });
 }
 
-export function getOpenRouterLearnModel(input: {
-  requireConfiguredModel?: boolean;
-} = {}): string | null {
-  return resolveOpenRouterModel({
-    variable: "LLM_LEARN_MODEL",
-    fallback: DEFAULT_OPENROUTER_LEARN_MODEL,
-    requireConfigured: input.requireConfiguredModel,
-  });
-}
-
 export function getOpenRouterEvaluationModel(input: {
   requireConfiguredModel?: boolean;
 } = {}): string | null {
@@ -181,32 +169,6 @@ export function getOpenRouterChatConfig(input: {
     return {
       ok: false,
       error: "LLM_MODEL is not configured.",
-    };
-  }
-
-  return { ok: true, apiKey, model };
-}
-
-export function getOpenRouterLearnConfig(input: {
-  requireConfiguredModel?: boolean;
-} = {}): OpenRouterChatConfig {
-  const apiKey = getOpenRouterApiKey();
-
-  if (!apiKey) {
-    return {
-      ok: false,
-      error: "OPENROUTER_API_KEY or LLM_API_KEY is not configured.",
-    };
-  }
-
-  const model = getOpenRouterLearnModel({
-    requireConfiguredModel: input.requireConfiguredModel,
-  });
-
-  if (!model) {
-    return {
-      ok: false,
-      error: "LLM_LEARN_MODEL is not configured.",
     };
   }
 

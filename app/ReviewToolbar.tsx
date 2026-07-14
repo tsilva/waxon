@@ -28,7 +28,6 @@ type ReviewToolbarProps = {
   menuDisplayName: string;
   menuEmail: string;
   onReviewClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
-  onLearnClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onTagsClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onStatsClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onAdminClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
@@ -70,7 +69,6 @@ export function ReviewToolbar({
   menuDisplayName,
   menuEmail,
   onReviewClick,
-  onLearnClick,
   onTagsClick,
   onStatsClick,
   onAdminClick,
@@ -180,18 +178,6 @@ export function ReviewToolbar({
             onClick={handleTabClick("review", onReviewClick)}
           >
             Review
-          </Link>
-          <Link
-            className={tabClass(activeTab === "learn", pendingTab === "learn")}
-            href="/learn"
-            prefetch={false}
-            role="tab"
-            id="learn-tab"
-            aria-selected={activeTab === "learn"}
-            aria-controls="learn-panel"
-            onClick={handleTabClick("learn", onLearnClick)}
-          >
-            Learn
           </Link>
           <Link
             className={tabClass(

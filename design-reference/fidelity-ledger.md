@@ -6,7 +6,7 @@ Reference image: `design-reference/waxon-approved-ui.png`
 
 - Refreshed `design-reference/waxon-approved-ui.png` on June 8, 2026 from the live local app at `http://localhost:3001/review`.
 - The new composite uses a 1440x900 desktop capture and a 390x844 mobile capture stitched side by side.
-- The refreshed baseline reflects the current product UI shape: `Learn` / `Library` / `Review` study navigation, current waxon mark, warm brown accent, question provenance above the active prompt, microphone and submit composer actions, and the admin-visible mobile toolbar state.
+- The reference predates the July 14, 2026 scope reduction. Current authenticated navigation is `Review` / `Library` / `Tags`, with `Admin` added for operators; ignore the archived `Learn` tab when comparing shell spacing.
 - Current live data at capture time showed `181 due` and a Deep Learning question. Treat the exact due count and question text as sample content, not a fixed design requirement.
 
 ## Remaining Comparison Notes
@@ -18,7 +18,6 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - June 8-9, 2026 queue updates were superseded by the current Library-backed queue surface. Compare semantic search, generated-question actions, and embedding-map modal behavior against the live Library/Review UI rather than the removed deck-detail concept references.
 - June 9, 2026 review update: previous-answer rows may show a discreet `eval $...` label in the lower-right metadata area when trace cost data is available. Treat this as an intentional addition that should stay low-contrast and avoid crowding the timestamp/expand control.
 - June 9, 2026 review update: backticked formula-like inline snippets now share the same warm mono inline-code chip treatment as ordinary identifiers such as `target_logit`. Treat matching formula/code chips as intentional when comparing formula-heavy questions.
-- June 18, 2026 Learn update: the course picker now uses compact full-width list rows instead of a card grid. Selected-course chat still stretches to the full shell height, the answer composer sits near the lower edge of the workspace, and the horizontal topic rail scrolls inside the viewport instead of widening the page on mobile.
-- June 23, 2026 Learn update: selected-course chat uses tighter top and bottom shell padding so long course conversations have more visible vertical room before clipping at the viewport edge.
-- June 13, 2026 mobile shell update: authenticated app pages use an icon-only brand mark in the mobile header so the `Learn` / `Review` / `Library` / `Tags` tab strip and due-count actions fit without clipping. Treat the missing visible `waxon` wordmark in mobile app chrome as intentional; the desktop header still shows the full wordmark.
+- June 13, 2026 mobile shell update: authenticated app pages use an icon-only brand mark in the mobile header so the tab strip and due-count actions fit without clipping. Treat the missing visible `waxon` wordmark in mobile app chrome as intentional; the desktop header still shows the full wordmark.
+- July 14, 2026 scope update: the course experience and its navigation tab are intentionally absent while work focuses on question-bank and Review milestones.
 - June 27, 2026 tag update: concept tag badges use squared 4px corners instead of pill corners across Review, Library, and question detail surfaces.
