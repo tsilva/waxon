@@ -1,22 +1,20 @@
 import { pool } from "@/app/db/client";
-import { normalizeConceptSlug } from "./conceptSlug";
+import { normalizeConceptSlug } from "../../shared/concept-slug.mjs";
+import { vectorLiteral } from "../../shared/vector-literal.mjs";
 import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
-  decodeOpenRouterEmbeddings,
   normalizeEmbeddingText,
+  requestEmbeddings,
   resolveEmbeddingModel,
 } from "./embeddingSource";
 import {
-  getQueuedQuestionsByEmbeddingProximityPage,
-  getQueuedQuestionsPage,
+  hasReviewEligibleQuestions,
   upsertDueQuestions,
   upsertQuestionEmbeddings,
-  type DueQuestion,
 } from "./postgresStore";
 import type { NormalizedQuestionDraft } from "./questionDraft";
-import { getOpenRouterApiKey, openRouterEmbeddings } from "./openRouter";
 import {
   gateNovelQuestions,
   type NovelQuestionGateResult,
@@ -27,6 +25,7 @@ const MAX_QUESTION_BANK_LIMIT = 100;
 const MAX_MEANING_SEARCH_RESULTS = 200;
 
 export type QuestionBankStatusFilter = "all" | "due" | "flagged" | "untagged";
+export type QuestionBankSearchMode = "text" | "meaning";
 export type QuestionBankSort =
   | "due"
   | "created-desc"
@@ -73,19 +72,16 @@ export async function addQuestionsToKnowledgeBase(input: {
   questions: NormalizedQuestionDraft[];
   sourceQuestion?: string | null;
 }): Promise<{ added: number; rejected: number }> {
-  const { total: userCardCount } = await getQueuedQuestionsPage({
+  const hasExistingQuestions = await hasReviewEligibleQuestions({
     userId: input.userId,
-    limit: 0,
-    offset: 0,
-    sortKey: "creation-date",
   });
   const gateResult =
-    userCardCount === 0
-      ? acceptQuestionsWithoutNoveltyGate(input.questions)
-      : await gateNovelQuestions(input.questions, {
+    hasExistingQuestions
+      ? await gateNovelQuestions(input.questions, {
           operation: "add_questions_gate",
           userId: input.userId,
-        });
+        })
+      : acceptQuestionsWithoutNoveltyGate(input.questions);
   const addedQuestions = await upsertDueQuestions({
     questions: gateResult.accepted,
     sourceQuestion: input.sourceQuestion ?? null,
@@ -151,119 +147,25 @@ export function normalizeQuestionBankSort(value: unknown): QuestionBankSort {
     : "due";
 }
 
-function dueQuestionToQuestionBankItem(item: DueQuestion): QuestionBankItem {
-  return {
-    questionId: item.questionId,
-    question: item.question,
-    conciseAnswer: item.conciseAnswer,
-    questionProvenance: item.questionProvenance,
-    nextDue: item.nextDue,
-    createdAt: item.createdAt,
-    updatedAt: item.createdAt,
-    flaggedAt: item.flaggedAt,
-    conceptSlugs: item.conceptSlugs,
-  };
-}
-
 async function embedQuestionBankSearchQuery(input: {
   query: string;
   userId: string;
 }): Promise<number[]> {
-  const apiKey = getOpenRouterApiKey();
-
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required.");
-  }
-
-  const { response, body } = await openRouterEmbeddings({
-    apiKey,
+  const embeddings = await requestEmbeddings({
+    texts: [input.query],
     trace: {
       operation: "question_bank_search_embedding",
       userId: input.userId,
       question: input.query,
     },
-    body: {
-      model: resolveEmbeddingModel(),
-      input: [input.query],
-      encoding_format: "float",
-    },
   });
 
-  if (!response.ok) {
-    throw new Error(`OpenRouter embedding request failed (${response.status}).`);
-  }
-
-  return decodeOpenRouterEmbeddings(body.data, {
-    expectedCount: 1,
-    expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
-  })[0] ?? [];
+  return embeddings[0] ?? [];
 }
 
-export async function searchQuestionBankItemsByMeaning(input: {
+export async function queryQuestionBankItems(input: {
   userId: string;
-  query: string;
-  tagSlugs?: string[] | null;
-  status?: QuestionBankStatusFilter | null;
-  limit?: number | null;
-  offset?: number | null;
-}): Promise<QuestionBankPage> {
-  const query = normalizeEmbeddingText(input.query);
-
-  if (!query) {
-    return { items: [], total: 0, hasMore: false, nextOffset: null };
-  }
-
-  const tagSlugs = normalizeQuestionBankTagSlugs(input.tagSlugs ?? []);
-  const status = normalizeStatus(input.status);
-  const limit = Math.max(
-    1,
-    Math.min(
-      MAX_QUESTION_BANK_LIMIT,
-      Math.floor(input.limit ?? DEFAULT_QUESTION_BANK_LIMIT),
-    ),
-  );
-  const offset = Math.max(0, Math.floor(input.offset ?? 0));
-  const page = await getQueuedQuestionsByEmbeddingProximityPage({
-    userId: input.userId,
-    queryEmbedding: await embedQuestionBankSearchQuery({
-      query,
-      userId: input.userId,
-    }),
-    embeddingModel: resolveEmbeddingModel(),
-    embeddingKind: DEDUPE_EMBEDDING_KIND,
-    sourceVersion: DEDUPE_SOURCE_VERSION,
-    limit,
-    offset,
-    maxResults: MAX_MEANING_SEARCH_RESULTS,
-  });
-  const now = Date.now();
-  const items = page.items
-    .filter((item) =>
-      tagSlugs.every((slug) => item.conceptSlugs.includes(slug)),
-    )
-    .filter((item) => {
-      if (status === "due") {
-        return item.nextDue <= now;
-      }
-
-      if (status === "untagged") {
-        return item.conceptSlugs.length === 0;
-      }
-
-      return status !== "flagged";
-    })
-    .map(dueQuestionToQuestionBankItem);
-
-  return {
-    items,
-    total: page.total,
-    hasMore: false,
-    nextOffset: null,
-  };
-}
-
-export async function listQuestionBankItems(input: {
-  userId: string;
+  searchMode?: QuestionBankSearchMode | null;
   query?: string | null;
   tagSlug?: string | null;
   tagSlugs?: string[] | null;
@@ -272,7 +174,11 @@ export async function listQuestionBankItems(input: {
   limit?: number | null;
   offset?: number | null;
 }): Promise<QuestionBankPage> {
-  const query = input.query?.trim() ?? "";
+  const rawQuery = input.query?.trim() ?? "";
+  const searchMode: QuestionBankSearchMode =
+    input.searchMode === "meaning" && rawQuery ? "meaning" : "text";
+  const query =
+    searchMode === "meaning" ? normalizeEmbeddingText(rawQuery) : rawQuery;
   const tagSlugs = normalizeQuestionBankTagSlugs(
     input.tagSlugs && input.tagSlugs.length > 0
       ? input.tagSlugs
@@ -288,7 +194,36 @@ export async function listQuestionBankItems(input: {
     ),
   );
   const offset = Math.max(0, Math.floor(input.offset ?? 0));
-  const pageLimit = limit + 1;
+  const remainingMeaningResults = Math.max(
+    0,
+    MAX_MEANING_SEARCH_RESULTS - offset,
+  );
+  const pageLimit =
+    searchMode === "meaning"
+      ? Math.min(limit + 1, remainingMeaningResults)
+      : limit + 1;
+
+  if (pageLimit === 0) {
+    return {
+      items: [],
+      total: Math.min(offset, MAX_MEANING_SEARCH_RESULTS),
+      hasMore: false,
+      nextOffset: null,
+    };
+  }
+
+  const queryEmbedding =
+    searchMode === "meaning"
+      ? await embedQuestionBankSearchQuery({ query, userId: input.userId })
+      : null;
+
+  if (
+    queryEmbedding !== null &&
+    queryEmbedding.length !== DEDUPE_EMBEDDING_DIMENSIONS
+  ) {
+    throw new Error("Search query embedding has an unexpected dimension.");
+  }
+
   const now = Math.round(Date.now());
   const result = await pool.query(
     `
@@ -308,10 +243,23 @@ export async function listQuestionBankItems(input: {
           q.next_due,
           q.created_at,
           q.updated_at,
-          q.flagged_at
+          q.flagged_at,
+          CASE WHEN $9::text = 'meaning'
+            THEN qe.embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
+              <=> $10::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
+            ELSE NULL
+          END AS distance
         FROM questions q
+        LEFT JOIN question_embeddings qe
+          ON qe.question_id = q.id
+          AND qe.user_id = q.user_id
+          AND qe.embedding_model = $11
+          AND qe.embedding_kind = $12
+          AND qe.source_version = $13
+          AND qe.is_current = true
         WHERE q.user_id = $1
-          AND ($2::text = ''
+          AND ($9::text <> 'meaning' OR qe.question_id IS NOT NULL)
+          AND ($9::text <> 'text' OR $2::text = ''
             OR q.id::text ILIKE '%' || $2::text || '%'
             OR q.question ILIKE '%' || $2::text || '%'
             OR q.concise_answer ILIKE '%' || $2::text || '%'
@@ -350,12 +298,13 @@ export async function listQuestionBankItems(input: {
         SELECT *
         FROM filtered_questions
         ORDER BY
-          CASE WHEN $8::text = 'due' THEN flagged_at IS NOT NULL END ASC,
-          CASE WHEN $8::text = 'due' THEN next_due END ASC,
-          CASE WHEN $8::text = 'created-desc' THEN created_at END DESC,
-          CASE WHEN $8::text = 'created-asc' THEN created_at END ASC,
-          CASE WHEN $8::text = 'updated-desc' THEN updated_at END DESC,
-          CASE WHEN $8::text = 'updated-asc' THEN updated_at END ASC,
+          CASE WHEN $9::text = 'meaning' THEN distance END ASC,
+          CASE WHEN $9::text = 'text' AND $8::text = 'due' THEN flagged_at IS NOT NULL END ASC,
+          CASE WHEN $9::text = 'text' AND $8::text = 'due' THEN next_due END ASC,
+          CASE WHEN $9::text = 'text' AND $8::text = 'created-desc' THEN created_at END DESC,
+          CASE WHEN $9::text = 'text' AND $8::text = 'created-asc' THEN created_at END ASC,
+          CASE WHEN $9::text = 'text' AND $8::text = 'updated-desc' THEN updated_at END DESC,
+          CASE WHEN $9::text = 'text' AND $8::text = 'updated-asc' THEN updated_at END ASC,
           created_at DESC,
           question ASC
         LIMIT $6 OFFSET $7
@@ -369,6 +318,7 @@ export async function listQuestionBankItems(input: {
         pq.created_at,
         pq.updated_at,
         pq.flagged_at,
+        pq.distance,
         coalesce(
           array_agg(vct.slug ORDER BY vct.slug) FILTER (WHERE vct.slug IS NOT NULL),
           '{}'
@@ -384,18 +334,34 @@ export async function listQuestionBankItems(input: {
         pq.next_due,
         pq.created_at,
         pq.updated_at,
-        pq.flagged_at
+        pq.flagged_at,
+        pq.distance
       ORDER BY
-        CASE WHEN $8::text = 'due' THEN pq.flagged_at IS NOT NULL END ASC,
-        CASE WHEN $8::text = 'due' THEN pq.next_due END ASC,
-        CASE WHEN $8::text = 'created-desc' THEN pq.created_at END DESC,
-        CASE WHEN $8::text = 'created-asc' THEN pq.created_at END ASC,
-        CASE WHEN $8::text = 'updated-desc' THEN pq.updated_at END DESC,
-        CASE WHEN $8::text = 'updated-asc' THEN pq.updated_at END ASC,
+        CASE WHEN $9::text = 'meaning' THEN pq.distance END ASC,
+        CASE WHEN $9::text = 'text' AND $8::text = 'due' THEN pq.flagged_at IS NOT NULL END ASC,
+        CASE WHEN $9::text = 'text' AND $8::text = 'due' THEN pq.next_due END ASC,
+        CASE WHEN $9::text = 'text' AND $8::text = 'created-desc' THEN pq.created_at END DESC,
+        CASE WHEN $9::text = 'text' AND $8::text = 'created-asc' THEN pq.created_at END ASC,
+        CASE WHEN $9::text = 'text' AND $8::text = 'updated-desc' THEN pq.updated_at END DESC,
+        CASE WHEN $9::text = 'text' AND $8::text = 'updated-asc' THEN pq.updated_at END ASC,
         pq.created_at DESC,
         pq.question ASC
     `,
-    [input.userId, query, tagSlugs, status, now, pageLimit, offset, sort],
+    [
+      input.userId,
+      query,
+      tagSlugs,
+      status,
+      now,
+      pageLimit,
+      offset,
+      sort,
+      searchMode,
+      queryEmbedding === null ? null : vectorLiteral(queryEmbedding),
+      resolveEmbeddingModel(),
+      DEDUPE_EMBEDDING_KIND,
+      DEDUPE_SOURCE_VERSION,
+    ],
   );
   const hasMore = result.rows.length > limit;
   const pageRows = hasMore ? result.rows.slice(0, limit) : result.rows;

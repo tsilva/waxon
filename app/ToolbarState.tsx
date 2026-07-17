@@ -10,6 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { isAdminEmail } from "@/app/lib/adminAccess";
+import type { ReviewSummary } from "@/app/lib/reviewTypes";
 import type { UserProfile } from "@/app/lib/userProfile";
 
 type ToolbarStateValue = {
@@ -18,10 +19,6 @@ type ToolbarStateValue = {
   dueCount: number | null;
   setCurrentUser: Dispatch<SetStateAction<UserProfile | null>>;
   setDueCount: Dispatch<SetStateAction<number | null>>;
-};
-
-type ReviewSummaryResponse = {
-  queueRemaining: number;
 };
 
 const ToolbarStateContext = createContext<ToolbarStateValue | null>(null);
@@ -59,7 +56,7 @@ export function ToolbarStateProvider({
         }
 
         if (summaryResult.status === "fulfilled" && summaryResult.value.ok) {
-          const summary = (await summaryResult.value.json()) as ReviewSummaryResponse;
+          const summary = (await summaryResult.value.json()) as ReviewSummary;
           setDueCount(summary.queueRemaining);
         }
       } catch {

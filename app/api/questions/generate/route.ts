@@ -9,7 +9,7 @@ import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
-  decodeOpenRouterEmbeddings,
+  requestEmbeddings,
   resolveEmbeddingModel,
 } from "@/app/lib/embeddingSource";
 import { getCurrentUser } from "@/app/lib/auth";
@@ -17,9 +17,8 @@ import {
   extractChatCompletionText,
   getOpenRouterChatConfig,
   openRouterChatCompletion,
-  openRouterEmbeddings,
 } from "@/app/lib/openRouter";
-import { extractJsonObject } from "@/app/lib/jsonObject";
+import { extractJsonObject } from "../../../../shared/json-object.mjs";
 import { getQuestionQualityReference } from "@/app/lib/questionQualityReference";
 import {
   CONCISE_ANSWER_MAX_CHARS,
@@ -28,7 +27,7 @@ import {
   QUESTION_TEXT_MAX_CHARS,
 } from "@/app/lib/questionContract";
 import { normalizeQuestionDraft } from "@/app/lib/questionDraft";
-import { vectorLiteral } from "@/app/lib/vectorLiteral";
+import { vectorLiteral } from "../../../../shared/vector-literal.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -432,33 +431,17 @@ async function fetchSummaryEmbedding(input: {
   summary: string;
   userId: string;
 }): Promise<number[]> {
-  const { response, body } = await openRouterEmbeddings({
+  const embeddings = await requestEmbeddings({
     apiKey: input.apiKey,
+    texts: [input.summary],
+    failureMode: "empty",
     trace: {
       operation: "generate_questions_summary_embedding",
       userId: input.userId,
     },
-    body: {
-      model: resolveEmbeddingModel(),
-      input: [input.summary],
-      encoding_format: "float",
-    },
   });
 
-  if (!response.ok) {
-    return [];
-  }
-
-  try {
-    return (
-      decodeOpenRouterEmbeddings(body.data, {
-        expectedCount: 1,
-        expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
-      })[0] ?? []
-    );
-  } catch {
-    return [];
-  }
+  return embeddings[0] ?? [];
 }
 
 async function loadGenerationNeighbors(input: {

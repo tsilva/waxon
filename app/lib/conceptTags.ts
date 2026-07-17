@@ -7,36 +7,34 @@ import {
 } from "@/app/db/schema";
 import {
   DEDUPE_EMBEDDING_DIMENSIONS,
-  decodeOpenRouterEmbeddings,
-  resolveEmbeddingModel,
+  requestEmbeddings,
 } from "./embeddingSource";
-import { extractJsonObject } from "./jsonObject";
+import { extractJsonObject } from "../../shared/json-object.mjs";
 import {
   extractChatCompletionText,
   getOpenRouterApiKey,
   getOpenRouterChatModel,
   openRouterChatCompletion,
-  openRouterEmbeddings,
 } from "./openRouter";
 import {
   loadPromptTemplate,
   renderPromptTemplate,
-} from "./promptTemplates.ts";
-import { vectorLiteral } from "./vectorLiteral";
+} from "../../shared/prompt-templates.mjs";
+import { vectorLiteral } from "../../shared/vector-literal.mjs";
 export {
   fallbackConceptSlug,
   isUsefulConceptSlug,
   normalizeConceptSlug,
   normalizeConceptSlugList,
   isScaffoldingConceptSlug,
-} from "./conceptSlug";
+} from "../../shared/concept-slug.mjs";
 import {
   fallbackConceptSlug,
   isUsefulConceptSlug,
   isScaffoldingConceptSlug,
   normalizeConceptSlug,
   normalizeConceptSlugList,
-} from "./conceptSlug";
+} from "../../shared/concept-slug.mjs";
 
 const MAX_PROPOSED_SLUGS = 8;
 const MAX_SOURCE_TEXT_CHARS = 4_000;
@@ -125,37 +123,13 @@ async function fetchEmbeddings(input: {
   texts: string[];
   operation: string;
 }): Promise<number[][]> {
-  if (input.texts.length === 0) {
-    return [];
-  }
-
-  const apiKey = getOpenRouterApiKey();
-
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is not configured.");
-  }
-
-  const { response, body } = await openRouterEmbeddings({
-    apiKey,
+  return requestEmbeddings({
+    texts: input.texts,
     trace: {
       operation: input.operation,
       userId: input.userId,
       question: input.texts[0]?.slice(0, 240),
     },
-    body: {
-      model: resolveEmbeddingModel(),
-      input: input.texts,
-      encoding_format: "float",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenRouter embedding request failed (${response.status}).`);
-  }
-
-  return decodeOpenRouterEmbeddings(body.data, {
-    expectedCount: input.texts.length,
-    expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
   });
 }
 

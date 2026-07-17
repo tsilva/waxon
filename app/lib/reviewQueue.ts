@@ -35,6 +35,7 @@ import type {
   QuestionAttempt,
   ReviewActivity,
   ReviewQueueItem,
+  ReviewSessionQueueResponse,
   ReviewSummary,
 } from "./reviewTypes";
 
@@ -227,9 +228,7 @@ export async function loadReviewSessionQueue(input: {
   excludeQuestionIds?: string[];
   limit?: number;
   offset?: number;
-}): Promise<{
-  items: ReviewQueueItem[];
-}> {
+}): Promise<ReviewSessionQueueResponse> {
   const now = Date.now();
   const limit = Math.min(
     REVIEW_SESSION_QUEUE_LIMIT,

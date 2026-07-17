@@ -13,7 +13,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { db, pool } from "@/app/db/client";
+import { db } from "@/app/db/client";
 import {
   answerEvaluations,
   llmTraceInteractions,
@@ -29,18 +29,13 @@ import { scheduleNextReview, type ReviewEntry } from "./scheduler";
 import { questionSlug } from "./questionSlug";
 import type { NormalizedQuestionDraft } from "./questionDraft";
 import {
-  DEDUPE_EMBEDDING_DIMENSIONS,
-  DEDUPE_EMBEDDING_KIND,
-  DEDUPE_SOURCE_VERSION,
   projectEmbeddingForPlot,
-  resolveEmbeddingModel,
 } from "./embeddingSource";
 import type {
   EvaluationPhase,
   EvaluationQueueItem,
   QuestionAttempt,
 } from "./reviewTypes";
-import { vectorLiteral } from "./vectorLiteral";
 import {
   activeConceptEligibilityClause,
   assignConceptSlugsForQuestions,
@@ -111,13 +106,6 @@ const EVALUATION_PHASES = new Set<EvaluationPhase>([
   "saving-evaluation",
   "finalizing",
 ]);
-
-export type QueuedQuestionsSortKey = "review-date" | "creation-date";
-
-export type QueuedQuestionsPage = {
-  items: DueQuestion[];
-  total: number;
-};
 
 type UserContextInput = {
   user?: AuthenticatedUser;
@@ -197,6 +185,25 @@ const reviewHistorySql = sql<ReviewEntry[]>`COALESCE((
   ) recent
 ), '[]'::jsonb)`;
 
+const questionIdentitySelection = {
+  question_id: questions.id,
+  user_id: questions.userId,
+  question: questions.question,
+  next_due: questions.nextDue,
+  generated_from_question: questions.generatedFromQuestion,
+  question_provenance: questions.questionProvenance,
+  last_answer: questions.lastAnswer,
+  last_answer_summary: questions.lastAnswerSummary,
+  concise_answer: questions.conciseAnswer,
+  flagged_at: questions.flaggedAt,
+  created_at: questions.createdAt,
+};
+
+const questionRowSelection = {
+  ...questionIdentitySelection,
+  review_history: reviewHistorySql,
+};
+
 async function enrichDueQuestionsWithConceptSlugs(
   userId: string,
   items: DueQuestion[],
@@ -249,20 +256,7 @@ async function selectQuestionRows(
   const context = await resolveUserContext(input);
 
   return db
-    .select({
-      question_id: questions.id,
-      user_id: questions.userId,
-      question: questions.question,
-      review_history: reviewHistorySql,
-      next_due: questions.nextDue,
-      generated_from_question: questions.generatedFromQuestion,
-      question_provenance: questions.questionProvenance,
-      last_answer: questions.lastAnswer,
-      last_answer_summary: questions.lastAnswerSummary,
-      concise_answer: questions.conciseAnswer,
-      flagged_at: questions.flaggedAt,
-      created_at: questions.createdAt,
-    })
+    .select(questionRowSelection)
     .from(questions)
     .where(and(eq(questions.userId, context.userId), whereClause))
     .orderBy(asc(questions.nextDue), asc(questions.createdAt), asc(questions.question));
@@ -507,20 +501,7 @@ export async function getDueQuestions(
     input.limit === undefined ? null : Math.max(0, Math.floor(input.limit));
   const offset = Math.max(0, Math.floor(input.offset ?? 0));
   const rows = await db
-    .select({
-      question_id: questions.id,
-      user_id: questions.userId,
-      question: questions.question,
-      review_history: reviewHistorySql,
-      next_due: questions.nextDue,
-      generated_from_question: questions.generatedFromQuestion,
-      question_provenance: questions.questionProvenance,
-      last_answer: questions.lastAnswer,
-      last_answer_summary: questions.lastAnswerSummary,
-      concise_answer: questions.conciseAnswer,
-      flagged_at: questions.flaggedAt,
-      created_at: questions.createdAt,
-    })
+    .select(questionRowSelection)
     .from(questions)
     .where(
       and(
@@ -593,213 +574,23 @@ export async function getNextScheduledQuestionDue(
   return row?.nextDue ?? null;
 }
 
-export async function getQueuedQuestionsPage(
-  input: UserContextInput & {
-    excludeQuestionIds?: string[];
-    limit: number;
-    offset: number;
-    sortKey: QueuedQuestionsSortKey;
-  },
-): Promise<QueuedQuestionsPage> {
+export async function hasReviewEligibleQuestions(
+  input: UserContextInput = {},
+): Promise<boolean> {
   const context = await resolveUserContext(input);
-  const excludeQuestionIds = Array.from(
-    new Set(input.excludeQuestionIds ?? []),
-  ).filter(Boolean);
-  const whereClause = and(
-    eq(questions.userId, context.userId),
-    isNull(questions.flaggedAt),
-    activeConceptEligibilityClause(context.userId),
-    excludeQuestionIds.length > 0
-      ? notInArray(questions.id, excludeQuestionIds)
-      : sql`true`,
-  );
-  const orderBy =
-    input.sortKey === "creation-date"
-      ? [desc(questions.createdAt), asc(questions.question)]
-      : [asc(questions.nextDue), asc(questions.createdAt), asc(questions.question)];
-  const [{ value: total = 0 } = { value: 0 }] = await db
-    .select({ value: count() })
+  const [row] = await db
+    .select({ id: questions.id })
     .from(questions)
-    .where(whereClause);
+    .where(
+      and(
+        eq(questions.userId, context.userId),
+        isNull(questions.flaggedAt),
+        activeConceptEligibilityClause(context.userId),
+      ),
+    )
+    .limit(1);
 
-  const rows = await db
-    .select({
-      question_id: questions.id,
-      user_id: questions.userId,
-      question: questions.question,
-      review_history: reviewHistorySql,
-      next_due: questions.nextDue,
-      generated_from_question: questions.generatedFromQuestion,
-      question_provenance: questions.questionProvenance,
-      last_answer: questions.lastAnswer,
-      last_answer_summary: questions.lastAnswerSummary,
-      concise_answer: questions.conciseAnswer,
-      flagged_at: questions.flaggedAt,
-      created_at: questions.createdAt,
-    })
-    .from(questions)
-    .where(whereClause)
-    .orderBy(...orderBy)
-    .limit(Math.max(0, Math.floor(input.limit)))
-    .offset(Math.max(0, Math.floor(input.offset)));
-
-  return {
-    items: await enrichDueQuestionsWithConceptSlugs(
-      context.userId,
-      rows.map(toDueQuestion).filter((row) => Number.isFinite(row.nextDue)),
-    ),
-    total,
-  };
-}
-
-function rawQuestionRowToDueQuestion(row: {
-  question_id: string;
-  user_id: string;
-  question: string;
-  review_history: ReviewEntry[];
-  next_due: number | string;
-  generated_from_question: string | null;
-  question_provenance: string;
-  last_answer: string;
-  last_answer_summary: string;
-  concise_answer: string;
-  flagged_at: number | string | null;
-  created_at: number | string;
-}): DueQuestion {
-  return toDueQuestion({
-    ...row,
-    next_due: Number(row.next_due),
-    flagged_at: row.flagged_at === null ? null : Number(row.flagged_at),
-    created_at: Number(row.created_at),
-  });
-}
-
-export async function getQueuedQuestionsByEmbeddingProximityPage(
-  input: UserContextInput & {
-    queryEmbedding: number[];
-    excludeQuestionIds?: string[];
-    limit: number;
-    offset: number;
-    maxResults: number;
-    embeddingModel?: string;
-    embeddingKind?: string;
-    sourceVersion?: number;
-  },
-): Promise<QueuedQuestionsPage> {
-  const context = await resolveUserContext(input);
-  const queryEmbedding = normalizeEmbedding(input.queryEmbedding);
-
-  if (queryEmbedding.length !== DEDUPE_EMBEDDING_DIMENSIONS) {
-    throw new Error("Search query embedding has an unexpected dimension.");
-  }
-
-  const model = normalizeEmbeddingModel(
-    input.embeddingModel ?? resolveEmbeddingModel(),
-  );
-  const embeddingKind = input.embeddingKind?.trim() || DEDUPE_EMBEDDING_KIND;
-  const sourceVersion = input.sourceVersion ?? DEDUPE_SOURCE_VERSION;
-  const excludeQuestionIds = Array.from(
-    new Set(input.excludeQuestionIds ?? []),
-  ).filter(Boolean);
-  const maxResults = Math.max(0, Math.floor(input.maxResults));
-  const offset = Math.max(0, Math.floor(input.offset));
-  const requestedLimit = Math.max(0, Math.floor(input.limit));
-  const params: unknown[] = [
-    context.userId,
-    model,
-    embeddingKind,
-    sourceVersion,
-  ];
-  const clauses = [
-    "q.user_id = $1",
-    "q.flagged_at IS NULL",
-    `EXISTS (
-      SELECT 1
-      FROM question_concept_tags qct
-      INNER JOIN concept_tags ct ON ct.id = qct.concept_tag_id
-      WHERE qct.question_id = q.id
-        AND ct.user_id = $1
-        AND ct.active = true
-    )`,
-    "qe.user_id = q.user_id",
-    "qe.embedding_model = $2",
-    "qe.embedding_kind = $3",
-    "qe.source_version = $4",
-    "qe.is_current = true",
-  ];
-
-  if (excludeQuestionIds.length > 0) {
-    clauses.push(
-      `q.id NOT IN (${excludeQuestionIds
-        .map((_, index) => `$${params.length + index + 1}`)
-        .join(", ")})`,
-    );
-    params.push(...excludeQuestionIds);
-  }
-
-  const whereSql = clauses.join("\n        AND ");
-  const countResult = await pool.query(
-    `
-      SELECT count(*) AS value
-      FROM question_embeddings qe
-      JOIN questions q ON q.id = qe.question_id AND q.user_id = qe.user_id
-      WHERE ${whereSql}
-    `,
-    params,
-  );
-  const total = Math.min(maxResults, Number(countResult.rows[0]?.value ?? 0));
-  const limit = Math.min(requestedLimit, Math.max(0, maxResults - offset));
-
-  if (limit === 0 || offset >= maxResults) {
-    return { items: [], total };
-  }
-
-  const rowsResult = await pool.query(
-    `
-      SELECT
-        q.id AS question_id,
-        q.user_id,
-        q.question,
-        COALESCE((
-          SELECT jsonb_agg(
-            jsonb_build_object('ts', recent.resolved_at, 'score', recent.score)
-            ORDER BY recent.resolved_at, recent.id
-          )
-          FROM (
-            SELECT attempt.id, attempt.resolved_at, attempt.score
-            FROM question_attempts attempt
-            WHERE attempt.question_id = q.id
-            ORDER BY attempt.resolved_at DESC, attempt.id DESC
-            LIMIT 10
-          ) recent
-        ), '[]'::jsonb) AS review_history,
-        q.next_due,
-        q.generated_from_question,
-        q.question_provenance,
-        q.last_answer,
-        q.last_answer_summary,
-        q.concise_answer,
-        q.flagged_at,
-        q.created_at,
-        qe.embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
-          <=> $${params.length + 1}::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS}) AS distance
-      FROM question_embeddings qe
-      JOIN questions q ON q.id = qe.question_id AND q.user_id = qe.user_id
-      WHERE ${whereSql}
-      ORDER BY distance ASC, q.question ASC
-      LIMIT $${params.length + 2}
-      OFFSET $${params.length + 3}
-    `,
-    [...params, vectorLiteral(queryEmbedding), limit, offset],
-  );
-
-  return {
-    items: await enrichDueQuestionsWithConceptSlugs(
-      context.userId,
-      rowsResult.rows.map(rawQuestionRowToDueQuestion),
-    ),
-    total,
-  };
+  return Boolean(row);
 }
 
 export async function getQuestionSnapshot(
@@ -1387,19 +1178,7 @@ export async function applyEvaluationToPostgres(input: {
 
   return db.transaction(async (tx) => {
     const [row] = await tx
-      .select({
-        question_id: questions.id,
-        user_id: questions.userId,
-        question: questions.question,
-        next_due: questions.nextDue,
-        generated_from_question: questions.generatedFromQuestion,
-        question_provenance: questions.questionProvenance,
-        last_answer: questions.lastAnswer,
-        last_answer_summary: questions.lastAnswerSummary,
-        concise_answer: questions.conciseAnswer,
-        flagged_at: questions.flaggedAt,
-        created_at: questions.createdAt,
-      })
+      .select(questionIdentitySelection)
       .from(questions)
       .where(
         and(

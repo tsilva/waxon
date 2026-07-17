@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
 import {
-  listQuestionBankItems,
   normalizeQuestionBankSort,
-  searchQuestionBankItemsByMeaning,
+  queryQuestionBankItems,
   type QuestionBankStatusFilter,
 } from "@/app/lib/questionBank";
 
@@ -40,18 +39,11 @@ export async function GET(request: Request) {
     offset: readNonNegativeInteger(url.searchParams.get("offset")),
   };
 
-  if (url.searchParams.get("searchMode") === "meaning" && input.query) {
-    return NextResponse.json(
-      await searchQuestionBankItemsByMeaning({
-        ...input,
-        query: input.query,
-      }),
-    );
-  }
-
   return NextResponse.json(
-    await listQuestionBankItems({
+    await queryQuestionBankItems({
       ...input,
+      searchMode:
+        url.searchParams.get("searchMode") === "meaning" ? "meaning" : "text",
       sort: normalizeQuestionBankSort(url.searchParams.get("sort")),
     }),
   );

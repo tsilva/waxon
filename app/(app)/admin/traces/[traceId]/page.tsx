@@ -10,13 +10,12 @@ export default async function AdminTracePage({
   params: Promise<{ traceId: string }>;
 }) {
   const { traceId } = await params;
-  const { currentUser, initialViewState } = await getAdminPageShellProps();
+  const { initialViewState } = await getAdminPageShellProps();
 
   return (
     <>
       <AppStaticLoadingView staticView="admin" />
       <AdminHydrator
-        currentUser={currentUser}
         initialViewState={initialViewState}
         selectedTraceId={traceId}
       />

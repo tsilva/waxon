@@ -84,3 +84,26 @@ export type ReviewActivity = ReviewSummary & {
   evaluations: EvaluationQueueItem[];
   recentAttempts: QuestionAttempt[];
 };
+
+export type ReviewSessionQueueResponse = {
+  items: ReviewQueueItem[];
+};
+
+export type EvaluationStatusResponse = {
+  evaluations: EvaluationQueueItem[];
+};
+
+export type QuestionAttemptsResponse = {
+  attempts: QuestionAttempt[];
+};
+
+export type SubmitAnswerResponse =
+  | {
+      ok: true;
+      evaluationId: string;
+      traceId: string;
+    }
+  | {
+      ok: false;
+      error: string;
+    };

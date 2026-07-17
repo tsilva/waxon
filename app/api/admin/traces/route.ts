@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { getCurrentUser } from "@/app/lib/auth";
 import { listLlmTraceInteractions } from "@/app/lib/llmTraceStore";
-import { reviewSummaryForUser } from "@/app/lib/reviewQueue";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,13 +13,9 @@ export async function GET() {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 
-  const [interactions, queueStatus] = await Promise.all([
-    listLlmTraceInteractions(),
-    reviewSummaryForUser(currentUser.id),
-  ]);
+  const interactions = await listLlmTraceInteractions();
 
   return NextResponse.json({
     interactions,
-    dueCount: queueStatus.queueRemaining,
   });
 }

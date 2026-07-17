@@ -14,7 +14,6 @@ const authRoutes = ["/sign-in", "/sign-up"];
 const reviewShellRoutes = [
   "/review",
   "/library",
-  "/queue",
   "/stats",
   "/admin",
 ];

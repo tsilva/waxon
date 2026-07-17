@@ -12,6 +12,11 @@ import {
   normalizeEmbeddingText,
   questionDedupeSourceHash,
 } from "../../shared/embedding-contract.mjs";
+import {
+  getOpenRouterApiKey,
+  openRouterEmbeddings,
+  type OpenRouterTraceContext,
+} from "./openRouter";
 
 export { DEFAULT_EMBEDDING_MODEL, resolveEmbeddingModel };
 export {
@@ -24,6 +29,50 @@ export {
   normalizeEmbeddingText,
   questionDedupeSourceHash,
 };
+
+export async function requestEmbeddings(input: {
+  texts: string[];
+  trace: OpenRouterTraceContext;
+  apiKey?: string;
+  failureMode?: "throw" | "empty";
+}): Promise<number[][]> {
+  if (input.texts.length === 0) {
+    return [];
+  }
+
+  try {
+    const apiKey = input.apiKey ?? getOpenRouterApiKey();
+
+    if (!apiKey) {
+      throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required.");
+    }
+
+    const { response, body } = await openRouterEmbeddings({
+      apiKey,
+      trace: input.trace,
+      body: {
+        model: resolveEmbeddingModel(),
+        input: input.texts,
+        encoding_format: "float",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenRouter embedding request failed (${response.status}).`);
+    }
+
+    return decodeOpenRouterEmbeddings(body.data, {
+      expectedCount: input.texts.length,
+      expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
+    });
+  } catch (error) {
+    if (input.failureMode === "empty") {
+      return [];
+    }
+
+    throw error;
+  }
+}
 
 const PLOT_PROJECTION_X_SIN = 1.37;
 const PLOT_PROJECTION_X_COS = 2.11;

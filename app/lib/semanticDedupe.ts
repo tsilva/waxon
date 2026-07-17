@@ -4,7 +4,6 @@ import {
   getOpenRouterApiKey,
   getOpenRouterChatModel,
   openRouterChatCompletion,
-  openRouterEmbeddings,
   type OpenRouterTraceContext,
 } from "./openRouter";
 import { questionSlug } from "./questionSlug";
@@ -13,18 +12,18 @@ import {
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
   buildQuestionDedupeSource,
-  decodeOpenRouterEmbeddings,
   questionDedupeSourceHash,
+  requestEmbeddings,
   resolveEmbeddingModel,
 } from "./embeddingSource";
 import { generateConciseAnswers } from "./conciseAnswer";
-import { extractJsonObject } from "./jsonObject";
+import { extractJsonObject } from "../../shared/json-object.mjs";
 import {
   loadPromptTemplate,
   renderPromptTemplate,
-} from "./promptTemplates.ts";
+} from "../../shared/prompt-templates.mjs";
 import type { NormalizedQuestionDraft } from "./questionDraft";
-import { vectorLiteral } from "./vectorLiteral";
+import { vectorLiteral } from "../../shared/vector-literal.mjs";
 
 export type NovelQuestionCandidate = NormalizedQuestionDraft;
 
@@ -96,37 +95,13 @@ async function fetchEmbeddings(
   input: string[],
   trace: Partial<OpenRouterTraceContext>,
 ): Promise<number[][]> {
-  if (input.length === 0) {
-    return [];
-  }
-
-  const apiKey = getOpenRouterApiKey();
-
-  if (!apiKey) {
-    throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required.");
-  }
-
-  const { response, body } = await openRouterEmbeddings({
-    apiKey,
+  return requestEmbeddings({
+    texts: input,
     trace: {
       operation: trace.operation ?? "semantic_dedupe_embedding",
       userId: trace.userId,
       question: trace.question,
     },
-    body: {
-      model: resolveEmbeddingModel(),
-      input,
-      encoding_format: "float",
-    },
-  });
-
-  if (!response.ok) {
-    throw new Error(`OpenRouter embedding request failed (${response.status}).`);
-  }
-
-  return decodeOpenRouterEmbeddings(body.data, {
-    expectedCount: input.length,
-    expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
   });
 }
 
