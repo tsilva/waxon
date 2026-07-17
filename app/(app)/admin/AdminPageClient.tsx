@@ -1378,7 +1378,6 @@ export function AdminPageClient({
     <main className="page admin-page">
       <section className="review-shell admin-shell" aria-label="Admin traces">
         <ReviewToolbar
-          activeTab="admin"
           onReviewClick={persistAdminPageCache}
         />
 

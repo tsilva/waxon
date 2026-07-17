@@ -452,7 +452,7 @@ export default function StatsPageClient() {
   return (
     <main className="page">
       <section className="review-shell" aria-label="Review statistics">
-        <ReviewToolbar activeTab="stats" />
+        <ReviewToolbar />
 
         <section className="stats-stage" aria-label="Review statistics">
           <div className="stats-page-header">

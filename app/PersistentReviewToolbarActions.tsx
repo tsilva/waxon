@@ -1,12 +1,11 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { ReviewToolbarActions } from "@/app/ReviewToolbar";
-import { localSettingsEvent } from "@/app/toolbarEvents";
-import type { ReviewToolbarTab } from "@/app/toolbarTypes";
+import { reviewToolbarTabFromPathname } from "@/app/toolbarTypes";
 import { useToolbarState } from "@/app/ToolbarState";
 
 const toolbarRoutes = [
@@ -15,25 +14,12 @@ const toolbarRoutes = [
   "/stats",
   "/admin",
 ];
-function activeTabFromPathname(pathname: string): ReviewToolbarTab {
-  if (pathname.startsWith("/library")) {
-    return "library";
-  }
-
-  if (pathname.startsWith("/stats")) {
-    return "stats";
-  }
-
-  if (pathname.startsWith("/admin")) {
-    return "admin";
-  }
-
-  return "review";
-}
-
-export function PersistentReviewToolbarActions() {
+export function PersistentReviewToolbarActions({
+  onManageLocalAccount,
+}: {
+  onManageLocalAccount: () => void;
+}) {
   const pathname = usePathname();
-  const router = useRouter();
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
   const { currentUser, dueCount } = useToolbarState();
@@ -45,7 +31,7 @@ export function PersistentReviewToolbarActions() {
     return null;
   }
 
-  const activeTab = activeTabFromPathname(pathname);
+  const activeTab = reviewToolbarTabFromPathname(pathname);
   const menuAvatarUrl =
     clerkUser?.imageUrl || currentUser?.avatarUrl || null;
   const menuDisplayName =
@@ -75,12 +61,7 @@ export function PersistentReviewToolbarActions() {
       menuEmail={menuEmail}
       onManageAccount={() => {
         if (isLocalAuth) {
-          if (pathname.startsWith("/review")) {
-            window.dispatchEvent(new Event(localSettingsEvent));
-          } else {
-            router.push("/review");
-          }
-
+          onManageLocalAccount();
           return;
         }
 

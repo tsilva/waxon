@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractJsonObject } from "../shared/json-object.mjs";
+import { extractJsonObject } from "../shared/json-object.mts";
 
 test("extractJsonObject accepts raw newlines inside JSON string values", () => {
   const result = extractJsonObject('{"memoryPatch":[{"body":"- first\n- second"}]}');

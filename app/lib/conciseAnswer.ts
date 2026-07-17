@@ -8,7 +8,7 @@ import {
 import {
   buildConciseAnswerRequest,
   parseConciseAnswerResults,
-} from "../../shared/concise-answer-contract.mjs";
+} from "../../shared/concise-answer-contract.mts";
 
 export type ConciseAnswerInput = {
   id: string;

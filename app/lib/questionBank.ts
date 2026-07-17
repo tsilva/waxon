@@ -1,6 +1,6 @@
 import { pool } from "@/app/db/client";
-import { normalizeConceptSlug } from "../../shared/concept-slug.mjs";
-import { vectorLiteral } from "../../shared/vector-literal.mjs";
+import { normalizeConceptSlug } from "../../shared/concept-slug.mts";
+import { vectorLiteral } from "../../shared/vector-literal.mts";
 import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
@@ -50,6 +50,16 @@ export type QuestionBankPage = {
   total: number;
   hasMore: boolean;
   nextOffset: number | null;
+};
+
+export type QuestionBankQuery = {
+  searchMode: QuestionBankSearchMode;
+  query: string;
+  tagSlugs: string[];
+  status: QuestionBankStatusFilter;
+  sort: QuestionBankSort;
+  limit: number;
+  offset: number;
 };
 
 function acceptQuestionsWithoutNoveltyGate(
@@ -138,13 +148,59 @@ function normalizeStatus(value: unknown): QuestionBankStatusFilter {
     : "all";
 }
 
-export function normalizeQuestionBankSort(value: unknown): QuestionBankSort {
+function normalizeQuestionBankSort(value: unknown): QuestionBankSort {
   return value === "created-desc" ||
     value === "created-asc" ||
     value === "updated-desc" ||
     value === "updated-asc"
     ? value
     : "due";
+}
+
+function readQuestionBankInteger(input: {
+  value: string | null;
+  fallback: number;
+  minimum: number;
+  maximum: number;
+}): number {
+  const parsed = Number(input.value ?? "");
+
+  if (!Number.isSafeInteger(parsed) || parsed < input.minimum) {
+    return input.fallback;
+  }
+
+  return Math.min(input.maximum, parsed);
+}
+
+export function parseQuestionBankQuery(
+  searchParams: Pick<URLSearchParams, "get" | "getAll">,
+): QuestionBankQuery {
+  const rawQuery = searchParams.get("q")?.trim() ?? "";
+  const searchMode: QuestionBankSearchMode =
+    rawQuery && searchParams.get("searchMode") === "meaning"
+      ? "meaning"
+      : "text";
+
+  return {
+    searchMode,
+    query:
+      searchMode === "meaning" ? normalizeEmbeddingText(rawQuery) : rawQuery,
+    tagSlugs: normalizeQuestionBankTagSlugs(searchParams.getAll("tag")),
+    status: normalizeStatus(searchParams.get("status")),
+    sort: normalizeQuestionBankSort(searchParams.get("sort")),
+    limit: readQuestionBankInteger({
+      value: searchParams.get("limit"),
+      fallback: DEFAULT_QUESTION_BANK_LIMIT,
+      minimum: 1,
+      maximum: MAX_QUESTION_BANK_LIMIT,
+    }),
+    offset: readQuestionBankInteger({
+      value: searchParams.get("offset"),
+      fallback: 0,
+      minimum: 0,
+      maximum: Number.MAX_SAFE_INTEGER,
+    }),
+  };
 }
 
 async function embedQuestionBankSearchQuery(input: {
@@ -163,37 +219,10 @@ async function embedQuestionBankSearchQuery(input: {
   return embeddings[0] ?? [];
 }
 
-export async function queryQuestionBankItems(input: {
-  userId: string;
-  searchMode?: QuestionBankSearchMode | null;
-  query?: string | null;
-  tagSlug?: string | null;
-  tagSlugs?: string[] | null;
-  status?: QuestionBankStatusFilter | null;
-  sort?: QuestionBankSort | null;
-  limit?: number | null;
-  offset?: number | null;
-}): Promise<QuestionBankPage> {
-  const rawQuery = input.query?.trim() ?? "";
-  const searchMode: QuestionBankSearchMode =
-    input.searchMode === "meaning" && rawQuery ? "meaning" : "text";
-  const query =
-    searchMode === "meaning" ? normalizeEmbeddingText(rawQuery) : rawQuery;
-  const tagSlugs = normalizeQuestionBankTagSlugs(
-    input.tagSlugs && input.tagSlugs.length > 0
-      ? input.tagSlugs
-      : input.tagSlug,
-  );
-  const status = normalizeStatus(input.status);
-  const sort = normalizeQuestionBankSort(input.sort);
-  const limit = Math.max(
-    1,
-    Math.min(
-      MAX_QUESTION_BANK_LIMIT,
-      Math.floor(input.limit ?? DEFAULT_QUESTION_BANK_LIMIT),
-    ),
-  );
-  const offset = Math.max(0, Math.floor(input.offset ?? 0));
+export async function queryQuestionBankItems(
+  input: QuestionBankQuery & { userId: string },
+): Promise<QuestionBankPage> {
+  const { limit, offset, query, searchMode, sort, status, tagSlugs } = input;
   const remainingMeaningResults = Math.max(
     0,
     MAX_MEANING_SEARCH_RESULTS - offset,

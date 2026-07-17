@@ -23,17 +23,16 @@ import {
 } from "@/app/lib/speechRecognition";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import {
-  MarkdownContent as SharedMarkdownContent,
   MarkdownInline as SharedMarkdownInline,
 } from "@/app/MarkdownContent";
+import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import {
-  PreviousAnswerRow,
-  PreviousAnswerScore,
-} from "@/app/PreviousAnswerRow";
+  QuestionDetailsDialog,
+  type QuestionAnswerHistoryEntry,
+  type QuestionDetailsModel,
+} from "@/app/QuestionDetailsDialog";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
-import { localSettingsEvent } from "@/app/toolbarEvents";
 import { useToolbarState } from "@/app/ToolbarState";
-import { ScoreChart } from "./ReviewVisualizations";
 import { formatDurationBadge } from "./reviewFormatting";
 import type {
   EvaluationPhase,
@@ -47,16 +46,8 @@ import type {
   ReviewSessionQueueResponse,
   SubmitAnswerResponse,
 } from "@/app/lib/reviewTypes";
-import type { UserProfile } from "@/app/lib/userProfile";
+import { Flag, Info } from "lucide-react";
 import {
-  Flag,
-  Info,
-  Trash2,
-  Upload,
-  User,
-} from "lucide-react";
-import {
-  ChangeEvent,
   FormEvent,
   KeyboardEvent,
   type ComponentProps,
@@ -218,41 +209,8 @@ async function fetchReviewSessionQueue(input: {
   return data.items;
 }
 
-type QuestionStats = {
-  questionId: string | null;
-  question: string;
-  reviewHistory: ReviewHistoryEntry[];
-  answerHistory: AnswerHistoryEntry[];
-  attempts: number;
-  averageScore: number | null;
-  bestScore: number | null;
-  lastScore: number | null;
-  lastReviewedAt: number | null;
-  nextDue: number | null;
-  msUntilDue: number | null;
-  dueStatus: "now" | "scheduled" | "unknown";
-  pendingCount: number;
-  generatedFromQuestion: string | null;
-  questionProvenance: string | null;
-  conciseAnswer: string | null;
-  lastJustification: string | null;
-  conceptSlugs: string[];
-};
-
-type AnswerHistoryEntry = {
-  id: string;
-  rawAnswer: string;
-  answerSummary: string | null;
-  score: number | null;
-  justification: string | null;
-  correctAnswer: string | null;
-  traceId: string | null;
-  submittedAt: number;
-  resolvedAt: number | null;
-  status: "grading" | "resolved";
-  phase: EvaluationPhase | null;
-  lastActivityAt: number | null;
-};
+type QuestionStats = QuestionDetailsModel;
+type AnswerHistoryEntry = QuestionAnswerHistoryEntry;
 
 const COLLAPSED_PREVIOUS_ANSWER_LIMIT = 2;
 const EXPANDED_PREVIOUS_ANSWER_LIMIT = 24;
@@ -264,7 +222,6 @@ const STALE_EVALUATION_GRADING_MS = 120_000;
 const EVALUATION_STATUS_POLL_MS = 750;
 const QUESTION_SWAP_ANIMATION_MS = 140;
 
-const MAX_AVATAR_UPLOAD_BYTES = 512 * 1024;
 const TERMINAL_SPEECH_COMMAND = /(?:^|\s)(submit)[.!?]*$/i;
 
 function questionSwapLayerKey(
@@ -284,52 +241,6 @@ function MarkdownInline(
   return <SharedMarkdownInline enableMath {...props} />;
 }
 
-function MarkdownContent(
-  props: Omit<ComponentProps<typeof SharedMarkdownContent>, "enableMath">,
-) {
-  return <SharedMarkdownContent enableMath {...props} />;
-}
-
-function formatEvaluationPhase(phase: EvaluationPhase | null): string {
-  switch (phase) {
-    case "queued":
-      return "Queued for evaluation";
-    case "evaluating-answer":
-      return "Waiting for evaluator";
-    case "saving-evaluation":
-      return "Saving evaluation";
-    case "finalizing":
-      return "Finalizing evaluation";
-    default:
-      return "Evaluating in background";
-  }
-}
-
-function formatEvaluationActivity(
-  lastActivityAt: number | null,
-  currentTime: number,
-): string {
-  if (lastActivityAt === null) {
-    return "Activity pending";
-  }
-
-  const elapsedSeconds = Math.max(
-    0,
-    Math.floor((currentTime - lastActivityAt) / 1000),
-  );
-
-  if (elapsedSeconds < 2) {
-    return "Active now";
-  }
-
-  if (elapsedSeconds < 60) {
-    return `Active ${elapsedSeconds}s ago`;
-  }
-
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-  return `Active ${elapsedMinutes}m ago`;
-}
-
 function IconTooltip({
   label,
   children,
@@ -347,14 +258,6 @@ function IconTooltip({
       {children(tooltipId)}
     </span>
   );
-}
-
-function formatScore(score: number | null): string {
-  return score === null ? "N/A" : `${score}/10`;
-}
-
-function formatAverageScore(score: number | null): string {
-  return score === null ? "N/A" : `${score.toFixed(1)}/10`;
 }
 
 function formatReviewDate(timestamp: number | null): string {
@@ -421,18 +324,6 @@ function reviewQueueItemPreviousTimestamp(item: ReviewQueueItem): number | null 
   );
 }
 
-function formatNextDue(stats: QuestionStats): string {
-  if (stats.nextDue === null || stats.msUntilDue === null) {
-    return "Unknown";
-  }
-
-  if (stats.msUntilDue <= 0) {
-    return "Due now";
-  }
-
-  return `In ${formatDurationBadge(stats.msUntilDue)}`;
-}
-
 function formatPreviousAnswerScheduleLabel(
   nextDue: number | null,
   now: number,
@@ -473,35 +364,6 @@ function extractTerminalSpeechCommand(
     heldText: transcript.slice(commandStart).trim(),
     submitAnswer: mergeTranscriptText(baseAnswer, beforeCommand),
   };
-}
-
-function UploadIcon() {
-  return <Upload aria-hidden="true" />;
-}
-
-function RemoveIcon() {
-  return <Trash2 aria-hidden="true" />;
-}
-
-function UserIcon() {
-  return <User aria-hidden="true" />;
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-        return;
-      }
-
-      reject(new Error("Could not read avatar image."));
-    };
-    reader.onerror = () => reject(new Error("Could not read avatar image."));
-    reader.readAsDataURL(file);
-  });
 }
 
 export default function ReviewApp() {
@@ -586,15 +448,7 @@ export default function ReviewApp() {
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFlaggingQuestion, setIsFlaggingQuestion] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const {
-    canViewAdmin,
-    currentUser,
-    setCurrentUser,
-    setDueCount,
-  } = useToolbarState();
-  const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
-  const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
+  const { canViewAdmin, setDueCount } = useToolbarState();
   const [error, setError] = useState<string | null>(null);
   const { showError } = useAppError();
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -613,7 +467,6 @@ export default function ReviewApp() {
   const processedEvaluationIdsRef = useRef(new Set<string>());
   const questionAttemptsRequestKeysRef = useRef(new Set<string>());
   const answerInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const isSubmittingRef = useRef(isSubmitting);
   const shouldRefocusAnswerAfterSubmitRef = useRef(false);
   const keepListeningRef = useRef(false);
@@ -898,33 +751,6 @@ export default function ReviewApp() {
 
     return () => window.clearInterval(interval);
   }, [hasPendingEvaluationActivity]);
-
-  useEffect(() => {
-    if (!isSettingsOpen) {
-      return;
-    }
-
-    function closeSettingsOnEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === "Escape") {
-        setIsSettingsOpen(false);
-      }
-    }
-
-    window.addEventListener("keydown", closeSettingsOnEscape);
-
-    return () => window.removeEventListener("keydown", closeSettingsOnEscape);
-  }, [isSettingsOpen]);
-
-  useEffect(() => {
-    function openLocalSettings() {
-      setIsSettingsOpen(true);
-    }
-
-    window.addEventListener(localSettingsEvent, openLocalSettings);
-
-    return () =>
-      window.removeEventListener(localSettingsEvent, openLocalSettings);
-  }, []);
 
   const clearPendingSpeechCommand = useCallback(() => {
     if (pendingSpeechCommandTimerRef.current) {
@@ -1827,73 +1653,6 @@ export default function ReviewApp() {
     }
   }
 
-  async function saveAvatar(avatarUrl: string | null) {
-    setIsAvatarUpdating(true);
-    setAvatarMessage(null);
-
-    try {
-      const response = await fetch("/api/user", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ avatarUrl }),
-      });
-      const data = (await response.json()) as
-        | UserProfile
-        | { error?: string };
-
-      if (!response.ok) {
-        throw new Error(
-          "error" in data && data.error ? data.error : "Could not update avatar.",
-        );
-      }
-
-      setCurrentUser(data as UserProfile);
-      setAvatarMessage(avatarUrl ? "Avatar updated." : "Avatar removed.");
-    } catch (avatarError) {
-      setAvatarMessage(
-        avatarError instanceof Error
-          ? avatarError.message
-          : "Could not update avatar.",
-      );
-    } finally {
-      setIsAvatarUpdating(false);
-    }
-  }
-
-  async function handleAvatarFileChange(
-    event: ChangeEvent<HTMLInputElement>,
-  ) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-
-    if (!file) {
-      return;
-    }
-
-    if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type)) {
-      setAvatarMessage("Choose a PNG, JPEG, WebP, or GIF image.");
-      return;
-    }
-
-    if (file.size > MAX_AVATAR_UPLOAD_BYTES) {
-      setAvatarMessage("Choose an image under 512 KB.");
-      return;
-    }
-
-    try {
-      const avatarUrl = await readFileAsDataUrl(file);
-      await saveAvatar(avatarUrl);
-    } catch (avatarError) {
-      setAvatarMessage(
-        avatarError instanceof Error
-          ? avatarError.message
-          : "Could not read avatar image.",
-      );
-    }
-  }
-
   const sessionPreviousAnswers: PreviousAnswerItem[] = messages
     .filter(
       (message): message is Extract<ChatMessage, { kind: "answer" }> =>
@@ -2439,7 +2198,7 @@ export default function ReviewApp() {
     sessionQueue,
   ]);
 
-  usePageScrollLock(isSettingsOpen || Boolean(selectedQuestionStats));
+  usePageScrollLock(Boolean(selectedQuestionStats));
 
   useEffect(() => {
     if (!selectedQuestionStats) {
@@ -2460,9 +2219,7 @@ export default function ReviewApp() {
   return (
     <main className={`page ${isPreviousExpanded ? "page-previous-expanded" : ""}`}>
       <section className="review-shell" aria-label="Flashcard learning">
-        <ReviewToolbar
-          activeTab="review"
-        />
+        <ReviewToolbar />
 
         <div
           className={`review-stage ${
@@ -2692,326 +2449,14 @@ export default function ReviewApp() {
 
       </section>
 
-      {isSettingsOpen ? (
-        <div
-          className="settings-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setIsSettingsOpen(false);
-            }
-          }}
-        >
-          <section
-            className="settings-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-modal-title"
-          >
-            <div className="settings-modal-header">
-              <div>
-                <p className="settings-modal-kicker">User settings</p>
-                <h2 className="settings-modal-title" id="settings-modal-title">
-                  Profile
-                </h2>
-              </div>
-              <button
-                className="stats-modal-close"
-                type="button"
-                aria-label="Close settings"
-                onClick={() => setIsSettingsOpen(false)}
-              />
-            </div>
-
-            <div className="settings-profile">
-              <div className="settings-avatar-preview" aria-hidden="true">
-                {currentUser?.avatarUrl ? (
-                  <span
-                    className="settings-avatar-image"
-                    style={{ backgroundImage: `url("${currentUser.avatarUrl}")` }}
-                  />
-                ) : (
-                  <UserIcon />
-                )}
-              </div>
-
-              <div className="settings-profile-copy">
-                <dl className="settings-profile-details">
-                  <div>
-                    <dt>Name</dt>
-                    <dd>{currentUser?.displayName ?? "Loading..."}</dd>
-                  </div>
-                  <div>
-                    <dt>Email</dt>
-                    <dd>{currentUser?.email ?? "Loading..."}</dd>
-                  </div>
-                </dl>
-
-                <div className="settings-avatar-actions">
-                  <input
-                    ref={avatarInputRef}
-                    className="settings-avatar-input"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    onChange={(event) => void handleAvatarFileChange(event)}
-                  />
-                  <button
-                    className="settings-action-primary"
-                    type="button"
-                    onClick={() => avatarInputRef.current?.click()}
-                    disabled={isAvatarUpdating}
-                  >
-                    <UploadIcon />
-                    <span>
-                      {isAvatarUpdating ? "Uploading..." : "Upload avatar"}
-                    </span>
-                  </button>
-                  <button
-                    className="settings-action-secondary"
-                    type="button"
-                    onClick={() => void saveAvatar(null)}
-                    disabled={isAvatarUpdating || !currentUser?.avatarUrl}
-                  >
-                    <RemoveIcon />
-                    <span>Remove</span>
-                  </button>
-                </div>
-
-                {avatarMessage ? (
-                  <p className="settings-status" aria-live="polite">
-                    {avatarMessage}
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          </section>
-        </div>
-      ) : null}
-
       {selectedQuestionStats ? (
-        <div
-          className="stats-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              selectQuestion(null);
-            }
-          }}
-        >
-          <section
-            className="stats-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="stats-modal-title"
-          >
-            <div className="stats-modal-header">
-              <div>
-                <p className="stats-modal-kicker">Question stats</p>
-                <MarkdownInline
-                  as="h2"
-                  className="stats-modal-title"
-                  text={selectedQuestionStats.question}
-                />
-                <p className="stats-modal-question-id">
-                  <span>Question ID:</span>
-                  <code>{selectedQuestionStats.questionId ?? "Unavailable"}</code>
-                </p>
-              </div>
-              <button
-                className="stats-modal-close"
-                type="button"
-                aria-label="Close stats"
-                onClick={() => selectQuestion(null)}
-              />
-            </div>
-
-            <div className="stats-grid" aria-label="Question summary metrics">
-              <div className="stats-tile">
-                <span>Attempts</span>
-                <strong>{selectedQuestionStats.attempts}</strong>
-              </div>
-              <div className="stats-tile">
-                <span>Average</span>
-                <strong>{formatAverageScore(selectedQuestionStats.averageScore)}</strong>
-              </div>
-              <div className="stats-tile">
-                <span>Best</span>
-                <strong>{formatScore(selectedQuestionStats.bestScore)}</strong>
-              </div>
-              <div className="stats-tile">
-                <span>Last</span>
-                <strong>{formatScore(selectedQuestionStats.lastScore)}</strong>
-              </div>
-              <div className="stats-tile">
-                <span>Next due</span>
-                <strong>{formatNextDue(selectedQuestionStats)}</strong>
-              </div>
-              <div className="stats-tile">
-                <span>Pending</span>
-                <strong>{selectedQuestionStats.pendingCount}</strong>
-              </div>
-            </div>
-
-            <div className="stats-chart-panel">
-              <div className="stats-section-heading">
-                <h3>Previous scores</h3>
-                <span>
-                  Last reviewed {formatReviewDate(selectedQuestionStats.lastReviewedAt)}
-                </span>
-              </div>
-              <ScoreChart entries={selectedQuestionStats.reviewHistory} />
-            </div>
-
-            <div className="stats-history-panel">
-              <div className="stats-section-heading">
-                <h3>Answer history</h3>
-                <span>{selectedQuestionStats.dueStatus}</span>
-              </div>
-              {selectedQuestionStats.answerHistory.length === 0 ? (
-                <p className="stats-empty">No answers recorded yet.</p>
-              ) : (
-                <ol className="stats-history-list">
-                  {selectedQuestionStats.answerHistory.map((entry) => {
-                    const isPending = entry.status === "grading";
-
-                    return (
-                      <li
-                        className={`stats-history-row ${
-                          isPending
-                            ? "stats-history-row-pending"
-                            : "stats-history-row-resolved"
-                        }`}
-                        key={entry.id}
-                      >
-                        <div className="stats-history-score-slot">
-                          {isPending ? (
-                            <span className="pending-spinner" aria-hidden="true" />
-                          ) : (
-                            <PreviousAnswerScore score={entry.score} />
-                          )}
-                        </div>
-
-                        <div className="stats-history-copy">
-                          <div className="previous-field stats-history-answer-field">
-                            <span className="previous-field-label">Answer</span>
-                            <p className="stats-history-answer">
-                              {entry.rawAnswer}
-                            </p>
-                          </div>
-
-                          {entry.answerSummary &&
-                          entry.answerSummary !== entry.rawAnswer ? (
-                            <div className="previous-field">
-                              <span className="previous-field-label">
-                                Summary
-                              </span>
-                              <p className="stats-history-summary">
-                                {entry.answerSummary}
-                              </p>
-                            </div>
-                          ) : null}
-                          <div className="previous-field">
-                            <span className="previous-field-label">
-                              Evaluation
-                            </span>
-                            {entry.justification ? (
-                              <p className="stats-history-summary">
-                                {entry.justification}
-                              </p>
-                            ) : (
-                              <p className="stats-history-summary stats-history-summary-muted">
-                                {isPending
-                                  ? `${formatEvaluationPhase(
-                                      entry.phase,
-                                    )}... ${formatEvaluationActivity(
-                                      entry.lastActivityAt,
-                                      currentTime,
-                                    )}`
-                                  : "No feedback returned."}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="stats-history-row-meta">
-                          <time
-                            className="previous-time"
-                            dateTime={new Date(
-                              entry.resolvedAt ?? entry.submittedAt,
-                            ).toISOString()}
-                          >
-                            {formatReviewDate(
-                              entry.resolvedAt ?? entry.submittedAt,
-                            )}
-                          </time>
-                          <span className="stats-history-status">
-                            {isPending
-                              ? formatEvaluationPhase(entry.phase)
-                              : "Resolved"}
-                          </span>
-                          {canViewAdmin && entry.traceId ? (
-                            <Link
-                              className="stats-history-trace-link"
-                              href={`/admin/traces/${encodeURIComponent(
-                                entry.traceId,
-                              )}`}
-                            >
-                              View trace
-                            </Link>
-                          ) : null}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ol>
-              )}
-              {selectedQuestionStats.lastJustification ? (
-                <div className="stats-feedback">
-                  <span>Latest feedback</span>
-                  <MarkdownContent
-                    className="stats-feedback-copy"
-                    text={selectedQuestionStats.lastJustification}
-                  />
-                </div>
-              ) : null}
-              {selectedQuestionStats.generatedFromQuestion ? (
-                <div className="stats-feedback">
-                  <span>Generated from</span>
-                  <MarkdownContent
-                    className="stats-feedback-copy"
-                    text={selectedQuestionStats.generatedFromQuestion}
-                  />
-                </div>
-              ) : null}
-              {selectedQuestionStats.questionProvenance ? (
-                <div className="stats-feedback">
-                  <span>Provenance</span>
-                  <MarkdownContent
-                    className="stats-feedback-copy"
-                    text={selectedQuestionStats.questionProvenance}
-                  />
-                </div>
-              ) : null}
-              {selectedQuestionStats.conceptSlugs.length > 0 ? (
-                <div className="stats-feedback">
-                  <span>Concepts</span>
-                  <div className="stats-concept-list">
-                    {selectedQuestionStats.conceptSlugs.map((slug) => (
-                      <Link
-                        className="stats-concept-chip stats-concept-chip-link"
-                        href={libraryTagHref(slug)}
-                        key={slug}
-                        onClick={() => selectQuestion(null)}
-                      >
-                        #{slug}
-                      </Link>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </section>
-        </div>
+        <QuestionDetailsDialog
+          canViewAdmin={canViewAdmin}
+          currentTime={currentTime}
+          details={selectedQuestionStats}
+          kicker="Question stats"
+          onClose={() => selectQuestion(null)}
+        />
       ) : null}
 
     </main>

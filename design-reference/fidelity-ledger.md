@@ -22,3 +22,4 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - July 14, 2026 scope update: the course experience and its navigation tab are intentionally absent while work focuses on question-bank and Review milestones.
 - June 27, 2026 tag update: concept tag badges use squared 4px corners instead of pill corners across Review, Library, and question detail surfaces.
 - July 17, 2026 Library update: concept-tag activation, renaming, merging, and question inspection live in the Library `Tags` modal. The old standalone Tags tab is intentionally absent, and `/tags` redirects to `/library` for old bookmarks.
+- July 17, 2026 shell/details ownership update: authenticated toolbar actions and local account settings are mounted once at the app-layout boundary, active tabs are derived from the route, and Review/Library share one question-details dialog. These are ownership changes only; preserve the approved header geometry, modal treatment, and responsive behavior.

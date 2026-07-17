@@ -7,9 +7,9 @@ import {
   resolveOpenRouterApiKey,
   resolveEmbeddingModel,
   resolveOpenRouterModel,
-} from "../../shared/openrouter-config.mjs";
-export { extractOpenRouterChatText } from "../../shared/openrouter-chat-text.mjs";
-export { vectorLiteral } from "../../shared/vector-literal.mjs";
+} from "../../shared/openrouter-config.mts";
+export { extractOpenRouterChatText } from "../../shared/openrouter-chat-text.mts";
+export { vectorLiteral } from "../../shared/vector-literal.mts";
 
 export {
   DEFAULT_EMBEDDING_MODEL,

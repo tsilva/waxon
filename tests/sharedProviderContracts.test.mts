@@ -3,11 +3,11 @@ import test from "node:test";
 import {
   extractChatCompletionText,
   extractOpenRouterChatText,
-} from "../shared/openrouter-chat-text.mjs";
+} from "../shared/openrouter-chat-text.mts";
 import {
   DEFAULT_EMBEDDING_MODEL,
   resolveEmbeddingModel,
-} from "../shared/openrouter-config.mjs";
+} from "../shared/openrouter-config.mts";
 import {
   buildEmbeddingSource,
   decodeOpenRouterEmbeddings,
@@ -15,12 +15,12 @@ import {
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
   hashEmbeddingSource,
-} from "../shared/embedding-contract.mjs";
-import { vectorLiteral } from "../shared/vector-literal.mjs";
+} from "../shared/embedding-contract.mts";
+import { vectorLiteral } from "../shared/vector-literal.mts";
 import {
   buildConciseAnswerRequest,
   parseConciseAnswerResults,
-} from "../shared/concise-answer-contract.mjs";
+} from "../shared/concise-answer-contract.mts";
 
 test("resolveEmbeddingModel trims overrides and falls back for blank values", () => {
   assert.equal(resolveEmbeddingModel({}), DEFAULT_EMBEDDING_MODEL);

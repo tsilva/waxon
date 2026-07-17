@@ -1,7 +1,7 @@
 import {
   DEFAULT_EMBEDDING_MODEL,
   resolveEmbeddingModel,
-} from "../../shared/openrouter-config.mjs";
+} from "../../shared/openrouter-config.mts";
 import {
   buildQuestionDedupeSource,
   decodeOpenRouterEmbeddings,
@@ -11,7 +11,7 @@ import {
   hashEmbeddingSource,
   normalizeEmbeddingText,
   questionDedupeSourceHash,
-} from "../../shared/embedding-contract.mjs";
+} from "../../shared/embedding-contract.mts";
 import {
   getOpenRouterApiKey,
   openRouterEmbeddings,

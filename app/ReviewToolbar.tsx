@@ -3,8 +3,11 @@
 import { LogOut, User, UserCog } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import type { ReviewToolbarTab } from "@/app/toolbarTypes";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  reviewToolbarTabFromPathname,
+  type ReviewToolbarTab,
+} from "@/app/toolbarTypes";
 import { useToolbarState } from "@/app/ToolbarState";
 import {
   useEffect,
@@ -14,7 +17,6 @@ import {
 } from "react";
 
 type ReviewToolbarProps = {
-  activeTab: ReviewToolbarTab;
   onReviewClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onAdminClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
 };
@@ -42,11 +44,12 @@ function tabClass(isActive: boolean, isPending: boolean): string {
 }
 
 export function ReviewToolbar({
-  activeTab,
   onReviewClick,
   onAdminClick,
 }: ReviewToolbarProps) {
+  const pathname = usePathname();
   const router = useRouter();
+  const activeTab = reviewToolbarTabFromPathname(pathname);
   const { canViewAdmin } = useToolbarState();
   const [pendingTab, setPendingTab] = useState<ReviewToolbarTab | null>(null);
 

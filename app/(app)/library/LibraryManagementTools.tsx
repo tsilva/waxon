@@ -95,11 +95,9 @@ function readFileAsText(file: File): Promise<string> {
 }
 
 export function LibraryManagementTools({
-  existingQuestions,
   onManageTags,
   onQuestionsAdded,
 }: {
-  existingQuestions: string[];
   onManageTags: () => void;
   onQuestionsAdded: () => void;
 }) {
@@ -242,8 +240,6 @@ export function LibraryManagementTools({
             QUESTION_GENERATION_MAX_COUNT,
             Math.max(1, questionCount),
           ),
-          difficulty: "Mixed",
-          existingQuestions,
         }),
       });
       const data = (await response.json()) as GenerateQuestionsResponse;
@@ -363,7 +359,7 @@ export function LibraryManagementTools({
     setMapMessage(null);
 
     try {
-      const response = await fetch("/api/knowledge-embedding-plot?limit=2000", {
+      const response = await fetch("/api/knowledge-embedding-plot", {
         cache: "no-store",
       });
       const data = (await response.json()) as KnowledgeEmbeddingPlotResponse & {

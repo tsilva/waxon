@@ -4,13 +4,7 @@ import {
   useEffect,
   useState,
   type ComponentType,
-  type ReactElement,
-  type ReactNode,
 } from "react";
-
-type AuthenticatedProvidersComponent = (props: {
-  children: ReactNode;
-}) => ReactElement;
 
 type AuthenticatedClientHydratorProps<TProps extends object> = {
   componentProps: TProps;
@@ -30,8 +24,6 @@ export function AuthenticatedClientHydrator<TProps extends object>({
 }: AuthenticatedClientHydratorProps<TProps>) {
   const [ClientComponent, setClientComponent] =
     useState<ComponentType<TProps> | null>(null);
-  const [AuthenticatedProviders, setAuthenticatedProviders] =
-    useState<AuthenticatedProvidersComponent | null>(null);
   const [hydrationProps] = useState<TProps>(componentProps);
 
   useEffect(() => {
@@ -43,18 +35,11 @@ export function AuthenticatedClientHydrator<TProps extends object>({
       };
     }
 
-    void Promise.all([
-      loadClient(),
-      import("@/app/AuthenticatedProviders"),
-    ]).then(([LoadedClient, providerModule]) => {
+    void loadClient().then((LoadedClient) => {
       if (isCancelled) {
         return;
       }
 
-      setAuthenticatedProviders(
-        () =>
-          providerModule.AuthenticatedProviders as AuthenticatedProvidersComponent,
-      );
       setClientComponent(() => LoadedClient);
     });
 
@@ -72,16 +57,14 @@ export function AuthenticatedClientHydrator<TProps extends object>({
     staticView?.setAttribute("inert", "");
   }, [ClientComponent, staticSelector]);
 
-  if (!ClientComponent || !AuthenticatedProviders) {
+  if (!ClientComponent) {
     return null;
   }
 
   return (
     <>
       <style>{`${staticSelector}{display:none}`}</style>
-      <AuthenticatedProviders>
-        <ClientComponent {...hydrationProps} />
-      </AuthenticatedProviders>
+      <ClientComponent {...hydrationProps} />
     </>
   );
 }
