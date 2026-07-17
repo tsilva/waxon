@@ -7,9 +7,6 @@ import { QUESTION_TEXT_MAX_CHARS } from "@/app/lib/questionContract";
 import { getCurrentUser } from "@/app/lib/auth";
 import { flagQuestion } from "@/app/lib/reviewQueue";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 const MAX_FLAG_BODY_BYTES = 4 * 1024;
 const MAX_QUESTION_ID_CHARS = 80;
 

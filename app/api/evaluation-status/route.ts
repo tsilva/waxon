@@ -2,15 +2,10 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
 import { getAnswerEvaluationsByIds } from "@/app/lib/postgresStore";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const ids = [
-    ...url.searchParams.getAll("evaluationId"),
-    ...(url.searchParams.get("ids")?.split(",") ?? []),
-  ]
+  const ids = url.searchParams
+    .getAll("evaluationId")
     .map((id) => id.trim())
     .filter(Boolean);
 

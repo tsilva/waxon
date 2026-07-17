@@ -3,9 +3,6 @@ import { isAdminEmail } from "@/app/lib/adminAccess";
 import { getCurrentUser } from "@/app/lib/auth";
 import { listLlmTraceInteractions } from "@/app/lib/llmTraceStore";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 export async function GET() {
   const currentUser = await getCurrentUser();
 

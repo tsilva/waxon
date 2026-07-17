@@ -17,9 +17,6 @@ import {
   type NormalizedQuestionDraft,
 } from "@/app/lib/questionDraft";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 const MAX_ADD_QUESTIONS_BODY_BYTES = 64 * 1024;
 const MAX_SOURCE_TEXT_CHARS = 4_000;
 const MAX_PROPOSED_CONCEPT_SLUGS = 8;

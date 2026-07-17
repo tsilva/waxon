@@ -10,9 +10,6 @@ import {
 } from "@/app/lib/conceptTags";
 import { readJsonBodyWithLimit } from "@/app/lib/apiLimits";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 const MAX_CONCEPT_TAG_BODY_BYTES = 8 * 1024;
 
 export async function GET(request: Request) {

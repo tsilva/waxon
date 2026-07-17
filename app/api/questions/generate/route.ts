@@ -29,9 +29,6 @@ import {
 import { normalizeQuestionDraft } from "@/app/lib/questionDraft";
 import { vectorLiteral } from "../../../../shared/vector-literal.mts";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 const MAX_GENERATE_BODY_BYTES = 96 * 1024;
 const MAX_SCOPE_CHARS = 12_000;
 const MAX_FILE_COUNT = 6;
@@ -59,8 +56,6 @@ type ContextFilePayload = {
 type GeneratedQuestionPayload = {
   question: string;
   conciseAnswer: string;
-  sourceLabel?: string;
-  coverageLabel?: string;
   proposedConceptSlugs?: string[];
   sourceText?: string;
 };
@@ -240,9 +235,6 @@ function normalizeGeneratedQuestions(
     normalized.push({
       question: draft.question,
       conciseAnswer: draft.conciseAnswer,
-      sourceLabel: normalizeText(record.sourceLabel ?? record.s) || "OpenRouter",
-      coverageLabel:
-        normalizeText(record.coverageLabel ?? record.c) || draft.question,
       proposedConceptSlugs: draft.proposedConceptSlugs,
       sourceText: normalizeText(record.sourceText ?? record.s),
     });
@@ -559,7 +551,6 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    model,
     questions: generated,
   });
 }
