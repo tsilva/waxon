@@ -1,4 +1,5 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
+import { parseArgs as parseNodeArgs } from "node:util";
 import {
   buildEmbeddingSource,
   decodeOpenRouterEmbeddings,
@@ -6,7 +7,7 @@ import {
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
   hashEmbeddingSource,
-} from "../shared/embedding-contract.mjs";
+} from "../shared/embedding-contract.mts";
 import {
   chunks,
   configureNeonWebSocket,
@@ -26,51 +27,40 @@ configureNeonWebSocket(neonConfig);
 const DEFAULT_BATCH_SIZE = 32;
 
 function parseArgs(argv) {
+  const { values } = parseNodeArgs({
+    args: argv,
+    options: {
+      "batch-size": {
+        type: "string",
+        default: String(DEFAULT_BATCH_SIZE),
+      },
+      force: {
+        type: "boolean",
+        default: false,
+      },
+      kind: {
+        type: "string",
+        default: DEDUPE_EMBEDDING_KIND,
+      },
+      model: {
+        type: "string",
+        default: DEFAULT_EMBEDDING_MODEL,
+      },
+      "source-version": {
+        type: "string",
+        default: String(DEDUPE_SOURCE_VERSION),
+      },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
   const options = {
-    batchSize: DEFAULT_BATCH_SIZE,
-    force: false,
-    kind: DEDUPE_EMBEDDING_KIND,
-    model: DEFAULT_EMBEDDING_MODEL,
-    sourceVersion: DEDUPE_SOURCE_VERSION,
+    batchSize: Number(values["batch-size"]),
+    force: values.force,
+    kind: values.kind.trim(),
+    model: values.model.trim(),
+    sourceVersion: Number(values["source-version"]),
   };
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-
-    if (arg === "--force") {
-      options.force = true;
-      continue;
-    }
-
-    if (arg === "--model") {
-      options.model = argv[index + 1] ?? "";
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--kind") {
-      options.kind = argv[index + 1] ?? "";
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--source-version") {
-      options.sourceVersion = Number(argv[index + 1] ?? "");
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--batch-size") {
-      options.batchSize = Number(argv[index + 1] ?? "");
-      index += 1;
-      continue;
-    }
-
-    throw new Error(`Unknown argument: ${arg}`);
-  }
-
-  options.model = options.model.trim();
-  options.kind = options.kind.trim();
 
   if (!options.model) {
     throw new Error("--model must not be empty");

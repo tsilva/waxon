@@ -17,13 +17,13 @@ import {
   resolveEmbeddingModel,
 } from "./embeddingSource";
 import { generateConciseAnswers } from "./conciseAnswer";
-import { extractJsonObject } from "../../shared/json-object.mjs";
+import { extractJsonObject } from "../../shared/json-object.mts";
 import {
   loadPromptTemplate,
   renderPromptTemplate,
-} from "../../shared/prompt-templates.mjs";
+} from "../../shared/prompt-templates.mts";
 import type { NormalizedQuestionDraft } from "./questionDraft";
-import { vectorLiteral } from "../../shared/vector-literal.mjs";
+import { vectorLiteral } from "../../shared/vector-literal.mts";
 
 export type NovelQuestionCandidate = NormalizedQuestionDraft;
 

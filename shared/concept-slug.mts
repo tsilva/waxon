@@ -2,7 +2,7 @@ const MIN_SLUG_WORDS = 2;
 
 export const FALLBACK_CONCEPT_SLUG = "needs-concept-tagging";
 
-export function normalizeConceptSlug(value) {
+export function normalizeConceptSlug(value: unknown): string {
   if (typeof value !== "string") {
     return "";
   }
@@ -17,7 +17,7 @@ export function normalizeConceptSlug(value) {
     .slice(0, 120);
 }
 
-export function isUsefulConceptSlug(slug) {
+export function isUsefulConceptSlug(slug: string): boolean {
   const normalized = normalizeConceptSlug(slug);
 
   if (normalized !== slug || normalized.length < 3) {
@@ -37,11 +37,11 @@ export function isUsefulConceptSlug(slug) {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug);
 }
 
-export function fallbackConceptSlug() {
+export function fallbackConceptSlug(): string {
   return FALLBACK_CONCEPT_SLUG;
 }
 
-export function isScaffoldingConceptSlug(slug) {
+export function isScaffoldingConceptSlug(slug: string): boolean {
   const normalized = normalizeConceptSlug(slug);
 
   return (
@@ -50,13 +50,13 @@ export function isScaffoldingConceptSlug(slug) {
   );
 }
 
-export function normalizeConceptSlugList(value) {
+export function normalizeConceptSlugList(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  const seen = new Set();
-  const normalized = [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
 
   for (const item of value) {
     const slug = normalizeConceptSlug(item);

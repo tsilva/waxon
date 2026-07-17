@@ -1,19 +1,20 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
+import { parseArgs as parseNodeArgs } from "node:util";
 import {
   FALLBACK_CONCEPT_SLUG,
   isScaffoldingConceptSlug,
   isUsefulConceptSlug,
   normalizeConceptSlug,
-} from "../shared/concept-slug.mjs";
+} from "../shared/concept-slug.mts";
 import {
   decodeOpenRouterEmbeddings,
   DEDUPE_EMBEDDING_DIMENSIONS,
-} from "../shared/embedding-contract.mjs";
-import { extractJsonObject } from "../shared/json-object.mjs";
+} from "../shared/embedding-contract.mts";
+import { extractJsonObject } from "../shared/json-object.mts";
 import {
   loadPromptTemplate,
   renderPromptTemplate,
-} from "../shared/prompt-templates.mjs";
+} from "../shared/prompt-templates.mts";
 import {
   chunks,
   configureNeonWebSocket,
@@ -35,47 +36,39 @@ configureNeonWebSocket(neonConfig);
 const DEFAULT_BATCH_SIZE = 10;
 
 function parseArgs(argv) {
+  const { values } = parseNodeArgs({
+    args: argv,
+    options: {
+      "batch-size": {
+        type: "string",
+        default: String(DEFAULT_BATCH_SIZE),
+      },
+      "dry-run": {
+        type: "boolean",
+        default: false,
+      },
+      force: {
+        type: "boolean",
+        default: false,
+      },
+      limit: {
+        type: "string",
+      },
+      "user-id": {
+        type: "string",
+        default: "",
+      },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
   const options = {
-    batchSize: DEFAULT_BATCH_SIZE,
-    dryRun: false,
-    force: false,
-    limit: null,
-    userId: "",
+    batchSize: Number(values["batch-size"]),
+    dryRun: values["dry-run"],
+    force: values.force,
+    limit: values.limit === undefined ? null : Number(values.limit),
+    userId: values["user-id"].trim(),
   };
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-
-    if (arg === "--batch-size") {
-      options.batchSize = Number(argv[index + 1] ?? "");
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--dry-run") {
-      options.dryRun = true;
-      continue;
-    }
-
-    if (arg === "--force") {
-      options.force = true;
-      continue;
-    }
-
-    if (arg === "--limit") {
-      options.limit = Number(argv[index + 1] ?? "");
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--user-id") {
-      options.userId = String(argv[index + 1] ?? "").trim();
-      index += 1;
-      continue;
-    }
-
-    throw new Error(`Unknown argument: ${arg}`);
-  }
 
   if (
     !Number.isInteger(options.batchSize) ||

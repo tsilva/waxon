@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
-import { knowledgeEmbeddingPlotStatus } from "@/app/lib/reviewQueue";
+import { knowledgeEmbeddingPlotStatus } from "@/app/lib/knowledgeEmbeddingPlot";
+import { readQuestionEmbeddingProjections } from "@/app/lib/postgresStore";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,10 +13,13 @@ export async function GET(request: Request) {
   const user = await getCurrentUser();
 
   return NextResponse.json(
-    await knowledgeEmbeddingPlotStatus({
-      userId: user.id,
-      limit: Number.isFinite(limit) ? limit : undefined,
-      offset: Number.isFinite(offset) ? offset : undefined,
-    }),
+    await knowledgeEmbeddingPlotStatus(
+      {
+        userId: user.id,
+        limit: Number.isFinite(limit) ? limit : undefined,
+        offset: Number.isFinite(offset) ? offset : undefined,
+      },
+      readQuestionEmbeddingProjections,
+    ),
   );
 }

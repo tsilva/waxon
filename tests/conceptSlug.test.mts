@@ -4,7 +4,7 @@ import {
   isUsefulConceptSlug,
   normalizeConceptSlug,
   normalizeConceptSlugList,
-} from "../shared/concept-slug.mjs";
+} from "../shared/concept-slug.mts";
 
 test("normalizeConceptSlug produces lowercase kebab-case phrases", () => {
   assert.equal(

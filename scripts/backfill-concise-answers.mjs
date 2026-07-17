@@ -1,8 +1,9 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
+import { parseArgs as parseNodeArgs } from "node:util";
 import {
   buildConciseAnswerRequest,
   parseConciseAnswerResults,
-} from "../shared/concise-answer-contract.mjs";
+} from "../shared/concise-answer-contract.mts";
 import {
   chunks,
   configureNeonWebSocket,
@@ -22,27 +23,25 @@ configureNeonWebSocket(neonConfig);
 const DEFAULT_BATCH_SIZE = 20;
 
 function parseArgs(argv) {
+  const { values } = parseNodeArgs({
+    args: argv,
+    options: {
+      "batch-size": {
+        type: "string",
+        default: String(DEFAULT_BATCH_SIZE),
+      },
+      force: {
+        type: "boolean",
+        default: false,
+      },
+    },
+    strict: true,
+    allowPositionals: false,
+  });
   const options = {
-    batchSize: DEFAULT_BATCH_SIZE,
-    force: false,
+    batchSize: Number(values["batch-size"]),
+    force: values.force,
   };
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-
-    if (arg === "--force") {
-      options.force = true;
-      continue;
-    }
-
-    if (arg === "--batch-size") {
-      options.batchSize = Number(argv[index + 1] ?? "");
-      index += 1;
-      continue;
-    }
-
-    throw new Error(`Unknown argument: ${arg}`);
-  }
 
   if (
     !Number.isInteger(options.batchSize) ||

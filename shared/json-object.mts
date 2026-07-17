@@ -1,5 +1,5 @@
-export function extractJsonObject(source) {
-  const parseAttempts = (candidate) => {
+export function extractJsonObject(source: string): unknown {
+  const parseAttempts = (candidate: string): unknown => {
     try {
       return JSON.parse(candidate);
     } catch {
@@ -20,7 +20,7 @@ export function extractJsonObject(source) {
   }
 }
 
-function extractFirstBalancedObject(source) {
+function extractFirstBalancedObject(source: string): string | null {
   let start = -1;
   let depth = 0;
   let inString = false;
@@ -69,7 +69,7 @@ function extractFirstBalancedObject(source) {
   return null;
 }
 
-function escapeControlCharactersInJsonStrings(source) {
+function escapeControlCharactersInJsonStrings(source: string): string {
   let escaped = "";
   let inString = false;
   let isEscaped = false;

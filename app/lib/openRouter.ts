@@ -10,8 +10,8 @@ import {
   OPENROUTER_EMBEDDINGS_URL,
   resolveOpenRouterApiKey,
   resolveOpenRouterModel,
-} from "../../shared/openrouter-config.mjs";
-export { extractChatCompletionText } from "../../shared/openrouter-chat-text.mjs";
+} from "../../shared/openrouter-config.mts";
+export { extractChatCompletionText } from "../../shared/openrouter-chat-text.mts";
 
 export {
   DEFAULT_OPENROUTER_CHAT_MODEL,

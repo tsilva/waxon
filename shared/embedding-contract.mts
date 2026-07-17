@@ -4,7 +4,14 @@ export const DEDUPE_EMBEDDING_DIMENSIONS = 3072;
 export const DEDUPE_EMBEDDING_KIND = "dedupe_v1";
 export const DEDUPE_SOURCE_VERSION = 1;
 
-export function normalizeEmbeddingText(value) {
+export type EmbeddingSourceInput = {
+  question: string;
+  conciseAnswer?: string;
+  kind?: string;
+  sourceVersion?: number;
+};
+
+export function normalizeEmbeddingText(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
@@ -13,7 +20,7 @@ export function buildEmbeddingSource({
   conciseAnswer = "",
   kind = DEDUPE_EMBEDDING_KIND,
   sourceVersion = DEDUPE_SOURCE_VERSION,
-}) {
+}: EmbeddingSourceInput): string {
   if (kind === "question_only") {
     return [
       `version: ${sourceVersion}`,
@@ -40,22 +47,36 @@ export function buildEmbeddingSource({
   throw new Error(`Unsupported embedding kind: ${kind}`);
 }
 
-export function buildQuestionDedupeSource(input) {
+export function buildQuestionDedupeSource(input: {
+  question: string;
+  conciseAnswer: string;
+}): string {
   return buildEmbeddingSource(input);
 }
 
-export function hashEmbeddingSource(source) {
+export function hashEmbeddingSource(source: string): string {
   return createHash("sha256").update(source).digest("hex");
 }
 
-export function questionDedupeSourceHash(input) {
+export function questionDedupeSourceHash(input: {
+  question: string;
+  conciseAnswer: string;
+}): string {
   return hashEmbeddingSource(buildQuestionDedupeSource(input));
 }
 
 export function decodeOpenRouterEmbeddings(
-  data,
-  { expectedCount, expectedDimensions, allowEmpty = false } = {},
-) {
+  data: unknown,
+  {
+    expectedCount,
+    expectedDimensions,
+    allowEmpty = false,
+  }: {
+    expectedCount?: number;
+    expectedDimensions?: number;
+    allowEmpty?: boolean;
+  } = {},
+): number[][] {
   if (!Array.isArray(data)) {
     throw new Error("OpenRouter returned no embedding data.");
   }
@@ -67,9 +88,13 @@ export function decodeOpenRouterEmbeddings(
   }
 
   return data.map((item, index) => {
-    const rawEmbedding = item?.embedding;
+    const rawEmbedding = (item as { embedding?: unknown } | null | undefined)
+      ?.embedding;
 
-    if (!Array.isArray(rawEmbedding) || (!allowEmpty && rawEmbedding.length === 0)) {
+    if (
+      !Array.isArray(rawEmbedding) ||
+      (!allowEmpty && rawEmbedding.length === 0)
+    ) {
       throw new Error(`Embedding ${index} is missing or empty.`);
     }
 

@@ -13,8 +13,8 @@ the next recall attempt from past performance.
 - **Review** grades typed recall answers and schedules the next review from the
   learner's performance.
 - **Library** provides the unified question bank, with source and concept
-  metadata.
-- **Tags** organizes questions by concept.
+  metadata, concept-tag organization, and bank-management tools.
+- **Stats** summarizes review volume, scheduling, and answer quality over time.
 - **Admin** exposes model traces, latency, token use, and cost for operators.
 
 ## Install
@@ -120,8 +120,8 @@ Codex in-app Browser and a development-only deterministic evaluator.
   data-only or extension-specific SQL explicit in the migration file.
 - Questions are user-owned. `question_attempts` stores resolved answers and
   scores, while the question row stores current scheduling state.
-- Review queue state and pending evaluations are kept in memory for the current
-  server process.
+- Pending and resolved answer-evaluation status is persisted in
+  `answer_evaluations`; model work begins after the submit response.
 - API routes use the Node.js runtime and are dynamic where request-time state is
   required.
 - If no model API key is configured, model-backed operations return a clear

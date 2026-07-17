@@ -18,7 +18,7 @@ import {
   getOpenRouterChatConfig,
   openRouterChatCompletion,
 } from "@/app/lib/openRouter";
-import { extractJsonObject } from "../../../../shared/json-object.mjs";
+import { extractJsonObject } from "../../../../shared/json-object.mts";
 import { getQuestionQualityReference } from "@/app/lib/questionQualityReference";
 import {
   CONCISE_ANSWER_MAX_CHARS,
@@ -27,7 +27,7 @@ import {
   QUESTION_TEXT_MAX_CHARS,
 } from "@/app/lib/questionContract";
 import { normalizeQuestionDraft } from "@/app/lib/questionDraft";
-import { vectorLiteral } from "../../../../shared/vector-literal.mjs";
+import { vectorLiteral } from "../../../../shared/vector-literal.mts";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,12 +38,7 @@ const MAX_FILE_COUNT = 6;
 const MAX_FILE_NAME_CHARS = 160;
 const MAX_FILE_CONTENT_CHARS = 20_000;
 const MAX_TOTAL_FILE_CONTENT_CHARS = 32_000;
-const MAX_DIFFICULTY_CHARS = 40;
-const MAX_EXISTING_QUESTION_COUNT = 200;
-const MAX_EXISTING_QUESTION_CHARS = QUESTION_TEXT_MAX_CHARS;
-const MAX_MODAL_QUESTION_COUNT = 120;
-const MAX_MODAL_CONCISE_ANSWER_CHARS = CONCISE_ANSWER_MAX_CHARS;
-const MAX_MODAL_COVERAGE_LABEL_CHARS = 240;
+const MAX_FILE_STATUS_CHARS = 40;
 const MAX_CONTEXT_CHARS = 32_000;
 const MAX_SUMMARY_CHARS = 1_600;
 const MAX_DIRECT_GENERATION_CONTEXT_CHARS = 6_000;
@@ -68,12 +63,6 @@ type GeneratedQuestionPayload = {
   coverageLabel?: string;
   proposedConceptSlugs?: string[];
   sourceText?: string;
-};
-
-type ExistingQuestionContext = {
-  question: string;
-  conciseAnswer: string;
-  coverageLabel: string;
 };
 
 type NormalizeResult<T> =
@@ -143,9 +132,9 @@ function normalizeFiles(value: unknown): NormalizeResult<ContextFilePayload[]> {
       );
     }
 
-    if (status.length > MAX_DIFFICULTY_CHARS) {
+    if (status.length > MAX_FILE_STATUS_CHARS) {
       return validationError(
-        `file status must be ${MAX_DIFFICULTY_CHARS} characters or fewer.`,
+        `file status must be ${MAX_FILE_STATUS_CHARS} characters or fewer.`,
       );
     }
 
@@ -169,101 +158,6 @@ function normalizeFiles(value: unknown): NormalizeResult<ContextFilePayload[]> {
   }
 
   return { ok: true, value: files };
-}
-
-function normalizeExistingQuestions(value: unknown): NormalizeResult<Set<string>> {
-  if (!Array.isArray(value)) {
-    return { ok: true, value: new Set() };
-  }
-
-  if (value.length > MAX_EXISTING_QUESTION_COUNT) {
-    return validationError(
-      `existingQuestions can include at most ${MAX_EXISTING_QUESTION_COUNT} items.`,
-    );
-  }
-
-  const questions = new Set<string>();
-
-  for (const item of value) {
-    if (typeof item !== "string") {
-      continue;
-    }
-
-    const draft = normalizeQuestionDraft(item);
-    const question = item.trim();
-
-    if (question.length > MAX_EXISTING_QUESTION_CHARS) {
-      return validationError(
-        `existingQuestions items must be ${MAX_EXISTING_QUESTION_CHARS} characters or fewer.`,
-      );
-    }
-
-    if (draft) {
-      questions.add(draft.questionIdentity);
-    }
-  }
-
-  return { ok: true, value: questions };
-}
-
-function normalizeExistingQuestionContexts(
-  value: unknown,
-): NormalizeResult<ExistingQuestionContext[]> {
-  if (!Array.isArray(value)) {
-    return { ok: true, value: [] };
-  }
-
-  if (value.length > MAX_MODAL_QUESTION_COUNT) {
-    return validationError(
-      `modalQuestions can include at most ${MAX_MODAL_QUESTION_COUNT} items.`,
-    );
-  }
-
-  const seen = new Set<string>();
-  const normalized: ExistingQuestionContext[] = [];
-
-  for (const item of value) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-
-    const record = item as Record<string, unknown>;
-    const question = normalizeText(record.question).replace(/\s+/g, " ");
-    const conciseAnswer = normalizeText(record.conciseAnswer).replace(/\s+/g, " ");
-    const coverageLabel = normalizeText(record.coverageLabel).replace(/\s+/g, " ");
-    const key = question.toLowerCase();
-
-    if (question.length > MAX_EXISTING_QUESTION_CHARS) {
-      return validationError(
-        `modalQuestions question must be ${MAX_EXISTING_QUESTION_CHARS} characters or fewer.`,
-      );
-    }
-
-    if (conciseAnswer.length > MAX_MODAL_CONCISE_ANSWER_CHARS) {
-      return validationError(
-        `modalQuestions conciseAnswer must be ${MAX_MODAL_CONCISE_ANSWER_CHARS} characters or fewer.`,
-      );
-    }
-
-    if (coverageLabel.length > MAX_MODAL_COVERAGE_LABEL_CHARS) {
-      return validationError(
-        `modalQuestions coverageLabel must be ${MAX_MODAL_COVERAGE_LABEL_CHARS} characters or fewer.`,
-      );
-    }
-
-    if (!question || seen.has(key)) {
-      continue;
-    }
-
-    seen.add(key);
-    normalized.push({
-      question,
-      conciseAnswer,
-      coverageLabel,
-    });
-  }
-
-  return { ok: true, value: normalized };
 }
 
 function buildContext(input: {
@@ -297,7 +191,7 @@ function buildQuestionGenerationSystemPrompt(questionQualityReference: string): 
     "Maximize coverage across the content instead of making variants of the same point.",
     "Avoid generic questions such as 'What is the key idea behind the topic?'",
     "Each question needs a short expected answer for dedupe embeddings; do not include explanations, numbering, or preambles.",
-    "Do not duplicate existing questions, near-duplicates, or current modal review queue questions.",
+    "Do not duplicate existing questions or near-duplicates from the knowledge bank.",
     "Return compact keys: q=question, a=short expected answer, s=prompt or filename, c=covered concept slug.",
     "The c value must be one full self-disambiguating lowercase kebab-case concept slug, not an acronym-only tag.",
     "Return JSON only:",
@@ -309,7 +203,7 @@ function buildQuestionGenerationSystemPrompt(questionQualityReference: string): 
 
 function normalizeGeneratedQuestions(
   value: unknown,
-  existingQuestions: Set<string>,
+  existingQuestionIdentities: Set<string>,
 ): GeneratedQuestionPayload[] {
   if (!value || typeof value !== "object") {
     return [];
@@ -321,7 +215,7 @@ function normalizeGeneratedQuestions(
     return [];
   }
 
-  const seen = new Set(existingQuestions);
+  const seen = new Set(existingQuestionIdentities);
   const normalized: GeneratedQuestionPayload[] = [];
 
   for (const item of questions) {
@@ -492,10 +386,30 @@ async function loadGenerationNeighbors(input: {
   );
 
   return result.rows.map((row) => ({
-    question: String(row.question ?? ""),
-    conciseAnswer: String(row.concise_answer ?? ""),
+    question: String(row.question ?? "").slice(0, QUESTION_TEXT_MAX_CHARS),
+    conciseAnswer: String(row.concise_answer ?? "").slice(
+      0,
+      CONCISE_ANSWER_MAX_CHARS,
+    ),
     similarity: Number((1 - Number(row.distance)).toFixed(4)),
   }));
+}
+
+async function loadExistingQuestionIdentities(userId: string): Promise<Set<string>> {
+  const result = await pool.query(
+    `
+      SELECT q.question_slug
+      FROM questions q
+      WHERE q.user_id = $1
+    `,
+    [userId],
+  );
+
+  return new Set(
+    result.rows
+      .map((row: { question_slug?: unknown }) => String(row.question_slug ?? ""))
+      .filter(Boolean),
+  );
 }
 
 export async function POST(request: Request) {
@@ -536,27 +450,7 @@ export async function POST(request: Request) {
     return files.response;
   }
 
-  const difficulty = normalizeBoundedText(payload.difficulty, {
-    field: "difficulty",
-    maxLength: MAX_DIFFICULTY_CHARS,
-  });
-
-  if (!difficulty.ok) {
-    return difficulty.response;
-  }
-
   const count = normalizeQuestionCount(payload.count);
-  const existingQuestions = normalizeExistingQuestions(payload.existingQuestions);
-
-  if (!existingQuestions.ok) {
-    return existingQuestions.response;
-  }
-
-  const modalQuestions = normalizeExistingQuestionContexts(payload.modalQuestions);
-
-  if (!modalQuestions.ok) {
-    return modalQuestions.response;
-  }
 
   if (!scope.value && files.value.length === 0) {
     return NextResponse.json(
@@ -579,15 +473,17 @@ export async function POST(request: Request) {
   }
 
   const context = buildContext({ scope: scope.value, files: files.value });
-  const contextSummary =
+  const [contextSummary, existingQuestionIdentities] = await Promise.all([
     context.length <= MAX_DIRECT_GENERATION_CONTEXT_CHARS
       ? context.slice(0, MAX_SUMMARY_CHARS)
-      : await summarizeGenerationContext({
+      : summarizeGenerationContext({
           apiKey,
           model,
           context,
           userId: user.id,
-        });
+        }),
+    loadExistingQuestionIdentities(user.id),
+  ]);
   const generationNeighbors = await loadGenerationNeighbors({
     apiKey,
     summary: contextSummary,
@@ -614,25 +510,7 @@ export async function POST(request: Request) {
           role: "user",
           content: [
             `Generate exactly ${count} recall questions.`,
-            `Difficulty: ${difficulty.value || "Mixed"}.`,
-            existingQuestions.value.size > 0
-              ? `Existing questions to avoid:\n${Array.from(existingQuestions.value)
-                  .slice(0, 200)
-                  .join("\n")}`
-              : "",
-            modalQuestions.value.length > 0
-              ? [
-                  "Questions already generated in the current modal review queue:",
-                  JSON.stringify(
-                    modalQuestions.value.map((item) => ({
-                      q: item.question,
-                      a: item.conciseAnswer,
-                      c: item.coverageLabel,
-                    })),
-                  ),
-                  "Treat these targets as covered.",
-                ].join("\n\n")
-              : "",
+            "Difficulty: Mixed.",
             generationNeighbors.length > 0
               ? [
                   "Nearby already-covered questions from the knowledge base:",
@@ -676,7 +554,7 @@ export async function POST(request: Request) {
 
   const generated = normalizeGeneratedQuestions(
     extractJsonObject(content),
-    existingQuestions.value,
+    existingQuestionIdentities,
   ).slice(0, count);
 
   return NextResponse.json({

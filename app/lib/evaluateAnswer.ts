@@ -13,7 +13,7 @@ import {
 import {
   loadPromptTemplate,
   renderPromptTemplate,
-} from "../../shared/prompt-templates.mjs";
+} from "../../shared/prompt-templates.mts";
 import {
   failedEvaluation,
   parseEvaluation,

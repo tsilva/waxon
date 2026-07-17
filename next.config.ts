@@ -4,6 +4,19 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   devIndicators: false,
   htmlLimitedBots: /.*/,
+  webpack(config) {
+    config.module.rules.push({
+      test: /\.mts$/u,
+      use: [
+        {
+          loader: new URL("./scripts/lib/next-mts-loader.mjs", import.meta.url)
+            .pathname,
+        },
+      ],
+    });
+
+    return config;
+  },
   async redirects() {
     return [
       {

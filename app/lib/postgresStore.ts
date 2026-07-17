@@ -204,6 +204,38 @@ const questionRowSelection = {
   review_history: reviewHistorySql,
 };
 
+const questionAttemptSelection = {
+  id: questionAttempts.id,
+  questionId: questionAttempts.questionId,
+  question: questionAttempts.question,
+  rawAnswer: questionAttempts.rawAnswer,
+  answerSummary: questionAttempts.answerSummary,
+  correctAnswer: questions.conciseAnswer,
+  score: questionAttempts.score,
+  justification: questionAttempts.justification,
+  submittedAt: questionAttempts.submittedAt,
+  resolvedAt: questionAttempts.resolvedAt,
+};
+
+const answerEvaluationSelection = {
+  id: answerEvaluations.id,
+  traceId: answerEvaluations.traceId,
+  questionId: questions.id,
+  question: answerEvaluations.question,
+  answer: answerEvaluations.rawAnswer,
+  status: answerEvaluations.status,
+  phase: answerEvaluations.phase,
+  lastActivityAt: answerEvaluations.lastActivityAt,
+  submittedAt: answerEvaluations.submittedAt,
+  score: answerEvaluations.score,
+  justification: answerEvaluations.justification,
+  answerSummary: answerEvaluations.answerSummary,
+  correctAnswer: questions.conciseAnswer,
+  nextDue: answerEvaluations.nextDue,
+  resolvedAt: answerEvaluations.resolvedAt,
+  traceCalls: llmTraceInteractions.calls,
+};
+
 async function enrichDueQuestionsWithConceptSlugs(
   userId: string,
   items: DueQuestion[],
@@ -675,18 +707,7 @@ export async function getQuestionAttemptsByQuestionIds(
   }
 
   const rows = await db
-    .select({
-      id: questionAttempts.id,
-      questionId: questionAttempts.questionId,
-      question: questionAttempts.question,
-      rawAnswer: questionAttempts.rawAnswer,
-      answerSummary: questionAttempts.answerSummary,
-      correctAnswer: questions.conciseAnswer,
-      score: questionAttempts.score,
-      justification: questionAttempts.justification,
-      submittedAt: questionAttempts.submittedAt,
-      resolvedAt: questionAttempts.resolvedAt,
-    })
+    .select(questionAttemptSelection)
     .from(questionAttempts)
     .innerJoin(questions, eq(questions.id, questionAttempts.questionId))
     .where(
@@ -736,18 +757,7 @@ export async function getRecentQuestionAttempts(
   ).filter(Boolean);
 
   const rows = await db
-    .select({
-      id: questionAttempts.id,
-      questionId: questionAttempts.questionId,
-      question: questionAttempts.question,
-      rawAnswer: questionAttempts.rawAnswer,
-      answerSummary: questionAttempts.answerSummary,
-      correctAnswer: questions.conciseAnswer,
-      score: questionAttempts.score,
-      justification: questionAttempts.justification,
-      submittedAt: questionAttempts.submittedAt,
-      resolvedAt: questionAttempts.resolvedAt,
-    })
+    .select(questionAttemptSelection)
     .from(questionAttempts)
     .innerJoin(questions, eq(questions.id, questionAttempts.questionId))
     .where(
@@ -943,24 +953,7 @@ export async function getVisibleAnswerEvaluations(input: UserContextInput & {
   const resolvedSince = Math.round(input.resolvedSince);
 
   const rows = await db
-    .select({
-      id: answerEvaluations.id,
-      traceId: answerEvaluations.traceId,
-      questionId: questions.id,
-      question: answerEvaluations.question,
-      answer: answerEvaluations.rawAnswer,
-      status: answerEvaluations.status,
-      phase: answerEvaluations.phase,
-      lastActivityAt: answerEvaluations.lastActivityAt,
-      submittedAt: answerEvaluations.submittedAt,
-      score: answerEvaluations.score,
-      justification: answerEvaluations.justification,
-      answerSummary: answerEvaluations.answerSummary,
-      correctAnswer: questions.conciseAnswer,
-      nextDue: answerEvaluations.nextDue,
-      resolvedAt: answerEvaluations.resolvedAt,
-      traceCalls: llmTraceInteractions.calls,
-    })
+    .select(answerEvaluationSelection)
     .from(answerEvaluations)
     .leftJoin(
       llmTraceInteractions,
@@ -1036,24 +1029,7 @@ export async function getAnswerEvaluationsByIds(input: UserContextInput & {
   }
 
   const rows = await db
-    .select({
-      id: answerEvaluations.id,
-      traceId: answerEvaluations.traceId,
-      questionId: questions.id,
-      question: answerEvaluations.question,
-      answer: answerEvaluations.rawAnswer,
-      status: answerEvaluations.status,
-      phase: answerEvaluations.phase,
-      lastActivityAt: answerEvaluations.lastActivityAt,
-      submittedAt: answerEvaluations.submittedAt,
-      score: answerEvaluations.score,
-      justification: answerEvaluations.justification,
-      answerSummary: answerEvaluations.answerSummary,
-      correctAnswer: questions.conciseAnswer,
-      nextDue: answerEvaluations.nextDue,
-      resolvedAt: answerEvaluations.resolvedAt,
-      traceCalls: llmTraceInteractions.calls,
-    })
+    .select(answerEvaluationSelection)
     .from(answerEvaluations)
     .leftJoin(
       llmTraceInteractions,

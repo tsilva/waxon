@@ -24,8 +24,11 @@ import type { QuestionAttempt } from "@/app/lib/reviewTypes";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
+import {
+  buildPersistedQuestionDetails,
+  QuestionDetailsDialog,
+} from "@/app/QuestionDetailsDialog";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
-import { ScoreChart } from "../review/ReviewVisualizations";
 import { LibraryManagementTools } from "./LibraryManagementTools";
 
 const ConceptTagManager = dynamic(() =>
@@ -61,7 +64,6 @@ const EMPTY_QUESTION_BANK: QuestionBankPage = {
   hasMore: false,
   nextOffset: null,
 };
-const LIBRARY_PAGE_SIZE = 50;
 const LIBRARY_TAG_SUGGESTION_LIMIT = 8;
 
 function formatDate(value: number): string {
@@ -109,7 +111,6 @@ function questionBankParams(input: {
   offset: number;
 }): URLSearchParams {
   const params = new URLSearchParams({
-    limit: String(LIBRARY_PAGE_SIZE),
     offset: String(Math.max(0, Math.floor(input.offset))),
   });
 
@@ -241,18 +242,13 @@ export default function LibraryPageClient() {
       : Math.min(activeTagOptionIndex, matchingTagOptions.length - 1);
   const isTagPickerOpen = tagDraft !== null;
   const searchInputValue = tagSearchInputValue(query, tagDraft);
-  const reviewHistory = useMemo(
-    () =>
-      selectedQuestionAttempts
-        .map((attempt) => ({ ts: attempt.resolvedAt, score: attempt.score }))
-        .sort((left, right) => left.ts - right.ts),
-    [selectedQuestionAttempts],
-  );
-  const averageScore =
-    reviewHistory.length > 0
-      ? reviewHistory.reduce((total, entry) => total + entry.score, 0) /
-        reviewHistory.length
-      : null;
+  const questionDetails = selectedQuestionDetails
+    ? buildPersistedQuestionDetails(
+        selectedQuestionDetails,
+        selectedQuestionAttempts,
+        now,
+      )
+    : null;
 
   usePageScrollLock(Boolean(selectedQuestionDetails) || isTagManagerOpen);
 
@@ -561,7 +557,7 @@ export default function LibraryPageClient() {
   return (
     <main className="page page-review page-library">
       <section className="review-shell library-shell" aria-label="Question bank">
-        <ReviewToolbar activeTab="library" />
+        <ReviewToolbar />
 
         <section
           className="queue-stage library-stage"
@@ -569,7 +565,6 @@ export default function LibraryPageClient() {
         >
           <div className="library-filter-row" aria-label="Question bank filters">
             <LibraryManagementTools
-              existingQuestions={questionBank.items.map((item) => item.question)}
               onManageTags={() => setIsTagManagerOpen(true)}
               onQuestionsAdded={() => setReloadVersion((current) => current + 1)}
             />
@@ -905,189 +900,14 @@ export default function LibraryPageClient() {
         </div>
       ) : null}
 
-      {selectedQuestionDetails ? (
-        <div
-          className="stats-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setSelectedQuestionDetails(null);
-            }
-          }}
-        >
-          <section
-            className="stats-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="library-details-title"
-          >
-            <div className="stats-modal-header">
-              <div>
-                <p className="stats-modal-kicker">Question details</p>
-                <div id="library-details-title">
-                  <MarkdownInline
-                    as="h2"
-                    className="stats-modal-title"
-                    enableMath
-                    text={selectedQuestionDetails.question}
-                  />
-                </div>
-                <p className="stats-modal-question-id">
-                  <span>Question ID:</span>
-                  <code>{selectedQuestionDetails.questionId}</code>
-                </p>
-              </div>
-              <button
-                className="stats-modal-close"
-                type="button"
-                aria-label="Close question details"
-                onClick={() => setSelectedQuestionDetails(null)}
-              />
-            </div>
-
-            <div className="stats-grid" aria-label="Question summary">
-              <div className="stats-tile">
-                <span>Attempts</span>
-                <strong>{selectedQuestionAttempts.length}</strong>
-              </div>
-              <div className="stats-tile">
-                <span>Average</span>
-                <strong>{averageScore === null ? "N/A" : `${averageScore.toFixed(1)}/10`}</strong>
-              </div>
-              <div className="stats-tile">
-                <span>Best</span>
-                <strong>
-                  {reviewHistory.length === 0
-                    ? "N/A"
-                    : `${Math.max(...reviewHistory.map((entry) => entry.score))}/10`}
-                </strong>
-              </div>
-              <div className="stats-tile">
-                <span>Last</span>
-                <strong>
-                  {reviewHistory.length === 0
-                    ? "N/A"
-                    : `${reviewHistory.at(-1)?.score ?? 0}/10`}
-                </strong>
-              </div>
-              <div className="stats-tile">
-                <span>Next due</span>
-                <strong>{formatNextDue(selectedQuestionDetails.nextDue, now)}</strong>
-              </div>
-              <div className="stats-tile">
-                <span>Status</span>
-                <strong>{questionStatus(selectedQuestionDetails, now)}</strong>
-              </div>
-            </div>
-
-            <div className="stats-chart-panel">
-              <div className="stats-section-heading">
-                <h3>Previous scores</h3>
-                <span>{areQuestionAttemptsLoading ? "Loading..." : `${reviewHistory.length} attempts`}</span>
-              </div>
-              <ScoreChart entries={reviewHistory} />
-            </div>
-
-            <div className="stats-history-panel">
-              <div className="stats-section-heading">
-                <h3>Answer history</h3>
-              </div>
-              {areQuestionAttemptsLoading ? (
-                <p className="stats-empty">Loading history...</p>
-              ) : selectedQuestionAttempts.length === 0 ? (
-                <p className="stats-empty">No answers recorded yet.</p>
-              ) : (
-                <ol className="stats-history-list">
-                  {[...selectedQuestionAttempts]
-                    .sort((left, right) => right.submittedAt - left.submittedAt)
-                    .map((attempt) => (
-                      <li className="stats-history-row stats-history-row-resolved" key={attempt.id}>
-                        <div className="stats-history-score-slot">
-                          <span className="previous-score" aria-label={`Score ${attempt.score} out of 10`}>
-                            {attempt.score}
-                          </span>
-                        </div>
-                        <div className="stats-history-copy">
-                          <div className="previous-field stats-history-answer-field">
-                            <span className="previous-field-label">Answer</span>
-                            <p className="stats-history-answer">{attempt.rawAnswer || "(blank)"}</p>
-                          </div>
-                          {attempt.answerSummary && attempt.answerSummary !== attempt.rawAnswer ? (
-                            <div className="previous-field">
-                              <span className="previous-field-label">Summary</span>
-                              <p className="stats-history-summary">{attempt.answerSummary}</p>
-                            </div>
-                          ) : null}
-                          <div className="previous-field">
-                            <span className="previous-field-label">Evaluation</span>
-                            <p className="stats-history-summary">{attempt.justification || "No feedback returned."}</p>
-                          </div>
-                        </div>
-                        <div className="stats-history-row-meta">
-                          <time className="previous-time" dateTime={new Date(attempt.resolvedAt).toISOString()}>
-                            {formatDate(attempt.resolvedAt)}
-                          </time>
-                          <span className="stats-history-status">Resolved</span>
-                        </div>
-                      </li>
-                    ))}
-                </ol>
-              )}
-            </div>
-
-            <div className="stats-history-panel">
-              <div className="stats-section-heading">
-                <h3>Answer</h3>
-              </div>
-              {selectedQuestionDetails.conciseAnswer ? (
-                <MarkdownInline
-                  as="p"
-                  className="previous-answer"
-                  enableMath
-                  text={formatFormulaMarkdown(
-                    selectedQuestionDetails.conciseAnswer,
-                    { style: "math" },
-                  )}
-                />
-              ) : (
-                <p className="stats-empty">No answer recorded.</p>
-              )}
-            </div>
-
-            {selectedQuestionDetails.questionProvenance ? (
-              <div className="stats-history-panel">
-                <div className="stats-section-heading">
-                  <h3>Source</h3>
-                </div>
-                <p className="previous-answer previous-answer-empty">
-                  {selectedQuestionDetails.questionProvenance}
-                </p>
-              </div>
-            ) : null}
-
-            <div className="stats-history-panel">
-              <div className="stats-section-heading">
-                <h3>Concepts</h3>
-              </div>
-              {selectedQuestionDetails.conceptSlugs.length === 0 ? (
-                <p className="stats-empty">No concepts tagged.</p>
-              ) : (
-                <div className="stats-concept-list">
-                  {selectedQuestionDetails.conceptSlugs.map((slug) => (
-                    <Link
-                      className="stats-concept-chip stats-concept-chip-link"
-                      href={libraryTagHref(slug)}
-                      key={slug}
-                      onClick={() => setSelectedQuestionDetails(null)}
-                    >
-                      #{slug}
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
+      {questionDetails ? (
+        <QuestionDetailsDialog
+          canViewAdmin={false}
+          currentTime={now}
+          details={questionDetails}
+          isLoading={areQuestionAttemptsLoading}
+          onClose={() => setSelectedQuestionDetails(null)}
+        />
       ) : null}
     </main>
   );

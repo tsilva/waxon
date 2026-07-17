@@ -9,7 +9,7 @@ import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   requestEmbeddings,
 } from "./embeddingSource";
-import { extractJsonObject } from "../../shared/json-object.mjs";
+import { extractJsonObject } from "../../shared/json-object.mts";
 import {
   extractChatCompletionText,
   getOpenRouterApiKey,
@@ -19,22 +19,22 @@ import {
 import {
   loadPromptTemplate,
   renderPromptTemplate,
-} from "../../shared/prompt-templates.mjs";
-import { vectorLiteral } from "../../shared/vector-literal.mjs";
+} from "../../shared/prompt-templates.mts";
+import { vectorLiteral } from "../../shared/vector-literal.mts";
 export {
   fallbackConceptSlug,
   isUsefulConceptSlug,
   normalizeConceptSlug,
   normalizeConceptSlugList,
   isScaffoldingConceptSlug,
-} from "../../shared/concept-slug.mjs";
+} from "../../shared/concept-slug.mts";
 import {
   fallbackConceptSlug,
   isUsefulConceptSlug,
   isScaffoldingConceptSlug,
   normalizeConceptSlug,
   normalizeConceptSlugList,
-} from "../../shared/concept-slug.mjs";
+} from "../../shared/concept-slug.mts";
 
 const MAX_PROPOSED_SLUGS = 8;
 const MAX_SOURCE_TEXT_CHARS = 4_000;
