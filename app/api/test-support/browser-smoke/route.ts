@@ -7,9 +7,6 @@ import { BROWSER_SMOKE_QUESTIONS } from "@/app/lib/browserSmokeSupport";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { questionSlug } from "@/app/lib/questionSlug";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 function isEnabled(): boolean {
   return (
     process.env.NODE_ENV === "development" &&

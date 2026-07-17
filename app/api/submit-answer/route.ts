@@ -8,9 +8,6 @@ import { getCurrentUser } from "@/app/lib/auth";
 import { QUESTION_TEXT_MAX_CHARS } from "@/app/lib/questionContract";
 import { submitAnswer } from "@/app/lib/reviewQueue";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 const MAX_SUBMIT_BODY_BYTES = 16 * 1024;
 const MAX_QUESTION_ID_CHARS = 80;
 const MAX_ANSWER_CHARS = 4_000;

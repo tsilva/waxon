@@ -5,9 +5,6 @@ import { users } from "@/app/db/schema";
 import { getCurrentUser } from "@/app/lib/auth";
 import type { UserProfile } from "@/app/lib/userProfile";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 const MAX_AVATAR_DATA_URL_LENGTH = 700_000;
 const AVATAR_DATA_URL_PATTERN =
   /^data:image\/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/i;

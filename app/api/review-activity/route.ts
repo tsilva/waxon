@@ -2,9 +2,6 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
 import { reviewActivityForUser } from "@/app/lib/reviewQueue";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const recentAttemptsLimit = Number.parseInt(
