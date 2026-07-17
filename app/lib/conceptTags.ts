@@ -7,6 +7,7 @@ import {
 } from "@/app/db/schema";
 import {
   DEDUPE_EMBEDDING_DIMENSIONS,
+  decodeOpenRouterEmbeddings,
   resolveEmbeddingModel,
 } from "./embeddingSource";
 import { extractJsonObject } from "./jsonObject";
@@ -103,12 +104,6 @@ function deterministicFallbackSlug(input: ConceptTaggedQuestion): string {
   return fallbackConceptSlug();
 }
 
-function visibleConceptTagClause() {
-  return sql`
-    ${conceptTags.slug} NOT LIKE 'course-%'
-  `;
-}
-
 function buildTaggingContext(question: ConceptTaggedQuestion): string {
   return [
     `Question: ${question.question}`,
@@ -154,24 +149,13 @@ async function fetchEmbeddings(input: {
     },
   });
 
-  if (!response.ok || !Array.isArray(body.data)) {
+  if (!response.ok) {
     throw new Error(`OpenRouter embedding request failed (${response.status}).`);
   }
 
-  return body.data.map((item, index) => {
-    if (!Array.isArray(item.embedding)) {
-      throw new Error(`Embedding ${index} is missing.`);
-    }
-
-    return item.embedding.map((component) => {
-      const value = Number(component);
-
-      if (!Number.isFinite(value)) {
-        throw new Error(`Embedding ${index} contains a non-finite value.`);
-      }
-
-      return value;
-    });
+  return decodeOpenRouterEmbeddings(body.data, {
+    expectedCount: input.texts.length,
+    expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
   });
 }
 
@@ -186,7 +170,7 @@ async function loadRelevantConceptTags(input: {
         slug: conceptTags.slug,
       })
       .from(conceptTags)
-      .where(and(eq(conceptTags.userId, input.userId), visibleConceptTagClause()))
+      .where(eq(conceptTags.userId, input.userId))
       .orderBy(conceptTags.slug)
       .limit(MAX_RELEVANT_TAGS);
 
@@ -198,7 +182,6 @@ async function loadRelevantConceptTags(input: {
       SELECT id, slug
       FROM concept_tags
       WHERE user_id = $1
-        AND slug NOT LIKE 'course-%'
       ORDER BY
         CASE WHEN embedding IS NULL THEN 1 ELSE 0 END ASC,
         embedding::halfvec(${DEDUPE_EMBEDDING_DIMENSIONS})
@@ -514,7 +497,7 @@ export async function listConceptTags(input: {
       eq(questionConceptTags.conceptTagId, conceptTags.id),
     )
     .leftJoin(questions, eq(questions.id, questionConceptTags.questionId))
-    .where(and(eq(conceptTags.userId, input.userId), visibleConceptTagClause()))
+    .where(eq(conceptTags.userId, input.userId))
     .groupBy(
       conceptTags.id,
       conceptTags.slug,
@@ -736,7 +719,6 @@ export async function getQuestionConceptSlugs(input: {
         eq(conceptTags.userId, input.userId),
         eq(questions.userId, input.userId),
         inArray(questionConceptTags.questionId, questionIds),
-        visibleConceptTagClause(),
       ),
     )
     .orderBy(conceptTags.slug);

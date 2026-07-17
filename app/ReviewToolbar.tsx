@@ -4,13 +4,8 @@ import { LogOut, User, UserCog } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  toolbarDueCountEvent,
-  toolbarSnapshotEvent,
-  type ToolbarDueCountDetail,
-  type ToolbarSnapshotDetail,
-} from "@/app/toolbarEvents";
 import type { ReviewToolbarTab } from "@/app/toolbarTypes";
+import { useToolbarState } from "@/app/ToolbarState";
 import {
   useEffect,
   useRef,
@@ -20,33 +15,20 @@ import {
 
 type ReviewToolbarProps = {
   activeTab: ReviewToolbarTab;
-  actions?: "inline" | "placeholder";
+  onReviewClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
+  onAdminClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
+};
+
+type ReviewToolbarActionsProps = {
+  activeTab: ReviewToolbarTab;
+  className?: string;
   dueCount: number | null;
-  dueCountSource?: "local" | "review-queue";
-  showAdmin: boolean;
   menuAvatarUrl: string | null;
   menuDisplayName: string;
   menuEmail: string;
-  onReviewClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
-  onTagsClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
-  onStatsClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
-  onAdminClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onManageAccount: () => void;
   onSignOut: () => void;
-};
-
-type ReviewToolbarActionsProps = Pick<
-  ReviewToolbarProps,
-  | "activeTab"
-  | "dueCount"
-  | "menuAvatarUrl"
-  | "menuDisplayName"
-  | "menuEmail"
-  | "onStatsClick"
-  | "onManageAccount"
-  | "onSignOut"
-> & {
-  className?: string;
+  onStatsClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
 };
 
 function tabClass(isActive: boolean, isPending: boolean): string {
@@ -61,21 +43,11 @@ function tabClass(isActive: boolean, isPending: boolean): string {
 
 export function ReviewToolbar({
   activeTab,
-  actions = "placeholder",
-  dueCount,
-  dueCountSource = "local",
-  showAdmin,
-  menuAvatarUrl,
-  menuDisplayName,
-  menuEmail,
   onReviewClick,
-  onTagsClick,
-  onStatsClick,
   onAdminClick,
-  onManageAccount,
-  onSignOut,
 }: ReviewToolbarProps) {
   const router = useRouter();
+  const { canViewAdmin } = useToolbarState();
   const [pendingTab, setPendingTab] = useState<ReviewToolbarTab | null>(null);
 
   useEffect(() => {
@@ -106,41 +78,6 @@ export function ReviewToolbar({
       }
     };
   }
-
-  useEffect(() => {
-    if (actions !== "placeholder") {
-      return;
-    }
-
-    const detail: ToolbarSnapshotDetail = {
-      activeTab,
-      menuAvatarUrl,
-      menuDisplayName,
-      menuEmail,
-    };
-
-    window.dispatchEvent(new CustomEvent(toolbarSnapshotEvent, { detail }));
-  }, [
-    actions,
-    activeTab,
-    menuAvatarUrl,
-    menuDisplayName,
-    menuEmail,
-  ]);
-
-  useEffect(() => {
-    if (actions !== "placeholder" || dueCountSource !== "review-queue") {
-      return;
-    }
-
-    if (dueCount === null) {
-      return;
-    }
-
-    const detail: ToolbarDueCountDetail = { dueCount };
-
-    window.dispatchEvent(new CustomEvent(toolbarDueCountEvent, { detail }));
-  }, [actions, dueCount, dueCountSource]);
 
   return (
     <header
@@ -192,17 +129,7 @@ export function ReviewToolbar({
           >
             Library
           </Link>
-          <Link
-            className={tabClass(activeTab === "tags", pendingTab === "tags")}
-            href="/tags"
-            prefetch={false}
-            role="tab"
-            aria-selected={activeTab === "tags"}
-            onClick={handleTabClick("tags", onTagsClick)}
-          >
-            Tags
-          </Link>
-          {showAdmin ? (
+          {canViewAdmin ? (
             <Link
               className={tabClass(
                 activeTab === "admin",
@@ -222,20 +149,7 @@ export function ReviewToolbar({
         </div>
       </div>
 
-      {actions === "inline" ? (
-        <ReviewToolbarActions
-          activeTab={activeTab}
-          dueCount={dueCount}
-          menuAvatarUrl={menuAvatarUrl}
-          menuDisplayName={menuDisplayName}
-          menuEmail={menuEmail}
-          onStatsClick={onStatsClick}
-          onManageAccount={onManageAccount}
-          onSignOut={onSignOut}
-        />
-      ) : (
-        <div className="reader-actions reader-actions-placeholder" />
-      )}
+      <div className="reader-actions reader-actions-placeholder" />
     </header>
   );
 }

@@ -8,16 +8,62 @@ import {
   DEFAULT_EMBEDDING_MODEL,
   resolveEmbeddingModel,
 } from "../shared/openrouter-config.mjs";
+import {
+  buildEmbeddingSource,
+  decodeOpenRouterEmbeddings,
+  DEDUPE_EMBEDDING_DIMENSIONS,
+  DEDUPE_EMBEDDING_KIND,
+  DEDUPE_SOURCE_VERSION,
+  hashEmbeddingSource,
+} from "../shared/embedding-contract.mjs";
 import { vectorLiteral } from "../shared/vector-literal.mjs";
 
-test("resolveEmbeddingModel preserves the existing environment fallback semantics", () => {
+test("resolveEmbeddingModel trims overrides and falls back for blank values", () => {
   assert.equal(resolveEmbeddingModel({}), DEFAULT_EMBEDDING_MODEL);
   assert.equal(
     resolveEmbeddingModel({ EMBEDDING_MODEL: "openai/text-embedding-3-small" }),
     "openai/text-embedding-3-small",
   );
-  assert.equal(resolveEmbeddingModel({ EMBEDDING_MODEL: "" }), "");
-  assert.equal(resolveEmbeddingModel({ EMBEDDING_MODEL: "  custom/model  " }), "  custom/model  ");
+  assert.equal(resolveEmbeddingModel({ EMBEDDING_MODEL: "" }), DEFAULT_EMBEDDING_MODEL);
+  assert.equal(resolveEmbeddingModel({ EMBEDDING_MODEL: "  custom/model  " }), "custom/model");
+});
+
+test("shared embedding source preserves live and backfill identity", () => {
+  const source = buildEmbeddingSource({
+    question: "  What is PPO? ",
+    conciseAnswer: " Proximal policy optimization. ",
+    kind: DEDUPE_EMBEDDING_KIND,
+    sourceVersion: DEDUPE_SOURCE_VERSION,
+  });
+
+  assert.equal(
+    source,
+    "version: 1\nkind: dedupe_v1\nQuestion: What is PPO?\nExpected answer: Proximal policy optimization.",
+  );
+  assert.match(hashEmbeddingSource(source), /^[a-f0-9]{64}$/u);
+});
+
+test("shared embedding decoder enforces count, dimensions, and finite values", () => {
+  const embedding = Array.from(
+    { length: DEDUPE_EMBEDDING_DIMENSIONS },
+    (_, index) => index / 100,
+  );
+
+  assert.deepEqual(
+    decodeOpenRouterEmbeddings([{ embedding }], {
+      expectedCount: 1,
+      expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
+    }),
+    [embedding],
+  );
+  assert.throws(
+    () => decodeOpenRouterEmbeddings([], { expectedCount: 1 }),
+    /expected 1/u,
+  );
+  assert.throws(
+    () => decodeOpenRouterEmbeddings([{ embedding: [Number.NaN] }]),
+    /non-finite/u,
+  );
 });
 
 test("vectorLiteral preserves the app and script pgvector serialization", () => {

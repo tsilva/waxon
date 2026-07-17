@@ -506,45 +506,17 @@ async function processEvaluation(submission: Submission): Promise<void> {
   }
 }
 
-async function nextQuestionForUser(userId: string): Promise<{
-  questionId: string | null;
-  question: string | null;
-  queueRemaining: number;
-}> {
-  const now = Date.now();
-  const activeEvaluationQuestionIds = await getActiveAnswerEvaluationQuestionIds({
-    userId,
-    activeSince: now - ACTIVE_PERSISTED_EVALUATION_VISIBLE_MS,
-  });
-  const [nextQuestion] = await getDueQuestions(now, {
-    userId,
-    excludeQuestionIds: activeEvaluationQuestionIds,
-    limit: 1,
-  });
-
-  return {
-    questionId: nextQuestion?.questionId ?? null,
-    question: nextQuestion?.question ?? null,
-    queueRemaining: await countDueQuestions(now, { userId }),
-  };
-}
-
 export async function flagQuestion(input: {
   userId: string;
   questionId: string;
   question: string;
-}): Promise<{
-  questionId: string | null;
-  question: string | null;
-  queueRemaining: number;
-}> {
+}): Promise<void> {
   await flagQuestionForReview({
     userId: input.userId,
     questionId: input.questionId,
     question: input.question,
   });
 
-  return nextQuestionForUser(input.userId);
 }
 
 export async function submitAnswer(input: {

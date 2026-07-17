@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { DAY } from "@/app/lib/scheduler";
 import type { StatsResponse } from "@/app/lib/stats";
-import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
-import type { UserProfile } from "@/app/lib/userProfile";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 
 type DailyCountBucket = {
@@ -393,7 +391,6 @@ function StatsDashboardSkeleton() {
 }
 
 export default function StatsPageClient() {
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [isStatsLoading, setIsStatsLoading] = useState(true);
   const [statsMessage, setStatsMessage] = useState<string | null>(null);
@@ -403,17 +400,6 @@ export default function StatsPageClient() {
     () => buildStatsAnalytics(renderedStats),
     [renderedStats],
   );
-  const {
-    canViewAdmin,
-    menuAvatarUrl,
-    menuDisplayName,
-    menuEmail,
-    onManageAccount,
-    onSignOut,
-  } = useToolbarAccount(currentUser, {
-    localSignOutHref: "/",
-  });
-
   useEffect(() => {
     const controller = new AbortController();
     let isActive = true;
@@ -423,27 +409,19 @@ export default function StatsPageClient() {
       setStatsMessage(null);
 
       try {
-        const [userResponse, statsResponse] = await Promise.all([
-          fetch("/api/user", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/stats", { cache: "no-store", signal: controller.signal }),
-        ]);
-        const userData = (await userResponse.json()) as UserProfile & {
-          error?: string;
-        };
+        const statsResponse = await fetch("/api/stats", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
         const statsData = (await statsResponse.json()) as StatsResponse & {
           error?: string;
         };
-
-        if (!userResponse.ok) {
-          throw new Error(userData.error || "Could not load profile.");
-        }
 
         if (!statsResponse.ok) {
           throw new Error(statsData.error || "Could not load stats.");
         }
 
         if (isActive) {
-          setCurrentUser(userData);
           setStats(statsData);
         }
       } catch (error) {
@@ -474,16 +452,7 @@ export default function StatsPageClient() {
   return (
     <main className="page">
       <section className="review-shell" aria-label="Review statistics">
-        <ReviewToolbar
-          activeTab="stats"
-          dueCount={renderedStats.dueCount}
-          showAdmin={canViewAdmin}
-          menuAvatarUrl={menuAvatarUrl}
-          menuDisplayName={menuDisplayName}
-          menuEmail={menuEmail}
-          onManageAccount={onManageAccount}
-          onSignOut={onSignOut}
-        />
+        <ReviewToolbar activeTab="stats" />
 
         <section className="stats-stage" aria-label="Review statistics">
           <div className="stats-page-header">

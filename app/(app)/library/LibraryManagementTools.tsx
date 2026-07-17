@@ -6,6 +6,7 @@ import {
   Layers,
   Plus,
   Sparkles,
+  Tags,
   X,
 } from "lucide-react";
 import {
@@ -95,9 +96,11 @@ function readFileAsText(file: File): Promise<string> {
 
 export function LibraryManagementTools({
   existingQuestions,
+  onManageTags,
   onQuestionsAdded,
 }: {
   existingQuestions: string[];
+  onManageTags: () => void;
   onQuestionsAdded: () => void;
 }) {
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
@@ -398,6 +401,10 @@ export function LibraryManagementTools({
         <button className="queue-map-trigger" type="button" onClick={() => void openMap()}>
           <Layers aria-hidden="true" />
           <span>Map</span>
+        </button>
+        <button className="queue-map-trigger" type="button" onClick={onManageTags}>
+          <Tags aria-hidden="true" />
+          <span>Tags</span>
         </button>
       </div>
 

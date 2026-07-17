@@ -28,7 +28,11 @@ export function resolveOpenRouterModel({
 }
 
 export function resolveEmbeddingModel(env = process.env) {
-  return env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL;
+  return resolveOpenRouterModel({
+    env,
+    variable: "EMBEDDING_MODEL",
+    fallback: DEFAULT_EMBEDDING_MODEL,
+  });
 }
 
 export function buildOpenRouterHeaders(apiKey, env = process.env) {

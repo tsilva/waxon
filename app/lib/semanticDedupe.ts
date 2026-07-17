@@ -13,6 +13,7 @@ import {
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
   buildQuestionDedupeSource,
+  decodeOpenRouterEmbeddings,
   questionDedupeSourceHash,
   resolveEmbeddingModel,
 } from "./embeddingSource";
@@ -22,13 +23,10 @@ import {
   loadPromptTemplate,
   renderPromptTemplate,
 } from "./promptTemplates.ts";
-import type { QuestionInput } from "./postgresStore";
+import type { NormalizedQuestionDraft } from "./questionDraft";
 import { vectorLiteral } from "./vectorLiteral";
 
-export type NovelQuestionCandidate = {
-  question: string;
-  conciseAnswer: string;
-};
+export type NovelQuestionCandidate = NormalizedQuestionDraft;
 
 export type AcceptedQuestionCandidate = NovelQuestionCandidate & {
   embedding: number[];
@@ -69,34 +67,6 @@ const JUDGE_BATCH_SIZE = 10;
 const SEMANTIC_DEDUPE_JUDGE_SYSTEM_PROMPT = loadPromptTemplate(
   "semantic-dedupe-judge-system.md",
 );
-
-function normalizeQuestionInput(
-  input: Array<string | QuestionInput>,
-): NovelQuestionCandidate[] {
-  const seen = new Set<string>();
-  const normalized: NovelQuestionCandidate[] = [];
-
-  for (const item of input) {
-    const question = typeof item === "string" ? item : item.question;
-    const normalizedQuestion = question.trim().replace(/\s+/g, " ");
-    const slug = questionSlug(normalizedQuestion);
-
-    if (!normalizedQuestion || seen.has(slug)) {
-      continue;
-    }
-
-    seen.add(slug);
-    normalized.push({
-      question: normalizedQuestion,
-      conciseAnswer:
-        typeof item === "string"
-          ? ""
-          : (item.conciseAnswer ?? "").trim().replace(/\s+/g, " "),
-    });
-  }
-
-  return normalized;
-}
 
 function dotProduct(left: number[], right: number[]): number {
   let dot = 0;
@@ -154,24 +124,9 @@ async function fetchEmbeddings(
     throw new Error(`OpenRouter embedding request failed (${response.status}).`);
   }
 
-  if (!Array.isArray(body.data) || body.data.length !== input.length) {
-    throw new Error("OpenRouter returned an unexpected embedding response.");
-  }
-
-  return body.data.map((item: { embedding?: unknown }, index: number) => {
-    if (!Array.isArray(item.embedding) || item.embedding.length === 0) {
-      throw new Error(`Embedding ${index} is missing or empty.`);
-    }
-
-    return item.embedding.map((component) => {
-      const value = Number(component);
-
-      if (!Number.isFinite(value)) {
-        throw new Error(`Embedding ${index} contains a non-finite value.`);
-      }
-
-      return value;
-    });
+  return decodeOpenRouterEmbeddings(body.data, {
+    expectedCount: input.length,
+    expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
   });
 }
 
@@ -514,7 +469,7 @@ async function judgeDuplicateBatch(
 }
 
 export async function gateNovelQuestions(
-  input: Array<string | QuestionInput>,
+  input: NormalizedQuestionDraft[],
   trace: Partial<OpenRouterTraceContext> = {},
 ): Promise<NovelQuestionGateResult> {
   const userId = trace.userId?.trim();
@@ -525,7 +480,7 @@ export async function gateNovelQuestions(
 
   const traceWithUser = { ...trace, userId };
   const normalized = await ensureConciseAnswers(
-    normalizeQuestionInput(input),
+    input,
     traceWithUser,
   );
   const candidatesWithAnswers = normalized.filter(
@@ -621,8 +576,7 @@ export async function gateNovelQuestions(
 
     if (duplicateOf && !rejectedCandidateIds.has(duplicateOf)) {
       rejected.push({
-        question: candidate.question,
-        conciseAnswer: candidate.conciseAnswer,
+        ...candidate,
         duplicateOf,
         rationale: decision.rationale,
       });
@@ -631,8 +585,7 @@ export async function gateNovelQuestions(
     }
 
     accepted.push({
-      question: candidate.question,
-      conciseAnswer: candidate.conciseAnswer,
+      ...candidate,
       embedding: candidate.embedding,
       sourceHash: candidate.sourceHash,
     });

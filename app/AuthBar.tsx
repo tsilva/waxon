@@ -8,7 +8,6 @@ import {
 } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AccountWidgetsUserProfilePage } from "@/app/AccountProfileWidgets";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 
 const authRoutes = ["/sign-in", "/sign-up"];
@@ -16,7 +15,6 @@ const reviewShellRoutes = [
   "/review",
   "/library",
   "/queue",
-  "/tags",
   "/stats",
   "/admin",
 ];
@@ -62,9 +60,7 @@ export function AuthBar() {
             </div>
           </Show>
           <Show when="signed-in">
-            <UserButton>
-              <AccountWidgetsUserProfilePage />
-            </UserButton>
+            <UserButton />
           </Show>
         </>
       )}

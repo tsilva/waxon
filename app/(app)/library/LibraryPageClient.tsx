@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown, Search, X } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -19,15 +20,17 @@ import type {
   QuestionBankStatusFilter,
 } from "@/app/lib/questionBank";
 import { formatFormulaMarkdown } from "@/app/lib/markdownFormulaFormatting";
-import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import type { QuestionAttempt } from "@/app/lib/reviewTypes";
-import type { UserProfile } from "@/app/lib/userProfile";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { MarkdownInline } from "@/app/MarkdownContent";
 import { PreviousAnswerRow } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { ScoreChart } from "../review/ReviewVisualizations";
 import { LibraryManagementTools } from "./LibraryManagementTools";
+
+const ConceptTagManager = dynamic(() =>
+  import("./ConceptTagManager").then((module) => module.ConceptTagManager),
+);
 
 type SearchMode = "text" | "meaning";
 
@@ -191,7 +194,6 @@ export default function LibraryPageClient() {
   const searchParams = useSearchParams();
   const [questionBank, setQuestionBank] = useState(EMPTY_QUESTION_BANK);
   const [conceptTags, setConceptTags] = useState<ConceptTagSummary[]>([]);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [query, setQuery] = useState(() => searchParams.get("q")?.trim() ?? "");
   const [searchMode, setSearchMode] = useState<SearchMode>("text");
   const [status, setStatus] = useState<QuestionBankStatusFilter>("all");
@@ -213,21 +215,9 @@ export default function LibraryPageClient() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isMetadataLoading, setIsMetadataLoading] = useState(true);
+  const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const now = Date.now();
-  const activeTags = conceptTags.filter((tag) => tag.active);
-  const dueCount = activeTags.reduce((total, tag) => total + tag.dueCount, 0);
-  const {
-    canViewAdmin,
-    menuAvatarUrl,
-    menuDisplayName,
-    menuEmail,
-    onManageAccount,
-    onSignOut,
-  } = useToolbarAccount(currentUser, {
-    localManageHref: "/review",
-    localSignOutHref: "/",
-  });
   const isInitialQuestionBankLoading =
     isLoading && questionBank.items.length === 0 && questionBank.total === 0;
   const questionCountLabel = questionBank.hasMore
@@ -264,7 +254,22 @@ export default function LibraryPageClient() {
         reviewHistory.length
       : null;
 
-  usePageScrollLock(Boolean(selectedQuestionDetails));
+  usePageScrollLock(Boolean(selectedQuestionDetails) || isTagManagerOpen);
+
+  useEffect(() => {
+    if (!isTagManagerOpen) {
+      return;
+    }
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsTagManagerOpen(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [isTagManagerOpen]);
 
   useEffect(() => {
     const nextQuery = searchParams.get("q")?.trim() ?? "";
@@ -378,31 +383,20 @@ export default function LibraryPageClient() {
       setIsMetadataLoading(true);
 
       try {
-        const [userResponse, tagsResponse] = await Promise.all([
-          fetch("/api/user", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/concept-tags", {
-            cache: "no-store",
-            signal: controller.signal,
-          }),
-        ]);
-        const userData = (await userResponse.json()) as UserProfile & {
-          error?: string;
-        };
+        const tagsResponse = await fetch("/api/concept-tags", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
         const tagsData = (await tagsResponse.json()) as {
           conceptTags?: ConceptTagSummary[];
           error?: string;
         };
-
-        if (!userResponse.ok) {
-          throw new Error(userData.error || "Could not load profile.");
-        }
 
         if (!tagsResponse.ok) {
           throw new Error(tagsData.error || "Could not load tags.");
         }
 
         if (isActive) {
-          setCurrentUser(userData);
           setConceptTags(tagsData.conceptTags ?? []);
         }
       } catch (error) {
@@ -567,16 +561,7 @@ export default function LibraryPageClient() {
   return (
     <main className="page page-review page-library">
       <section className="review-shell library-shell" aria-label="Question bank">
-        <ReviewToolbar
-          activeTab="library"
-          dueCount={dueCount}
-          showAdmin={canViewAdmin}
-          menuAvatarUrl={menuAvatarUrl}
-          menuDisplayName={menuDisplayName}
-          menuEmail={menuEmail}
-          onManageAccount={onManageAccount}
-          onSignOut={onSignOut}
-        />
+        <ReviewToolbar activeTab="library" />
 
         <section
           className="queue-stage library-stage"
@@ -585,6 +570,7 @@ export default function LibraryPageClient() {
           <div className="library-filter-row" aria-label="Question bank filters">
             <LibraryManagementTools
               existingQuestions={questionBank.items.map((item) => item.question)}
+              onManageTags={() => setIsTagManagerOpen(true)}
               onQuestionsAdded={() => setReloadVersion((current) => current + 1)}
             />
             <label className="library-status-filter-label">
@@ -879,6 +865,45 @@ export default function LibraryPageClient() {
           ) : null}
         </section>
       </section>
+
+      {isTagManagerOpen ? (
+        <div
+          className="generator-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsTagManagerOpen(false);
+            }
+          }}
+        >
+          <section
+            className="generator-modal tags-manager-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="library-tags-title"
+          >
+            <div className="generator-modal-header">
+              <div>
+                <p className="generator-modal-kicker">Library</p>
+                <h2 className="generator-modal-title" id="library-tags-title">
+                  Manage concept tags
+                </h2>
+              </div>
+              <button
+                className="stats-modal-close"
+                type="button"
+                aria-label="Close concept tag manager"
+                onClick={() => setIsTagManagerOpen(false)}
+              />
+            </div>
+            <ConceptTagManager
+              conceptTags={conceptTags}
+              isLoading={isMetadataLoading}
+              setConceptTags={setConceptTags}
+            />
+          </section>
+        </div>
+      ) : null}
 
       {selectedQuestionDetails ? (
         <div

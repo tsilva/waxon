@@ -1,5 +1,12 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { createHash } from "node:crypto";
+import {
+  buildEmbeddingSource,
+  decodeOpenRouterEmbeddings,
+  DEDUPE_EMBEDDING_DIMENSIONS,
+  DEDUPE_EMBEDDING_KIND,
+  DEDUPE_SOURCE_VERSION,
+  hashEmbeddingSource,
+} from "../shared/embedding-contract.mjs";
 import {
   chunks,
   configureNeonWebSocket,
@@ -16,17 +23,15 @@ import {
 loadLocalEnvFiles();
 configureNeonWebSocket(neonConfig);
 
-const DEFAULT_KIND = "dedupe_v1";
-const DEFAULT_SOURCE_VERSION = 1;
 const DEFAULT_BATCH_SIZE = 32;
 
 function parseArgs(argv) {
   const options = {
     batchSize: DEFAULT_BATCH_SIZE,
     force: false,
-    kind: DEFAULT_KIND,
+    kind: DEDUPE_EMBEDDING_KIND,
     model: DEFAULT_EMBEDDING_MODEL,
-    sourceVersion: DEFAULT_SOURCE_VERSION,
+    sourceVersion: DEDUPE_SOURCE_VERSION,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -90,41 +95,6 @@ function parseArgs(argv) {
   return options;
 }
 
-function normalizeEmbeddingText(value) {
-  return value.trim().replace(/\s+/g, " ");
-}
-
-function buildEmbeddingSource(row, kind, sourceVersion) {
-  if (kind === "question_only") {
-    return [
-      `version: ${sourceVersion}`,
-      "kind: question_only",
-      `Question: ${normalizeEmbeddingText(row.question)}`,
-    ].join("\n");
-  }
-
-  if (kind === "dedupe_v1") {
-    if (!row.concise_answer?.trim()) {
-      throw new Error(
-        `Question is missing concise_answer for dedupe_v1: ${row.question}`,
-      );
-    }
-
-    return [
-      `version: ${sourceVersion}`,
-      "kind: dedupe_v1",
-      `Question: ${normalizeEmbeddingText(row.question)}`,
-      `Expected answer: ${normalizeEmbeddingText(row.concise_answer)}`,
-    ].join("\n");
-  }
-
-  throw new Error(`Unsupported embedding kind: ${kind}`);
-}
-
-function sourceHash(source) {
-  return createHash("sha256").update(source).digest("hex");
-}
-
 async function fetchEmbeddings(input, model, apiKey) {
   const body = await fetchOpenRouterJson(OPENROUTER_EMBEDDINGS_URL, {
     apiKey,
@@ -136,26 +106,9 @@ async function fetchEmbeddings(input, model, apiKey) {
     },
   });
 
-  if (!Array.isArray(body.data) || body.data.length !== input.length) {
-    throw new Error(
-      `OpenRouter returned ${body.data?.length ?? "no"} embeddings for ${
-        input.length
-      } inputs`,
-    );
-  }
-
-  return body.data.map((item, index) => {
-    if (!Array.isArray(item.embedding) || item.embedding.length === 0) {
-      throw new Error(`Embedding ${index} is missing or empty`);
-    }
-
-    const embedding = item.embedding.map((component) => Number(component));
-
-    if (embedding.some((component) => !Number.isFinite(component))) {
-      throw new Error(`Embedding ${index} contains a non-finite value`);
-    }
-
-    return embedding;
+  return decodeOpenRouterEmbeddings(body.data, {
+    expectedCount: input.length,
+    expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
   });
 }
 
@@ -183,12 +136,17 @@ async function loadQuestions(pool, options) {
 
   return result.rows
     .map((row) => {
-      const source = buildEmbeddingSource(row, options.kind, options.sourceVersion);
+      const source = buildEmbeddingSource({
+        question: row.question,
+        conciseAnswer: row.concise_answer,
+        kind: options.kind,
+        sourceVersion: options.sourceVersion,
+      });
 
       return {
         ...row,
         source,
-        source_hash: sourceHash(source),
+        source_hash: hashEmbeddingSource(source),
       };
     })
     .filter(

@@ -3,7 +3,6 @@ import test from "node:test";
 import {
   DEFAULT_OPENROUTER_CHAT_MODEL,
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
-  extractAffordableOpenRouterMaxTokens,
   getOpenRouterChatModel,
   getOpenRouterEvaluationModel,
   getOpenRouterEvaluationReasoning,
@@ -129,38 +128,6 @@ test("classifyLlmInteractionKind uses explicit non-answer trace kinds", () => {
   assert.equal(classifyLlmInteractionKind("refresh_knowledge_memory"), "Knowledge memory");
   assert.equal(classifyLlmInteractionKind("question_embedding"), "Embedding");
   assert.equal(classifyLlmInteractionKind("test_operation"), "Other");
-});
-
-test("extractAffordableOpenRouterMaxTokens reads OpenRouter credit errors", () => {
-  assert.equal(
-    extractAffordableOpenRouterMaxTokens({
-      error: {
-        message:
-          "This request requires more credits, or fewer max_tokens. You requested up to 10000 tokens, but can only afford 7070.",
-        metadata: {
-          previous_errors: [
-            {
-              code: 402,
-              message:
-                "This request requires more credits, or fewer max_tokens. You requested up to 10000 tokens, but can only afford 7070.",
-            },
-          ],
-        },
-      },
-    }),
-    7070,
-  );
-});
-
-test("extractAffordableOpenRouterMaxTokens ignores unrelated errors", () => {
-  assert.equal(
-    extractAffordableOpenRouterMaxTokens({
-      error: {
-        message: "Provider is temporarily unavailable.",
-      },
-    }),
-    null,
-  );
 });
 
 test("getOpenRouterChatModel defaults to the configured chat model and allows env override", () => {

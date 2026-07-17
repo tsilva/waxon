@@ -1,4 +1,14 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
+import {
+  FALLBACK_CONCEPT_SLUG,
+  isScaffoldingConceptSlug,
+  isUsefulConceptSlug,
+  normalizeConceptSlug,
+} from "../shared/concept-slug.mjs";
+import {
+  decodeOpenRouterEmbeddings,
+  DEDUPE_EMBEDDING_DIMENSIONS,
+} from "../shared/embedding-contract.mjs";
 import { extractJsonObject } from "../shared/json-object.mjs";
 import {
   loadPromptTemplate,
@@ -23,14 +33,12 @@ loadLocalEnvFiles();
 configureNeonWebSocket(neonConfig);
 
 const DEFAULT_BATCH_SIZE = 10;
-const FALLBACK_CONCEPT_SLUG = "needs-concept-tagging";
 
 function parseArgs(argv) {
   const options = {
     batchSize: DEFAULT_BATCH_SIZE,
     dryRun: false,
     force: false,
-    keepLegacyActive: false,
     limit: null,
     userId: "",
   };
@@ -51,11 +59,6 @@ function parseArgs(argv) {
 
     if (arg === "--force") {
       options.force = true;
-      continue;
-    }
-
-    if (arg === "--keep-legacy-active") {
-      options.keepLegacyActive = true;
       continue;
     }
 
@@ -90,49 +93,6 @@ function parseArgs(argv) {
   }
 
   return options;
-}
-
-function normalizeConceptSlug(value) {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-+/g, "-")
-    .slice(0, 120);
-}
-
-function isUsefulConceptSlug(slug) {
-  const normalized = normalizeConceptSlug(slug);
-
-  if (normalized !== slug || normalized.length < 3) {
-    return false;
-  }
-
-  const parts = slug.split("-").filter(Boolean);
-
-  if (parts.length < 2) {
-    return false;
-  }
-
-  if (parts.every((part) => part.length <= 3)) {
-    return false;
-  }
-
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug);
-}
-
-function isScaffoldingConceptSlug(slug) {
-  return (
-    slug === "general-knowledge" ||
-    slug === FALLBACK_CONCEPT_SLUG ||
-    slug.startsWith("course-")
-  );
 }
 
 function titleCaseSlug(slug) {
@@ -194,11 +154,7 @@ async function assertConceptSchemaExists(pool) {
   }
 }
 
-async function loadLegacySlugsByUser() {
-  return new Map();
-}
-
-async function loadCandidateSlugsByUser(pool, legacySlugsByUser, userId) {
+async function loadCandidateSlugsByUser(pool, userId) {
   const result = await pool.query(
     `
       SELECT user_id, slug
@@ -213,12 +169,9 @@ async function loadCandidateSlugsByUser(pool, legacySlugsByUser, userId) {
   for (const row of result.rows) {
     const user = String(row.user_id);
     const slug = String(row.slug);
-    const legacySlugs = legacySlugsByUser.get(user) ?? new Set();
-
     if (
       !isUsefulConceptSlug(slug) ||
-      isScaffoldingConceptSlug(slug) ||
-      legacySlugs.has(slug)
+      isScaffoldingConceptSlug(slug)
     ) {
       continue;
     }
@@ -363,21 +316,15 @@ async function fetchConceptEmbeddings(slugs, apiKey) {
     },
   });
 
-  if (!Array.isArray(body.data) || body.data.length !== uniqueSlugs.length) {
-    throw new Error("Concept embedding response length did not match request.");
-  }
+  const embeddings = decodeOpenRouterEmbeddings(body.data, {
+    expectedCount: uniqueSlugs.length,
+    expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
+  });
 
   const embeddingsBySlug = new Map();
 
   for (let index = 0; index < uniqueSlugs.length; index += 1) {
-    const embedding = body.data[index]?.embedding;
-
-    if (Array.isArray(embedding) && embedding.length > 0) {
-      embeddingsBySlug.set(
-        uniqueSlugs[index],
-        embedding.map((component) => Number(component)),
-      );
-    }
+    embeddingsBySlug.set(uniqueSlugs[index], embeddings[index]);
   }
 
   return embeddingsBySlug;
@@ -448,56 +395,6 @@ async function saveAssignments(pool, assignments, apiKey) {
   return attached;
 }
 
-async function deactivateLegacyTagsIfSafe(pool, options, legacySlugsByUser) {
-  if (options.keepLegacyActive || options.dryRun) {
-    return;
-  }
-
-  const rows = await loadQuestions(pool, options.userId);
-  const remaining = rows.filter((row) => !hasRealConcept(row));
-
-  if (remaining.length > 0) {
-    console.log(
-      `Keeping legacy tags active because ${remaining.length} questions still have no real concept tag.`,
-    );
-    if (remaining.length <= 20) {
-      for (const row of remaining) {
-        console.log(
-          [
-            `Remaining ${row.questionId}:`,
-            row.question.slice(0, 220),
-            `current=${row.conceptSlugs.join(", ") || "none"}`,
-          ].join(" "),
-        );
-      }
-    }
-    return;
-  }
-
-  let deactivated = 0;
-
-  for (const [userId, legacySlugs] of legacySlugsByUser) {
-    const result = await pool.query(
-      `
-        UPDATE concept_tags
-        SET active = false,
-            updated_at = $3
-        WHERE user_id = $1
-          AND active = true
-          AND (
-            slug = ANY($2::text[])
-            OR slug LIKE 'course-%'
-          )
-      `,
-      [userId, Array.from(legacySlugs), Date.now()],
-    );
-
-    deactivated += result.rowCount ?? 0;
-  }
-
-  console.log(`Deactivated ${deactivated} legacy course tags.`);
-}
-
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const apiKey = requireOpenRouterApiKey();
@@ -506,10 +403,8 @@ async function main() {
   try {
     await assertConceptSchemaExists(pool);
 
-    const legacySlugsByUser = await loadLegacySlugsByUser(pool, options.userId);
     const candidateSlugsByUser = await loadCandidateSlugsByUser(
       pool,
-      legacySlugsByUser,
       options.userId,
     );
     const allQuestions = await loadQuestions(pool, options.userId);
@@ -519,7 +414,6 @@ async function main() {
 
     if (questions.length === 0) {
       console.log("No questions need concept backfill.");
-      await deactivateLegacyTagsIfSafe(pool, options, legacySlugsByUser);
       return;
     }
 
@@ -564,7 +458,6 @@ async function main() {
 
     if (!options.dryRun) {
       console.log(`Attached ${attached} new question-tag links.`);
-      await deactivateLegacyTagsIfSafe(pool, options, legacySlugsByUser);
     }
   } finally {
     await pool.end();

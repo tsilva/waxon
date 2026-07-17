@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   ArrowDownUp,
   CheckCircle2,
@@ -24,7 +23,6 @@ import type {
   LlmTraceInteraction,
 } from "@/app/lib/llmTraceStore";
 import { JsonSyntaxBlock } from "@/app/JsonSyntaxBlock";
-import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
@@ -1032,7 +1030,6 @@ export function AdminPageClient({
   initialViewState,
   selectedTraceId = null,
 }: AdminPageClientProps) {
-  const router = useRouter();
   const resolvedInitialViewState = useMemo(
     () =>
       initialAdminViewState({
@@ -1046,25 +1043,10 @@ export function AdminPageClient({
   const [traceInteractions, setTraceInteractions] = useState(
     () => resolvedInitialViewState.interactions,
   );
-  const [dueCount, setDueCount] = useState(
-    () => resolvedInitialViewState.dueCount,
-  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(
     () => initialInteractions.length === 0,
   );
-  const {
-    menuAvatarUrl,
-    menuDisplayName,
-    menuEmail,
-    onManageAccount,
-    onSignOut,
-  } = useToolbarAccount(currentUser, {
-    fallbackDisplayName: currentUser.email,
-    localSignOutHref: "/",
-    onLocalManageAccount: () => router.push("/review"),
-    showAdmin: true,
-  });
   const latestDate = useMemo(
     () => latestTraceDate(traceInteractions),
     [traceInteractions],
@@ -1127,9 +1109,6 @@ export function AdminPageClient({
         mergeTraceInteractions(current, payload.interactions),
       );
 
-      if (Number.isFinite(payload.dueCount)) {
-        setDueCount(payload.dueCount);
-      }
     } catch (error) {
       console.error("[waxon] admin traces refresh failed", {
         error: error instanceof Error ? error.message : "unknown error",
@@ -1413,13 +1392,6 @@ export function AdminPageClient({
       <section className="review-shell admin-shell" aria-label="Admin traces">
         <ReviewToolbar
           activeTab="admin"
-          dueCount={dueCount}
-          showAdmin
-          menuAvatarUrl={menuAvatarUrl}
-          menuDisplayName={menuDisplayName}
-          menuEmail={menuEmail}
-          onManageAccount={onManageAccount}
-          onSignOut={onSignOut}
           onReviewClick={persistAdminPageCache}
         />
 

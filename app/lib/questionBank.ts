@@ -4,6 +4,7 @@ import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
+  decodeOpenRouterEmbeddings,
   normalizeEmbeddingText,
   resolveEmbeddingModel,
 } from "./embeddingSource";
@@ -13,10 +14,9 @@ import {
   upsertDueQuestions,
   upsertQuestionEmbeddings,
   type DueQuestion,
-  type QuestionInput,
 } from "./postgresStore";
+import type { NormalizedQuestionDraft } from "./questionDraft";
 import { getOpenRouterApiKey, openRouterEmbeddings } from "./openRouter";
-import { questionSlug } from "./questionSlug";
 import {
   gateNovelQuestions,
   type NovelQuestionGateResult,
@@ -54,31 +54,13 @@ export type QuestionBankPage = {
 };
 
 function acceptQuestionsWithoutNoveltyGate(
-  input: Array<string | QuestionInput>,
+  input: NormalizedQuestionDraft[],
 ): NovelQuestionGateResult {
-  const seen = new Set<string>();
-  const accepted: NovelQuestionGateResult["accepted"] = [];
-
-  for (const item of input) {
-    const question = typeof item === "string" ? item : item.question;
-    const normalizedQuestion = question.trim().replace(/\s+/g, " ");
-    const slug = questionSlug(normalizedQuestion);
-
-    if (!normalizedQuestion || seen.has(slug)) {
-      continue;
-    }
-
-    seen.add(slug);
-    accepted.push({
-      question: normalizedQuestion,
-      conciseAnswer:
-        typeof item === "string"
-          ? ""
-          : (item.conciseAnswer ?? "").trim().replace(/\s+/g, " "),
+  const accepted = input.map((draft) => ({
+      ...draft,
       embedding: [],
       sourceHash: "",
-    });
-  }
+    }));
 
   return {
     accepted,
@@ -88,7 +70,7 @@ function acceptQuestionsWithoutNoveltyGate(
 
 export async function addQuestionsToKnowledgeBase(input: {
   userId: string;
-  questions: Array<string | QuestionInput>;
+  questions: NormalizedQuestionDraft[];
   sourceQuestion?: string | null;
 }): Promise<{ added: number; rejected: number }> {
   const { total: userCardCount } = await getQueuedQuestionsPage({
@@ -104,38 +86,8 @@ export async function addQuestionsToKnowledgeBase(input: {
           operation: "add_questions_gate",
           userId: input.userId,
         });
-  const objectQuestions = input.questions.filter(
-    (question): question is QuestionInput => typeof question !== "string",
-  );
-  const provenanceByQuestion = new Map(
-    objectQuestions.map((question) => [
-      question.question.trim().replace(/\s+/g, " ").toLowerCase(),
-      question.questionProvenance?.trim().replace(/\s+/g, " ") ?? "",
-    ]),
-  );
-  const proposedSlugsByQuestion = new Map(
-    objectQuestions.map((question) => [
-      question.question.trim().replace(/\s+/g, " ").toLowerCase(),
-      question.proposedConceptSlugs ?? [],
-    ]),
-  );
-  const sourceTextByQuestion = new Map(
-    objectQuestions.map((question) => [
-      question.question.trim().replace(/\s+/g, " ").toLowerCase(),
-      question.sourceText ?? "",
-    ]),
-  );
-
   const addedQuestions = await upsertDueQuestions({
-    questions: gateResult.accepted.map((candidate) => ({
-      question: candidate.question,
-      conciseAnswer: candidate.conciseAnswer,
-      questionProvenance:
-        provenanceByQuestion.get(candidate.question.toLowerCase()) ?? "",
-      proposedConceptSlugs:
-        proposedSlugsByQuestion.get(candidate.question.toLowerCase()) ?? [],
-      sourceText: sourceTextByQuestion.get(candidate.question.toLowerCase()) ?? "",
-    })),
+    questions: gateResult.accepted,
     sourceQuestion: input.sourceQuestion ?? null,
     now: Date.now(),
     userId: input.userId,
@@ -241,21 +193,10 @@ async function embedQuestionBankSearchQuery(input: {
     throw new Error(`OpenRouter embedding request failed (${response.status}).`);
   }
 
-  const embedding = body.data?.[0]?.embedding;
-
-  if (!Array.isArray(embedding) || embedding.length !== DEDUPE_EMBEDDING_DIMENSIONS) {
-    throw new Error("OpenRouter returned an unexpected search embedding.");
-  }
-
-  return embedding.map((component, index) => {
-    const value = Number(component);
-
-    if (!Number.isFinite(value)) {
-      throw new Error(`Search embedding contains a non-finite value at ${index}.`);
-    }
-
-    return value;
-  });
+  return decodeOpenRouterEmbeddings(body.data, {
+    expectedCount: 1,
+    expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
+  })[0] ?? [];
 }
 
 export async function searchQuestionBankItemsByMeaning(input: {
@@ -357,7 +298,6 @@ export async function listQuestionBankItems(input: {
           ct.slug
         FROM concept_tags ct
         WHERE ct.user_id = $1
-          AND ct.slug NOT LIKE 'course-%'
       ),
       filtered_questions AS (
         SELECT

@@ -12,7 +12,10 @@ import {
   QUESTION_PROVENANCE_MAX_CHARS,
   QUESTION_TEXT_MAX_CHARS,
 } from "@/app/lib/questionContract";
-import type { QuestionInput } from "@/app/lib/postgresStore";
+import {
+  normalizeQuestionDraft,
+  type NormalizedQuestionDraft,
+} from "@/app/lib/questionDraft";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,7 +66,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const questions: Array<string | QuestionInput> = [];
+  const questions: NormalizedQuestionDraft[] = [];
 
   for (const question of payload.questions) {
     if (typeof question === "string") {
@@ -77,7 +80,11 @@ export async function POST(request: Request) {
         return normalizedQuestion.response;
       }
 
-      questions.push(normalizedQuestion.value);
+      const draft = normalizeQuestionDraft(normalizedQuestion.value);
+
+      if (draft) {
+        questions.push(draft);
+      }
       continue;
     }
 
@@ -139,13 +146,17 @@ export async function POST(request: Request) {
           .filter(Boolean)
       : [];
 
-    questions.push({
+    const draft = normalizeQuestionDraft({
       question: normalizedQuestion.value,
       conciseAnswer: conciseAnswer.value,
       questionProvenance: questionProvenance.value,
       proposedConceptSlugs,
       sourceText: sourceText.value,
     });
+
+    if (draft) {
+      questions.push(draft);
+    }
   }
 
   const user = await getCurrentUser();

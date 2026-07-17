@@ -46,11 +46,11 @@ export async function POST(request: Request) {
 
   const user = await getCurrentUser();
 
-  return NextResponse.json(
-    await flagQuestion({
-      userId: user.id,
-      questionId: questionId.value,
-      question: question.value,
-    }),
-  );
+  await flagQuestion({
+    userId: user.id,
+    questionId: questionId.value,
+    question: question.value,
+  });
+
+  return NextResponse.json({ ok: true });
 }
