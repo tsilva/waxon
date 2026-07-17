@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeQuestionDraft } from "../app/lib/questionDraft.ts";
+import {
+  normalizeQuestionDraft,
+  normalizeQuestionDrafts,
+} from "../app/lib/questionDraft.ts";
 
 test("normalizeQuestionDraft canonicalizes shared aliases and whitespace", () => {
   const cases = [
@@ -112,4 +115,29 @@ test("normalizeQuestionDraft rejects values without a usable question", () => {
   for (const value of [null, 42, {}, { q: "   " }]) {
     assert.equal(normalizeQuestionDraft(value), null);
   }
+});
+
+test("normalizeQuestionDrafts deduplicates while preserving ingestion metadata", () => {
+  assert.deepEqual(
+    normalizeQuestionDrafts([
+      {
+        question: "  What is PPO? ",
+        conciseAnswer: " Proximal policy optimization. ",
+        questionProvenance: " paper ",
+        proposedConceptSlugs: ["policy-optimization"],
+        sourceText: "source excerpt",
+      },
+      { question: "What is PPO?", questionProvenance: "duplicate" },
+    ]),
+    [
+      {
+        question: "What is PPO?",
+        questionIdentity: "what-is-ppo",
+        conciseAnswer: "Proximal policy optimization.",
+        questionProvenance: "paper",
+        proposedConceptSlugs: ["policy-optimization"],
+        sourceText: "source excerpt",
+      },
+    ],
+  );
 });

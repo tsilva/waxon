@@ -29,10 +29,15 @@ UPDATE "questions"
 SET "concise_answer" = "reference_answer"
 WHERE length(trim("concise_answer")) = 0
   AND length(trim("reference_answer")) > 0;--> statement-breakpoint
-UPDATE "questions_trash"
-SET "concise_answer" = "reference_answer"
-WHERE length(trim("concise_answer")) = 0
-  AND length(trim("reference_answer")) > 0;--> statement-breakpoint
+DO $$
+BEGIN
+  IF to_regclass('public.questions_trash') IS NOT NULL THEN
+    UPDATE "questions_trash"
+    SET "concise_answer" = "reference_answer"
+    WHERE length(trim("concise_answer")) = 0
+      AND length(trim("reference_answer")) > 0;
+  END IF;
+END $$;--> statement-breakpoint
 
 ALTER TABLE "answer_evaluations" DROP CONSTRAINT IF EXISTS "answer_evaluations_deck_id_decks_id_fk";--> statement-breakpoint
 ALTER TABLE "courses" DROP CONSTRAINT IF EXISTS "courses_deck_id_decks_id_fk";--> statement-breakpoint
@@ -51,8 +56,13 @@ ALTER TABLE "question_attempts" DROP COLUMN "deck_id";--> statement-breakpoint
 ALTER TABLE "question_embeddings" DROP COLUMN "deck_id";--> statement-breakpoint
 ALTER TABLE "questions" DROP COLUMN "deck_id";--> statement-breakpoint
 ALTER TABLE "questions" DROP COLUMN "reference_answer";--> statement-breakpoint
-ALTER TABLE "questions_trash" RENAME COLUMN "deck_id" TO "legacy_deck_id";--> statement-breakpoint
-ALTER TABLE "questions_trash" DROP COLUMN "reference_answer";--> statement-breakpoint
-COMMENT ON COLUMN "questions_trash"."legacy_deck_id" IS
-  'Opaque provenance retained for the pre-user-scope duplicate archive; not an application relationship.';--> statement-breakpoint
+DO $$
+BEGIN
+  IF to_regclass('public.questions_trash') IS NOT NULL THEN
+    ALTER TABLE "questions_trash" RENAME COLUMN "deck_id" TO "legacy_deck_id";
+    ALTER TABLE "questions_trash" DROP COLUMN "reference_answer";
+    COMMENT ON COLUMN "questions_trash"."legacy_deck_id" IS
+      'Opaque provenance retained for the pre-user-scope duplicate archive; not an application relationship.';
+  END IF;
+END $$;--> statement-breakpoint
 DROP TABLE "decks";

@@ -1,11 +1,5 @@
-import { AppStaticLoadingView } from "../AppStaticLoadingView";
-import { TagsHydrator } from "./TagsHydrator";
+import { redirect } from "next/navigation";
 
 export default function TagsPage() {
-  return (
-    <>
-      <AppStaticLoadingView staticView="tags" />
-      <TagsHydrator />
-    </>
-  );
+  redirect("/library");
 }

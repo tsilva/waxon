@@ -12,7 +12,7 @@ export default function NotFoundPage() {
         <p>The page you requested is not available.</p>
         <p>
           Return to <Link href="/review">review</Link> or adjust your{" "}
-          <Link href="/tags">tags</Link>.
+          <Link href="/library">library</Link>.
         </p>
       </article>
     </main>

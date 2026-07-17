@@ -1,13 +1,29 @@
-import { createHash } from "node:crypto";
 import {
   DEFAULT_EMBEDDING_MODEL,
   resolveEmbeddingModel,
 } from "../../shared/openrouter-config.mjs";
+import {
+  buildQuestionDedupeSource,
+  decodeOpenRouterEmbeddings,
+  DEDUPE_EMBEDDING_DIMENSIONS,
+  DEDUPE_EMBEDDING_KIND,
+  DEDUPE_SOURCE_VERSION,
+  hashEmbeddingSource,
+  normalizeEmbeddingText,
+  questionDedupeSourceHash,
+} from "../../shared/embedding-contract.mjs";
 
 export { DEFAULT_EMBEDDING_MODEL, resolveEmbeddingModel };
-export const DEDUPE_EMBEDDING_DIMENSIONS = 3072;
-export const DEDUPE_EMBEDDING_KIND = "dedupe_v1";
-export const DEDUPE_SOURCE_VERSION = 1;
+export {
+  buildQuestionDedupeSource,
+  decodeOpenRouterEmbeddings,
+  DEDUPE_EMBEDDING_DIMENSIONS,
+  DEDUPE_EMBEDDING_KIND,
+  DEDUPE_SOURCE_VERSION,
+  hashEmbeddingSource,
+  normalizeEmbeddingText,
+  questionDedupeSourceHash,
+};
 
 const PLOT_PROJECTION_X_SIN = 1.37;
 const PLOT_PROJECTION_X_COS = 2.11;
@@ -18,34 +34,6 @@ export type EmbeddingPlotProjection = {
   x: number;
   y: number;
 };
-
-export type QuestionDedupeSource = {
-  question: string;
-  conciseAnswer: string;
-};
-
-export function normalizeEmbeddingText(value: string): string {
-  return value.trim().replace(/\s+/g, " ");
-}
-
-export function buildQuestionDedupeSource(input: QuestionDedupeSource): string {
-  return [
-    `version: ${DEDUPE_SOURCE_VERSION}`,
-    `kind: ${DEDUPE_EMBEDDING_KIND}`,
-    `Question: ${normalizeEmbeddingText(input.question)}`,
-    `Expected answer: ${normalizeEmbeddingText(input.conciseAnswer)}`,
-  ].join("\n");
-}
-
-export function hashEmbeddingSource(source: string): string {
-  return createHash("sha256").update(source).digest("hex");
-}
-
-export function questionDedupeSourceHash(
-  input: QuestionDedupeSource,
-): string {
-  return hashEmbeddingSource(buildQuestionDedupeSource(input));
-}
 
 export function projectEmbeddingForPlot(
   embedding: number[],

@@ -6,7 +6,7 @@ Reference image: `design-reference/waxon-approved-ui.png`
 
 - Refreshed `design-reference/waxon-approved-ui.png` on June 8, 2026 from the live local app at `http://localhost:3001/review`.
 - The new composite uses a 1440x900 desktop capture and a 390x844 mobile capture stitched side by side.
-- The reference predates the July 14, 2026 scope reduction. Current authenticated navigation is `Review` / `Library` / `Tags`, with `Admin` added for operators; ignore the archived `Learn` tab when comparing shell spacing.
+- The reference predates the July 17, 2026 navigation simplification. Current authenticated navigation is `Review` / `Library`, with `Admin` added for operators; ignore the archived `Learn` and `Tags` tabs when comparing shell spacing.
 - Current live data at capture time showed `181 due` and a Deep Learning question. Treat the exact due count and question text as sample content, not a fixed design requirement.
 
 ## Remaining Comparison Notes
@@ -21,3 +21,4 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - June 13, 2026 mobile shell update: authenticated app pages use an icon-only brand mark in the mobile header so the tab strip and due-count actions fit without clipping. Treat the missing visible `waxon` wordmark in mobile app chrome as intentional; the desktop header still shows the full wordmark.
 - July 14, 2026 scope update: the course experience and its navigation tab are intentionally absent while work focuses on question-bank and Review milestones.
 - June 27, 2026 tag update: concept tag badges use squared 4px corners instead of pill corners across Review, Library, and question detail surfaces.
+- July 17, 2026 Library update: concept-tag activation, renaming, merging, and question inspection live in the Library `Tags` modal. The old standalone Tags tab is intentionally absent, and `/tags` redirects to `/library` for old bookmarks.

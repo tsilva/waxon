@@ -21,7 +21,6 @@ import {
   type SpeechRecognition,
   type SpeechStatus,
 } from "@/app/lib/speechRecognition";
-import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
 import { usePageScrollLock } from "@/app/lib/usePageScrollLock";
 import {
   MarkdownContent as SharedMarkdownContent,
@@ -33,6 +32,7 @@ import {
 } from "@/app/PreviousAnswerRow";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { localSettingsEvent } from "@/app/toolbarEvents";
+import { useToolbarState } from "@/app/ToolbarState";
 import { ScoreChart } from "./ReviewVisualizations";
 import { formatDurationBadge } from "./reviewFormatting";
 import type {
@@ -63,12 +63,6 @@ import {
   useRef,
   useState,
 } from "react";
-
-type NextQuestionResponse = {
-  questionId: string | null;
-  question: string | null;
-  queueRemaining: number;
-};
 
 type SubmitAnswerResponse =
   | {
@@ -170,7 +164,6 @@ type ReviewSessionSnapshot = {
   expandedPreviousAnswerIds: Set<string>;
   selectedQuestionId: string | null;
   selectedQuestion: string | null;
-  currentUser: UserProfile | null;
   hasLoadedQuestion: boolean;
 };
 
@@ -588,9 +581,6 @@ export default function ReviewApp() {
   const [queueRemaining, setQueueRemaining] = useState(
     () => cachedSessionRef.current?.queueRemaining ?? 0,
   );
-  const [toolbarDueCount, setToolbarDueCount] = useState<number | null>(
-    () => cachedSessionRef.current?.queueRemaining ?? null,
-  );
   const [evaluations, setEvaluations] = useState<EvaluationQueueItem[]>(
     () => cachedSessionRef.current?.evaluations ?? [],
   );
@@ -623,22 +613,14 @@ export default function ReviewApp() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isFlaggingQuestion, setIsFlaggingQuestion] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(
-    () => cachedSessionRef.current?.currentUser ?? null,
-  );
-  const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
-  const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
   const {
     canViewAdmin,
-    menuAvatarUrl,
-    menuDisplayName,
-    menuEmail,
-    onManageAccount,
-    onSignOut,
-  } = useToolbarAccount(currentUser, {
-    localSignOutHref: "/",
-    onLocalManageAccount: () => setIsSettingsOpen(true),
-  });
+    currentUser,
+    setCurrentUser,
+    setDueCount,
+  } = useToolbarState();
+  const [isAvatarUpdating, setIsAvatarUpdating] = useState(false);
+  const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { showError } = useAppError();
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -822,14 +804,12 @@ export default function ReviewApp() {
       expandedPreviousAnswerIds: new Set(expandedPreviousAnswerIds),
       selectedQuestionId,
       selectedQuestion,
-      currentUser,
       hasLoadedQuestion: hasLoadedQuestionRef.current,
     };
   }, [
     answer,
     currentQuestionId,
     currentSessionItem,
-    currentUser,
     evaluations,
     expandedPreviousAnswerIds,
     isPreviousExpanded,
@@ -946,46 +926,6 @@ export default function ReviewApp() {
   }, [hasPendingEvaluationActivity]);
 
   useEffect(() => {
-    if (cachedSessionRef.current?.currentUser) {
-      return;
-    }
-
-    if (!hasLoadedQuestionRef.current) {
-      return;
-    }
-
-    let isActive = true;
-
-    async function loadUserProfile() {
-      try {
-        const response = await fetch("/api/user", {
-          cache: "no-store",
-        });
-
-        if (!response.ok) {
-          throw new Error("Could not load profile.");
-        }
-
-        const data = (await response.json()) as UserProfile;
-
-        if (isActive) {
-          setCurrentUser(data);
-        }
-      } catch {
-        if (isActive) {
-          setAvatarMessage("Could not load profile.");
-        }
-      }
-    }
-
-    void loadUserProfile();
-
-    return () => {
-      isActive = false;
-    };
-  }, [question]);
-
-  useEffect(() => {
     if (!isSettingsOpen) {
       return;
     }
@@ -1047,24 +987,6 @@ export default function ReviewApp() {
       ];
     });
   }, []);
-
-  const applyNextQuestion = useCallback((
-    data: NextQuestionResponse,
-    options?: { appendToMessages?: boolean },
-  ) => {
-    hasLoadedQuestionRef.current = true;
-    setCurrentSessionItem(null);
-    setCurrentQuestionId(data.questionId);
-    questionIdRef.current = data.questionId;
-    setQuestion(data.question);
-    questionRef.current = data.question;
-    setQueueRemaining(data.queueRemaining);
-    setToolbarDueCount(data.queueRemaining);
-
-    if (data.question && options?.appendToMessages !== false) {
-      appendQuestion(data.question);
-    }
-  }, [appendQuestion]);
 
   const applyReviewQueueItem = useCallback((
     item: ReviewQueueItem | null,
@@ -1252,14 +1174,14 @@ export default function ReviewApp() {
       const data = (await response.json()) as QueueStatusResponse;
 
       setQueueRemaining(data.queueRemaining);
-      setToolbarDueCount(data.queueRemaining);
+      setDueCount(data.queueRemaining);
       setEvaluations(data.evaluations);
       setRecentAttempts(data.recentAttempts ?? []);
       hasLoadedPreviousAnswerStatusRef.current = true;
     } catch {
       // Previous answers are supplemental; keep the review loop usable.
     }
-  }, [previousAnswerStatusUrl]);
+  }, [previousAnswerStatusUrl, setDueCount]);
 
   const loadMorePreviousAnswers = useCallback(async () => {
     if (isLoadingMorePreviousAnswers) {
@@ -1708,14 +1630,14 @@ export default function ReviewApp() {
         question: activeQuestion,
       }),
     }).then((response) =>
-      readJsonResponse<NextQuestionResponse>(
+      readJsonResponse<{ ok: true }>(
         response,
         "Failed to flag the question.",
       ),
     );
 
     try {
-      const data = await flagRequest;
+      await flagRequest;
       const nextQueue = sessionQueueRef.current.filter(
         (item) =>
           item.questionId !== activeQuestionId &&
@@ -1725,11 +1647,7 @@ export default function ReviewApp() {
       sessionQueueRef.current = nextQueue;
       setSessionQueue(nextQueue);
 
-      if (nextQueue.length > 0) {
-        await advanceReviewSessionQueue({ appendToMessages: true });
-      } else {
-        applyNextQuestion(data);
-      }
+      await advanceReviewSessionQueue({ appendToMessages: true });
 
       return true;
     } catch (flagError) {
@@ -1753,7 +1671,6 @@ export default function ReviewApp() {
     }
   }, [
     advanceReviewSessionQueue,
-    applyNextQuestion,
     clearPendingSpeechCommand,
     surfaceReviewError,
   ]);
@@ -2571,14 +2488,6 @@ export default function ReviewApp() {
       <section className="review-shell" aria-label="Flashcard learning">
         <ReviewToolbar
           activeTab="review"
-          dueCount={toolbarDueCount}
-          dueCountSource="review-queue"
-          showAdmin={canViewAdmin}
-          menuAvatarUrl={menuAvatarUrl}
-          menuDisplayName={menuDisplayName}
-          menuEmail={menuEmail}
-          onManageAccount={onManageAccount}
-          onSignOut={onSignOut}
         />
 
         <div
@@ -2842,10 +2751,10 @@ export default function ReviewApp() {
 
             <div className="settings-profile">
               <div className="settings-avatar-preview" aria-hidden="true">
-                {menuAvatarUrl ? (
+                {currentUser?.avatarUrl ? (
                   <span
                     className="settings-avatar-image"
-                    style={{ backgroundImage: `url("${menuAvatarUrl}")` }}
+                    style={{ backgroundImage: `url("${currentUser.avatarUrl}")` }}
                   />
                 ) : (
                   <UserIcon />

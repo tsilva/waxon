@@ -41,44 +41,8 @@ function validateAvatarUrl(avatarUrl: unknown): string | null {
   return avatarUrl;
 }
 
-async function ensureCurrentUser(): Promise<UserProfile> {
-  const currentUser = await getCurrentUser();
-  const now = Date.now();
-
-  const [row] = await db
-    .insert(users)
-    .values({
-      id: currentUser.id,
-      displayName: currentUser.displayName,
-      email: currentUser.email,
-      avatarUrl: currentUser.avatarUrl,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: users.id,
-      set: {
-        displayName: currentUser.displayName,
-        email: currentUser.email,
-        updatedAt: now,
-      },
-    })
-    .returning({
-      id: users.id,
-      displayName: users.displayName,
-      email: users.email,
-      avatarUrl: users.avatarUrl,
-    });
-
-  if (!row) {
-    throw new Error("Could not load user profile.");
-  }
-
-  return toUserProfile(row);
-}
-
 export async function GET() {
-  return NextResponse.json(await ensureCurrentUser());
+  return NextResponse.json(await getCurrentUser());
 }
 
 export async function PATCH(request: NextRequest) {
@@ -98,8 +62,6 @@ export async function PATCH(request: NextRequest) {
       { status: 400 },
     );
   }
-
-  await ensureCurrentUser();
 
   const currentUser = await getCurrentUser();
   const [row] = await db

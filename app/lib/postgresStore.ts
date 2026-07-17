@@ -27,7 +27,7 @@ import {
 } from "./auth";
 import { scheduleNextReview, type ReviewEntry } from "./scheduler";
 import { questionSlug } from "./questionSlug";
-import { normalizeQuestionDraft } from "./questionDraft";
+import type { NormalizedQuestionDraft } from "./questionDraft";
 import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
@@ -1292,48 +1292,14 @@ export async function getAnswerEvaluationsByIds(input: UserContextInput & {
     .map(toEvaluationQueueItem);
 }
 
-export type QuestionInput = {
-  question: string;
-  conciseAnswer?: string | null;
-  questionProvenance?: string | null;
-  proposedConceptSlugs?: string[] | null;
-  sourceText?: string | null;
-};
-
-function normalizeGeneratedQuestions(
-  generatedQuestions: Array<string | QuestionInput>,
-): QuestionInput[] {
-  const seen = new Set<string>();
-  const normalizedQuestions: QuestionInput[] = [];
-
-  for (const item of generatedQuestions) {
-    const draft = normalizeQuestionDraft(item, { sourceText: 4_000 });
-
-    if (!draft || seen.has(draft.questionIdentity)) {
-      continue;
-    }
-
-    seen.add(draft.questionIdentity);
-    normalizedQuestions.push({
-      question: draft.question,
-      conciseAnswer: draft.conciseAnswer,
-      questionProvenance: draft.questionProvenance,
-      proposedConceptSlugs: draft.proposedConceptSlugs,
-      sourceText: draft.sourceText,
-    });
-  }
-
-  return normalizedQuestions;
-}
-
 export async function upsertDueQuestions(input: {
-  questions: Array<string | QuestionInput>;
+  questions: NormalizedQuestionDraft[];
   sourceQuestion: string | null;
   now: number;
   userId?: string;
 }): Promise<DueQuestion[]> {
   const context = await resolveUserContext(input);
-  const generatedQuestions = normalizeGeneratedQuestions(input.questions);
+  const generatedQuestions = input.questions;
 
   if (generatedQuestions.length === 0) {
     return [];
@@ -1347,7 +1313,7 @@ export async function upsertDueQuestions(input: {
       generatedQuestions.map((question, index) => ({
         userId: context.userId,
         question: question.question,
-        questionSlug: questionSlug(question.question),
+        questionSlug: question.questionIdentity,
         nextDue: now + index,
         generatedFromQuestion: input.sourceQuestion,
         questionProvenance: question.questionProvenance ?? "",
@@ -1373,7 +1339,7 @@ export async function upsertDueQuestions(input: {
   const rows = await selectQuestionRows(
     inArray(
       questions.questionSlug,
-      generatedQuestions.map((question) => questionSlug(question.question)),
+      generatedQuestions.map((question) => question.questionIdentity),
     ),
     { userId: context.userId },
   );
@@ -1384,7 +1350,7 @@ export async function upsertDueQuestions(input: {
       userId: context.userId,
       questions: dueQuestions.map((row) => {
         const inputQuestion = generatedQuestions.find(
-          (question) => questionSlug(question.question) === questionSlug(row.question),
+          (question) => question.questionIdentity === questionSlug(row.question),
         );
 
         return {

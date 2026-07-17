@@ -9,6 +9,7 @@ import {
   DEDUPE_EMBEDDING_DIMENSIONS,
   DEDUPE_EMBEDDING_KIND,
   DEDUPE_SOURCE_VERSION,
+  decodeOpenRouterEmbeddings,
   resolveEmbeddingModel,
 } from "@/app/lib/embeddingSource";
 import { getCurrentUser } from "@/app/lib/auth";
@@ -448,15 +449,16 @@ async function fetchSummaryEmbedding(input: {
     return [];
   }
 
-  const embedding = body.data?.[0]?.embedding;
-
-  if (!Array.isArray(embedding)) {
+  try {
+    return (
+      decodeOpenRouterEmbeddings(body.data, {
+        expectedCount: 1,
+        expectedDimensions: DEDUPE_EMBEDDING_DIMENSIONS,
+      })[0] ?? []
+    );
+  } catch {
     return [];
   }
-
-  return embedding
-    .map((component: unknown) => Number(component))
-    .filter(Number.isFinite);
 }
 
 async function loadGenerationNeighbors(input: {

@@ -4,8 +4,3 @@ export type UserProfile = {
   email: string;
   avatarUrl: string | null;
 };
-
-export type UserProfileSummary = Pick<
-  UserProfile,
-  "displayName" | "email" | "avatarUrl"
->;

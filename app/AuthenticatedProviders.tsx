@@ -3,6 +3,7 @@
 import { AppErrorProvider } from "./AppErrorModal";
 import { AuthShell } from "./AuthShell";
 import { PersistentReviewToolbarActions } from "./PersistentReviewToolbarActions";
+import { ToolbarStateProvider } from "./ToolbarState";
 
 export function AuthenticatedProviders({
   children,
@@ -12,8 +13,10 @@ export function AuthenticatedProviders({
   return (
     <AuthShell>
       <AppErrorProvider>
-        <PersistentReviewToolbarActions />
-        {children}
+        <ToolbarStateProvider>
+          <PersistentReviewToolbarActions />
+          {children}
+        </ToolbarStateProvider>
       </AppErrorProvider>
     </AuthShell>
   );

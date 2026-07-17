@@ -9,37 +9,28 @@ import {
   ToggleRight,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState, type Dispatch, type SetStateAction } from "react";
 import type {
   ConceptTaggedQuestionSummary,
   ConceptTagSummary,
 } from "@/app/lib/conceptTags";
 import { libraryTagHref } from "@/app/lib/libraryTagNavigation";
-import { useToolbarAccount } from "@/app/lib/useToolbarAccount";
-import type { UserProfile } from "@/app/lib/userProfile";
 import { MarkdownInline } from "@/app/MarkdownContent";
-import { ReviewToolbar } from "@/app/ReviewToolbar";
 
 type ConceptTagMutationResponse =
-  | {
-      ok: true;
-      conceptTag: ConceptTagSummary;
-    }
-  | {
-      ok: false;
-      error?: string;
-    };
+  | { ok: true; conceptTag: ConceptTagSummary }
+  | { ok: false; error?: string };
 
-type ConceptTaggedQuestionsResponse = {
-  questions: ConceptTaggedQuestionSummary[];
-};
+const dueDateFormatter = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
 
 async function patchConceptTag(payload: Record<string, unknown>) {
   const response = await fetch("/api/concept-tags", {
     method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const data = (await response.json()) as ConceptTagMutationResponse;
@@ -51,10 +42,15 @@ async function patchConceptTag(payload: Record<string, unknown>) {
   return data.conceptTag;
 }
 
-export default function TagsPageClient() {
-  const [conceptTags, setConceptTags] = useState<ConceptTagSummary[]>([]);
-  const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
-  const [isTagsLoading, setIsTagsLoading] = useState(true);
+export function ConceptTagManager({
+  conceptTags,
+  isLoading,
+  setConceptTags,
+}: {
+  conceptTags: ConceptTagSummary[];
+  isLoading: boolean;
+  setConceptTags: Dispatch<SetStateAction<ConceptTagSummary[]>>;
+}) {
   const [query, setQuery] = useState("");
   const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [draftSlug, setDraftSlug] = useState("");
@@ -72,87 +68,14 @@ export default function TagsPageClient() {
   );
   const activeTags = visibleTags.filter((tag) => tag.active);
   const mutedTags = visibleTags.filter((tag) => !tag.active);
-  const dueCount = conceptTags
-    .filter((tag) => tag.active)
-    .reduce((total, tag) => total + tag.dueCount, 0);
-  const {
-    canViewAdmin,
-    menuAvatarUrl,
-    menuDisplayName,
-    menuEmail,
-    onManageAccount,
-    onSignOut,
-  } = useToolbarAccount(currentUser, {
-    localSignOutHref: "/",
-  });
-
-  useEffect(() => {
-    const controller = new AbortController();
-    let isActive = true;
-
-    async function loadTagsPageData() {
-      setIsTagsLoading(true);
-      setMessage(null);
-
-      try {
-        const [userResponse, tagsResponse] = await Promise.all([
-          fetch("/api/user", { cache: "no-store", signal: controller.signal }),
-          fetch("/api/concept-tags", {
-            cache: "no-store",
-            signal: controller.signal,
-          }),
-        ]);
-        const userData = (await userResponse.json()) as UserProfile & {
-          error?: string;
-        };
-        const tagsData = (await tagsResponse.json()) as {
-          conceptTags?: ConceptTagSummary[];
-          error?: string;
-        };
-
-        if (!userResponse.ok) {
-          throw new Error(userData.error || "Could not load profile.");
-        }
-
-        if (!tagsResponse.ok) {
-          throw new Error(tagsData.error || "Could not load concept tags.");
-        }
-
-        if (isActive) {
-          setCurrentUser(userData);
-          setConceptTags(tagsData.conceptTags ?? []);
-        }
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-
-        if (isActive) {
-          setMessage(error instanceof Error ? error.message : "Could not load tags.");
-        }
-      } finally {
-        if (isActive) {
-          setIsTagsLoading(false);
-        }
-      }
-    }
-
-    void loadTagsPageData();
-
-    return () => {
-      isActive = false;
-      controller.abort();
-    };
-  }, []);
 
   function replaceConceptTag(nextTag: ConceptTagSummary) {
-    setConceptTags((currentTags) => {
-      const withoutUpdated = currentTags.filter((tag) => tag.id !== nextTag.id);
-
-      return [...withoutUpdated, nextTag].sort((a, b) =>
-        a.slug.localeCompare(b.slug),
-      );
-    });
+    setConceptTags((currentTags) =>
+      currentTags
+        .filter((tag) => tag.id !== nextTag.id)
+        .concat(nextTag)
+        .sort((left, right) => left.slug.localeCompare(right.slug)),
+    );
   }
 
   async function toggleTag(tag: ConceptTagSummary) {
@@ -180,11 +103,7 @@ export default function TagsPageClient() {
 
     try {
       replaceConceptTag(
-        await patchConceptTag({
-          action: "rename",
-          slug,
-          toSlug: draftSlug,
-        }),
+        await patchConceptTag({ action: "rename", slug, toSlug: draftSlug }),
       );
       setEditingSlug(null);
       setDraftSlug("");
@@ -210,7 +129,7 @@ export default function TagsPageClient() {
         currentTags
           .filter((tag) => tag.slug !== slug && tag.id !== mergedTag.id)
           .concat(mergedTag)
-          .sort((a, b) => a.slug.localeCompare(b.slug)),
+          .sort((left, right) => left.slug.localeCompare(right.slug)),
       );
       setMergeSourceSlug(null);
       setMergeTargetSlug("");
@@ -241,7 +160,8 @@ export default function TagsPageClient() {
         `/api/concept-tags?slug=${encodeURIComponent(tag.slug)}`,
         { cache: "no-store" },
       );
-      const data = (await response.json()) as ConceptTaggedQuestionsResponse & {
+      const data = (await response.json()) as {
+        questions?: ConceptTaggedQuestionSummary[];
         error?: string;
       };
 
@@ -251,8 +171,7 @@ export default function TagsPageClient() {
 
       setQuestionsBySlug((current) => {
         const next = new Map(current);
-
-        next.set(tag.slug, data.questions);
+        next.set(tag.slug, data.questions ?? []);
         return next;
       });
     } catch (error) {
@@ -265,33 +184,8 @@ export default function TagsPageClient() {
   }
 
   function renderTagRows(tags: ConceptTagSummary[]) {
-    if (isTagsLoading && tags.length === 0) {
-      return (
-        <ol
-          className="tags-list tags-list-loading"
-          aria-label="Loading concept tags"
-          aria-busy="true"
-        >
-          {Array.from({ length: 5 }, (_, index) => (
-            <li className="tags-row" key={index}>
-              <span className="tags-active-toggle kb-skeleton-toggle" />
-              <div className="tags-row-main">
-                <span className="admin-skeleton-line tags-skeleton-title" />
-                <span className="admin-skeleton-line tags-skeleton-copy" />
-              </div>
-              <div className="tags-row-meta">
-                <span className="admin-skeleton-pill" />
-                <span className="admin-skeleton-pill" />
-              </div>
-              <div className="tags-row-actions">
-                <span className="kb-icon-button kb-skeleton-toggle" />
-                <span className="kb-icon-button kb-skeleton-toggle" />
-                <span className="kb-icon-button kb-skeleton-toggle" />
-              </div>
-            </li>
-          ))}
-        </ol>
-      );
+    if (isLoading && tags.length === 0) {
+      return <p className="tags-empty">Loading concept tags...</p>;
     }
 
     if (tags.length === 0) {
@@ -315,9 +209,7 @@ export default function TagsPageClient() {
                 }`}
                 type="button"
                 aria-pressed={tag.active}
-                aria-label={
-                  tag.active ? `Mute ${tag.slug}` : `Activate ${tag.slug}`
-                }
+                aria-label={tag.active ? `Mute ${tag.slug}` : `Activate ${tag.slug}`}
                 disabled={isBusy}
                 onClick={() => void toggleTag(tag)}
               >
@@ -344,20 +236,13 @@ export default function TagsPageClient() {
                       aria-label={`Rename ${tag.slug}`}
                       disabled={isBusy}
                     />
-                    <button
-                      className="tags-small-button"
-                      type="submit"
-                      disabled={isBusy}
-                    >
+                    <button className="tags-small-button" type="submit" disabled={isBusy}>
                       Save
                     </button>
                   </form>
                 ) : (
                   <p className="tags-slug">
-                    <Link
-                      className="tags-slug-link"
-                      href={libraryTagHref(tag.slug)}
-                    >
+                    <Link className="tags-slug-link" href={libraryTagHref(tag.slug)}>
                       #{tag.slug}
                     </Link>
                   </p>
@@ -379,11 +264,7 @@ export default function TagsPageClient() {
                       aria-label={`Merge ${tag.slug} into`}
                       disabled={isBusy}
                     />
-                    <button
-                      className="tags-small-button"
-                      type="submit"
-                      disabled={isBusy}
-                    >
+                    <button className="tags-small-button" type="submit" disabled={isBusy}>
                       Merge
                     </button>
                   </form>
@@ -451,12 +332,7 @@ export default function TagsPageClient() {
                             text={question.question}
                           />
                           <small>
-                            due{" "}
-                            {new Intl.DateTimeFormat(undefined, {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric",
-                            }).format(new Date(question.nextDue))}
+                            due {dueDateFormatter.format(new Date(question.nextDue))}
                           </small>
                         </li>
                       ))}
@@ -472,55 +348,38 @@ export default function TagsPageClient() {
   }
 
   return (
-    <main className="page page-review page-tags">
-      <section className="review-shell tags-shell" aria-label="Concept tags">
-        <ReviewToolbar
-          activeTab="tags"
-          dueCount={dueCount}
-          showAdmin={canViewAdmin}
-          menuAvatarUrl={menuAvatarUrl}
-          menuDisplayName={menuDisplayName}
-          menuEmail={menuEmail}
-          onManageAccount={onManageAccount}
-          onSignOut={onSignOut}
-        />
+    <div className="tags-manager-content">
+      <label className="kb-search-label library-search-label tags-search-label">
+        <span className="sr-only">Search concept tags</span>
+        <span className="kb-search-shell">
+          <Search aria-hidden="true" />
+          <input
+            className="kb-search-input"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search tags"
+          />
+        </span>
+      </label>
 
-        <section className="queue-stage tags-stage" aria-label="Concept tags">
-          <div className="library-filter-row tags-filter-row" aria-label="Concept tag filters">
-            <label className="kb-search-label library-search-label tags-search-label">
-              <span className="sr-only">Search concept tags</span>
-              <span className="kb-search-shell">
-                <Search aria-hidden="true" />
-                <input
-                  className="kb-search-input"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search tags"
-                />
-              </span>
-            </label>
-          </div>
+      {message ? <p className="kb-editor-status">{message}</p> : null}
 
-          {message ? <p className="kb-editor-status">{message}</p> : null}
+      <div className="tags-summary-strip library-summary-strip">
+        <span>{conceptTags.length} tags</span>
+        <span>{activeTags.length} active</span>
+        <span>{mutedTags.length} muted</span>
+        <span>{isLoading ? "loading" : "ready"}</span>
+      </div>
 
-          <div className="tags-summary-strip library-summary-strip">
-            <span>{conceptTags.length} tags</span>
-            <span>{activeTags.length} active</span>
-            <span>{mutedTags.length} muted</span>
-            <span>{isTagsLoading ? "loading" : "ready"}</span>
-          </div>
-
-          <section className="tags-section" aria-label="Active tags">
-            <h2>Active</h2>
-            {renderTagRows(activeTags)}
-          </section>
-
-          <section className="tags-section" aria-label="Muted tags">
-            <h2>Muted</h2>
-            {renderTagRows(mutedTags)}
-          </section>
-        </section>
+      <section className="tags-section" aria-label="Active tags">
+        <h3>Active</h3>
+        {renderTagRows(activeTags)}
       </section>
-    </main>
+
+      <section className="tags-section" aria-label="Muted tags">
+        <h3>Muted</h3>
+        {renderTagRows(mutedTags)}
+      </section>
+    </div>
   );
 }

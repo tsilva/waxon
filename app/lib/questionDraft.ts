@@ -9,6 +9,14 @@ export type NormalizedQuestionDraft = {
   sourceText: string;
 };
 
+export type QuestionDraftInput = {
+  question: string;
+  conciseAnswer?: string | null;
+  questionProvenance?: string | null;
+  proposedConceptSlugs?: string[] | null;
+  sourceText?: string | null;
+};
+
 export type QuestionDraftLengthLimits = Partial<{
   question: number;
   conciseAnswer: number;
@@ -126,4 +134,25 @@ export function normalizeQuestionDraft(
     proposedConceptSlugs: normalizeConceptSlugs(record, limits.conceptSlug),
     sourceText: normalizeSourceText(record.sourceText, limits.sourceText),
   };
+}
+
+export function normalizeQuestionDrafts(
+  values: readonly unknown[],
+  limits: QuestionDraftLengthLimits = {},
+): NormalizedQuestionDraft[] {
+  const seen = new Set<string>();
+  const drafts: NormalizedQuestionDraft[] = [];
+
+  for (const value of values) {
+    const draft = normalizeQuestionDraft(value, limits);
+
+    if (!draft || seen.has(draft.questionIdentity)) {
+      continue;
+    }
+
+    seen.add(draft.questionIdentity);
+    drafts.push(draft);
+  }
+
+  return drafts;
 }
