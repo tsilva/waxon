@@ -17,6 +17,10 @@ import {
   hashEmbeddingSource,
 } from "../shared/embedding-contract.mjs";
 import { vectorLiteral } from "../shared/vector-literal.mjs";
+import {
+  buildConciseAnswerRequest,
+  parseConciseAnswerResults,
+} from "../shared/concise-answer-contract.mjs";
 
 test("resolveEmbeddingModel trims overrides and falls back for blank values", () => {
   assert.equal(resolveEmbeddingModel({}), DEFAULT_EMBEDDING_MODEL);
@@ -69,6 +73,33 @@ test("shared embedding decoder enforces count, dimensions, and finite values", (
 test("vectorLiteral preserves the app and script pgvector serialization", () => {
   assert.equal(vectorLiteral([]), "[]");
   assert.equal(vectorLiteral([0.25, -1, 3]), "[0.25,-1,3]");
+});
+
+test("shared concise-answer contract keeps live and backfill payloads aligned", () => {
+  const questions = [{ id: "q-1", question: "What is PPO?" }];
+  const request = buildConciseAnswerRequest({
+    model: "test/model",
+    questions,
+  });
+
+  assert.equal(request.model, "test/model");
+  assert.equal(request.max_tokens, 540);
+  assert.match(String(request.messages[1]?.content), /What is PPO\?/u);
+  assert.deepEqual(
+    parseConciseAnswerResults(
+      questions,
+      JSON.stringify({
+        answers: [{ id: "q-1", conciseAnswer: "  Proximal   policy optimization.  " }],
+      }),
+    ),
+    [
+      {
+        id: "q-1",
+        question: "What is PPO?",
+        conciseAnswer: "Proximal policy optimization.",
+      },
+    ],
+  );
 });
 
 test("extractChatCompletionText preserves app trimming and compact text-part joins", () => {

@@ -1,9 +1,8 @@
 import { Pool, neonConfig } from "@neondatabase/serverless";
-import { extractJsonObject } from "../shared/json-object.mjs";
 import {
-  loadPromptTemplate,
-  renderPromptTemplate,
-} from "../shared/prompt-templates.mjs";
+  buildConciseAnswerRequest,
+  parseConciseAnswerResults,
+} from "../shared/concise-answer-contract.mjs";
 import {
   chunks,
   configureNeonWebSocket,
@@ -21,10 +20,6 @@ loadLocalEnvFiles();
 configureNeonWebSocket(neonConfig);
 
 const DEFAULT_BATCH_SIZE = 20;
-const MAX_CONCISE_ANSWER_CHARS = 320;
-const CONCISE_ANSWER_SYSTEM_PROMPT = loadPromptTemplate(
-  "concise-answer-system.md",
-);
 
 function parseArgs(argv) {
   const options = {
@@ -79,51 +74,13 @@ async function generateConciseAnswers(batch, apiKey) {
     apiKey,
     errorPrefix: "Concise answer request failed",
     errorTextLength: 300,
-    body: {
+    body: buildConciseAnswerRequest({
       model: openRouterChatModel(),
-      response_format: { type: "json_object" },
-      temperature: 0,
-      max_tokens: Math.min(4096, 140 * batch.length + 400),
-      messages: [
-        {
-          role: "system",
-          content: CONCISE_ANSWER_SYSTEM_PROMPT,
-        },
-        {
-          role: "user",
-          content: renderPromptTemplate(loadPromptTemplate("concise-answer-user.md"), {
-            questionsJson: JSON.stringify(
-              batch.map((row) => ({
-                id: row.id,
-                question: row.question,
-              })),
-            ),
-          }),
-        },
-      ],
-    },
+      questions: batch,
+    }),
   });
-  const parsed = extractJsonObject(extractOpenRouterChatText(body));
 
-  if (!Array.isArray(parsed.answers)) {
-    throw new Error("Model returned no answers array.");
-  }
-
-  const answersById = new Map();
-
-  for (const item of parsed.answers) {
-    const id = String(item?.id ?? "").trim();
-    const conciseAnswer = String(item?.conciseAnswer ?? "")
-      .trim()
-      .replace(/\s+/g, " ")
-      .slice(0, MAX_CONCISE_ANSWER_CHARS);
-
-    if (id && conciseAnswer) {
-      answersById.set(id, conciseAnswer);
-    }
-  }
-
-  return answersById;
+  return parseConciseAnswerResults(batch, extractOpenRouterChatText(body));
 }
 
 async function saveAnswers(pool, rows, force) {
@@ -164,13 +121,9 @@ async function main() {
     let saved = 0;
 
     for (const batch of chunks(questions, options.batchSize)) {
-      const answersById = await generateConciseAnswers(batch, apiKey);
-      const rows = batch
-        .map((row) => ({
-          ...row,
-          conciseAnswer: answersById.get(row.id) ?? "",
-        }))
-        .filter((row) => row.conciseAnswer);
+      const rows = (await generateConciseAnswers(batch, apiKey)).filter(
+        (row) => row.conciseAnswer,
+      );
 
       saved += await saveAnswers(pool, rows, options.force);
       logSavedProgress(saved, questions.length);

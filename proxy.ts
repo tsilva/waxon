@@ -20,10 +20,8 @@ const isPublicStaticPage = createRouteMatcher([
 
 const isPublicAppShellRoute = createRouteMatcher([
   "/library(.*)",
-  "/queue(.*)",
   "/review(.*)",
   "/stats(.*)",
-  "/tags(.*)",
 ]);
 
 const handleClerkMiddleware = clerkMiddleware(async (auth, request) => {

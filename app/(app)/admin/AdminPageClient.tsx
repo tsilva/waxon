@@ -17,7 +17,6 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import type { AuthenticatedUser } from "@/app/lib/auth";
 import type {
   LlmTraceCall,
   LlmTraceInteraction,
@@ -48,16 +47,13 @@ type LlmCall = LlmTraceCall;
 type TraceInteraction = LlmTraceInteraction;
 
 type AdminPageClientProps = {
-  currentUser: Pick<AuthenticatedUser, "displayName" | "email" | "avatarUrl">;
   initialInteractions: TraceInteraction[];
-  initialDueCount: number;
   initialViewState?: AdminCachedViewState | null;
   selectedTraceId?: string | null;
 };
 
 type AdminTracesResponse = {
   interactions: TraceInteraction[];
-  dueCount: number;
 };
 
 type PayloadViewMode = "json" | "markdown";
@@ -200,12 +196,9 @@ function writeAdminViewStateCookie(viewState: AdminCachedViewState) {
 
 function initialAdminViewState({
   initialInteractions,
-  initialDueCount,
   initialViewState,
 }: {
-  currentUserEmail: string;
   initialInteractions: TraceInteraction[];
-  initialDueCount: number;
   initialViewState?: AdminCachedViewState | null;
 }) {
   const serverInteractions =
@@ -214,7 +207,6 @@ function initialAdminViewState({
   if (initialViewState) {
     return {
       interactions: serverInteractions,
-      dueCount: initialDueCount,
       preset: initialViewState.preset,
       fromDate: initialViewState.fromDate,
       toDate: initialViewState.toDate,
@@ -232,7 +224,6 @@ function initialAdminViewState({
 
   return {
     interactions: serverInteractions,
-    dueCount: initialDueCount,
     preset: "7d" as DatePreset,
     fromDate: defaultRange.fromDate,
     toDate: defaultRange.toDate,
@@ -1024,21 +1015,17 @@ function AdminLoadingPlaceholders() {
 }
 
 export function AdminPageClient({
-  currentUser,
   initialInteractions,
-  initialDueCount,
   initialViewState,
   selectedTraceId = null,
 }: AdminPageClientProps) {
   const resolvedInitialViewState = useMemo(
     () =>
       initialAdminViewState({
-        currentUserEmail: currentUser.email,
         initialInteractions,
-        initialDueCount,
         initialViewState,
       }),
-    [currentUser.email, initialDueCount, initialInteractions, initialViewState],
+    [initialInteractions, initialViewState],
   );
   const [traceInteractions, setTraceInteractions] = useState(
     () => resolvedInitialViewState.interactions,

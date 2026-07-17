@@ -20,7 +20,6 @@ export async function getAdminPageShellProps() {
   );
 
   return {
-    currentUser,
     initialViewState,
   };
 }

@@ -4,6 +4,20 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   devIndicators: false,
   htmlLimitedBots: /.*/,
+  async redirects() {
+    return [
+      {
+        source: "/queue",
+        destination: "/library",
+        permanent: false,
+      },
+      {
+        source: "/tags",
+        destination: "/library",
+        permanent: false,
+      },
+    ];
+  },
   async headers() {
     return [
       {

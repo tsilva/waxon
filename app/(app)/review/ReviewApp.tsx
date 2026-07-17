@@ -38,9 +38,14 @@ import { formatDurationBadge } from "./reviewFormatting";
 import type {
   EvaluationPhase,
   EvaluationQueueItem,
+  EvaluationStatusResponse,
   QuestionAttempt,
+  QuestionAttemptsResponse,
+  ReviewActivity,
   ReviewHistoryEntry,
   ReviewQueueItem,
+  ReviewSessionQueueResponse,
+  SubmitAnswerResponse,
 } from "@/app/lib/reviewTypes";
 import type { UserProfile } from "@/app/lib/userProfile";
 import {
@@ -63,37 +68,6 @@ import {
   useRef,
   useState,
 } from "react";
-
-type SubmitAnswerResponse =
-  | {
-      ok: true;
-      evaluationId: string;
-      traceId: string;
-    }
-  | {
-      ok: false;
-      error: string;
-    };
-
-type QueueStatusResponse = {
-  queueRemaining: number;
-  nextScheduledDue?: number | null;
-  pendingEvaluations: number;
-  evaluations: EvaluationQueueItem[];
-  recentAttempts?: QuestionAttempt[];
-};
-
-type ReviewSessionQueueResponse = {
-  items: ReviewQueueItem[];
-};
-
-type EvaluationStatusResponse = {
-  evaluations: EvaluationQueueItem[];
-};
-
-type QuestionAttemptsResponse = {
-  attempts: QuestionAttempt[];
-};
 
 type ChatMessage =
   | {
@@ -1171,7 +1145,7 @@ export default function ReviewApp() {
         return;
       }
 
-      const data = (await response.json()) as QueueStatusResponse;
+      const data = (await response.json()) as ReviewActivity;
 
       setQueueRemaining(data.queueRemaining);
       setDueCount(data.queueRemaining);
