@@ -260,7 +260,6 @@ async function assignWithLlm(input: {
     body: {
       model,
       response_format: CONCEPT_TAGGING_RESPONSE_FORMAT,
-      temperature: 0.1,
       max_tokens: Math.min(2_400, 240 + input.questions.length * 120),
       messages: [
         {

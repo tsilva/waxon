@@ -241,7 +241,6 @@ export async function evaluateAnswer(
         },
         reasoning: getOpenRouterEvaluationReasoning(model),
         stream: true,
-        temperature: 0,
         max_tokens: 2_000,
       },
     });

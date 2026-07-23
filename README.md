@@ -49,13 +49,13 @@ Create `.env.local` with an OpenRouter-compatible API key:
 OPENROUTER_API_KEY=your-api-key
 
 # Optional model overrides
-LLM_MODEL=google/gemini-3.5-flash
-LLM_EVALUATION_MODEL=google/gemini-3.5-flash
+LLM_MODEL=google/gemini-3.6-flash
+LLM_EVALUATION_MODEL=google/gemini-3.6-flash
 ```
 
 `LLM_API_KEY` is accepted when `OPENROUTER_API_KEY` is not set. The model
 variables are optional; generic chat and answer evaluation currently
-default to `google/gemini-3.5-flash`.
+default to `google/gemini-3.6-flash`.
 
 Start a development server on an available port:
 
