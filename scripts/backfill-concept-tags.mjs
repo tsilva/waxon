@@ -242,7 +242,6 @@ async function generateConceptSlugs(batch, candidateSlugsByUser, apiKey) {
     body: {
       model: openRouterChatModel(),
       response_format: { type: "json_object" },
-      temperature: 0.1,
       max_tokens: Math.min(4096, 1_000 + batch.length * 350),
       messages: [
         {

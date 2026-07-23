@@ -288,7 +288,6 @@ async function summarizeGenerationContext(input: {
     },
     body: {
       model: input.model,
-      temperature: 0,
       max_tokens: 500,
       messages: [
         {
@@ -490,7 +489,6 @@ export async function POST(request: Request) {
     },
     body: {
       model,
-      temperature: 0.35,
       max_tokens: Math.min(4096, 180 * count + 700),
       response_format: { type: "json_object" },
       messages: [

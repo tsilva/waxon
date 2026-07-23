@@ -2,8 +2,8 @@ export const OPENROUTER_CHAT_URL =
   "https://openrouter.ai/api/v1/chat/completions";
 export const OPENROUTER_EMBEDDINGS_URL =
   "https://openrouter.ai/api/v1/embeddings";
-export const DEFAULT_OPENROUTER_CHAT_MODEL = "google/gemini-3.5-flash";
-export const DEFAULT_OPENROUTER_EVALUATION_MODEL = "google/gemini-3.5-flash";
+export const DEFAULT_OPENROUTER_CHAT_MODEL = "google/gemini-3.6-flash";
+export const DEFAULT_OPENROUTER_EVALUATION_MODEL = "google/gemini-3.6-flash";
 export const DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-2";
 
 export type OpenRouterEnvironment = Record<string, string | undefined>;

@@ -370,7 +370,6 @@ async function judgeDuplicateBatch(
       body: {
         model,
         response_format: { type: "json_object" },
-        temperature: 0,
         max_tokens: Math.min(4096, 220 * batch.length + 500),
         messages: [
           {
