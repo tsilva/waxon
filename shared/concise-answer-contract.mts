@@ -32,6 +32,7 @@ export function buildConciseAnswerRequest({
 }): {
   model: string;
   response_format: { type: "json_object" };
+  temperature: number;
   max_tokens: number;
   messages: Array<{
     role: "system" | "user";
@@ -41,6 +42,7 @@ export function buildConciseAnswerRequest({
   return {
     model,
     response_format: { type: "json_object" },
+    temperature: 0,
     max_tokens: Math.min(4096, 140 * questions.length + 400),
     messages: [
       {
