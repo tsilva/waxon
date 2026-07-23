@@ -51,6 +51,7 @@ export type OpenRouterChatRequest = {
   response_format?: unknown;
   reasoning?: unknown;
   reasoning_effort?: string;
+  temperature?: number;
   max_tokens?: number;
   user?: string;
   stream?: boolean;
