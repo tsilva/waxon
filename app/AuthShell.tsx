@@ -39,7 +39,6 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ClerkProvider
-      prefetchUI={false}
       signInForceRedirectUrl={postAuthReviewUrl}
       signUpForceRedirectUrl={postAuthReviewUrl}
     >

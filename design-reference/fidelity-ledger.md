@@ -11,6 +11,23 @@ Reference image: `design-reference/waxon-approved-ui.png`
 
 ## Remaining Comparison Notes
 
+- July 25, 2026 v2 overhaul: the approved warm editorial shell, typography,
+  spacing, subdued borders, and focused recall surface remain authoritative.
+  Library now uses a compact left-hand view rail for Inbox, lifecycle states,
+  Sources, Concepts, Health, and saved views; this intentionally replaces the
+  prior wall of generation and tag-management controls. Review remains a
+  single-question free-recall surface, with asynchronous feedback below the
+  current prompt. Stats now reports v2 learning evidence and coverage. The Add
+  knowledge dialog has five compact capture choices (Question, Topic, Paste,
+  URL, File); source cards reveal retry or cancel only when relevant, and Inbox
+  exposes a bounded batch-accept action for quality-checked Drafts.
+- July 25, 2026 verification status: typecheck, lint, unit tests, and production
+  compilation pass. A native-browser pass found a pre-existing Clerk UI-loading
+  failure in the running production bundle; `AuthShell` was corrected by
+  allowing Clerk UI components to load. The running server was not restarted,
+  so desktop, 390 px, keyboard, reduced-motion, and 200% zoom screenshot
+  comparison remain required on the next freshly built server before the
+  approved reference image can be refreshed.
 - The reference image is a composite showing both desktop and mobile states. The app implements the active viewport only, so desktop verification compares against the desktop panel in the composite and mobile verification compares against the mobile panel.
 - The live app question content comes from the local review queue, so screenshots may show different real questions across verification runs. The layout should still support long questions and formulas through the existing markdown/math renderer.
 - Mobile captures in a local admin-enabled session may include the `Admin` toolbar link. Non-admin sessions can compare layout, spacing, typography, and control treatment while ignoring that role-specific link.

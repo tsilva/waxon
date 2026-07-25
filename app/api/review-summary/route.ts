@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
-import { reviewSummaryForUser } from "@/app/lib/reviewQueue";
+import { getReviewSummary } from "@/app/lib/v2/service";
 
 export async function GET() {
   const user = await getCurrentUser();
 
-  return NextResponse.json(await reviewSummaryForUser(user.id));
+  return NextResponse.json(await getReviewSummary(user.id));
 }

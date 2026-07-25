@@ -8,7 +8,9 @@
   "scripts": {
     "dev": "node scripts/next-server.mjs dev",
     "build": "next build",
+    "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:reset": "node scripts/reset-v2.mjs",
     "db:studio": "drizzle-kit studio",
     "answers:backfill-concise": "node --experimental-strip-types scripts/backfill-concise-answers.mjs",
     "embeddings:backfill": "node --experimental-strip-types scripts/backfill-question-embeddings.mjs",
@@ -22,11 +24,14 @@
     "@clerk/nextjs": "7.4.2",
     "@neondatabase/serverless": "^1.1.0",
     "@sentry/nextjs": "^10.55.0",
+    "@vercel/blob": "2.6.1",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.16.0",
     "next": "^15.5.6",
+    "pdfjs-dist": "6.1.200",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "ts-fsrs": "5.4.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.3.5",
