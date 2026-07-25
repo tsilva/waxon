@@ -16,9 +16,10 @@ if (!connectionString) {
 }
 
 export default defineConfig({
-  schema: "./app/db/schema.ts",
-  out: "./drizzle",
+  schema: "./app/db/v2/schema.ts",
+  out: "./drizzle-v2",
   dialect: "postgresql",
+  schemaFilter: ["waxon_v2"],
   dbCredentials: {
     url: connectionString,
   },

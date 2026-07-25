@@ -1,0 +1,1 @@
+ALTER TYPE "waxon_v2"."retry_status" ADD VALUE 'cancelled' BEFORE 'waived';

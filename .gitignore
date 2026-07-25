@@ -19,3 +19,4 @@ data/questions.sqlite-*
 
 # clerk configuration (can include secrets)
 /.clerk/
+.env*

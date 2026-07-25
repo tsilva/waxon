@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/app/db/client";
-import { users } from "@/app/db/schema";
+import { getV2Db } from "@/app/db/v2/client";
+import { users } from "@/app/db/v2/schema";
 import { getCurrentUser } from "@/app/lib/auth";
 import type { UserProfile } from "@/app/lib/userProfile";
 
@@ -61,11 +61,12 @@ export async function PATCH(request: NextRequest) {
   }
 
   const currentUser = await getCurrentUser();
+  const db = getV2Db();
   const [row] = await db
     .update(users)
     .set({
       avatarUrl,
-      updatedAt: Date.now(),
+      updatedAt: new Date(),
     })
     .where(eq(users.id, currentUser.id))
     .returning({

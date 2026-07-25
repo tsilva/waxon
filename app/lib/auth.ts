@@ -1,14 +1,12 @@
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import * as Sentry from "@sentry/nextjs";
 import { eq } from "drizzle-orm";
-import { db } from "@/app/db/client";
-import { authAccounts, users } from "@/app/db/schema";
+import { getV2Db } from "@/app/db/v2/client";
+import { learnerSettings, users } from "@/app/db/v2/schema";
 import { isLocalTestAuthEnabled, localTestUser } from "@/app/lib/localTestAuth";
 import type { UserProfile } from "@/app/lib/userProfile";
 
 export type AuthenticatedUser = UserProfile;
-
-const CLERK_PROVIDER = "clerk";
 
 function normalizeDisplayName(input: {
   fullName: string | null;
@@ -50,8 +48,10 @@ function setTraceIdentity(input: {
 }
 
 export async function getCurrentUser(): Promise<AuthenticatedUser> {
+  const db = getV2Db();
+
   if (isLocalTestAuthEnabled()) {
-    const now = Date.now();
+    const now = new Date();
     const [existingLocalUser] = await db
       .select({
         id: users.id,
@@ -102,6 +102,11 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
       throw new Error("Could not load current user.");
     }
 
+    await db
+      .insert(learnerSettings)
+      .values({ userId: row.id })
+      .onConflictDoNothing({ target: learnerSettings.userId });
+
     return row;
   }
 
@@ -120,7 +125,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
     username: clerkUser.username,
     email,
   });
-  const now = Date.now();
+  const now = new Date();
 
   const userId = appUserIdForClerkUser(clerkUserId);
   setTraceIdentity({ userId, email, displayName });
@@ -153,28 +158,10 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
     throw new Error("Could not load current user.");
   }
 
-  try {
-    await db
-      .insert(authAccounts)
-      .values({
-        userId,
-        provider: CLERK_PROVIDER,
-        providerAccountId: clerkUserId,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [authAccounts.provider, authAccounts.providerAccountId],
-        set: {
-          userId,
-          updatedAt: now,
-        },
-      });
-  } catch (error) {
-    console.info("[waxon] auth account sync skipped", {
-      error: error instanceof Error ? error.message : "unknown error",
-    });
-  }
+  await db
+    .insert(learnerSettings)
+    .values({ userId })
+    .onConflictDoNothing({ target: learnerSettings.userId });
 
   return row;
 }
