@@ -31,10 +31,12 @@ import {
 } from "@/app/db/v2/schema";
 import { analyzeSourceMaterial } from "./model";
 import { claimV2Job } from "./jobs";
+import { alignEvidenceQuote } from "./evidenceQuote";
 import {
   assessQuestionQuality,
   recallTargetKey,
 } from "./questionQuality";
+import { extractPdfText } from "./pdf";
 
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 const MAX_MODEL_TEXT_CHARS = 250_000;
@@ -196,29 +198,6 @@ async function safeFetchUrl(value: string): Promise<Uint8Array> {
   throw new Error("The source URL redirected too many times.");
 }
 
-async function pdfText(bytes: Uint8Array): Promise<string> {
-  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  const document = await pdfjs.getDocument({
-    data: bytes,
-    useSystemFonts: true,
-  }).promise;
-  const pages: string[] = [];
-
-  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-    const page = await document.getPage(pageNumber);
-    const content = await page.getTextContent();
-    pages.push(
-      content.items
-        .map((item) =>
-          "str" in item && typeof item.str === "string" ? item.str : "",
-        )
-        .join(" "),
-    );
-  }
-
-  return pages.join("\n\n");
-}
-
 export async function createSource(input: {
   userId: string;
   kind: "paste" | "url" | "pdf" | "text" | "topic";
@@ -361,8 +340,97 @@ export async function createGroundedTopicSource(input: {
     [input.userId, query],
   );
   if (result.rows.length === 0) {
+    const candidates = await getV2Client().pool.query<{
+      title: string;
+      status: typeof sources.$inferSelect.status;
+      error: string | null;
+      body_text: string | null;
+    }>(
+      `SELECT
+         s.title,
+         s.status,
+         s.error,
+         left(COALESCE(sv.body_text, s.raw_text), 120000) AS body_text
+       FROM waxon_v2.sources s
+       LEFT JOIN LATERAL (
+         SELECT source_version.body_text
+           FROM waxon_v2.source_versions source_version
+          WHERE source_version.user_id = s.user_id
+            AND source_version.source_id = s.id
+          ORDER BY source_version.version DESC
+          LIMIT 1
+       ) sv ON true
+      WHERE s.user_id = $1
+        AND s.kind <> 'topic'
+        AND s.status NOT IN ('erasing', 'erased')
+        AND (
+          s.title ILIKE '%' || $2 || '%'
+          OR COALESCE(sv.body_text, s.raw_text, '') ILIKE '%' || $2 || '%'
+          OR (
+            COALESCE(sv.body_text, s.raw_text) IS NOT NULL
+            AND to_tsvector(
+              'simple',
+              COALESCE(sv.body_text, s.raw_text)
+            ) @@ websearch_to_tsquery('simple', $2)
+          )
+        )
+      ORDER BY
+        CASE s.status
+          WHEN 'ready' THEN 0
+          WHEN 'processing' THEN 1
+          WHEN 'captured' THEN 2
+          WHEN 'failed' THEN 3
+          ELSE 4
+        END,
+        s.updated_at DESC
+      LIMIT 5`,
+      [input.userId, query],
+    );
+    const ready = candidates.rows.filter(
+      (candidate) => candidate.status === "ready" && candidate.body_text,
+    );
+    if (ready.length > 0) {
+      const text = ready
+        .map(
+          (candidate) =>
+            `[Source: ${candidate.title}]\n${candidate.body_text}`,
+        )
+        .join("\n\n")
+        .slice(0, MAX_MODEL_TEXT_CHARS);
+      return await createSource({
+        userId: input.userId,
+        kind: "topic",
+        title: `Topic: ${query}`,
+        rawText: text,
+        contentChecksum: checksum(`topic:${query}:${text}`),
+      });
+    }
+    const processing = candidates.rows.find((candidate) =>
+      ["captured", "processing"].includes(candidate.status),
+    );
+    if (processing) {
+      throw new Error(
+        `“${processing.title}” is still processing. Wait for it to reach Ready, then expand this topic.`,
+      );
+    }
+    const failed = candidates.rows.find(
+      (candidate) => candidate.status === "failed",
+    );
+    if (failed) {
+      throw new Error(
+        `“${failed.title}” exists, but its processing failed. Open Sources and choose Retry processing.`,
+      );
+    }
+    const disabled = candidates.rows.find(
+      (candidate) => candidate.status === "disabled",
+    );
+    if (disabled) {
+      throw new Error(
+        `“${disabled.title}” is disabled. Enable it in Sources before expanding this topic.`,
+      );
+    }
     throw new Error(
-      "Waxon could not find stored evidence for that topic. Add a source first.",
+      "Waxon could not find a saved source matching that topic. Add a source first.",
     );
   }
   const text = result.rows
@@ -576,7 +644,7 @@ async function loadSourceText(source: typeof sources.$inferSelect): Promise<stri
     throw new Error("The source is larger than 20 MB.");
   }
   return source.kind === "pdf"
-    ? await pdfText(bytes)
+    ? await extractPdfText(bytes)
     : new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
@@ -694,14 +762,18 @@ export async function runSourceJob(jobId: string): Promise<void> {
       }
 
       for (const target of analysis.targets) {
-        const localQuoteOffset = analysisText.indexOf(target.evidenceQuote);
-        const quoteOffset =
-          localQuoteOffset >= 0 ? analysisOffset + localQuoteOffset : -1;
+        const evidenceMatch = alignEvidenceQuote(
+          analysisText,
+          target.evidenceQuote,
+        );
         const evidenceQuote =
-          quoteOffset >= 0
-            ? target.evidenceQuote
-            : target.evidenceQuote.slice(0, 16_000);
-        const startOffset = Math.max(0, quoteOffset);
+          evidenceMatch?.quote ?? target.evidenceQuote.slice(0, 16_000);
+        const startOffset = evidenceMatch
+          ? analysisOffset + evidenceMatch.startOffset
+          : 0;
+        const endOffset = evidenceMatch
+          ? analysisOffset + evidenceMatch.endOffset
+          : evidenceQuote.length;
         const [evidence] = await tx
           .insert(evidenceSpans)
           .values({
@@ -709,15 +781,15 @@ export async function runSourceJob(jobId: string): Promise<void> {
             sourceVersionId: version.id,
             section: target.type,
             startOffset,
-            endOffset: startOffset + evidenceQuote.length,
+            endOffset,
             quote: evidenceQuote,
           })
           .returning({ id: evidenceSpans.id });
         const canDraft = Boolean(
           target.question &&
-            target.answer &&
-            target.answerMode &&
-            quoteOffset >= 0,
+          target.answer &&
+          target.answerMode &&
+          evidenceMatch,
         );
         const [coverage] = await tx
           .insert(coverageTargets)

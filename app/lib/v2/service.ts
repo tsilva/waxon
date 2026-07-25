@@ -501,7 +501,13 @@ export async function activateQuestion(input: {
           AND q.id = qv.question_id
         WHERE q.user_id = $2
           AND q.id <> $3
-          AND q.lifecycle IN ('new', 'learning', 'review')
+          AND (
+            q.lifecycle IN ('new', 'learning', 'review')
+            OR (
+              q.lifecycle = 'draft'
+              AND qv.quality_decision = 'distinct'
+            )
+          )
         ORDER BY qe.embedding <=> $1::vector
         LIMIT 1`,
       [vectorLiteral(embedding), input.userId, input.questionId],

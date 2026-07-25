@@ -14,8 +14,38 @@ import {
   MINIMUM_SOLO_RETRY_DELAY_MS,
   retryEarliestAt,
 } from "../app/lib/v2/retryPolicy.ts";
+import { extractPdfText } from "../app/lib/v2/pdf.ts";
+import { normalizeGeneratedAnswerMode } from "../app/lib/v2/generatedAnswerMode.ts";
+import { alignEvidenceQuote } from "../app/lib/v2/evidenceQuote.ts";
 
 const now = new Date("2026-07-25T10:00:00.000Z");
+
+function minimalTextPdf(text: string): Uint8Array {
+  const escaped = text.replace(/[()\\]/gu, (value) => `\\${value}`);
+  const stream = `BT /F1 18 Tf 50 100 Td (${escaped}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf, "ascii"));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(pdf, "ascii");
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  for (const offset of offsets.slice(1)) {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\n`;
+  pdf += `startxref\n${xrefOffset}\n%%EOF\n`;
+  return new Uint8Array(Buffer.from(pdf, "ascii"));
+}
 
 function candidate(
   overrides: Partial<PlanCandidate> & Pick<PlanCandidate, "questionId">,
@@ -216,5 +246,47 @@ test("v2 FSRS lengthens successful recall and makes failure conservative", () =>
       at: failed.dueAt,
     }) <= 1,
     true,
+  );
+});
+
+test("v2 PDF extraction installs Node canvas globals and reads text", async () => {
+  const text = await extractPdfText(
+    minimalTextPdf("Proximal Policy Optimization"),
+  );
+
+  assert.match(text, /Proximal Policy Optimization/u);
+  assert.equal(typeof globalThis.DOMMatrix, "function");
+});
+
+test("v2 source generation accepts common semantic answer-mode aliases", () => {
+  assert.equal(normalizeGeneratedAnswerMode("semantic"), "semantic");
+  assert.equal(normalizeGeneratedAnswerMode("text"), "semantic");
+  assert.equal(normalizeGeneratedAnswerMode("short"), "semantic");
+  assert.equal(normalizeGeneratedAnswerMode("long"), "semantic");
+  assert.equal(normalizeGeneratedAnswerMode("free_text"), "semantic");
+  assert.equal(normalizeGeneratedAnswerMode("multi-point"), "rubric");
+  assert.equal(normalizeGeneratedAnswerMode("unsupported-mode"), null);
+});
+
+test("v2 evidence alignment maps PDF hyphenation back to an exact quote", () => {
+  const source =
+    "Methods which al- ternate between sampling data and optimizing a surrogate objective.";
+  const aligned = alignEvidenceQuote(
+    source,
+    "which alternate between sampling data and optimizing a surrogate objective",
+  );
+
+  assert.deepEqual(aligned, {
+    quote:
+      "which al- ternate between sampling data and optimizing a surrogate objective",
+    startOffset: 8,
+    endOffset: 84,
+  });
+  assert.equal(
+    alignEvidenceQuote(
+      source,
+      "PPO guarantees monotonic improvement for every optimization step.",
+    ),
+    null,
   );
 });
