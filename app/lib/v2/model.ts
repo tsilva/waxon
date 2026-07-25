@@ -9,6 +9,7 @@ import {
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
 } from "@/shared/openrouter-config.mts";
 import { extractJsonObject } from "@/shared/json-object.mts";
+import { normalizeGeneratedAnswerMode } from "./generatedAnswerMode";
 import type { V2AnswerMode, V2Grade } from "./types";
 
 async function postOpenRouter<T>(url: string, body: unknown): Promise<T> {
@@ -223,7 +224,7 @@ export async function analyzeSourceMaterial(input: {
       {
         role: "system",
         content:
-          "Turn source material into an auditable coverage manifest and high-quality active-recall drafts. Return JSON only: {targets:[{type,statement,evidenceQuote,question,answer,displayAnswer,answerMode,concepts}],unresolved:[string]}. Targets must be atomic claims, distinctions, formulas, procedures, derivation steps, prerequisites, or failure modes. evidenceQuote must be an exact substring of the source. Questions must be concise, atomic, self-contained, recall-oriented, precise, and answerable only from that evidence. Do not use outside knowledge. Set question fields to null when evidence is insufficient or the target should not become a card.",
+          "Turn source material into an auditable coverage manifest and high-quality active-recall drafts. Return JSON only: {targets:[{type,statement,evidenceQuote,question,answer,displayAnswer,answerMode,concepts}],unresolved:[string]}. answerMode must be exactly one of semantic, rubric, or exact. Use semantic for ordinary short- or long-form explanatory answers, rubric for answers with multiple independently required points, and exact only when wording or notation must match exactly. Targets must be atomic claims, distinctions, formulas, procedures, derivation steps, prerequisites, or failure modes. evidenceQuote must be an exact substring of the source. Questions must be concise, atomic, self-contained, recall-oriented, precise, and answerable only from that evidence. Do not use outside knowledge. Set question fields to null when evidence is insufficient or the target should not become a card.",
       },
       {
         role: "user",
@@ -256,7 +257,6 @@ export async function analyzeSourceMaterial(input: {
           return [];
         }
 
-        const mode = item.answerMode;
         return [
           {
             type,
@@ -275,10 +275,7 @@ export async function analyzeSourceMaterial(input: {
               item.displayAnswer.trim()
                 ? item.displayAnswer.trim().slice(0, 8_000)
                 : null,
-            answerMode:
-              mode === "exact" || mode === "semantic" || mode === "rubric"
-                ? mode
-                : null,
+            answerMode: normalizeGeneratedAnswerMode(item.answerMode),
             concepts: asStringArray(item.concepts).slice(0, 8),
           } satisfies GeneratedCoverageTarget,
         ];
