@@ -14,7 +14,6 @@ the next recall attempt from past performance.
   learner's performance.
 - **Library** provides the unified question bank, with source and concept
   metadata, concept-tag organization, and bank-management tools.
-- **Stats** summarizes review volume, scheduling, and answer quality over time.
 - **Admin** exposes model traces, latency, token use, and cost for operators.
 
 ## Install
@@ -23,32 +22,27 @@ the next recall attempt from past performance.
 git clone https://github.com/tsilva/waxon.git
 cd waxon
 pnpm install
+keyenv doctor
 ```
 
-Create `.env` with the pooled Neon Postgres connection used by the app:
+Private values declared in `.keyenv.toml`, including the pooled Neon connection,
+OpenRouter key, Clerk secret, Blob token, and Sentry token, live in macOS
+Keychain. Launch commands through `keyenv run -- ...`; Node reads the injected
+values normally from `process.env`.
 
-```bash
-DATABASE_URL=your-pooled-neon-connection-string
-```
-
-For migrations, add Neon's direct connection string too:
-
-```bash
-DATABASE_URL_UNPOOLED=your-direct-neon-connection-string
-```
+If migrations require a separate `DATABASE_URL_UNPOOLED`, declare it in
+`.keyenv.toml` and store it with `keyenv set DATABASE_URL_UNPOOLED`; do not put
+it in `.env`.
 
 Apply migrations before running Waxon against a new database:
 
 ```bash
-pnpm db:migrate
+keyenv run -- pnpm db:migrate
 ```
 
-Create `.env.local` with an OpenRouter-compatible API key:
+Non-secret model overrides may remain in `.env.local`:
 
 ```bash
-OPENROUTER_API_KEY=your-api-key
-
-# Optional model overrides
 LLM_MODEL=google/gemini-3.6-flash
 LLM_EVALUATION_MODEL=google/gemini-3.6-flash
 ```
@@ -60,19 +54,25 @@ default to `google/gemini-3.6-flash`.
 Start a development server on an available port:
 
 ```bash
-pnpm dev --port auto
+keyenv run -- pnpm dev --port auto
+```
+
+For linked Vercel development environments, use no-file injection:
+
+```bash
+vercel env run -e development -- keyenv run -- pnpm dev --port auto
 ```
 
 Open the URL printed by the command.
 
 ## Authentication
 
-Production sign-in and sign-up use Clerk. Create a Clerk application and add
-its keys to `.env.local`:
+Production sign-in and sign-up use Clerk. Keep only its public client settings
+in `.env.local`; `CLERK_SECRET_KEY` is supplied by `keyenv` locally and by the
+deployment provider in hosted environments:
 
 ```bash
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your-clerk-publishable-key
-CLERK_SECRET_KEY=your-clerk-secret-key
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 ```

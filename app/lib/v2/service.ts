@@ -35,7 +35,6 @@ import {
   retryObligations,
   reviewSessionItems,
   reviewSessions,
-  savedViews,
   sourceVersions,
   sources,
   targetQuestions,
@@ -70,7 +69,6 @@ import {
   evaluateRecall,
   generateRepairQuestion,
 } from "./model";
-import { runSourceJob } from "./sources";
 import { claimV2Job } from "./jobs";
 import { retryEarliestAt } from "./retryPolicy";
 
@@ -828,6 +826,11 @@ export async function listLibrary(input: {
     ignored: string;
     unresolved: string;
     has_more_analysis: boolean;
+    run_id: string | null;
+    run_status: NonNullable<V2Source["run"]>["status"] | null;
+    run_stage: string | null;
+    run_progress: number | null;
+    residual_count: number | null;
   }>(
     `SELECT s.id, s.kind, s.status, s.title, s.original_url,
             s.processing_progress, s.error, s.created_at,
@@ -837,18 +840,130 @@ export async function listLibrary(input: {
             count(*) FILTER (WHERE ct.status = 'ignored')::text AS ignored,
             count(*) FILTER (WHERE ct.status = 'unresolved')::text AS unresolved,
             COALESCE(
-              bool_or(ct.target_type = 'analysis-pending'),
+              bool_or(ct.target_type = 'analysis-pending')
+                OR COALESCE(jsonb_array_length(gr.residuals), 0) > 0,
               false
-            ) AS has_more_analysis
+            ) AS has_more_analysis,
+            gr.id AS run_id,
+            gr.status AS run_status,
+            gr.stage AS run_stage,
+            gr.progress AS run_progress,
+            COALESCE(jsonb_array_length(gr.residuals), 0)::int AS residual_count
        FROM waxon_v2.sources s
+       LEFT JOIN waxon_v2.generation_runs gr
+         ON gr.user_id = s.user_id AND gr.id = s.active_run_id
        LEFT JOIN waxon_v2.coverage_targets ct
          ON ct.user_id = s.user_id AND ct.source_id = s.id
       WHERE s.user_id = $1
-      GROUP BY s.id
+      GROUP BY s.id, gr.id
       ORDER BY s.created_at DESC
       LIMIT 100`,
     [input.userId],
   );
+  const masteryRows = await pool.query<{
+    source_id: string;
+    target_id: string;
+    target_status: string;
+    question_id: string | null;
+    lifecycle: V2Lifecycle | null;
+    latest_grade: V2Grade | null;
+    due_at: Date | null;
+    last_review_at: Date | null;
+    stability: number | string | null;
+    difficulty: number | string | null;
+    elapsed_days: number | null;
+    scheduled_days: number | null;
+    reps: number | null;
+    lapses: number | null;
+    memory_state: number | null;
+    learning_steps: number | null;
+  }>(
+    `SELECT ct.source_id,
+            ct.id AS target_id,
+            ct.status AS target_status,
+            q.id AS question_id,
+            q.lifecycle,
+            latest_grade.value AS latest_grade,
+            ms.due_at,
+            ms.last_review_at,
+            ms.stability,
+            ms.difficulty,
+            ms.elapsed_days,
+            ms.scheduled_days,
+            ms.reps,
+            ms.lapses,
+            ms.state AS memory_state,
+            ms.learning_steps
+       FROM waxon_v2.coverage_targets ct
+       LEFT JOIN waxon_v2.target_questions tq
+         ON tq.user_id = ct.user_id AND tq.target_id = ct.id
+       LEFT JOIN waxon_v2.questions q
+         ON q.user_id = tq.user_id AND q.id = tq.question_id
+       LEFT JOIN waxon_v2.memory_states ms
+         ON ms.user_id = q.user_id AND ms.question_id = q.id
+       LEFT JOIN LATERAL (
+         SELECT ge.grade AS value
+           FROM waxon_v2.answer_submissions a
+           JOIN waxon_v2.grade_events ge
+             ON ge.user_id = a.user_id AND ge.submission_id = a.id
+          WHERE a.user_id = q.user_id AND a.question_id = q.id
+          ORDER BY ge.created_at DESC
+          LIMIT 1
+       ) latest_grade ON true
+      WHERE ct.user_id = $1 AND ct.requirement = 'required'`,
+    [input.userId],
+  );
+  const masteryBySource = new Map<
+    string,
+    Map<string, { mastered: boolean; attempted: boolean; covered: boolean }>
+  >();
+  for (const row of masteryRows.rows) {
+    let sourceTargets = masteryBySource.get(row.source_id);
+    if (!sourceTargets) {
+      sourceTargets = new Map();
+      masteryBySource.set(row.source_id, sourceTargets);
+    }
+    const state = sourceTargets.get(row.target_id) ?? {
+      mastered: false,
+      attempted: false,
+      covered: row.target_status === "covered",
+    };
+    state.covered ||= row.target_status === "covered";
+    state.attempted ||= row.latest_grade !== null;
+    if (
+      row.lifecycle &&
+      ACTIVE_LIFECYCLES.includes(row.lifecycle) &&
+      (row.latest_grade === "good" || row.latest_grade === "easy") &&
+      row.due_at &&
+      row.stability !== null &&
+      row.difficulty !== null &&
+      row.elapsed_days !== null &&
+      row.scheduled_days !== null &&
+      row.reps !== null &&
+      row.lapses !== null &&
+      row.memory_state !== null &&
+      row.learning_steps !== null
+    ) {
+      const retrievability = memoryRetrievability({
+        memory: {
+          dueAt: row.due_at,
+          lastReviewAt: row.last_review_at,
+          stability: Number(row.stability),
+          difficulty: Number(row.difficulty),
+          elapsedDays: row.elapsed_days,
+          scheduledDays: row.scheduled_days,
+          reps: row.reps,
+          lapses: row.lapses,
+          state: row.memory_state,
+          learningSteps: row.learning_steps,
+        },
+        desiredRetention: settings.desiredRetention,
+        at: now,
+      });
+      state.mastered ||= retrievability >= settings.desiredRetention;
+    }
+    sourceTargets.set(row.target_id, state);
+  }
   const conceptRows = await pool.query<{
     id: string;
     name: string;
@@ -865,47 +980,79 @@ export async function listLibrary(input: {
       LIMIT 200`,
     [input.userId],
   );
-  const viewRows = await getV2Db()
-    .select({
-      id: savedViews.id,
-      name: savedViews.name,
-      query: savedViews.query,
-    })
-    .from(savedViews)
-    .where(eq(savedViews.userId, input.userId))
-    .orderBy(asc(savedViews.name))
-    .limit(100);
   const [health] = await pool.query<{ count: string }>(
-    `SELECT (
-       (SELECT count(*) FROM waxon_v2.questions
-         WHERE user_id = $1 AND lifecycle IN ('draft', 'suspended'))
-       +
-       (SELECT count(*) FROM waxon_v2.coverage_targets
-         WHERE user_id = $1 AND status IN ('weak', 'missing', 'unresolved'))
-     )::text AS count`,
+    `SELECT count(*)::text AS count
+       FROM waxon_v2.questions q
+       JOIN waxon_v2.question_versions qv
+         ON qv.user_id = q.user_id
+        AND qv.question_id = q.id
+        AND qv.is_current = true
+      WHERE q.user_id = $1
+        AND (q.lifecycle IN ('draft', 'suspended')
+          OR qv.quality_decision IN ('uncertain', 'duplicate', 'rejected'))`,
     [input.userId],
   ).then((result) => result.rows);
 
   return {
     questions: questionsOut,
-    sources: sourceRows.rows.map((row) => ({
-      id: row.id,
-      kind: row.kind,
-      status: row.status,
-      title: row.title,
-      originalUrl: row.original_url,
-      progress: row.processing_progress,
-      error: row.error,
-      hasMoreAnalysis: row.has_more_analysis,
-      coverage: {
-        covered: Number(row.covered),
-        weak: Number(row.weak),
-        missing: Number(row.missing),
-        ignored: Number(row.ignored),
-        unresolved: Number(row.unresolved),
-      },
-      createdAt: row.created_at.toISOString(),
-    })),
+    sources: sourceRows.rows.map((row) => {
+      const targets = [...(masteryBySource.get(row.id)?.values() ?? [])];
+      const masteredTargets = targets.filter((target) => target.mastered).length;
+      const requiredTargets = targets.length;
+      const currentlyMastered =
+        requiredTargets > 0 &&
+        masteredTargets === requiredTargets &&
+        targets.every((target) => target.covered);
+      const attempted = targets.some((target) => target.attempted);
+      const runStatus = row.run_status;
+      const questionSetStatus =
+        runStatus === "ready"
+          ? "ready"
+          : runStatus === "needs_attention" ||
+              runStatus === "failed" ||
+              runStatus === "cancelled"
+            ? "needs_attention"
+            : row.status === "ready"
+              ? "ready"
+              : "building";
+      return {
+        id: row.id,
+        kind: row.kind,
+        status: row.status,
+        title: row.title,
+        originalUrl: row.original_url,
+        progress: row.run_progress ?? row.processing_progress,
+        error: row.error,
+        hasMoreAnalysis: row.has_more_analysis,
+        questionSetStatus,
+        mastery: {
+          status: currentlyMastered
+            ? "currently_mastered"
+            : attempted
+              ? "in_progress"
+              : "not_started",
+          masteredTargets,
+          requiredTargets,
+        },
+        run: row.run_id && runStatus
+          ? {
+              id: row.run_id,
+              status: runStatus,
+              stage: row.run_stage ?? "Preparing",
+              progress: row.run_progress ?? 0,
+              residualCount: row.residual_count ?? 0,
+            }
+          : null,
+        coverage: {
+          covered: Number(row.covered),
+          weak: Number(row.weak),
+          missing: Number(row.missing),
+          ignored: Number(row.ignored),
+          unresolved: Number(row.unresolved),
+        },
+        createdAt: row.created_at.toISOString(),
+      } satisfies V2Source;
+    }),
     counts,
     concepts: conceptRows.rows.map((row) => ({
       id: row.id,
@@ -913,83 +1060,9 @@ export async function listLibrary(input: {
       slug: row.slug,
       count: Number(row.count),
     })),
-    savedViews: viewRows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      query: {
-        search:
-          typeof row.query.search === "string" ? row.query.search : undefined,
-        lifecycle:
-          row.query.lifecycle === "all" ||
-          (typeof row.query.lifecycle === "string" &&
-            [
-              "draft",
-              "new",
-              "learning",
-              "review",
-              "paused",
-              "archived",
-              "suspended",
-              "trash",
-              "superseded",
-            ].includes(row.query.lifecycle))
-            ? (row.query.lifecycle as V2Lifecycle | "all")
-            : undefined,
-      },
-    })),
     waitingNew: counts.new,
     healthCount: Number(health?.count ?? 0),
   };
-}
-
-export async function createSavedView(input: {
-  userId: string;
-  name: string;
-  search?: string;
-  lifecycle?: V2Lifecycle | "all";
-}) {
-  const name = input.name.trim().slice(0, 120);
-  if (!name) {
-    throw new Error("A saved view name is required.");
-  }
-  const db = getV2Db();
-  const [view] = await db
-    .insert(savedViews)
-    .values({
-      userId: input.userId,
-      name,
-      query: {
-        search: input.search?.trim().slice(0, 500) || undefined,
-        lifecycle: input.lifecycle ?? "all",
-      },
-    })
-    .onConflictDoUpdate({
-      target: [savedViews.userId, savedViews.name],
-      set: {
-        query: {
-          search: input.search?.trim().slice(0, 500) || undefined,
-          lifecycle: input.lifecycle ?? "all",
-        },
-        updatedAt: new Date(),
-      },
-    })
-    .returning();
-  return view;
-}
-
-export async function deleteSavedView(input: {
-  userId: string;
-  viewId: string;
-}): Promise<void> {
-  const db = getV2Db();
-  await db
-    .delete(savedViews)
-    .where(
-      and(
-        eq(savedViews.userId, input.userId),
-        eq(savedViews.id, input.viewId),
-      ),
-    );
 }
 
 async function planCandidates(userId: string): Promise<PlanCandidate[]> {
@@ -1475,79 +1548,6 @@ export async function getReviewSummary(
   return {
     queueRemaining: Number(row?.due_count ?? 0),
     nextScheduledDue: row?.next_due?.getTime() ?? null,
-  };
-}
-
-export async function getLearningStats(userId: string) {
-  const pool = getV2Client().pool;
-  const [summary, daily] = await Promise.all([
-    pool.query<{
-      active_count: string;
-      new_count: string;
-      draft_count: string;
-      due_count: string;
-      review_count: string;
-      success_count: string;
-      override_count: string;
-      covered_count: string;
-      unresolved_count: string;
-    }>(
-      `SELECT
-        (SELECT count(*) FROM waxon_v2.questions
-          WHERE user_id = $1 AND lifecycle IN ('learning','review'))::text AS active_count,
-        (SELECT count(*) FROM waxon_v2.questions
-          WHERE user_id = $1 AND lifecycle = 'new')::text AS new_count,
-        (SELECT count(*) FROM waxon_v2.questions
-          WHERE user_id = $1 AND lifecycle = 'draft')::text AS draft_count,
-        (SELECT count(*) FROM waxon_v2.memory_states ms
-          JOIN waxon_v2.questions q ON q.user_id = ms.user_id AND q.id = ms.question_id
-          WHERE ms.user_id = $1 AND q.lifecycle IN ('learning','review')
-            AND ms.due_at <= now())::text AS due_count,
-        (SELECT count(*) FROM waxon_v2.grade_events
-          WHERE user_id = $1 AND created_at >= now() - interval '14 days')::text AS review_count,
-        (SELECT count(*) FROM waxon_v2.grade_events
-          WHERE user_id = $1 AND created_at >= now() - interval '14 days'
-            AND grade IN ('good','easy'))::text AS success_count,
-        (SELECT count(*) FROM waxon_v2.grade_events
-          WHERE user_id = $1 AND created_at >= now() - interval '14 days'
-            AND origin = 'correction')::text AS override_count,
-        (SELECT count(*) FROM waxon_v2.coverage_targets
-          WHERE user_id = $1 AND status = 'covered')::text AS covered_count,
-        (SELECT count(*) FROM waxon_v2.coverage_targets
-          WHERE user_id = $1 AND status IN ('weak','missing','unresolved'))::text AS unresolved_count`,
-      [userId],
-    ),
-    pool.query<{ day: Date; reviews: string; successful: string }>(
-      `SELECT date_trunc('day', created_at) AS day,
-              count(*)::text AS reviews,
-              count(*) FILTER (WHERE grade IN ('good','easy'))::text AS successful
-         FROM waxon_v2.grade_events
-        WHERE user_id = $1
-          AND created_at >= now() - interval '14 days'
-        GROUP BY 1
-        ORDER BY 1`,
-      [userId],
-    ),
-  ]);
-  const row = summary.rows[0];
-  const reviewCount = Number(row?.review_count ?? 0);
-  const successCount = Number(row?.success_count ?? 0);
-
-  return {
-    activeCount: Number(row?.active_count ?? 0),
-    waitingNew: Number(row?.new_count ?? 0),
-    draftCount: Number(row?.draft_count ?? 0),
-    dueCount: Number(row?.due_count ?? 0),
-    reviewsLast14Days: reviewCount,
-    observedRecall: reviewCount > 0 ? successCount / reviewCount : null,
-    gradeOverrides: Number(row?.override_count ?? 0),
-    coveredTargets: Number(row?.covered_count ?? 0),
-    unresolvedTargets: Number(row?.unresolved_count ?? 0),
-    daily: daily.rows.map((item) => ({
-      day: item.day.toISOString(),
-      reviews: Number(item.reviews),
-      successful: Number(item.successful),
-    })),
   };
 }
 
@@ -3462,8 +3462,6 @@ export async function runPendingJobs(input: {
         await runActivationJob(job.id);
       } else if (job.type === "evaluate_submission") {
         await runEvaluationJob(job.id);
-      } else if (job.type === "process_source") {
-        await runSourceJob(job.id);
       } else if (job.type === "repair_gap") {
         await runRepairJob(job.id);
       } else {

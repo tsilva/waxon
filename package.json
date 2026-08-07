@@ -32,7 +32,8 @@
     "pdfjs-dist": "6.1.200",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "ts-fsrs": "5.4.1"
+    "ts-fsrs": "5.4.1",
+    "workflow": "4.7.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.3.5",

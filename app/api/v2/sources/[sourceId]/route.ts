@@ -1,16 +1,21 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { readJsonBodyWithLimit } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
 import { isRecord, v2Error } from "@/app/lib/v2/http";
 import {
-  continueSourceAnalysis,
   eraseSource,
   getSourceManifest,
-  mutateSourceProcessing,
   setSourceDisabled,
   sourceErasePreview,
 } from "@/app/lib/v2/sources";
-import { runPendingJobs } from "@/app/lib/v2/service";
+import {
+  requestSourceGenerationCancellation,
+  retrySourceGeneration,
+} from "@/app/lib/v2/sourceGeneration";
+import {
+  cancelSourceGenerationWorkflow,
+  startSourceGeneration,
+} from "@/app/lib/v2/sourceGenerationRuntime";
 
 export async function GET(
   _request: Request,
@@ -43,19 +48,23 @@ export async function POST(
       return NextResponse.json(await sourceErasePreview(user.id, sourceId));
     }
     if (parsed.value.action === "erase") {
-      await eraseSource({ userId: user.id, sourceId });
-    } else if (parsed.value.action === "continue") {
-      await continueSourceAnalysis({ userId: user.id, sourceId });
-      after(() => runPendingJobs({ userId: user.id, limit: 2 }));
-    } else if (
-      parsed.value.action === "retry" ||
-      parsed.value.action === "cancel"
-    ) {
-      await mutateSourceProcessing({
+      const cancelled = await requestSourceGenerationCancellation({
         userId: user.id,
         sourceId,
-        action: parsed.value.action,
+        allowMissing: true,
       });
+      await cancelSourceGenerationWorkflow(cancelled.workflowRunId);
+      await eraseSource({ userId: user.id, sourceId });
+    } else if (parsed.value.action === "retry") {
+      const retried = await retrySourceGeneration({ userId: user.id, sourceId });
+      const workflowRunId = await startSourceGeneration(retried.runId);
+      return NextResponse.json({ ok: true, ...retried, workflowRunId });
+    } else if (parsed.value.action === "cancel") {
+      const cancelled = await requestSourceGenerationCancellation({
+        userId: user.id,
+        sourceId,
+      });
+      await cancelSourceGenerationWorkflow(cancelled.workflowRunId);
     } else if (
       parsed.value.action === "disable" ||
       parsed.value.action === "enable"

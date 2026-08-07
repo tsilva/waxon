@@ -57,11 +57,38 @@ export const sourceStatus = waxonV2.enum("source_status", [
   "captured",
   "processing",
   "ready",
+  "needs_attention",
   "failed",
+  "cancelled",
   "rejected_limit",
   "disabled",
   "erasing",
   "erased",
+]);
+export const sourceMaterialKind = waxonV2.enum("source_material_kind", [
+  "input",
+  "extracted",
+  "model_synthesis",
+  "web",
+]);
+export const generationRunStatus = waxonV2.enum("generation_run_status", [
+  "queued",
+  "preparing",
+  "mapping",
+  "matching",
+  "drafting",
+  "criticizing",
+  "persisting",
+  "ready",
+  "needs_attention",
+  "failed",
+  "cancelled",
+]);
+export const targetRequirement = waxonV2.enum("target_requirement", [
+  "required",
+  "optional",
+  "excluded",
+  "unsupported",
 ]);
 export const coverageStatus = waxonV2.enum("coverage_status", [
   "covered",
@@ -179,7 +206,7 @@ export const learnerSettings = waxonV2.table("learner_settings", {
   timezone: text("timezone").notNull().default("UTC"),
   autoAcceptHighConfidence: boolean("auto_accept_high_confidence")
     .notNull()
-    .default(false),
+    .default(true),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -200,6 +227,8 @@ export const sources = waxonV2.table(
     byteSize: bigint("byte_size", { mode: "number" }).notNull().default(0),
     checksum: text("checksum"),
     rawText: text("raw_text"),
+    activeRevisionId: uuid("active_revision_id"),
+    activeRunId: uuid("active_run_id"),
     processingProgress: integer("processing_progress").notNull().default(0),
     error: text("error"),
     disabledAt: timestamp("disabled_at", {
@@ -246,12 +275,154 @@ export const sourceVersions = waxonV2.table(
   ],
 );
 
+export const sourceMaterials = waxonV2.table(
+  "source_materials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").notNull(),
+    sourceRevisionId: uuid("source_revision_id").notNull(),
+    kind: sourceMaterialKind("kind").notNull(),
+    title: text("title").notNull(),
+    bodyText: text("body_text").notNull(),
+    url: text("url"),
+    model: text("model"),
+    checksum: text("checksum").notNull(),
+    metadata: jsonb("metadata")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    unique("source_materials_user_id_id_unique").on(table.userId, table.id),
+    foreignKey({
+      name: "source_materials_revision_fk",
+      columns: [table.userId, table.sourceRevisionId],
+      foreignColumns: [sourceVersions.userId, sourceVersions.id],
+    }).onDelete("cascade"),
+    unique("source_materials_revision_kind_checksum_unique").on(
+      table.userId,
+      table.sourceRevisionId,
+      table.kind,
+      table.checksum,
+    ),
+    index("source_materials_revision_idx").on(
+      table.userId,
+      table.sourceRevisionId,
+    ),
+  ],
+);
+
+export const generationRuns = waxonV2.table(
+  "generation_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").notNull(),
+    sourceId: uuid("source_id").notNull(),
+    sourceRevisionId: uuid("source_revision_id").notNull(),
+    workflowRunId: text("workflow_run_id"),
+    status: generationRunStatus("status").notNull().default("queued"),
+    stage: text("stage").notNull().default("Queued"),
+    progress: integer("progress").notNull().default(0),
+    policyVersion: text("policy_version").notNull(),
+    model: text("model").notNull(),
+    criticModel: text("critic_model").notNull(),
+    bankFingerprint: text("bank_fingerprint"),
+    budget: jsonb("budget")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    usage: jsonb("usage")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    manifest: jsonb("manifest").$type<Record<string, unknown>>(),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    residuals: jsonb("residuals").$type<string[]>().notNull().default([]),
+    error: text("error"),
+    cancelRequestedAt: timestamp("cancel_requested_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "date" }),
+    finishedAt: timestamp("finished_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    unique("generation_runs_user_id_id_unique").on(table.userId, table.id),
+    foreignKey({
+      name: "generation_runs_source_fk",
+      columns: [table.userId, table.sourceId],
+      foreignColumns: [sources.userId, sources.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "generation_runs_revision_fk",
+      columns: [table.userId, table.sourceRevisionId],
+      foreignColumns: [sourceVersions.userId, sourceVersions.id],
+    }).onDelete("cascade"),
+    index("generation_runs_source_created_idx").on(
+      table.userId,
+      table.sourceId,
+      table.createdAt,
+    ),
+    uniqueIndex("generation_runs_one_active_per_source")
+      .on(table.userId, table.sourceId)
+      .where(
+        sql`${table.status} IN ('queued','preparing','mapping','matching','drafting','criticizing','persisting')`,
+      ),
+  ],
+);
+
+export const generationRunArtifacts = waxonV2.table(
+  "generation_run_artifacts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").notNull(),
+    generationRunId: uuid("generation_run_id").notNull(),
+    kind: text("kind").notNull(),
+    artifactKey: text("artifact_key").notNull(),
+    payload: jsonb("payload")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
+    usage: jsonb("usage")
+      .$type<Record<string, number>>()
+      .notNull()
+      .default({}),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    unique("generation_run_artifacts_user_id_id_unique").on(
+      table.userId,
+      table.id,
+    ),
+    foreignKey({
+      name: "generation_run_artifacts_run_fk",
+      columns: [table.userId, table.generationRunId],
+      foreignColumns: [generationRuns.userId, generationRuns.id],
+    }).onDelete("cascade"),
+    unique("generation_run_artifacts_run_key_unique").on(
+      table.userId,
+      table.generationRunId,
+      table.kind,
+      table.artifactKey,
+    ),
+    index("generation_run_artifacts_run_idx").on(
+      table.userId,
+      table.generationRunId,
+      table.kind,
+    ),
+  ],
+);
+
 export const evidenceSpans = waxonV2.table(
   "evidence_spans",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     userId: text("user_id").notNull(),
     sourceVersionId: uuid("source_version_id").notNull(),
+    sourceMaterialId: uuid("source_material_id"),
     section: text("section").notNull().default(""),
     startOffset: integer("start_offset").notNull(),
     endOffset: integer("end_offset").notNull(),
@@ -264,6 +435,11 @@ export const evidenceSpans = waxonV2.table(
       name: "evidence_spans_source_version_fk",
       columns: [table.userId, table.sourceVersionId],
       foreignColumns: [sourceVersions.userId, sourceVersions.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "evidence_spans_source_material_fk",
+      columns: [table.userId, table.sourceMaterialId],
+      foreignColumns: [sourceMaterials.userId, sourceMaterials.id],
     }).onDelete("cascade"),
     index("evidence_spans_source_idx").on(table.userId, table.sourceVersionId),
     check(
@@ -279,8 +455,14 @@ export const coverageTargets = waxonV2.table(
     id: uuid("id").defaultRandom().primaryKey(),
     userId: text("user_id").notNull(),
     sourceId: uuid("source_id").notNull(),
+    sourceRevisionId: uuid("source_revision_id"),
+    generationRunId: uuid("generation_run_id"),
+    targetKey: text("target_key"),
     targetType: text("target_type").notNull(),
     statement: text("statement").notNull(),
+    answerRubric: text("answer_rubric"),
+    requirement: targetRequirement("requirement").notNull().default("required"),
+    confidence: doublePrecision("confidence"),
     status: coverageStatus("status").notNull().default("unresolved"),
     ignoreReason: text("ignore_reason"),
     createdAt: createdAt(),
@@ -293,11 +475,26 @@ export const coverageTargets = waxonV2.table(
       columns: [table.userId, table.sourceId],
       foreignColumns: [sources.userId, sources.id],
     }).onDelete("cascade"),
+    foreignKey({
+      name: "coverage_targets_revision_fk",
+      columns: [table.userId, table.sourceRevisionId],
+      foreignColumns: [sourceVersions.userId, sourceVersions.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coverage_targets_generation_run_fk",
+      columns: [table.userId, table.generationRunId],
+      foreignColumns: [generationRuns.userId, generationRuns.id],
+    }).onDelete("cascade"),
     index("coverage_targets_source_status_idx").on(
       table.userId,
       table.sourceId,
       table.status,
     ),
+    uniqueIndex("coverage_targets_revision_target_key_unique")
+      .on(table.userId, table.sourceRevisionId, table.targetKey)
+      .where(
+        sql`${table.sourceRevisionId} IS NOT NULL AND ${table.targetKey} IS NOT NULL`,
+      ),
   ],
 );
 
@@ -434,6 +631,8 @@ export const targetQuestions = waxonV2.table(
     userId: text("user_id").notNull(),
     targetId: uuid("target_id").notNull(),
     questionId: uuid("question_id").notNull(),
+    relation: text("relation").notNull().default("generated"),
+    createdAt: createdAt(),
   },
   (table) => [
     primaryKey({
@@ -834,23 +1033,6 @@ export const repairDrafts = waxonV2.table(
       columns: [table.userId, table.childQuestionId],
       foreignColumns: [questions.userId, questions.id],
     }).onDelete("restrict"),
-  ],
-);
-
-export const savedViews = waxonV2.table(
-  "saved_views",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    query: jsonb("query").$type<Record<string, unknown>>().notNull().default({}),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    unique("saved_views_user_name_unique").on(table.userId, table.name),
   ],
 );
 

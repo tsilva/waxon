@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { del, put } from "@vercel/blob";
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
 import { consumeUserRateLimit } from "@/app/lib/apiLimits";
 import { v2Error } from "@/app/lib/v2/http";
-import { runPendingJobs } from "@/app/lib/v2/service";
-import { createSource } from "@/app/lib/v2/sources";
+import { createSourceGeneration } from "@/app/lib/v2/sourceGeneration";
+import { startSourceGeneration } from "@/app/lib/v2/sourceGenerationRuntime";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const ALLOWED_TYPES = new Set([
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       contentType: type,
     });
     uploadedUrl = blob.url;
-    const result = await createSource({
+    const result = await createSourceGeneration({
       userId: user.id,
       kind: isPdf ? "pdf" : "text",
       title:
@@ -71,8 +71,11 @@ export async function POST(request: Request) {
       await del(blob.url);
     }
     uploadedUrl = null;
-    after(() => runPendingJobs({ userId: user.id, limit: 2 }));
-    return NextResponse.json({ ok: true, ...result }, { status: 202 });
+    const workflowRunId = await startSourceGeneration(result.runId);
+    return NextResponse.json(
+      { ok: true, ...result, workflowRunId },
+      { status: 202 },
+    );
   } catch (error) {
     if (uploadedUrl) {
       await del(uploadedUrl).catch(() => undefined);

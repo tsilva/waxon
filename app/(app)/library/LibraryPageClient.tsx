@@ -34,6 +34,7 @@ import {
 } from "react";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
+import { inferSourceCapture } from "@/app/lib/v2/sourceCapture";
 import type {
   V2LibraryResponse,
   V2Lifecycle,
@@ -45,16 +46,24 @@ type LibraryView =
   | V2Lifecycle
   | "sources"
   | "concepts"
-  | "health";
-type CaptureKind = "question" | "topic" | "paste" | "url" | "file";
+  | "attention";
+type CaptureKind = "source" | "question";
 type SourceManifest = {
   targets: Array<{
     id: string;
     type: string;
     statement: string;
     status: "covered" | "weak" | "missing" | "ignored" | "unresolved";
+    requirement: "required" | "optional" | "excluded" | "unsupported";
+    confidence: number | null;
+    mastered: boolean;
     ignoreReason: string | null;
     evidenceQuote: string | null;
+    questions: Array<{
+      id: string;
+      prompt: string;
+      lifecycle: V2Lifecycle;
+    }>;
   }>;
 };
 
@@ -73,7 +82,6 @@ const EMPTY_LIBRARY: V2LibraryResponse = {
     superseded: 0,
   },
   concepts: [],
-  savedViews: [],
   waitingNew: 0,
   healthCount: 0,
 };
@@ -83,13 +91,25 @@ const QUESTION_VIEWS: Array<{
   label: string;
 }> = [
   { value: "all", label: "All" },
-  { value: "draft", label: "Inbox" },
   { value: "new", label: "Waiting" },
   { value: "learning", label: "Learning" },
   { value: "review", label: "Reviewing" },
+  { value: "attention", label: "Needs attention" },
   { value: "paused", label: "Paused" },
   { value: "trash", label: "Trash" },
 ];
+
+const ACTIVE_GENERATION_RUNS = new Set([
+  "queued",
+  "preparing",
+  "mapping",
+  "matching",
+  "drafting",
+  "criticizing",
+  "persisting",
+]);
+const SOURCE_BUILD_MESSAGE =
+  "Waxon is building a mastery question set in the background.";
 
 function viewCount(data: V2LibraryResponse, view: LibraryView): number | null {
   if (view === "all") {
@@ -103,7 +123,7 @@ function viewCount(data: V2LibraryResponse, view: LibraryView): number | null {
   if (view === "concepts") {
     return data.concepts.length;
   }
-  if (view === "health") {
+  if (view === "attention") {
     return data.healthCount;
   }
   return data.counts[view];
@@ -153,7 +173,7 @@ function CaptureDialog({
   onClose: () => void;
   onCaptured: (message: string) => void;
 }) {
-  const [kind, setKind] = useState<CaptureKind>("question");
+  const [kind, setKind] = useState<CaptureKind>("source");
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -192,37 +212,28 @@ function CaptureDialog({
           }),
         });
         onCaptured("Question saved. Waxon is checking its quality and overlap.");
-      } else if (kind === "file") {
-        if (!file) {
-          throw new Error("Choose a PDF or text file.");
-        }
+      } else if (file) {
         const upload = new FormData();
         upload.set("file", file);
-        upload.set("title", String(form.get("title") ?? ""));
         await jsonRequest("/api/v2/sources/upload", {
           method: "POST",
           body: upload,
         });
-        onCaptured("Source uploaded. Coverage analysis is running.");
+        onCaptured(SOURCE_BUILD_MESSAGE);
       } else {
+        const sourceInput = String(form.get("sourceInput") ?? "").trim();
+        if (!sourceInput) {
+          throw new Error(
+            "Enter a topic, paste source material, add a URL, or attach a file.",
+          );
+        }
+        const source = inferSourceCapture(sourceInput);
         await jsonRequest("/api/v2/sources", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            kind,
-            title: form.get("title"),
-            text:
-              kind === "paste" || kind === "topic"
-                ? form.get("text")
-                : undefined,
-            url: kind === "url" ? form.get("url") : undefined,
-          }),
+          body: JSON.stringify(source),
         });
-        onCaptured(
-          kind === "topic"
-            ? "Saved evidence found. Waxon is drafting topic coverage."
-            : "Source saved. Coverage analysis is running.",
-        );
+        onCaptured(SOURCE_BUILD_MESSAGE);
       }
       onClose();
     } catch (caught) {
@@ -245,8 +256,8 @@ function CaptureDialog({
       >
         <div className="v2-dialog-heading">
           <div>
-            <span className="v2-kicker">Add knowledge</span>
-            <h2 id="capture-title">What did you learn?</h2>
+            <span className="v2-kicker">Build your bank</span>
+            <h2 id="capture-title">What do you want to learn?</h2>
           </div>
           <button
             aria-label="Close"
@@ -258,21 +269,26 @@ function CaptureDialog({
             <X aria-hidden="true" />
           </button>
         </div>
-        <div className="v2-capture-tabs" role="tablist" aria-label="Capture type">
+        <div
+          className="v2-capture-tabs is-compact"
+          role="tablist"
+          aria-label="Capture type"
+        >
           {(
             [
-              ["question", "Question", Sparkles],
-              ["topic", "Topic", FolderSearch],
-              ["paste", "Paste", FileText],
-              ["url", "URL", Link2],
-              ["file", "File", Upload],
+              ["source", "Topic or source", BookOpen],
+              ["question", "One question", Sparkles],
             ] as const
           ).map(([value, label, Icon]) => (
             <button
               aria-selected={kind === value}
               className={kind === value ? "is-active" : ""}
+              disabled={isSaving}
               key={value}
-              onClick={() => setKind(value)}
+              onClick={() => {
+                setKind(value);
+                setError(null);
+              }}
               role="tab"
               type="button"
             >
@@ -324,73 +340,49 @@ function CaptureDialog({
             </>
           ) : (
             <>
-              {kind !== "topic" ? (
-                <label>
-                  Title
-                  <input
-                    autoFocus
-                    maxLength={300}
-                    name="title"
-                    placeholder={
-                      kind === "file" ? "Optional display title" : "Source title"
-                    }
-                    required={kind !== "file"}
-                  />
-                </label>
+              <label>
+                Topic, request, URL, or pasted material
+                <textarea
+                  autoFocus
+                  disabled={Boolean(file)}
+                  maxLength={1_000_000}
+                  name="sourceInput"
+                  placeholder={
+                    "Proximal Policy Optimization\n\n—or paste notes, a paper section, or a public URL"
+                  }
+                  required={!file}
+                  rows={8}
+                />
+              </label>
+              <div className="v2-source-divider"><span>or</span></div>
+              <label className="v2-file-picker is-compact">
+                <Upload aria-hidden="true" />
+                <strong>{file?.name ?? "Attach a PDF or text file"}</strong>
+                <span>PDF, Markdown, CSV, or plain text · up to 20 MB</span>
+                <input
+                  accept=".pdf,.txt,.md,.markdown,.csv,application/pdf,text/plain,text/markdown,text/csv"
+                  name="file"
+                  onChange={(event) => {
+                    setFile(event.currentTarget.files?.[0] ?? null);
+                    setError(null);
+                  }}
+                  type="file"
+                />
+              </label>
+              {file ? (
+                <button
+                  className="v2-clear-file"
+                  onClick={() => setFile(null)}
+                  type="button"
+                >
+                  <X /> Use text instead
+                </button>
               ) : null}
-              {kind === "topic" ? (
-                <label>
-                  Topic to expand
-                  <textarea
-                    autoFocus
-                    maxLength={300}
-                    name="text"
-                    placeholder="e.g. vision transformers, policy gradients, Japanese counters…"
-                    required
-                    rows={3}
-                  />
-                </label>
-              ) : kind === "paste" ? (
-                <label>
-                  Source material
-                  <textarea
-                    maxLength={1_000_000}
-                    name="text"
-                    placeholder="Paste notes, a paper section, or a book excerpt…"
-                    required
-                    rows={11}
-                  />
-                </label>
-              ) : kind === "url" ? (
-                <label>
-                  Public URL
-                  <input
-                    name="url"
-                    placeholder="https://…"
-                    required
-                    type="url"
-                  />
-                </label>
-              ) : (
-                <label className="v2-file-picker">
-                  <Upload aria-hidden="true" />
-                  <strong>{file?.name ?? "Choose a PDF or text file"}</strong>
-                  <span>PDF, Markdown, CSV, or plain text · up to 20 MB</span>
-                  <input
-                    accept=".pdf,.txt,.md,.markdown,.csv,application/pdf,text/plain,text/markdown,text/csv"
-                    name="file"
-                    onChange={(event) =>
-                      setFile(event.currentTarget.files?.[0] ?? null)
-                    }
-                    required
-                    type="file"
-                  />
-                </label>
-              )}
               <p className="v2-form-note">
-                {kind === "topic"
-                  ? "Topic expansion only uses evidence already saved in Waxon. Add a source first when nothing relevant is available."
-                  : "Waxon maps atomic knowledge targets first, then drafts questions with evidence. Drafts that are unclear or overlapping stay in Inbox instead of entering Review."}
+                Waxon maps the smallest question set that demonstrates mastery,
+                checks it against your existing bank, and only adds clear,
+                well-supported questions. For a topic, it can use model knowledge
+                and research when freshness matters.
               </p>
             </>
           )}
@@ -406,11 +398,7 @@ function CaptureDialog({
             </button>
             <button className="v2-button-primary" disabled={isSaving} type="submit">
               {isSaving ? <LoaderCircle className="v2-spin" /> : <Plus />}
-              {kind === "question"
-                ? "Save question"
-                : kind === "topic"
-                  ? "Expand topic"
-                  : "Analyze source"}
+              {kind === "question" ? "Save question" : "Build question set"}
             </button>
           </div>
         </form>
@@ -704,7 +692,7 @@ export default function LibraryPageClient() {
       view !== "all" &&
       view !== "sources" &&
       view !== "concepts" &&
-      view !== "health"
+      view !== "attention"
     ) {
       params.set("lifecycle", view);
     }
@@ -716,6 +704,7 @@ export default function LibraryPageClient() {
       { signal },
     );
     setData(next);
+    setError(null);
   }, [query, view]);
 
   useEffect(() => {
@@ -738,8 +727,10 @@ export default function LibraryPageClient() {
 
   useEffect(() => {
     const needsPolling =
-      data.sources.some((source) =>
-        ["captured", "processing"].includes(source.status),
+      data.sources.some(
+        (source) =>
+          (source.run && ACTIVE_GENERATION_RUNS.has(source.run.status)) ||
+          ["captured", "processing"].includes(source.status),
       ) ||
       data.questions.some(
         (question) => question.quality === "pending",
@@ -751,9 +742,22 @@ export default function LibraryPageClient() {
     return () => window.clearInterval(timer);
   }, [data.questions, data.sources, load]);
 
+  useEffect(() => {
+    if (
+      message === SOURCE_BUILD_MESSAGE &&
+      data.sources.length > 0 &&
+      !data.sources.some(
+        (source) =>
+          source.run && ACTIVE_GENERATION_RUNS.has(source.run.status),
+      )
+    ) {
+      setMessage(null);
+    }
+  }, [data.sources, message]);
+
   const visibleQuestions = useMemo(
     () =>
-      view === "health"
+      view === "attention"
         ? data.questions.filter(
             (question) =>
               question.lifecycle === "draft" ||
@@ -796,6 +800,10 @@ export default function LibraryPageClient() {
   async function sourceAction(sourceId: string, action: string) {
     setError(null);
     try {
+      if (action === "retry") {
+        setExpandedSourceId(null);
+        setSourceManifests({});
+      }
       if (action === "erase") {
         const preview = await jsonRequest<{
           sourceTitle: string;
@@ -847,33 +855,6 @@ export default function LibraryPageClient() {
     }
   }
 
-  async function saveCurrentView() {
-    const name = window.prompt("Name this saved view");
-    if (!name?.trim()) {
-      return;
-    }
-    try {
-      await jsonRequest("/api/v2/views", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          search: query,
-          lifecycle:
-            view === "sources" ||
-            view === "concepts" ||
-            view === "health"
-              ? "all"
-              : view,
-        }),
-      });
-      setMessage(`Saved “${name.trim()}”.`);
-      await load();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save view.");
-    }
-  }
-
   return (
     <main className="page">
       <section className="review-shell v2-library-shell">
@@ -889,7 +870,7 @@ export default function LibraryPageClient() {
               Add knowledge
             </button>
             <nav aria-label="Question bank views">
-              <span className="v2-sidebar-label">Question bank</span>
+              <span className="v2-sidebar-label">Bank</span>
               {QUESTION_VIEWS.map((item) => (
                 <button
                   aria-current={view === item.value ? "page" : undefined}
@@ -902,7 +883,7 @@ export default function LibraryPageClient() {
                   <small>{viewCount(data, item.value)}</small>
                 </button>
               ))}
-              <span className="v2-sidebar-label">Knowledge map</span>
+              <span className="v2-sidebar-label">Organize</span>
               <button
                 className={view === "sources" ? "is-active" : ""}
                 onClick={() => setView("sources")}
@@ -919,37 +900,12 @@ export default function LibraryPageClient() {
                 <span><Tags /> Concepts</span>
                 <small>{data.concepts.length}</small>
               </button>
-              <button
-                className={view === "health" ? "is-active" : ""}
-                onClick={() => setView("health")}
-                type="button"
-              >
-                <span><CircleAlert /> Health</span>
-                <small>{data.healthCount}</small>
-              </button>
-              {data.savedViews.length > 0 ? (
-                <>
-                  <span className="v2-sidebar-label">Saved views</span>
-                  {data.savedViews.map((savedView) => (
-                    <button
-                      key={savedView.id}
-                      onClick={() => {
-                        setView(savedView.query.lifecycle ?? "all");
-                        setQuery(savedView.query.search ?? "");
-                      }}
-                      type="button"
-                    >
-                      <span><FolderSearch /> {savedView.name}</span>
-                    </button>
-                  ))}
-                </>
-              ) : null}
             </nav>
           </aside>
           <section className="v2-library-content">
             <header className="v2-library-heading">
               <div>
-                <span className="v2-kicker">One bank, flexible views</span>
+                <span className="v2-kicker">One adaptive question bank</span>
                 <h1>
                   {view === "all"
                     ? "Your knowledge"
@@ -957,13 +913,13 @@ export default function LibraryPageClient() {
                       ? "Sources"
                       : view === "concepts"
                         ? "Concepts"
-                        : view === "health"
-                          ? "Health"
+                        : view === "attention"
+                          ? "Needs attention"
                           : lifecycleLabel(view)}
                 </h1>
                 <p>
-                  {view === "health"
-                    ? "Resolve weak coverage, ambiguity, and likely overlap before it reaches Review."
+                  {view === "attention"
+                    ? "Resolve ambiguity, weak questions, and likely overlap before they reach Review."
                     : view === "sources"
                       ? "See what each source covers—and what remains unresolved."
                       : view === "concepts"
@@ -983,9 +939,6 @@ export default function LibraryPageClient() {
                       value={query}
                     />
                   </label>
-                  <button onClick={saveCurrentView} type="button">
-                    <FolderSearch /> Save view
-                  </button>
                   {readyDraftIds.length > 0 ? (
                     <button
                       disabled={isLoading}
@@ -1019,6 +972,15 @@ export default function LibraryPageClient() {
                     (sum, count) => sum + count,
                     0,
                   );
+                  const isBuilding = Boolean(
+                    source.run && ACTIVE_GENERATION_RUNS.has(source.run.status),
+                  );
+                  const canRetry =
+                    !isBuilding &&
+                    source.status !== "disabled" &&
+                    (source.questionSetStatus === "needs_attention" ||
+                      source.status === "failed" ||
+                      source.status === "cancelled");
                   return (
                     <article className="v2-source-card" key={source.id}>
                       <div className="v2-source-card-heading">
@@ -1027,16 +989,44 @@ export default function LibraryPageClient() {
                         </span>
                         <div>
                           <strong>{source.title}</strong>
-                          <small>{source.kind.toUpperCase()} · {source.status}</small>
+                          <small>
+                            {source.kind.toUpperCase()} · {isBuilding
+                              ? source.run?.stage
+                              : source.questionSetStatus === "ready"
+                                ? "Question set ready"
+                                : "Needs attention"}
+                          </small>
                         </div>
-                        {["captured", "processing"].includes(source.status) ? (
+                        {isBuilding ? (
                           <LoaderCircle className="v2-spin" />
                         ) : (
                           <MoreHorizontal />
                         )}
                       </div>
-                      <div className="v2-progress-track">
-                        <span style={{ width: `${source.progress}%` }} />
+                      {isBuilding ? (
+                        <div className="v2-progress-track">
+                          <span style={{ width: `${source.progress}%` }} />
+                        </div>
+                      ) : null}
+                      <div className="v2-source-outcomes">
+                        <div>
+                          <span>Question set</span>
+                          <strong>
+                            {source.questionSetStatus === "ready"
+                              ? "Ready"
+                              : source.questionSetStatus === "building"
+                                ? "Building"
+                                : "Needs attention"}
+                          </strong>
+                        </div>
+                        <div>
+                          <span>Mastery</span>
+                          <strong>
+                            {source.mastery.requiredTargets === 0
+                              ? "Not practiced"
+                              : `${source.mastery.masteredTargets}/${source.mastery.requiredTargets} targets`}
+                          </strong>
+                        </div>
                       </div>
                       <dl className="v2-coverage-grid">
                         <div><dt>Covered</dt><dd>{source.coverage.covered}</dd></div>
@@ -1049,32 +1039,23 @@ export default function LibraryPageClient() {
                       ) : null}
                       {source.error ? <p className="v2-error">{source.error}</p> : null}
                       <div className="v2-row-actions">
-                        {source.status === "failed" ? (
+                        {canRetry ? (
                           <button
                             onClick={() => sourceAction(source.id, "retry")}
                             type="button"
                           >
-                            <RotateCcw /> Retry processing
+                            <RotateCcw /> Rebuild question set
                           </button>
                         ) : null}
-                        {source.status === "ready" &&
-                        source.hasMoreAnalysis ? (
-                          <button
-                            onClick={() => sourceAction(source.id, "continue")}
-                            type="button"
-                          >
-                            <Plus /> Continue analysis
-                          </button>
-                        ) : null}
-                        {["captured", "processing"].includes(source.status) ? (
+                        {isBuilding ? (
                           <button
                             onClick={() => sourceAction(source.id, "cancel")}
                             type="button"
                           >
-                            <X /> Cancel processing
+                            <X /> Cancel
                           </button>
                         ) : null}
-                        {source.status === "ready" ||
+                        {source.questionSetStatus !== "building" ||
                         source.status === "disabled" ? (
                           <>
                             <button
@@ -1124,15 +1105,31 @@ export default function LibraryPageClient() {
                                 <details key={target.id}>
                                   <summary>
                                     <span className={`is-${target.status}`}>
-                                      {target.status}
+                                      {target.mastered ? "mastered" : target.status}
                                     </span>
                                     {target.statement}
                                   </summary>
-                                  <p>{target.type}</p>
+                                  <p>
+                                    {target.requirement} · {target.type}
+                                    {target.confidence === null
+                                      ? ""
+                                      : ` · ${Math.round(target.confidence * 100)}% confidence`}
+                                  </p>
                                   {target.evidenceQuote ? (
                                     <blockquote>{target.evidenceQuote}</blockquote>
                                   ) : (
                                     <p>No exact evidence span is mapped yet.</p>
+                                  )}
+                                  {target.questions.length > 0 ? (
+                                    <ul>
+                                      {target.questions.map((question) => (
+                                        <li key={question.id}>
+                                          {question.prompt} <small>({lifecycleLabel(question.lifecycle)})</small>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <p>No active question covers this target yet.</p>
                                   )}
                                 </details>
                               ))
@@ -1209,6 +1206,8 @@ export default function LibraryPageClient() {
         <CaptureDialog
           onCaptured={(nextMessage) => {
             setMessage(nextMessage);
+            setExpandedSourceId(null);
+            setSourceManifests({});
             void load();
           }}
           onClose={() => setCaptureOpen(false)}

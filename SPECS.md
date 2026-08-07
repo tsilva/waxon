@@ -7,7 +7,8 @@ Waxon is a multi-user system for turning anything a learner studies into a durab
 - Waxon must support questions about any topic without specializing behavior for current test topics.
 - Production must provide functional user authentication and isolate each learner's learning data.
 - Waxon must maintain one question bank per learner; topics, concepts, sources, and saved views may organize or filter questions but must not require exclusive deck placement.
-- Learners must be able to add questions directly or add source material from which Waxon prepares question drafts and coverage analysis.
+- Learners must be able to add questions directly or submit a document, URL, pasted material, or topic request as a source from which Waxon prepares coverage analysis and question drafts.
+- Source-to-question preparation must use a bounded, resumable background agentic workflow informed by the learner’s existing question bank and demonstrated performance to produce the smallest non-redundant question set that provides defensible evidence of source-defined mastery without sacrificing atomicity, provenance, or material coverage.
 - Every active question must be self-contained, atomic, recall-oriented, answerable from a stored reference answer or rubric, and linked to its available source provenance.
 - Saving source material or a question draft must not be blocked by concept, provenance, embedding, or other enrichment work.
 - Waxon must make question coverage auditable for each source and concept, surfacing material gaps, weak coverage, likely overlap, and unresolved source residuals without equating question count with coverage or labeling a source fully audited while material scope remains unmapped or unexcluded.
