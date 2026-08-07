@@ -11,6 +11,15 @@ Reference image: `design-reference/waxon-approved-ui.png`
 
 ## Remaining Comparison Notes
 
+- August 7, 2026 provenance-path update: source cards now open a dedicated
+  pedagogical path that separates unique recall checkpoints from coverage
+  targets, shows prerequisite locks and bridge-source actions, and hands an
+  explicit source focus to the existing Review surface. A native in-app browser
+  pass on the PPO source confirmed 15 unique checkpoints for 18 targets,
+  preserved the warm editorial desktop hierarchy, and verified the reversible
+  Start source/Focused handoff. The browser's temporary 390x844 viewport
+  override did not take effect in this run, so a fresh mobile visual comparison
+  remains required before refreshing the approved composite.
 - August 7, 2026 source-to-mastery update: Library now centers a single
   `Topic or source` capture path alongside direct question entry. The compact
   rail is limited to bank lifecycle views plus Sources and Concepts; standalone

@@ -164,6 +164,16 @@ export const sessionItemState = waxonV2.enum("session_item_state", [
   "evaluated",
   "invalidated",
 ]);
+export const learningPathStatus = waxonV2.enum("learning_path_status", [
+  "ready",
+  "fallback_ready",
+  "needs_attention",
+  "superseded",
+]);
+export const learningPathNodeKind = waxonV2.enum("learning_path_node_kind", [
+  "target",
+  "external_prerequisite",
+]);
 export const retryStatus = waxonV2.enum("retry_status", [
   "queued",
   "deferred",
@@ -652,6 +662,202 @@ export const targetQuestions = waxonV2.table(
   ],
 );
 
+export const sourceLearningPaths = waxonV2.table(
+  "source_learning_paths",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").notNull(),
+    sourceId: uuid("source_id").notNull(),
+    sourceRevisionId: uuid("source_revision_id").notNull(),
+    generationRunId: uuid("generation_run_id").notNull(),
+    status: learningPathStatus("status").notNull(),
+    policyVersion: text("policy_version").notNull(),
+    diagnostics: jsonb("diagnostics").$type<string[]>().notNull().default([]),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    unique("source_learning_paths_user_id_id_unique").on(table.userId, table.id),
+    unique("source_learning_paths_generation_run_unique").on(
+      table.userId,
+      table.generationRunId,
+    ),
+    foreignKey({
+      name: "source_learning_paths_source_fk",
+      columns: [table.userId, table.sourceId],
+      foreignColumns: [sources.userId, sources.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "source_learning_paths_revision_fk",
+      columns: [table.userId, table.sourceRevisionId],
+      foreignColumns: [sourceVersions.userId, sourceVersions.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "source_learning_paths_generation_run_fk",
+      columns: [table.userId, table.generationRunId],
+      foreignColumns: [generationRuns.userId, generationRuns.id],
+    }).onDelete("cascade"),
+    index("source_learning_paths_source_status_idx").on(
+      table.userId,
+      table.sourceId,
+      table.status,
+    ),
+  ],
+);
+
+export const sourceLearningNodes = waxonV2.table(
+  "source_learning_nodes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").notNull(),
+    pathId: uuid("path_id").notNull(),
+    kind: learningPathNodeKind("kind").notNull(),
+    targetId: uuid("target_id"),
+    questionId: uuid("question_id"),
+    bridgeSourceId: uuid("bridge_source_id"),
+    moduleTitle: text("module_title").notNull(),
+    modulePosition: integer("module_position").notNull(),
+    sourcePosition: integer("source_position").notNull(),
+    pedagogicalPosition: integer("pedagogical_position").notNull(),
+    statement: text("statement").notNull(),
+    reason: text("reason"),
+    introducedAt: timestamp("introduced_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    passedAt: timestamp("passed_at", { withTimezone: true, mode: "date" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    unique("source_learning_nodes_user_id_id_unique").on(table.userId, table.id),
+    unique("source_learning_nodes_path_position_unique").on(
+      table.userId,
+      table.pathId,
+      table.pedagogicalPosition,
+    ),
+    uniqueIndex("source_learning_nodes_path_target_unique")
+      .on(table.userId, table.pathId, table.targetId)
+      .where(sql`${table.targetId} IS NOT NULL`),
+    foreignKey({
+      name: "source_learning_nodes_path_fk",
+      columns: [table.userId, table.pathId],
+      foreignColumns: [sourceLearningPaths.userId, sourceLearningPaths.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "source_learning_nodes_target_fk",
+      columns: [table.userId, table.targetId],
+      foreignColumns: [coverageTargets.userId, coverageTargets.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "source_learning_nodes_question_fk",
+      columns: [table.userId, table.questionId],
+      foreignColumns: [questions.userId, questions.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "source_learning_nodes_bridge_source_fk",
+      columns: [table.userId, table.bridgeSourceId],
+      foreignColumns: [sources.userId, sources.id],
+    }).onDelete("restrict"),
+    index("source_learning_nodes_path_order_idx").on(
+      table.userId,
+      table.pathId,
+      table.pedagogicalPosition,
+    ),
+    index("source_learning_nodes_question_progress_idx").on(
+      table.userId,
+      table.questionId,
+      table.passedAt,
+    ),
+    check(
+      "source_learning_nodes_target_kind_valid",
+      sql`(${table.kind} = 'target' AND ${table.targetId} IS NOT NULL) OR (${table.kind} = 'external_prerequisite' AND ${table.targetId} IS NULL)`,
+    ),
+  ],
+);
+
+export const sourceLearningEdges = waxonV2.table(
+  "source_learning_edges",
+  {
+    userId: text("user_id").notNull(),
+    pathId: uuid("path_id").notNull(),
+    prerequisiteNodeId: uuid("prerequisite_node_id").notNull(),
+    dependentNodeId: uuid("dependent_node_id").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "source_learning_edges_pk",
+      columns: [
+        table.userId,
+        table.pathId,
+        table.prerequisiteNodeId,
+        table.dependentNodeId,
+      ],
+    }),
+    foreignKey({
+      name: "source_learning_edges_path_fk",
+      columns: [table.userId, table.pathId],
+      foreignColumns: [sourceLearningPaths.userId, sourceLearningPaths.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "source_learning_edges_prerequisite_fk",
+      columns: [table.userId, table.prerequisiteNodeId],
+      foreignColumns: [sourceLearningNodes.userId, sourceLearningNodes.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "source_learning_edges_dependent_fk",
+      columns: [table.userId, table.dependentNodeId],
+      foreignColumns: [sourceLearningNodes.userId, sourceLearningNodes.id],
+    }).onDelete("cascade"),
+    check(
+      "source_learning_edges_not_self",
+      sql`${table.prerequisiteNodeId} <> ${table.dependentNodeId}`,
+    ),
+    index("source_learning_edges_dependent_idx").on(
+      table.userId,
+      table.pathId,
+      table.dependentNodeId,
+    ),
+  ],
+);
+
+export const sourceFocusStack = waxonV2.table(
+  "source_focus_stack",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    depth: integer("depth").notNull(),
+    sourceId: uuid("source_id").notNull(),
+    pathId: uuid("path_id").notNull(),
+    parentGapNodeId: uuid("parent_gap_node_id"),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({
+      name: "source_focus_stack_pk",
+      columns: [table.userId, table.depth],
+    }),
+    foreignKey({
+      name: "source_focus_stack_source_fk",
+      columns: [table.userId, table.sourceId],
+      foreignColumns: [sources.userId, sources.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "source_focus_stack_path_fk",
+      columns: [table.userId, table.pathId],
+      foreignColumns: [sourceLearningPaths.userId, sourceLearningPaths.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "source_focus_stack_parent_gap_fk",
+      columns: [table.userId, table.parentGapNodeId],
+      foreignColumns: [sourceLearningNodes.userId, sourceLearningNodes.id],
+    }).onDelete("restrict"),
+    check("source_focus_stack_depth_valid", sql`${table.depth} >= 0`),
+    index("source_focus_stack_active_idx").on(table.userId, table.depth),
+  ],
+);
+
 export const concepts = waxonV2.table(
   "concepts",
   {
@@ -759,6 +965,7 @@ export const reviewSessions = waxonV2.table(
     timeBudgetMinutes: integer("time_budget_minutes").notNull(),
     desiredRetention: doublePrecision("desired_retention").notNull(),
     estimatedSeconds: integer("estimated_seconds").notNull().default(0),
+    reservedSeconds: integer("reserved_seconds").notNull().default(0),
     plannedCount: integer("planned_count").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -792,6 +999,17 @@ export const reviewSessionItems = waxonV2.table(
     }).notNull(),
     exposedAt: timestamp("exposed_at", { withTimezone: true, mode: "date" }),
     submittedAt: timestamp("submitted_at", { withTimezone: true, mode: "date" }),
+    estimatedSeconds: integer("estimated_seconds").notNull().default(60),
+    isIntroduction: boolean("is_introduction").notNull().default(false),
+    sourceContext: jsonb("source_context").$type<{
+      sourceId?: string;
+      sourceTitle?: string;
+      moduleTitle?: string;
+      checkpoint?: number;
+      checkpointTotal?: number;
+      displacedByFocus?: boolean;
+      erased?: boolean;
+    } | null>(),
     createdAt: createdAt(),
   },
   (table) => [
@@ -821,6 +1039,35 @@ export const reviewSessionItems = waxonV2.table(
       table.sessionId,
       table.state,
       table.position,
+    ),
+  ],
+);
+
+export const reviewSessionItemPathNodes = waxonV2.table(
+  "review_session_item_path_nodes",
+  {
+    userId: text("user_id").notNull(),
+    sessionItemId: uuid("session_item_id").notNull(),
+    pathNodeId: uuid("path_node_id").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "review_session_item_path_nodes_pk",
+      columns: [table.userId, table.sessionItemId, table.pathNodeId],
+    }),
+    foreignKey({
+      name: "review_session_item_path_nodes_item_fk",
+      columns: [table.userId, table.sessionItemId],
+      foreignColumns: [reviewSessionItems.userId, reviewSessionItems.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "review_session_item_path_nodes_node_fk",
+      columns: [table.userId, table.pathNodeId],
+      foreignColumns: [sourceLearningNodes.userId, sourceLearningNodes.id],
+    }).onDelete("cascade"),
+    index("review_session_item_path_nodes_node_idx").on(
+      table.userId,
+      table.pathNodeId,
     ),
   ],
 );

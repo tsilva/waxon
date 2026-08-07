@@ -16,6 +16,7 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Route,
   Search,
   Sparkles,
   Split,
@@ -32,6 +33,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import Link from "next/link";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { inferSourceCapture } from "@/app/lib/v2/sourceCapture";
@@ -1058,6 +1060,11 @@ export default function LibraryPageClient() {
                         {source.questionSetStatus !== "building" ||
                         source.status === "disabled" ? (
                           <>
+                            {source.learningPath ? (
+                              <Link href={`/library/sources/${source.id}`}>
+                                <Route /> Learning path
+                              </Link>
+                            ) : null}
                             <button
                               onClick={() => toggleManifest(source.id)}
                               type="button"

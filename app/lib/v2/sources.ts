@@ -1084,6 +1084,28 @@ export async function setSourceDisabled(input: {
       .where(eq(sources.id, input.sourceId));
     if (input.disabled) {
       await tx.execute(sql`
+        WITH cutoff AS (
+          SELECT min(depth) AS depth
+            FROM waxon_v2.source_focus_stack
+           WHERE user_id = ${input.userId}
+             AND source_id = ${input.sourceId}
+        )
+        DELETE FROM waxon_v2.source_focus_stack focus
+         USING cutoff
+         WHERE focus.user_id = ${input.userId}
+           AND cutoff.depth IS NOT NULL
+           AND focus.depth >= cutoff.depth
+      `);
+      await tx.execute(sql`
+        UPDATE waxon_v2.review_session_items
+           SET state = 'invalidated'
+         WHERE user_id = ${input.userId}
+           AND state = 'queued'
+           AND source_context->>'sourceId' = ${input.sourceId}
+      `);
+    }
+    if (input.disabled) {
+      await tx.execute(sql`
         UPDATE waxon_v2.questions q
            SET lifecycle = 'suspended',
                prior_lifecycle = q.lifecycle,
@@ -1504,6 +1526,166 @@ export async function getSourceManifest(userId: string, sourceId: string) {
       : required.some((target) => target.questions.length > 0)
         ? "in_progress"
         : "not_started";
+  const [path] = source.activeRunId
+    ? await getV2Client().pool.query<{
+        id: string;
+        status: "ready" | "fallback_ready" | "needs_attention" | "superseded";
+        diagnostics: string[];
+        focused: boolean;
+      }>(
+        `SELECT path.id, path.status, path.diagnostics,
+                EXISTS (
+                  SELECT 1 FROM waxon_v2.source_focus_stack focus
+                   WHERE focus.user_id = path.user_id AND focus.path_id = path.id
+                ) AS focused
+           FROM waxon_v2.source_learning_paths path
+          WHERE path.user_id = $1
+            AND path.source_id = $2
+            AND path.generation_run_id = $3
+          LIMIT 1`,
+        [userId, sourceId, source.activeRunId],
+      ).then((result) => result.rows)
+    : [null];
+  const pathNodes = path
+    ? await getV2Client().pool.query<{
+        id: string;
+        kind: "target" | "external_prerequisite";
+        module_title: string;
+        module_position: number;
+        pedagogical_position: number;
+        statement: string;
+        reason: string | null;
+        introduced_at: Date | null;
+        passed_at: Date | null;
+        bridge_source_id: string | null;
+        question_id: string | null;
+        question_prompt: string | null;
+        lifecycle: string | null;
+        quality: string | null;
+        prerequisite_ids: string[];
+        unmet_prerequisites: string[];
+      }>(
+        `SELECT node.id,
+                node.kind,
+                node.module_title,
+                node.module_position,
+                node.pedagogical_position,
+                node.statement,
+                node.reason,
+                node.introduced_at,
+                node.passed_at,
+                node.bridge_source_id,
+                node.question_id,
+                qv.prompt AS question_prompt,
+                q.lifecycle,
+                qv.quality_decision AS quality,
+                COALESCE(array_agg(prerequisite.id) FILTER (
+                  WHERE prerequisite.id IS NOT NULL
+                    AND prerequisite.question_id IS DISTINCT FROM node.question_id
+                ), '{}') AS prerequisite_ids,
+                COALESCE(array_agg(prerequisite.statement) FILTER (
+                  WHERE prerequisite.id IS NOT NULL
+                    AND prerequisite.question_id IS DISTINCT FROM node.question_id
+                    AND prerequisite.passed_at IS NULL
+                ), '{}') AS unmet_prerequisites
+           FROM waxon_v2.source_learning_nodes node
+           LEFT JOIN waxon_v2.questions q
+             ON q.user_id = node.user_id AND q.id = node.question_id
+           LEFT JOIN waxon_v2.question_versions qv
+             ON qv.user_id = q.user_id AND qv.question_id = q.id AND qv.is_current = true
+           LEFT JOIN waxon_v2.source_learning_edges edge
+             ON edge.user_id = node.user_id
+            AND edge.path_id = node.path_id
+            AND edge.dependent_node_id = node.id
+           LEFT JOIN waxon_v2.source_learning_nodes prerequisite
+             ON prerequisite.user_id = edge.user_id
+            AND prerequisite.id = edge.prerequisite_node_id
+          WHERE node.user_id = $1 AND node.path_id = $2
+          GROUP BY node.id, q.id, qv.id
+          ORDER BY node.pedagogical_position`,
+        [userId, path.id],
+      ).then((result) => result.rows)
+    : [];
+  const targetGroups = new Map<string, typeof pathNodes>();
+  const displayPathNodes = pathNodes.flatMap((node) => {
+    if (node.kind === "external_prerequisite" || !node.question_id) {
+      return [node];
+    }
+    const group = targetGroups.get(node.question_id) ?? [];
+    group.push(node);
+    targetGroups.set(node.question_id, group);
+    return [];
+  });
+  for (const group of targetGroups.values()) {
+    const representative = group.reduce((latest, node) =>
+      node.pedagogical_position > latest.pedagogical_position ? node : latest,
+    );
+    const introducedTimes = group.flatMap((node) =>
+      node.introduced_at ? [node.introduced_at.getTime()] : [],
+    );
+    const passedTimes = group.flatMap((node) =>
+      node.passed_at ? [node.passed_at.getTime()] : [],
+    );
+    displayPathNodes.push({
+      ...representative,
+      introduced_at: introducedTimes.length > 0
+        ? new Date(Math.min(...introducedTimes))
+        : null,
+      passed_at: passedTimes.length === group.length
+        ? new Date(Math.max(...passedTimes))
+        : null,
+      prerequisite_ids: [
+        ...new Set(group.flatMap((node) => node.prerequisite_ids)),
+      ],
+      unmet_prerequisites: [
+        ...new Set(group.flatMap((node) => node.unmet_prerequisites)),
+      ],
+    });
+  }
+  displayPathNodes.sort(
+    (left, right) => left.pedagogical_position - right.pedagogical_position,
+  );
+  let checkpoint = 0;
+  const serializedPathNodes = displayPathNodes.map((node) => {
+    if (node.kind === "target") checkpoint += 1;
+    return {
+      id: node.id,
+      kind: node.kind,
+      moduleTitle: node.module_title,
+      modulePosition: node.module_position,
+      position: node.pedagogical_position,
+      checkpoint: node.kind === "target" ? checkpoint : null,
+      statement: node.statement,
+      reason: node.reason,
+      introducedAt: node.introduced_at?.toISOString() ?? null,
+      passedAt: node.passed_at?.toISOString() ?? null,
+      bridgeSourceId: node.bridge_source_id,
+      question: node.question_id && node.question_prompt && node.lifecycle
+        ? {
+            id: node.question_id,
+            prompt: node.question_prompt,
+            lifecycle: node.lifecycle,
+          }
+        : null,
+      prerequisiteIds: node.prerequisite_ids,
+      state: node.passed_at
+        ? "passed"
+        : node.unmet_prerequisites.length > 0
+          ? "locked"
+          : node.kind === "external_prerequisite"
+            ? "gap"
+            : node.introduced_at
+              ? "waiting"
+              : node.question_id &&
+                  node.lifecycle === "new" &&
+                  node.quality === "distinct"
+                ? "next"
+                : "needs_attention",
+      lockReason: node.unmet_prerequisites.length > 0
+        ? `Recall ${node.unmet_prerequisites.join(", ")} first.`
+        : null,
+    };
+  });
 
   return {
     source: {
@@ -1539,6 +1721,19 @@ export async function getSourceManifest(userId: string, sourceId: string) {
       : null,
     materials,
     targets,
+    learningPath: path
+      ? {
+          id: path.id,
+          status: path.status,
+          focused: path.focused,
+          diagnostics: path.diagnostics,
+          passed: displayPathNodes.filter(
+            (node) => node.kind === "target" && node.passed_at,
+          ).length,
+          total: displayPathNodes.filter((node) => node.kind === "target").length,
+          nodes: serializedPathNodes,
+        }
+      : null,
   };
 }
 
@@ -1565,6 +1760,42 @@ export async function eraseSource(input: {
     await del(source.objectUrl);
   }
   await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      UPDATE waxon_v2.review_session_items
+         SET state = CASE WHEN state = 'queued' THEN 'invalidated' ELSE state END,
+             source_context = '{"erased":true}'::jsonb
+       WHERE user_id = ${input.userId}
+         AND source_context->>'sourceId' = ${input.sourceId}
+    `);
+    await tx.execute(sql`
+      WITH cutoff AS (
+        SELECT min(focus.depth) AS depth
+          FROM waxon_v2.source_focus_stack focus
+         WHERE focus.user_id = ${input.userId}
+           AND (
+             focus.source_id = ${input.sourceId}
+             OR focus.parent_gap_node_id IN (
+               SELECT node.id
+                 FROM waxon_v2.source_learning_nodes node
+                 JOIN waxon_v2.source_learning_paths path
+                   ON path.user_id = node.user_id AND path.id = node.path_id
+                WHERE path.user_id = ${input.userId}
+                  AND path.source_id = ${input.sourceId}
+             )
+           )
+      )
+      DELETE FROM waxon_v2.source_focus_stack focus
+       USING cutoff
+       WHERE focus.user_id = ${input.userId}
+         AND cutoff.depth IS NOT NULL
+         AND focus.depth >= cutoff.depth
+    `);
+    await tx.execute(sql`
+      UPDATE waxon_v2.source_learning_nodes
+         SET bridge_source_id = NULL, updated_at = now()
+       WHERE user_id = ${input.userId}
+         AND bridge_source_id = ${input.sourceId}
+    `);
     await tx.execute(sql`
       DELETE FROM waxon_v2.question_evidence qe
        USING waxon_v2.evidence_spans es, waxon_v2.source_versions sv

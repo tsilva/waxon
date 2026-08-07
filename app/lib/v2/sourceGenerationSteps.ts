@@ -8,6 +8,7 @@ import {
   persistGenerationRunStep as persistGenerationRun,
   prepareGenerationRunStep as prepareGenerationRun,
   reuseGenerationManifestStep as reuseGenerationManifest,
+  sequenceGenerationRunStep as sequenceGenerationRun,
 } from "./sourceGeneration";
 
 export async function prepareGenerationRunStep(runId: string) {
@@ -36,6 +37,11 @@ export async function critiqueGenerationRunStep(runId: string) {
 export async function matchGenerationRunStep(runId: string) {
   "use step";
   return await matchGenerationRun(runId);
+}
+
+export async function sequenceGenerationRunStep(runId: string) {
+  "use step";
+  return await sequenceGenerationRun(runId);
 }
 
 export async function persistGenerationRunStep(runId: string) {

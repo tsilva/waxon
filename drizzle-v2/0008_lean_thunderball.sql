@@ -1,0 +1,1 @@
+ALTER TABLE "waxon_v2"."review_session_items" ADD COLUMN "is_introduction" boolean DEFAULT false NOT NULL;

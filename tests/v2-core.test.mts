@@ -18,6 +18,10 @@ import { extractPdfText } from "../app/lib/v2/pdf.ts";
 import { normalizeGeneratedAnswerMode } from "../app/lib/v2/generatedAnswerMode.ts";
 import { alignEvidenceQuote } from "../app/lib/v2/evidenceQuote.ts";
 import { inferSourceCapture } from "../app/lib/v2/sourceCapture.ts";
+import {
+  normalizeLearningPath,
+  removeSharedQuestionEdges,
+} from "../app/lib/v2/learningPath.ts";
 
 const now = new Date("2026-07-25T10:00:00.000Z");
 
@@ -143,6 +147,123 @@ test("v2 planner caps new admissions independently of bank size", () => {
   });
 
   assert.equal(plan.length, 2);
+});
+
+test("v2 planner keeps due work first and prefers the explicitly focused path", () => {
+  const plan = buildReviewPlan({
+    now,
+    timeBudgetMinutes: 10,
+    desiredRetention: 0.9,
+    newItemsPerDay: 2,
+    candidates: [
+      candidate({ questionId: "due" }),
+      candidate({
+        questionId: "unrelated-new",
+        lifecycle: "new",
+        dueAt: null,
+        retrievability: null,
+        importance: 10,
+      }),
+      candidate({
+        questionId: "focused-new",
+        lifecycle: "new",
+        dueAt: null,
+        retrievability: null,
+        path: {
+          nodeIds: ["node-1"],
+          sourceContext: {
+            sourceId: "source-1",
+            sourceTitle: "Policy optimization",
+            moduleTitle: "Foundations",
+            checkpoint: 1,
+            checkpointTotal: 8,
+          },
+        },
+      }),
+    ],
+  });
+  assert.deepEqual(
+    plan.map((item) => item.questionId),
+    ["due", "focused-new", "unrelated-new"],
+  );
+});
+
+test("learning-path validation lets prerequisites override source position", () => {
+  const path = normalizeLearningPath({
+    targets: [
+      { key: "advanced", statement: "Advanced objective", sourcePosition: 10 },
+      { key: "foundation", statement: "Foundation", sourcePosition: 20 },
+    ],
+    draft: {
+      modules: [{ key: "core", title: "Core" }],
+      nodes: [
+        {
+          targetKey: "advanced",
+          moduleKey: "core",
+          prerequisiteTargetKeys: ["foundation"],
+          externalPrerequisiteKeys: [],
+        },
+        {
+          targetKey: "foundation",
+          moduleKey: "core",
+          prerequisiteTargetKeys: [],
+          externalPrerequisiteKeys: [],
+        },
+      ],
+      externalPrerequisites: [],
+    },
+  });
+  assert.equal(path.status, "ready");
+  assert.deepEqual(path.nodes.map((node) => node.key), ["foundation", "advanced"]);
+});
+
+test("invalid learning-path cycles fall back to a strict source-order chain", () => {
+  const path = normalizeLearningPath({
+    targets: [
+      { key: "first", statement: "First", sourcePosition: 1 },
+      { key: "second", statement: "Second", sourcePosition: 2 },
+    ],
+    draft: {
+      modules: [{ key: "core", title: "Core" }],
+      nodes: [
+        {
+          targetKey: "first",
+          moduleKey: "core",
+          prerequisiteTargetKeys: ["second"],
+          externalPrerequisiteKeys: [],
+        },
+        {
+          targetKey: "second",
+          moduleKey: "core",
+          prerequisiteTargetKeys: ["first"],
+          externalPrerequisiteKeys: [],
+        },
+      ],
+      externalPrerequisites: [],
+    },
+  });
+  assert.equal(path.status, "fallback_ready");
+  assert.deepEqual(path.nodes.map((node) => node.key), ["first", "second"]);
+  assert.deepEqual(path.edges, [
+    { prerequisiteKey: "first", dependentKey: "second" },
+  ]);
+});
+
+test("learning paths remove dependencies inside one reused bank question", () => {
+  const edges = removeSharedQuestionEdges(
+    [
+      { prerequisiteKey: "foundation", dependentKey: "application" },
+      { prerequisiteKey: "application", dependentKey: "diagnostic" },
+    ],
+    new Map([
+      ["foundation", "shared-question"],
+      ["application", "shared-question"],
+      ["diagnostic", "different-question"],
+    ]),
+  );
+  assert.deepEqual(edges, [
+    { prerequisiteKey: "application", dependentKey: "diagnostic" },
+  ]);
 });
 
 test("v2 planner protects every at-risk item when it fits", () => {

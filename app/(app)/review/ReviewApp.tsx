@@ -472,7 +472,11 @@ export default function ReviewApp() {
               <section className="v2-recall-card">
                 <div className="v2-question-meta">
                   <span>
-                    {item.isRetry ? "Delayed retry" : `Question ${item.position + 1}`}
+                    {item.isRetry
+                      ? "Delayed retry"
+                      : item.sourceContext
+                        ? `${item.sourceContext.sourceTitle} · ${item.sourceContext.moduleTitle} · ${item.sourceContext.checkpoint} of ${item.sourceContext.checkpointTotal}`
+                        : `Question ${item.position + 1}`}
                   </span>
                   <span><Clock3 /> about {item.estimatedMinutes} min</span>
                 </div>
@@ -538,11 +542,17 @@ export default function ReviewApp() {
                       durable recall.
                     </p>
                   </>
-                ) : turns.some((turn) => turn.evaluation.status === "pending") ? (
+                ) : review?.waitingOnEvaluation || turns.some((turn) => turn.evaluation.status === "pending") ? (
                   <>
                     <LoaderCircle className="v2-spin" />
                     <h1>Finishing your feedback</h1>
                     <p>Your answers are safe. The session will close as grading finishes.</p>
+                  </>
+                ) : review?.blockedReason ? (
+                  <>
+                    <Clock3 />
+                    <h1>Your learning path is paused.</h1>
+                    <p>{review.blockedReason}</p>
                   </>
                 ) : (
                   <>

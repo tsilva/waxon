@@ -16,6 +16,12 @@ import {
   cancelSourceGenerationWorkflow,
   startSourceGeneration,
 } from "@/app/lib/v2/sourceGenerationRuntime";
+import {
+  buildPrerequisiteSource,
+  focusSource,
+  unfocusSource,
+} from "@/app/lib/v2/learningPathService";
+import { replanActiveSessionForFocus } from "@/app/lib/v2/service";
 
 export async function GET(
   _request: Request,
@@ -46,6 +52,29 @@ export async function POST(
     }
     if (parsed.value.action === "preview-erase") {
       return NextResponse.json(await sourceErasePreview(user.id, sourceId));
+    }
+    if (parsed.value.action === "focus") {
+      await focusSource({ userId: user.id, sourceId });
+      await replanActiveSessionForFocus(user.id);
+      return NextResponse.json({ ok: true });
+    }
+    if (parsed.value.action === "unfocus") {
+      await unfocusSource(user.id);
+      await replanActiveSessionForFocus(user.id);
+      return NextResponse.json({ ok: true });
+    }
+    if (parsed.value.action === "build-prerequisite") {
+      if (typeof parsed.value.gapNodeId !== "string") {
+        throw new Error("A prerequisite gap is required.");
+      }
+      return NextResponse.json(
+        await buildPrerequisiteSource({
+          userId: user.id,
+          sourceId,
+          gapNodeId: parsed.value.gapNodeId,
+        }),
+        { status: 202 },
+      );
     }
     if (parsed.value.action === "erase") {
       const cancelled = await requestSourceGenerationCancellation({
