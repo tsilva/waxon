@@ -60,6 +60,7 @@ export type OpenRouterChatRequest = {
   tools?: unknown;
   tool_choice?: unknown;
   parallel_tool_calls?: boolean;
+  max_tool_calls?: number;
 };
 
 export type OpenRouterEmbeddingRequest = {
@@ -79,6 +80,7 @@ type OpenRouterUsage = {
   cached_tokens?: unknown;
   cache_write_tokens?: unknown;
   cache_creation_input_tokens?: unknown;
+  server_tool_use?: unknown;
 };
 
 export type OpenRouterChatResponse = {
@@ -86,7 +88,11 @@ export type OpenRouterChatResponse = {
   model?: string;
   choices?: Array<{
     delta?: { content?: unknown; tool_calls?: OpenRouterToolCall[] };
-    message?: { content?: unknown; tool_calls?: OpenRouterToolCall[] };
+    message?: {
+      content?: unknown;
+      tool_calls?: OpenRouterToolCall[];
+      annotations?: unknown;
+    };
   }>;
   usage?: OpenRouterUsage & Record<string, unknown>;
 };

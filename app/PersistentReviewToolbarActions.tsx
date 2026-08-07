@@ -11,7 +11,6 @@ import { useToolbarState } from "@/app/ToolbarState";
 const toolbarRoutes = [
   "/review",
   "/library",
-  "/stats",
   "/admin",
 ];
 export function PersistentReviewToolbarActions({

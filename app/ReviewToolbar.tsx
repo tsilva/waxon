@@ -30,7 +30,6 @@ type ReviewToolbarActionsProps = {
   menuEmail: string;
   onManageAccount: () => void;
   onSignOut: () => void;
-  onStatsClick?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
 };
 
 function tabClass(isActive: boolean, isPending: boolean): string {
@@ -163,7 +162,6 @@ export function ReviewToolbarActions({
   menuAvatarUrl,
   menuDisplayName,
   menuEmail,
-  onStatsClick,
   onManageAccount,
   onSignOut,
   className = "",
@@ -205,22 +203,17 @@ export function ReviewToolbarActions({
     };
   }, [isUserMenuOpen]);
 
-  const queueSummaryClassName = `queue-summary ${
-    activeTab === "stats" ? "queue-summary-active" : ""
-  }`;
-
   return (
     <div className={`reader-actions ${className}`.trim()}>
       {dueCount === null ? (
         <span className="queue-summary-placeholder" aria-hidden="true" />
       ) : (
         <Link
-          className={queueSummaryClassName}
-          href="/stats"
+          className="queue-summary"
+          href="/review"
           prefetch={false}
-          aria-current={activeTab === "stats" ? "page" : undefined}
-          onClick={onStatsClick}
-          title="Review stats"
+          aria-current={activeTab === "review" ? "page" : undefined}
+          title="Open Review"
         >
           {dueCount} due
         </Link>

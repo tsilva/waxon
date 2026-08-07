@@ -1,4 +1,4 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { readJsonBodyWithLimit } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
 import {
@@ -9,13 +9,12 @@ import {
 import {
   applyLearnerGrade,
   getEvaluationForSubmission,
-  runPendingJobs,
 } from "@/app/lib/v2/service";
+import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 
 export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
-    after(() => runPendingJobs({ userId: user.id, limit: 3 }));
     const submissionId = new URL(request.url).searchParams.get("submissionId");
     if (!submissionId) {
       throw new Error("submissionId is required.");
@@ -51,7 +50,7 @@ export async function POST(request: Request) {
       submissionId,
       grade,
     });
-    after(() => runPendingJobs({ userId: user.id, limit: 3 }));
+    await startBackgroundJobs(user.id, 3);
     return NextResponse.json(result);
   } catch (error) {
     return v2Error(error);

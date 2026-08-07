@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import {
   consumeUserRateLimit,
   readJsonBodyWithLimit,
@@ -14,9 +14,9 @@ import {
   listLibrary,
   mergeQuestions,
   mutateQuestionLifecycle,
-  runPendingJobs,
   splitQuestion,
 } from "@/app/lib/v2/service";
+import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 import {
   asAnswerMode,
   isRecord,
@@ -39,7 +39,6 @@ const LIFECYCLES = new Set<V2Lifecycle>([
 export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
-    after(() => runPendingJobs({ userId: user.id, limit: 3 }));
     const url = new URL(request.url);
     const requestedLifecycle = url.searchParams.get("lifecycle");
     const lifecycle =
@@ -104,7 +103,9 @@ export async function POST(request: Request) {
           : undefined,
       answerMode: asAnswerMode(parsed.value.answerMode),
     });
-    after(() => runPendingJobs({ userId: user.id, limit: 3 }));
+    if (result.jobId) {
+      await startBackgroundJobs(user.id, 3);
+    }
     return NextResponse.json({ ok: true, ...result }, { status: 201 });
   } catch (error) {
     return v2Error(error);
@@ -137,7 +138,7 @@ export async function PATCH(request: Request) {
         userId: user.id,
         questionIds,
       });
-      after(() => runPendingJobs({ userId: user.id, limit: 6 }));
+      await startBackgroundJobs(user.id, 6);
       return NextResponse.json({ ok: true, accepted });
     }
     if (
@@ -228,7 +229,7 @@ export async function PATCH(request: Request) {
     } else {
       throw new Error("This Library action is not allowed.");
     }
-    after(() => runPendingJobs({ userId: user.id, limit: 6 }));
+    await startBackgroundJobs(user.id, 6);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return v2Error(error);

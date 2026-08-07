@@ -1,15 +1,12 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import {
   consumeUserRateLimit,
   readJsonBodyWithLimit,
 } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
 import { isRecord, v2Error } from "@/app/lib/v2/http";
-import { runPendingJobs } from "@/app/lib/v2/service";
-import {
-  createGroundedTopicSource,
-  createSource,
-} from "@/app/lib/v2/sources";
+import { createSourceGeneration } from "@/app/lib/v2/sourceGeneration";
+import { startSourceGeneration } from "@/app/lib/v2/sourceGenerationRuntime";
 
 export async function POST(request: Request) {
   const parsed = await readJsonBodyWithLimit(request, 2 * 1024 * 1024);
@@ -41,7 +38,7 @@ export async function POST(request: Request) {
         : "";
     const rawText =
       typeof parsed.value.text === "string"
-        ? parsed.value.text.slice(0, 1_000_000)
+        ? parsed.value.text.slice(0, kind === "topic" ? 2_000 : 1_000_000)
         : null;
     const originalUrl =
       typeof parsed.value.url === "string"
@@ -58,21 +55,22 @@ export async function POST(request: Request) {
           : "Add a URL or at least 40 characters of source text.",
       );
     }
-    const result =
-      kind === "topic"
-        ? await createGroundedTopicSource({
-            userId: user.id,
-            query: rawText ?? "",
-          })
-        : await createSource({
-            userId: user.id,
-            kind,
-            title: title || originalUrl || "Pasted source",
-            rawText: kind === "url" ? null : rawText,
-            originalUrl: kind === "url" ? originalUrl : null,
-          });
-    after(() => runPendingJobs({ userId: user.id, limit: 2 }));
-    return NextResponse.json({ ok: true, ...result }, { status: 202 });
+    const result = await createSourceGeneration({
+      userId: user.id,
+      kind,
+      title:
+        title ||
+        (kind === "topic" ? rawText : null) ||
+        originalUrl ||
+        "Pasted source",
+      rawText: kind === "url" ? null : rawText,
+      originalUrl: kind === "url" ? originalUrl : null,
+    });
+    const workflowRunId = await startSourceGeneration(result.runId);
+    return NextResponse.json(
+      { ok: true, ...result, workflowRunId },
+      { status: 202 },
+    );
   } catch (error) {
     return v2Error(error);
   }

@@ -11,6 +11,19 @@ Reference image: `design-reference/waxon-approved-ui.png`
 
 ## Remaining Comparison Notes
 
+- August 7, 2026 source-to-mastery update: Library now centers a single
+  `Topic or source` capture path alongside direct question entry. The compact
+  rail is limited to bank lifecycle views plus Sources and Concepts; standalone
+  Stats, saved views, Health, and Inbox are intentionally absent. Source cards
+  separate question-set readiness from demonstrated mastery and expose the
+  current auditable target manifest without showing superseded generation
+  attempts.
+- August 7, 2026 verification status: the native in-app browser passed the full
+  topic flow for Proximal Policy Optimization, producing 18 current mastery
+  targets covered by 17 bank questions. Desktop source/manifest rendering and
+  the 390x844 source and capture-dialog layouts were visually checked against
+  the warm editorial system. The approved composite image has not been
+  refreshed because its sample content remains a useful shell reference.
 - July 25, 2026 v2 overhaul: the approved warm editorial shell, typography,
   spacing, subdued borders, and focused recall surface remain authoritative.
   Library now uses a compact left-hand view rail for Inbox, lifecycle states,

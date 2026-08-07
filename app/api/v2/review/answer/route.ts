@@ -1,14 +1,12 @@
-import { after, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import {
   consumeUserRateLimit,
   readJsonBodyWithLimit,
 } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
 import { isRecord, v2Error } from "@/app/lib/v2/http";
-import {
-  runPendingJobs,
-  submitReviewAnswer,
-} from "@/app/lib/v2/service";
+import { submitReviewAnswer } from "@/app/lib/v2/service";
+import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 
 export async function POST(request: Request) {
   const parsed = await readJsonBodyWithLimit(request, 80 * 1024);
@@ -42,7 +40,9 @@ export async function POST(request: Request) {
       itemId,
       answer,
     });
-    after(() => runPendingJobs({ userId: user.id, limit: 4 }));
+    if (evaluation.status === "pending") {
+      await startBackgroundJobs(user.id, 4);
+    }
     return NextResponse.json(evaluation, { status: 202 });
   } catch (error) {
     return v2Error(error);

@@ -39,7 +39,9 @@ export type V2Source = {
     | "captured"
     | "processing"
     | "ready"
+    | "needs_attention"
     | "failed"
+    | "cancelled"
     | "rejected_limit"
     | "disabled"
     | "erasing"
@@ -49,6 +51,30 @@ export type V2Source = {
   progress: number;
   error: string | null;
   hasMoreAnalysis: boolean;
+  questionSetStatus: "building" | "ready" | "needs_attention";
+  mastery: {
+    status: "not_started" | "in_progress" | "currently_mastered";
+    masteredTargets: number;
+    requiredTargets: number;
+  };
+  run: {
+    id: string;
+    status:
+      | "queued"
+      | "preparing"
+      | "mapping"
+      | "matching"
+      | "drafting"
+      | "criticizing"
+      | "persisting"
+      | "ready"
+      | "needs_attention"
+      | "failed"
+      | "cancelled";
+    stage: string;
+    progress: number;
+    residualCount: number;
+  } | null;
   coverage: {
     covered: number;
     weak: number;
@@ -64,14 +90,6 @@ export type V2LibraryResponse = {
   sources: V2Source[];
   counts: Record<V2Lifecycle, number>;
   concepts: Array<{ id: string; name: string; slug: string; count: number }>;
-  savedViews: Array<{
-    id: string;
-    name: string;
-    query: {
-      search?: string;
-      lifecycle?: V2Lifecycle | "all";
-    };
-  }>;
   waitingNew: number;
   healthCount: number;
 };

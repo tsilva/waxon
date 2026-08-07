@@ -19,11 +19,13 @@ import {
   concepts,
   coverageTargets,
   evidenceSpans,
+  generationRuns,
   jobs,
   questionConcepts,
   questionEvidence,
   questions,
   questionVersions,
+  sourceMaterials,
   sources,
   sourceVersions,
   targetEvidence,
@@ -37,16 +39,17 @@ import {
   recallTargetKey,
 } from "./questionQuality";
 import { extractPdfText } from "./pdf";
+import { memoryRetrievability } from "./scheduler";
 
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
 const MAX_MODEL_TEXT_CHARS = 250_000;
 const MAX_REDIRECTS = 5;
 
-function checksum(value: string | Uint8Array): string {
+export function checksum(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function conceptSlug(name: string): string {
+export function conceptSlug(name: string): string {
   return name
     .normalize("NFKC")
     .toLocaleLowerCase("und")
@@ -55,7 +58,7 @@ function conceptSlug(name: string): string {
     .slice(0, 120);
 }
 
-function readableText(value: string): string {
+export function readableText(value: string): string {
   if (!/<(?:html|body|main|article|p|div|h[1-6]|script|style)\b/iu.test(value)) {
     return value;
   }
@@ -454,7 +457,7 @@ export async function mutateSourceProcessing(input: {
   const db = getV2Db();
   await db.transaction(async (tx) => {
     const [source] = await tx
-      .select({ status: sources.status })
+      .select({ status: sources.status, activeRunId: sources.activeRunId })
       .from(sources)
       .where(
         and(eq(sources.userId, input.userId), eq(sources.id, input.sourceId)),
@@ -623,7 +626,9 @@ export async function continueSourceAnalysis(input: {
   });
 }
 
-async function loadSourceText(source: typeof sources.$inferSelect): Promise<string> {
+export async function loadSourceText(
+  source: typeof sources.$inferSelect,
+): Promise<string> {
   if (source.rawText) {
     return source.rawText;
   }
@@ -1036,7 +1041,7 @@ export async function setSourceDisabled(input: {
   const db = getV2Db();
   await db.transaction(async (tx) => {
     const [source] = await tx
-      .select({ status: sources.status })
+      .select({ status: sources.status, activeRunId: sources.activeRunId })
       .from(sources)
       .where(
         and(eq(sources.userId, input.userId), eq(sources.id, input.sourceId)),
@@ -1045,10 +1050,34 @@ export async function setSourceDisabled(input: {
     if (!source) {
       throw new Error("Source not found.");
     }
+    const [activeRun] = source.activeRunId
+      ? await tx
+          .select({ status: generationRuns.status })
+          .from(generationRuns)
+          .where(
+            and(
+              eq(generationRuns.userId, input.userId),
+              eq(generationRuns.id, source.activeRunId),
+            ),
+          )
+          .limit(1)
+      : [null];
+    const enabledStatus =
+      activeRun?.status === "ready"
+        ? "ready"
+        : activeRun?.status === "needs_attention"
+          ? "needs_attention"
+          : activeRun?.status === "failed"
+            ? "failed"
+            : activeRun?.status === "cancelled"
+              ? "cancelled"
+              : activeRun
+                ? "processing"
+                : "ready";
     await tx
       .update(sources)
       .set({
-        status: input.disabled ? "disabled" : "ready",
+        status: input.disabled ? "disabled" : enabledStatus,
         disabledAt: input.disabled ? new Date() : null,
         updatedAt: new Date(),
       })
@@ -1257,8 +1286,12 @@ export async function getSourceManifest(userId: string, sourceId: string) {
     .select({
       id: sources.id,
       title: sources.title,
+      kind: sources.kind,
       status: sources.status,
       originalUrl: sources.originalUrl,
+      activeRevisionId: sources.activeRevisionId,
+      activeRunId: sources.activeRunId,
+      createdAt: sources.createdAt,
     })
     .from(sources)
     .where(and(eq(sources.userId, userId), eq(sources.id, sourceId)))
@@ -1266,40 +1299,247 @@ export async function getSourceManifest(userId: string, sourceId: string) {
   if (!source) {
     throw new Error("Source not found.");
   }
-  const targets = await db
-    .select({
-      id: coverageTargets.id,
-      type: coverageTargets.targetType,
-      statement: coverageTargets.statement,
-      status: coverageTargets.status,
-      ignoreReason: coverageTargets.ignoreReason,
-      evidenceQuote: evidenceSpans.quote,
-    })
-    .from(coverageTargets)
-    .leftJoin(
-      targetEvidence,
-      and(
-        eq(targetEvidence.userId, coverageTargets.userId),
-        eq(targetEvidence.targetId, coverageTargets.id),
-      ),
+  const [run] = source.activeRunId
+    ? await db
+        .select()
+        .from(generationRuns)
+        .where(
+          and(
+            eq(generationRuns.userId, userId),
+            eq(generationRuns.id, source.activeRunId),
+          ),
+        )
+        .limit(1)
+    : [null];
+  const materials = source.activeRevisionId
+    ? await db
+        .select({
+          id: sourceMaterials.id,
+          kind: sourceMaterials.kind,
+          title: sourceMaterials.title,
+          url: sourceMaterials.url,
+          model: sourceMaterials.model,
+          createdAt: sourceMaterials.createdAt,
+        })
+        .from(sourceMaterials)
+        .where(
+          and(
+            eq(sourceMaterials.userId, userId),
+            eq(sourceMaterials.sourceRevisionId, source.activeRevisionId),
+          ),
+        )
+        .orderBy(asc(sourceMaterials.createdAt))
+    : [];
+  const targetRows = await getV2Client().pool.query<{
+    id: string;
+    type: string;
+    statement: string;
+    status: "covered" | "weak" | "missing" | "ignored" | "unresolved";
+    requirement: "required" | "optional" | "excluded" | "unsupported";
+    confidence: number | string | null;
+    ignore_reason: string | null;
+    evidence_quote: string | null;
+    question_id: string | null;
+    question_prompt: string | null;
+    lifecycle: string | null;
+    relation: string | null;
+    latest_grade: "again" | "hard" | "good" | "easy" | null;
+    due_at: Date | null;
+    last_review_at: Date | null;
+    stability: number | string | null;
+    difficulty: number | string | null;
+    elapsed_days: number | null;
+    scheduled_days: number | null;
+    reps: number | null;
+    lapses: number | null;
+    memory_state: number | null;
+    learning_steps: number | null;
+  }>(
+    `SELECT ct.id,
+            ct.target_type AS type,
+            ct.statement,
+            ct.status,
+            ct.requirement,
+            ct.confidence,
+            ct.ignore_reason,
+            es.quote AS evidence_quote,
+            q.id AS question_id,
+            qv.prompt AS question_prompt,
+            q.lifecycle,
+            tq.relation,
+            latest_grade.value AS latest_grade,
+            ms.due_at,
+            ms.last_review_at,
+            ms.stability,
+            ms.difficulty,
+            ms.elapsed_days,
+            ms.scheduled_days,
+            ms.reps,
+            ms.lapses,
+            ms.state AS memory_state,
+            ms.learning_steps
+       FROM waxon_v2.coverage_targets ct
+       LEFT JOIN waxon_v2.target_evidence te
+         ON te.user_id = ct.user_id AND te.target_id = ct.id
+       LEFT JOIN waxon_v2.evidence_spans es
+         ON es.user_id = te.user_id AND es.id = te.evidence_span_id
+       LEFT JOIN waxon_v2.target_questions tq
+         ON tq.user_id = ct.user_id AND tq.target_id = ct.id
+       LEFT JOIN waxon_v2.questions q
+         ON q.user_id = tq.user_id AND q.id = tq.question_id
+       LEFT JOIN waxon_v2.question_versions qv
+         ON qv.user_id = q.user_id AND qv.question_id = q.id AND qv.is_current = true
+       LEFT JOIN waxon_v2.memory_states ms
+         ON ms.user_id = q.user_id AND ms.question_id = q.id
+       LEFT JOIN LATERAL (
+         SELECT ge.grade AS value
+           FROM waxon_v2.answer_submissions a
+           JOIN waxon_v2.grade_events ge
+             ON ge.user_id = a.user_id AND ge.submission_id = a.id
+          WHERE a.user_id = q.user_id AND a.question_id = q.id
+          ORDER BY ge.created_at DESC
+          LIMIT 1
+       ) latest_grade ON true
+      WHERE ct.user_id = $1
+        AND ct.source_id = $2
+        AND ($3::uuid IS NULL OR ct.source_revision_id = $3::uuid)
+        AND ($4::uuid IS NULL OR ct.generation_run_id = $4::uuid)
+      ORDER BY ct.created_at, q.updated_at DESC NULLS LAST`,
+    [userId, sourceId, source.activeRevisionId, source.activeRunId],
+  );
+  const [settings] = await getV2Client().pool
+    .query<{ desired_retention: number | string }>(
+      `SELECT desired_retention FROM waxon_v2.learner_settings WHERE user_id = $1`,
+      [userId],
     )
-    .leftJoin(
-      evidenceSpans,
-      and(
-        eq(evidenceSpans.userId, targetEvidence.userId),
-        eq(evidenceSpans.id, targetEvidence.evidenceSpanId),
-      ),
-    )
-    .where(
-      and(
-        eq(coverageTargets.userId, userId),
-        eq(coverageTargets.sourceId, sourceId),
-      ),
-    )
-    .orderBy(asc(coverageTargets.createdAt))
-    .limit(250);
+    .then((result) => result.rows);
+  const desiredRetention = Number(settings?.desired_retention ?? 0.9);
+  const targetsById = new Map<
+    string,
+    {
+      id: string;
+      type: string;
+      statement: string;
+      status: typeof targetRows.rows[number]["status"];
+      requirement: typeof targetRows.rows[number]["requirement"];
+      confidence: number | null;
+      ignoreReason: string | null;
+      evidenceQuote: string | null;
+      questions: Array<{
+        id: string;
+        prompt: string;
+        lifecycle: string;
+        relation: string;
+      }>;
+      mastered: boolean;
+    }
+  >();
+  for (const row of targetRows.rows) {
+    const target = targetsById.get(row.id) ?? {
+      id: row.id,
+      type: row.type,
+      statement: row.statement,
+      status: row.status,
+      requirement: row.requirement,
+      confidence: row.confidence === null ? null : Number(row.confidence),
+      ignoreReason: row.ignore_reason,
+      evidenceQuote: row.evidence_quote,
+      questions: [],
+      mastered: false,
+    };
+    if (
+      row.question_id &&
+      row.question_prompt &&
+      row.lifecycle &&
+      !target.questions.some((question) => question.id === row.question_id)
+    ) {
+      target.questions.push({
+        id: row.question_id,
+        prompt: row.question_prompt,
+        lifecycle: row.lifecycle,
+        relation: row.relation ?? "linked",
+      });
+    }
+    if (!target.evidenceQuote && row.evidence_quote) {
+      target.evidenceQuote = row.evidence_quote;
+    }
+    if (
+      ["new", "learning", "review"].includes(row.lifecycle ?? "") &&
+      (row.latest_grade === "good" || row.latest_grade === "easy") &&
+      row.due_at &&
+      row.stability !== null &&
+      row.difficulty !== null &&
+      row.elapsed_days !== null &&
+      row.scheduled_days !== null &&
+      row.reps !== null &&
+      row.lapses !== null &&
+      row.memory_state !== null &&
+      row.learning_steps !== null
+    ) {
+      target.mastered ||=
+        memoryRetrievability({
+          memory: {
+            dueAt: row.due_at,
+            lastReviewAt: row.last_review_at,
+            stability: Number(row.stability),
+            difficulty: Number(row.difficulty),
+            elapsedDays: row.elapsed_days,
+            scheduledDays: row.scheduled_days,
+            reps: row.reps,
+            lapses: row.lapses,
+            state: row.memory_state,
+            learningSteps: row.learning_steps,
+          },
+          desiredRetention,
+        }) >= desiredRetention;
+    }
+    targetsById.set(row.id, target);
+  }
+  const targets = [...targetsById.values()];
+  const required = targets.filter((target) => target.requirement === "required");
+  const masteredTargets = required.filter((target) => target.mastered).length;
+  const masteryStatus =
+    required.length > 0 && masteredTargets === required.length
+      ? "currently_mastered"
+      : required.some((target) => target.questions.length > 0)
+        ? "in_progress"
+        : "not_started";
 
-  return { source, targets };
+  return {
+    source: {
+      ...source,
+      questionSetStatus:
+        run?.status === "ready"
+          ? "ready"
+          : run?.status === "needs_attention" ||
+              run?.status === "failed" ||
+              run?.status === "cancelled"
+            ? "needs_attention"
+            : "building",
+      mastery: {
+        status: masteryStatus,
+        masteredTargets,
+        requiredTargets: required.length,
+      },
+    },
+    run: run
+      ? {
+          id: run.id,
+          workflowRunId: run.workflowRunId,
+          status: run.status,
+          stage: run.stage,
+          progress: run.progress,
+          usage: run.usage,
+          result: run.result,
+          residuals: run.residuals,
+          error: run.error,
+          createdAt: run.createdAt,
+          finishedAt: run.finishedAt,
+        }
+      : null,
+    materials,
+    targets,
+  };
 }
 
 export async function eraseSource(input: {

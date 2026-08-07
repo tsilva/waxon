@@ -21,7 +21,6 @@ const isPublicStaticPage = createRouteMatcher([
 const isPublicAppShellRoute = createRouteMatcher([
   "/library(.*)",
   "/review(.*)",
-  "/stats(.*)",
 ]);
 
 const handleClerkMiddleware = clerkMiddleware(async (auth, request) => {
@@ -58,7 +57,7 @@ export default function middleware(
 
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/((?!_next|\\.well-known/workflow/|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/__clerk/:path*",
     "/(api|trpc)(.*)",
   ],

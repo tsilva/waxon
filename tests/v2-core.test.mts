@@ -17,6 +17,7 @@ import {
 import { extractPdfText } from "../app/lib/v2/pdf.ts";
 import { normalizeGeneratedAnswerMode } from "../app/lib/v2/generatedAnswerMode.ts";
 import { alignEvidenceQuote } from "../app/lib/v2/evidenceQuote.ts";
+import { inferSourceCapture } from "../app/lib/v2/sourceCapture.ts";
 
 const now = new Date("2026-07-25T10:00:00.000Z");
 
@@ -266,6 +267,24 @@ test("v2 source generation accepts common semantic answer-mode aliases", () => {
   assert.equal(normalizeGeneratedAnswerMode("free_text"), "semantic");
   assert.equal(normalizeGeneratedAnswerMode("multi-point"), "rubric");
   assert.equal(normalizeGeneratedAnswerMode("unsupported-mode"), null);
+});
+
+test("v2 source capture infers a topic, URL, or pasted source", () => {
+  assert.deepEqual(inferSourceCapture("Proximal Policy Optimization"), {
+    kind: "topic",
+    title: "Proximal Policy Optimization",
+    text: "Proximal Policy Optimization",
+  });
+  assert.deepEqual(inferSourceCapture("https://example.com/ppo"), {
+    kind: "url",
+    title: "https://example.com/ppo",
+    url: "https://example.com/ppo",
+  });
+  assert.deepEqual(inferSourceCapture("PPO notes\nThe clipped objective limits policy updates."), {
+    kind: "paste",
+    title: "PPO notes",
+    text: "PPO notes\nThe clipped objective limits policy updates.",
+  });
 });
 
 test("v2 evidence alignment maps PDF hyphenation back to an exact quote", () => {
