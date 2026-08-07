@@ -1,0 +1,23 @@
+# Credential references only. Store values with `keyenv set ENV_NAME`.
+[keyenv]
+version = 1
+
+[secrets.BLOB_READ_WRITE_TOKEN]
+account = "waxon/BLOB_READ_WRITE_TOKEN"
+required = true
+
+[secrets.CLERK_SECRET_KEY]
+account = "waxon/CLERK_SECRET_KEY"
+required = true
+
+[secrets.DATABASE_URL]
+account = "waxon/DATABASE_URL"
+required = true
+
+[secrets.OPENROUTER_API_KEY]
+account = "waxon/OPENROUTER_API_KEY"
+required = true
+
+[secrets.SENTRY_AUTH_TOKEN]
+account = "waxon/SENTRY_AUTH_TOKEN"
+required = true
