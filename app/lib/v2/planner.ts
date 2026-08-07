@@ -10,6 +10,16 @@ export type PlanCandidate = {
   importance: number;
   hasGap: boolean;
   createdAt: Date;
+  path?: {
+    nodeIds: string[];
+    sourceContext: {
+      sourceId: string;
+      sourceTitle: string;
+      moduleTitle: string;
+      checkpoint: number;
+      checkpointTotal: number;
+    };
+  };
 };
 
 export type PlannedCandidate = PlanCandidate & {
@@ -74,6 +84,7 @@ export function buildReviewPlan(input: {
     .filter((candidate) => candidate.lifecycle === "new")
     .sort(
       (left, right) =>
+        Number(Boolean(right.path)) - Number(Boolean(left.path)) ||
         right.importance - left.importance ||
         left.createdAt.getTime() - right.createdAt.getTime() ||
         left.questionId.localeCompare(right.questionId),

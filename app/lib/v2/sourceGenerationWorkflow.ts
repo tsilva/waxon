@@ -8,6 +8,7 @@ import {
   persistGenerationRunStep,
   prepareGenerationRunStep,
   reuseGenerationManifestStep,
+  sequenceGenerationRunStep,
 } from "./sourceGenerationSteps";
 
 const MAX_CONCURRENT_MODEL_CALLS = 4;
@@ -39,6 +40,7 @@ export async function sourceGenerationWorkflow(runId: string): Promise<void> {
       await critiqueGenerationRunStep(runId);
     }
     await matchGenerationRunStep(runId);
+    await sequenceGenerationRunStep(runId);
     await persistGenerationRunStep(runId);
     await indexGeneratedQuestionsStep(runId);
     await finalizeGenerationRunStep(runId);

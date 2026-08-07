@@ -20,6 +20,7 @@ import {
   coverageTargets,
   evidenceSpans,
   evaluations,
+  generationRuns,
   gradeEvents,
   jobs,
   learnerSettings,
@@ -33,8 +34,11 @@ import {
   questionVersions,
   repairDrafts,
   retryObligations,
+  reviewSessionItemPathNodes,
   reviewSessionItems,
   reviewSessions,
+  sourceLearningNodes,
+  sourceLearningPaths,
   sourceVersions,
   sources,
   targetQuestions,
@@ -71,6 +75,14 @@ import {
 } from "./model";
 import { claimV2Job } from "./jobs";
 import { retryEarliestAt } from "./retryPolicy";
+import {
+  advanceCompletedFocus,
+  getFocusedIntroduction,
+} from "./learningPathService";
+import {
+  runLearningPathBackfillJob,
+  SOURCE_AGENT_POLICY_VERSION,
+} from "./sourceGeneration";
 
 const ACTIVE_LIFECYCLES: V2Lifecycle[] = ["new", "learning", "review"];
 const QUESTION_PAGE_LIMIT = 100;
@@ -992,10 +1004,80 @@ export async function listLibrary(input: {
           OR qv.quality_decision IN ('uncertain', 'duplicate', 'rejected'))`,
     [input.userId],
   ).then((result) => result.rows);
+  const pathRows = await pool.query<{
+    source_id: string;
+    status: NonNullable<V2Source["learningPath"]>["status"];
+    focused: boolean;
+    passed: string;
+    total: string;
+    next_statement: string | null;
+    prerequisite_gaps: string;
+  }>(
+    `SELECT path.source_id,
+            path.status,
+            EXISTS (
+              SELECT 1 FROM waxon_v2.source_focus_stack focus
+               WHERE focus.user_id = path.user_id AND focus.path_id = path.id
+            ) AS focused,
+            (SELECT count(*)::text FROM (
+               SELECT checkpoint.question_id
+                 FROM waxon_v2.source_learning_nodes checkpoint
+                WHERE checkpoint.user_id = path.user_id
+                  AND checkpoint.path_id = path.id
+                  AND checkpoint.kind = 'target'
+                  AND checkpoint.question_id IS NOT NULL
+                GROUP BY checkpoint.question_id
+               HAVING bool_and(checkpoint.passed_at IS NOT NULL)
+             ) passed_checkpoints) AS passed,
+            (SELECT count(DISTINCT checkpoint.question_id)::text
+               FROM waxon_v2.source_learning_nodes checkpoint
+              WHERE checkpoint.user_id = path.user_id
+                AND checkpoint.path_id = path.id
+                AND checkpoint.kind = 'target'
+                AND checkpoint.question_id IS NOT NULL) AS total,
+            (SELECT candidate.statement
+               FROM waxon_v2.source_learning_nodes candidate
+              WHERE candidate.user_id = path.user_id
+                AND candidate.path_id = path.id
+                AND candidate.kind = 'target'
+                AND candidate.question_id IS NOT NULL
+                AND candidate.pedagogical_position = (
+                  SELECT max(representative.pedagogical_position)
+                    FROM waxon_v2.source_learning_nodes representative
+                   WHERE representative.user_id = candidate.user_id
+                     AND representative.path_id = candidate.path_id
+                     AND representative.question_id = candidate.question_id
+                )
+                AND EXISTS (
+                  SELECT 1
+                    FROM waxon_v2.source_learning_nodes unpassed
+                   WHERE unpassed.user_id = candidate.user_id
+                     AND unpassed.path_id = candidate.path_id
+                     AND unpassed.question_id = candidate.question_id
+                     AND unpassed.passed_at IS NULL
+                )
+              ORDER BY candidate.pedagogical_position
+              LIMIT 1) AS next_statement,
+            count(*) FILTER (
+              WHERE node.kind = 'external_prerequisite' AND node.passed_at IS NULL
+            )::text AS prerequisite_gaps
+       FROM waxon_v2.source_learning_paths path
+       JOIN waxon_v2.sources source
+         ON source.user_id = path.user_id
+        AND source.id = path.source_id
+        AND source.active_run_id = path.generation_run_id
+       LEFT JOIN waxon_v2.source_learning_nodes node
+         ON node.user_id = path.user_id AND node.path_id = path.id
+      WHERE path.user_id = $1
+      GROUP BY path.id`,
+    [input.userId],
+  );
+  const pathBySource = new Map(pathRows.rows.map((row) => [row.source_id, row]));
 
   return {
     questions: questionsOut,
     sources: sourceRows.rows.map((row) => {
+      const learningPath = pathBySource.get(row.id);
       const targets = [...(masteryBySource.get(row.id)?.values() ?? [])];
       const masteredTargets = targets.filter((target) => target.mastered).length;
       const requiredTargets = targets.length;
@@ -1050,6 +1132,16 @@ export async function listLibrary(input: {
           ignored: Number(row.ignored),
           unresolved: Number(row.unresolved),
         },
+        learningPath: learningPath
+          ? {
+              status: learningPath.status,
+              focused: learningPath.focused,
+              passed: Number(learningPath.passed),
+              total: Number(learningPath.total),
+              next: learningPath.next_statement,
+              prerequisiteGaps: Number(learningPath.prerequisite_gaps),
+            }
+          : null,
         createdAt: row.created_at.toISOString(),
       } satisfies V2Source;
     }),
@@ -1122,13 +1214,42 @@ async function planCandidates(userId: string): Promise<PlanCandidate[]> {
     .limit(2_000);
   const settings = await getLearnerSettings(userId);
   const horizon = new Date(Date.now() + 24 * 60 * 60_000);
-
-  return rows.map((row) => {
+  const focus = await getFocusedIntroduction(userId);
+  const pathQuestionRows = focus.hasFocus
+    ? []
+    : await db
+        .select({ questionId: sourceLearningNodes.questionId })
+        .from(sourceLearningNodes)
+        .innerJoin(
+          sourceLearningPaths,
+          and(
+            eq(sourceLearningPaths.userId, sourceLearningNodes.userId),
+            eq(sourceLearningPaths.id, sourceLearningNodes.pathId),
+          ),
+        )
+        .where(
+          and(
+            eq(sourceLearningNodes.userId, userId),
+            eq(sourceLearningNodes.kind, "target"),
+            sql`${sourceLearningNodes.questionId} IS NOT NULL`,
+            sql`${sourceLearningPaths.status} <> 'superseded'`,
+          ),
+        );
+  const pathQuestionIds = new Set(
+    pathQuestionRows.flatMap((row) => row.questionId ? [row.questionId] : []),
+  );
+  const candidates: PlanCandidate[] = rows.flatMap((row) => {
+    if (
+      row.lifecycle === "new" &&
+      (focus.hasFocus || pathQuestionIds.has(row.questionId))
+    ) {
+      return [];
+    }
     const memory =
       row.memory?.dueAt && row.memory.stability !== null
         ? storedMemory(row.memory)
         : null;
-    return {
+    return [{
       questionId: row.questionId,
       questionVersionId: row.questionVersionId,
       lifecycle: row.lifecycle,
@@ -1144,8 +1265,33 @@ async function planCandidates(userId: string): Promise<PlanCandidate[]> {
       importance: row.importance,
       hasGap: false,
       createdAt: row.createdAt,
-    };
+    } satisfies PlanCandidate];
   });
+  if (
+    focus.questionId &&
+    focus.questionVersionId &&
+    focus.lifecycle &&
+    focus.answerMode &&
+    focus.createdAt &&
+    focus.sourceContext
+  ) {
+    candidates.push({
+      questionId: focus.questionId,
+      questionVersionId: focus.questionVersionId,
+      lifecycle: focus.lifecycle,
+      answerMode: focus.answerMode,
+      dueAt: null,
+      retrievability: null,
+      importance: focus.importance,
+      hasGap: false,
+      createdAt: focus.createdAt,
+      path: {
+        nodeIds: focus.pathNodeIds,
+        sourceContext: focus.sourceContext,
+      },
+    });
+  }
+  return candidates;
 }
 
 async function reviewCapacity(userId: string) {
@@ -1210,6 +1356,7 @@ async function exposeNextItem(
         answerMode: questionVersions.mode,
         position: reviewSessionItems.position,
         kind: reviewSessionItems.kind,
+        sourceContext: reviewSessionItems.sourceContext,
       })
       .from(reviewSessionItems)
       .innerJoin(
@@ -1240,6 +1387,7 @@ async function exposeNextItem(
             answerMode: questionVersions.mode,
             position: reviewSessionItems.position,
             kind: reviewSessionItems.kind,
+            sourceContext: reviewSessionItems.sourceContext,
           })
           .from(reviewSessionItems)
           .innerJoin(
@@ -1281,6 +1429,26 @@ async function exposeNextItem(
             eq(reviewSessionItems.state, "queued"),
           ),
         );
+      await tx
+        .update(questions)
+        .set({ lifecycle: "learning", updatedAt: now })
+        .where(
+          and(
+            eq(questions.userId, userId),
+            eq(questions.id, row.questionId),
+            eq(questions.lifecycle, "new"),
+          ),
+        );
+      await tx.execute(sql`
+        UPDATE waxon_v2.source_learning_nodes node
+           SET introduced_at = COALESCE(node.introduced_at, ${now}),
+               updated_at = now()
+          FROM waxon_v2.review_session_item_path_nodes link
+         WHERE link.user_id = ${userId}
+           AND link.session_item_id = ${row.itemId}
+           AND node.user_id = link.user_id
+           AND node.id = link.path_node_id
+      `);
       if (row.kind === "retry") {
         await tx
           .update(retryObligations)
@@ -1347,8 +1515,337 @@ async function exposeNextItem(
         Math.ceil((session?.estimatedSeconds ?? 60) / 60),
       ),
       isRetry: row.kind === "retry",
+      sourceContext: row.sourceContext?.sourceId && row.sourceContext.sourceTitle
+        ? {
+            sourceId: row.sourceContext.sourceId,
+            sourceTitle: row.sourceContext.sourceTitle,
+            moduleTitle: row.sourceContext.moduleTitle ?? "Learning path",
+            checkpoint: row.sourceContext.checkpoint ?? row.position + 1,
+            checkpointTotal: row.sourceContext.checkpointTotal ?? itemCount,
+          }
+        : null,
     };
   });
+}
+
+function estimateReviewSeconds(mode: V2AnswerMode): number {
+  return mode === "exact" ? 30 : mode === "semantic" ? 60 : 90;
+}
+
+async function restoreFocusDisplacedIntroductions(
+  userId: string,
+  sessionId: string,
+): Promise<void> {
+  const db = getV2Db();
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`session:${userId}`}))`,
+    );
+    const [session] = await tx
+      .select()
+      .from(reviewSessions)
+      .where(
+        and(
+          eq(reviewSessions.userId, userId),
+          eq(reviewSessions.id, sessionId),
+          eq(reviewSessions.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!session) return;
+    const [settings] = await tx
+      .select({
+        newItemsPerDay: learnerSettings.newItemsPerDay,
+        timezone: learnerSettings.timezone,
+      })
+      .from(learnerSettings)
+      .where(eq(learnerSettings.userId, userId))
+      .limit(1);
+    const [{ introducedToday }] = await tx
+      .select({ introducedToday: count() })
+      .from(reviewSessionItems)
+      .where(
+        and(
+          eq(reviewSessionItems.userId, userId),
+          eq(reviewSessionItems.isIntroduction, true),
+          sql`(${reviewSessionItems.exposedAt} AT TIME ZONE ${settings?.timezone ?? "UTC"})::date = (now() AT TIME ZONE ${settings?.timezone ?? "UTC"})::date`,
+        ),
+      );
+    let remainingSlots = Math.max(
+      0,
+      (settings?.newItemsPerDay ?? 5) - introducedToday,
+    );
+    let reservedSeconds = session.reservedSeconds;
+    const displaced = await tx
+      .select({
+        id: reviewSessionItems.id,
+        estimatedSeconds: reviewSessionItems.estimatedSeconds,
+      })
+      .from(reviewSessionItems)
+      .innerJoin(
+        questions,
+        and(
+          eq(questions.userId, reviewSessionItems.userId),
+          eq(questions.id, reviewSessionItems.questionId),
+        ),
+      )
+      .innerJoin(
+        questionVersions,
+        and(
+          eq(questionVersions.userId, reviewSessionItems.userId),
+          eq(questionVersions.id, reviewSessionItems.questionVersionId),
+          eq(questionVersions.isCurrent, true),
+        ),
+      )
+      .where(
+        and(
+          eq(reviewSessionItems.userId, userId),
+          eq(reviewSessionItems.sessionId, sessionId),
+          eq(reviewSessionItems.state, "invalidated"),
+          eq(reviewSessionItems.isIntroduction, true),
+          eq(questions.lifecycle, "new"),
+          eq(questionVersions.quality, "distinct"),
+          sql`${reviewSessionItems.sourceContext}->>'displacedByFocus' = 'true'`,
+        ),
+      )
+      .orderBy(asc(reviewSessionItems.position));
+    const restored: typeof displaced = [];
+    for (const item of displaced) {
+      const reservation = item.estimatedSeconds * 2;
+      if (
+        remainingSlots <= 0 ||
+        reservedSeconds + reservation > session.timeBudgetMinutes * 60
+      ) {
+        break;
+      }
+      restored.push(item);
+      remainingSlots -= 1;
+      reservedSeconds += reservation;
+    }
+    if (restored.length === 0) return;
+    await tx
+      .update(reviewSessionItems)
+      .set({ state: "queued", sourceContext: null })
+      .where(
+        and(
+          eq(reviewSessionItems.userId, userId),
+          inArray(reviewSessionItems.id, restored.map((item) => item.id)),
+        ),
+      );
+    const restoredSeconds = restored.reduce(
+      (sum, item) => sum + item.estimatedSeconds,
+      0,
+    );
+    await tx
+      .update(reviewSessions)
+      .set({
+        plannedCount: sql`${reviewSessions.plannedCount} + ${restored.length}`,
+        estimatedSeconds: sql`${reviewSessions.estimatedSeconds} + ${restoredSeconds}`,
+        reservedSeconds: sql`${reviewSessions.reservedSeconds} + ${restoredSeconds * 2}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(reviewSessions.id, sessionId));
+  });
+}
+
+async function appendFocusedIntroductionToSession(
+  userId: string,
+  sessionId: string,
+): Promise<boolean> {
+  await advanceCompletedFocus(userId);
+  const candidate = await getFocusedIntroduction(userId);
+  if (!candidate.hasFocus) {
+    await restoreFocusDisplacedIntroductions(userId, sessionId);
+    return false;
+  }
+  if (
+    !candidate.questionId ||
+    !candidate.questionVersionId ||
+    !candidate.answerMode ||
+    !candidate.sourceContext ||
+    candidate.pathNodeIds.length === 0
+  ) {
+    return false;
+  }
+  const questionId = candidate.questionId;
+  const questionVersionId = candidate.questionVersionId;
+  const answerMode = candidate.answerMode;
+  const sourceContext = candidate.sourceContext;
+  const pathNodeIds = candidate.pathNodeIds;
+  const db = getV2Db();
+  return await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`session:${userId}`}))`,
+    );
+    const [session] = await tx
+      .select()
+      .from(reviewSessions)
+      .where(
+        and(
+          eq(reviewSessions.userId, userId),
+          eq(reviewSessions.id, sessionId),
+          eq(reviewSessions.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!session) return false;
+    const [existing] = await tx
+      .select({ id: reviewSessionItems.id })
+      .from(reviewSessionItems)
+      .where(
+        and(
+          eq(reviewSessionItems.userId, userId),
+          eq(reviewSessionItems.sessionId, sessionId),
+          eq(reviewSessionItems.questionId, questionId),
+          ne(reviewSessionItems.state, "invalidated"),
+        ),
+      )
+      .limit(1);
+    if (existing) return false;
+    const [activeRetry] = await tx
+      .select({ id: retryObligations.id })
+      .from(retryObligations)
+      .where(
+        and(
+          eq(retryObligations.userId, userId),
+          eq(retryObligations.sessionId, sessionId),
+          inArray(retryObligations.status, ["queued", "deferred", "exposed"]),
+        ),
+      )
+      .limit(1);
+    if (activeRetry) return false;
+    const [settings] = await tx
+      .select({
+        newItemsPerDay: learnerSettings.newItemsPerDay,
+        timezone: learnerSettings.timezone,
+      })
+      .from(learnerSettings)
+      .where(eq(learnerSettings.userId, userId))
+      .limit(1);
+    const [{ introducedToday }] = await tx
+      .select({ introducedToday: count() })
+      .from(reviewSessionItems)
+      .where(
+        and(
+          eq(reviewSessionItems.userId, userId),
+          eq(reviewSessionItems.isIntroduction, true),
+          sql`(${reviewSessionItems.exposedAt} AT TIME ZONE ${settings?.timezone ?? "UTC"})::date = (now() AT TIME ZONE ${settings?.timezone ?? "UTC"})::date`,
+        ),
+      );
+    if (introducedToday >= (settings?.newItemsPerDay ?? 5)) return false;
+    const estimate = estimateReviewSeconds(answerMode);
+    if (session.reservedSeconds + estimate * 2 > session.timeBudgetMinutes * 60) {
+      return false;
+    }
+    const [{ maxPosition }] = await tx
+      .select({
+        maxPosition: sql<number>`COALESCE(max(${reviewSessionItems.position}), -1)::int`,
+      })
+      .from(reviewSessionItems)
+      .where(
+        and(
+          eq(reviewSessionItems.userId, userId),
+          eq(reviewSessionItems.sessionId, sessionId),
+        ),
+      );
+    const [item] = await tx
+      .insert(reviewSessionItems)
+      .values({
+        userId,
+        sessionId,
+        questionId,
+        questionVersionId,
+        position: Number(maxPosition ?? -1) + 1,
+        earliestAt: new Date(),
+        estimatedSeconds: estimate,
+        isIntroduction: true,
+        sourceContext,
+      })
+      .returning({ id: reviewSessionItems.id });
+    await tx.insert(reviewSessionItemPathNodes).values(
+      pathNodeIds.map((pathNodeId) => ({
+        userId,
+        sessionItemId: item.id,
+        pathNodeId,
+      })),
+    ).onConflictDoNothing();
+    await tx
+      .update(reviewSessions)
+      .set({
+        plannedCount: sql`${reviewSessions.plannedCount} + 1`,
+        estimatedSeconds: sql`${reviewSessions.estimatedSeconds} + ${estimate}`,
+        reservedSeconds: sql`${reviewSessions.reservedSeconds} + ${estimate * 2}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(reviewSessions.id, sessionId));
+    return true;
+  });
+}
+
+export async function replanActiveSessionForFocus(userId: string): Promise<void> {
+  const db = getV2Db();
+  const focus = await getFocusedIntroduction(userId);
+  const [session] = await db
+    .select({ id: reviewSessions.id })
+    .from(reviewSessions)
+    .where(
+      and(eq(reviewSessions.userId, userId), eq(reviewSessions.status, "active")),
+    )
+    .limit(1);
+  if (!session) return;
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`session:${userId}`}))`,
+    );
+    const removable = await tx
+      .select({
+        id: reviewSessionItems.id,
+        estimatedSeconds: reviewSessionItems.estimatedSeconds,
+      })
+      .from(reviewSessionItems)
+      .where(
+        and(
+          eq(reviewSessionItems.userId, userId),
+          eq(reviewSessionItems.sessionId, session.id),
+          eq(reviewSessionItems.kind, "base"),
+          eq(reviewSessionItems.state, "queued"),
+          focus.hasFocus
+            ? eq(reviewSessionItems.isIntroduction, true)
+            : sql`${reviewSessionItems.sourceContext}->>'sourceId' IS NOT NULL`,
+          sql`${reviewSessionItems.exposedAt} IS NULL`,
+        ),
+      );
+    if (removable.length === 0) return;
+    await tx
+      .update(reviewSessionItems)
+      .set({
+        state: "invalidated",
+        sourceContext: focus.hasFocus
+          ? sql`CASE
+              WHEN ${reviewSessionItems.sourceContext} IS NULL
+                THEN '{"displacedByFocus":true}'::jsonb
+              ELSE ${reviewSessionItems.sourceContext}
+            END`
+          : reviewSessionItems.sourceContext,
+      })
+      .where(
+        and(
+          eq(reviewSessionItems.userId, userId),
+          inArray(reviewSessionItems.id, removable.map((item) => item.id)),
+        ),
+      );
+    const estimate = removable.reduce((sum, item) => sum + item.estimatedSeconds, 0);
+    await tx
+      .update(reviewSessions)
+      .set({
+        plannedCount: sql`GREATEST(0, ${reviewSessions.plannedCount} - ${removable.length})`,
+        estimatedSeconds: sql`GREATEST(0, ${reviewSessions.estimatedSeconds} - ${estimate})`,
+        reservedSeconds: sql`GREATEST(0, ${reviewSessions.reservedSeconds} - ${estimate * 2})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(reviewSessions.id, session.id));
+  });
+  await appendFocusedIntroductionToSession(userId, session.id);
 }
 
 export async function getOrCreateReviewSession(
@@ -1406,38 +1903,49 @@ export async function getOrCreateReviewSession(
               (sum, item) => sum + item.estimatedSeconds,
               0,
             ),
+            reservedSeconds: plan.reduce(
+              (sum, item) => sum + item.estimatedSeconds * 2,
+              0,
+            ),
             plannedCount: plan.length,
           })
           .returning();
-        await tx.insert(reviewSessionItems).values(
-          plan.map((item) => ({
+        for (const item of plan) {
+          const [createdItem] = await tx.insert(reviewSessionItems).values({
             userId,
             sessionId: created.id,
             questionId: item.questionId,
             questionVersionId: item.questionVersionId,
             position: item.position,
             earliestAt: new Date(),
-          })),
-        );
-        const newQuestionIds = plan
-          .filter((item) => item.lifecycle === "new")
-          .map((item) => item.questionId);
-        if (newQuestionIds.length > 0) {
-          await tx
-            .update(questions)
-            .set({ lifecycle: "learning", updatedAt: new Date() })
-            .where(
-              and(
-                eq(questions.userId, userId),
-                inArray(questions.id, newQuestionIds),
-              ),
-            );
+            estimatedSeconds: item.estimatedSeconds,
+            isIntroduction: item.lifecycle === "new",
+            sourceContext: item.path?.sourceContext ?? null,
+          }).returning({ id: reviewSessionItems.id });
+          if (item.path?.nodeIds.length) {
+            await tx.insert(reviewSessionItemPathNodes).values(
+              item.path.nodeIds.map((pathNodeId) => ({
+                userId,
+                sessionItemId: createdItem.id,
+                pathNodeId,
+              })),
+            ).onConflictDoNothing();
+          }
         }
         return created;
       });
     }
   }
 
+  if (session) {
+    await appendFocusedIntroductionToSession(userId, session.id);
+    const [refreshed] = await db
+      .select()
+      .from(reviewSessions)
+      .where(eq(reviewSessions.id, session.id))
+      .limit(1);
+    session = refreshed ?? session;
+  }
   const item = session ? await exposeNextItem(userId, session.id) : null;
   if (session && !item) {
     const [{ unfinished }] = await db
@@ -1472,6 +1980,7 @@ export async function getOrCreateReviewSession(
   const capacity = await reviewCapacity(userId);
   let completedCount = 0;
   let retryAvailableAt: string | null = null;
+  let waitingOnEvaluation = false;
   if (session) {
     const [{ completed }] = await db
       .select({ completed: count() })
@@ -1484,6 +1993,17 @@ export async function getOrCreateReviewSession(
         ),
       );
     completedCount = completed;
+    const [{ pendingEvaluation }] = await db
+      .select({ pendingEvaluation: count() })
+      .from(reviewSessionItems)
+      .where(
+        and(
+          eq(reviewSessionItems.userId, userId),
+          eq(reviewSessionItems.sessionId, session.id),
+          eq(reviewSessionItems.state, "submitted"),
+        ),
+      );
+    waitingOnEvaluation = pendingEvaluation > 0;
     if (!item) {
       const [retry] = await db
         .select({ earliestAt: reviewSessionItems.earliestAt })
@@ -1501,6 +2021,7 @@ export async function getOrCreateReviewSession(
       retryAvailableAt = retry?.earliestAt.toISOString() ?? null;
     }
   }
+  const focused = await getFocusedIntroduction(userId);
 
   return {
     session: session
@@ -1516,6 +2037,11 @@ export async function getOrCreateReviewSession(
       : null,
     item,
     retryAvailableAt,
+    waitingOnEvaluation,
+    blockedReason:
+      !item && !waitingOnEvaluation && !retryAvailableAt
+        ? focused.blockedReason
+        : null,
     summary,
     capacity,
   };
@@ -1549,6 +2075,83 @@ export async function getReviewSummary(
     queueRemaining: Number(row?.due_count ?? 0),
     nextScheduledDue: row?.next_due?.getTime() ?? null,
   };
+}
+
+async function recomputeQuestionPathProgress(
+  tx: Parameters<Parameters<ReturnType<typeof getV2Db>["transaction"]>[0]>[0],
+  userId: string,
+  questionId: string,
+): Promise<void> {
+  await tx.execute(sql`
+    UPDATE waxon_v2.source_learning_nodes node
+       SET passed_at = effective.passed_at,
+           updated_at = now()
+      FROM (
+        SELECT candidate.id,
+               (SELECT min(a.submitted_at)
+                  FROM waxon_v2.answer_submissions a
+                  JOIN LATERAL (
+                    SELECT ge.grade
+                      FROM waxon_v2.grade_events ge
+                     WHERE ge.user_id = a.user_id
+                       AND ge.submission_id = a.id
+                     ORDER BY ge.created_at DESC, ge.id DESC
+                     LIMIT 1
+                  ) grade ON true
+                 WHERE a.user_id = candidate.user_id
+                   AND a.question_id = candidate.question_id
+                   AND a.status = 'graded'
+                   AND grade.grade IN ('good', 'easy')) AS passed_at
+          FROM waxon_v2.source_learning_nodes candidate
+         WHERE candidate.user_id = ${userId}
+           AND candidate.question_id = ${questionId}
+      ) effective
+     WHERE node.user_id = ${userId}
+       AND node.id = effective.id
+  `);
+  for (let depth = 0; depth < 16; depth += 1) {
+    const result = await tx.execute(sql`
+      WITH bridge_status AS (
+        SELECT gap.id,
+               count(child.id)::int AS total,
+               count(child.id) FILTER (WHERE child.passed_at IS NULL)::int AS remaining,
+               max(child.passed_at) AS completed_at
+          FROM waxon_v2.source_learning_nodes gap
+          LEFT JOIN waxon_v2.sources bridge_source
+            ON bridge_source.user_id = gap.user_id
+           AND bridge_source.id = gap.bridge_source_id
+          LEFT JOIN waxon_v2.source_learning_paths bridge_path
+            ON bridge_path.user_id = bridge_source.user_id
+           AND bridge_path.source_id = bridge_source.id
+           AND bridge_path.generation_run_id = bridge_source.active_run_id
+          LEFT JOIN waxon_v2.source_learning_nodes child
+            ON child.user_id = bridge_path.user_id
+           AND child.path_id = bridge_path.id
+         WHERE gap.user_id = ${userId}
+           AND gap.kind = 'external_prerequisite'
+           AND gap.bridge_source_id IS NOT NULL
+         GROUP BY gap.id
+      ), desired AS (
+        SELECT status.id,
+               CASE
+                 WHEN status.total > 0 AND status.remaining = 0
+                   THEN COALESCE(gap.passed_at, status.completed_at, now())
+                 ELSE NULL
+               END AS passed_at
+          FROM bridge_status status
+          JOIN waxon_v2.source_learning_nodes gap
+            ON gap.user_id = ${userId} AND gap.id = status.id
+      )
+      UPDATE waxon_v2.source_learning_nodes gap
+         SET passed_at = desired.passed_at,
+             updated_at = now()
+        FROM desired
+       WHERE gap.user_id = ${userId}
+         AND gap.id = desired.id
+         AND gap.passed_at IS DISTINCT FROM desired.passed_at
+    `);
+    if (Number((result as { rowCount?: number }).rowCount ?? 0) === 0) break;
+  }
 }
 
 async function applyGradeInTransaction(
@@ -1674,6 +2277,20 @@ async function applyGradeInTransaction(
         eq(questions.id, submission.questionId),
       ),
     );
+  await recomputeQuestionPathProgress(
+    tx,
+    input.userId,
+    submission.questionId,
+  );
+  if (item.kind === "base" && input.grade !== "again") {
+    await tx
+      .update(reviewSessions)
+      .set({
+        reservedSeconds: sql`GREATEST(0, ${reviewSessions.reservedSeconds} - ${item.estimatedSeconds})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(reviewSessions.id, item.sessionId));
+  }
 
   if (item.kind === "retry") {
     await tx
@@ -1737,7 +2354,7 @@ async function applyGradeInTransaction(
         sessionId: item.sessionId,
         earliestAt,
       });
-      await tx.insert(reviewSessionItems).values({
+      const [retryItem] = await tx.insert(reviewSessionItems).values({
         userId: input.userId,
         sessionId: item.sessionId,
         questionId: item.questionId,
@@ -1745,7 +2362,27 @@ async function applyGradeInTransaction(
         kind: "retry",
         position: Number(maxPosition?.value ?? -1) + 1,
         earliestAt,
-      });
+        estimatedSeconds: item.estimatedSeconds,
+        sourceContext: item.sourceContext,
+      }).returning({ id: reviewSessionItems.id });
+      const pathLinks = await tx
+        .select({ pathNodeId: reviewSessionItemPathNodes.pathNodeId })
+        .from(reviewSessionItemPathNodes)
+        .where(
+          and(
+            eq(reviewSessionItemPathNodes.userId, input.userId),
+            eq(reviewSessionItemPathNodes.sessionItemId, item.id),
+          ),
+        );
+      if (pathLinks.length > 0) {
+        await tx.insert(reviewSessionItemPathNodes).values(
+          pathLinks.map((link) => ({
+            userId: input.userId,
+            sessionItemId: retryItem.id,
+            pathNodeId: link.pathNodeId,
+          })),
+        ).onConflictDoNothing();
+      }
     }
   } else {
     await tx
@@ -2597,6 +3234,57 @@ export async function applyLearnerGrade(input: {
         ? [effectiveQuestionId, fullSubmission.questionId]
         : undefined,
     });
+    await recomputeQuestionPathProgress(
+      tx,
+      input.userId,
+      effectiveQuestionId,
+    );
+    if (effectiveQuestionId !== fullSubmission.questionId) {
+      await recomputeQuestionPathProgress(
+        tx,
+        input.userId,
+        fullSubmission.questionId,
+      );
+    }
+    await tx.execute(sql`
+      WITH invalidated AS (
+        UPDATE waxon_v2.review_session_items item
+           SET state = 'invalidated'
+         WHERE item.user_id = ${input.userId}
+           AND item.state = 'queued'
+           AND item.exposed_at IS NULL
+           AND item.is_introduction = true
+           AND EXISTS (
+             SELECT 1
+               FROM waxon_v2.review_session_item_path_nodes link
+               JOIN waxon_v2.source_learning_edges edge
+                 ON edge.user_id = link.user_id
+                AND edge.dependent_node_id = link.path_node_id
+               JOIN waxon_v2.source_learning_nodes prerequisite
+                 ON prerequisite.user_id = edge.user_id
+                AND prerequisite.id = edge.prerequisite_node_id
+              WHERE link.user_id = item.user_id
+                AND link.session_item_id = item.id
+                AND prerequisite.question_id IS DISTINCT FROM item.question_id
+                AND prerequisite.passed_at IS NULL
+           )
+        RETURNING item.session_id, item.estimated_seconds
+      ), totals AS (
+        SELECT session_id,
+               count(*)::int AS item_count,
+               COALESCE(sum(estimated_seconds), 0)::int AS seconds
+          FROM invalidated
+         GROUP BY session_id
+      )
+      UPDATE waxon_v2.review_sessions session
+         SET planned_count = GREATEST(0, session.planned_count - totals.item_count),
+             estimated_seconds = GREATEST(0, session.estimated_seconds - totals.seconds),
+             reserved_seconds = GREATEST(0, session.reserved_seconds - totals.seconds * 2),
+             updated_at = now()
+        FROM totals
+       WHERE session.user_id = ${input.userId}
+         AND session.id = totals.session_id
+    `);
     if (input.grade !== "again") {
       const obligations = await tx
         .select({
@@ -2758,7 +3446,7 @@ export async function applyLearnerGrade(input: {
                   eq(reviewSessionItems.sessionId, item.sessionId),
                 ),
               );
-            await tx.insert(reviewSessionItems).values({
+            const [createdRetry] = await tx.insert(reviewSessionItems).values({
               userId: input.userId,
               sessionId: item.sessionId,
               questionId: item.questionId,
@@ -2766,7 +3454,27 @@ export async function applyLearnerGrade(input: {
               kind: "retry",
               position: Number(maxPosition?.value ?? -1) + 1,
               earliestAt,
-            });
+              estimatedSeconds: item.estimatedSeconds,
+              sourceContext: item.sourceContext,
+            }).returning({ id: reviewSessionItems.id });
+            const pathLinks = await tx
+              .select({ pathNodeId: reviewSessionItemPathNodes.pathNodeId })
+              .from(reviewSessionItemPathNodes)
+              .where(
+                and(
+                  eq(reviewSessionItemPathNodes.userId, input.userId),
+                  eq(reviewSessionItemPathNodes.sessionItemId, item.id),
+                ),
+              );
+            if (pathLinks.length > 0) {
+              await tx.insert(reviewSessionItemPathNodes).values(
+                pathLinks.map((link) => ({
+                  userId: input.userId,
+                  sessionItemId: createdRetry.id,
+                  pathNodeId: link.pathNodeId,
+                })),
+              ).onConflictDoNothing();
+            }
           }
         }
       }
@@ -3131,6 +3839,26 @@ export async function editQuestion(input: {
             eq(reviewSessionItems.state, "queued"),
           ),
         );
+      await tx.execute(sql`
+        UPDATE waxon_v2.source_learning_paths path
+           SET status = 'needs_attention', updated_at = now()
+         WHERE path.user_id = ${input.userId}
+           AND EXISTS (
+             SELECT 1 FROM waxon_v2.source_learning_nodes node
+              WHERE node.user_id = path.user_id
+                AND node.path_id = path.id
+                AND node.question_id = ${input.questionId}
+           )
+      `);
+      await tx
+        .update(sourceLearningNodes)
+        .set({ introducedAt: null, passedAt: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(sourceLearningNodes.userId, input.userId),
+            eq(sourceLearningNodes.questionId, input.questionId),
+          ),
+        );
     }
     let jobId: string | null = null;
     if (quality.passes && needsActivation) {
@@ -3211,6 +3939,17 @@ export async function splitQuestion(input: {
           eq(reviewSessionItems.state, "queued"),
         ),
       );
+    await tx.execute(sql`
+      UPDATE waxon_v2.source_learning_paths path
+         SET status = 'needs_attention', updated_at = now()
+       WHERE path.user_id = ${input.userId}
+         AND EXISTS (
+           SELECT 1 FROM waxon_v2.source_learning_nodes node
+            WHERE node.user_id = path.user_id
+              AND node.path_id = path.id
+              AND node.question_id = ${input.questionId}
+         )
+    `);
   });
   return { childQuestionIds };
 }
@@ -3422,11 +4161,25 @@ export async function mergeQuestions(input: {
           eq(reviewSessionItems.state, "queued"),
         ),
       );
+    await tx
+      .update(sourceLearningNodes)
+      .set({ questionId: canonical.questionId, updatedAt: new Date() })
+      .where(
+        and(
+          eq(sourceLearningNodes.userId, input.userId),
+          eq(sourceLearningNodes.questionId, redundant.questionId),
+        ),
+      );
     await rebuildQuestionMemoryInTransaction(tx, {
       userId: input.userId,
       questionId: canonical.questionId,
       sourceQuestionIds: [canonical.questionId, redundant.questionId],
     });
+    await recomputeQuestionPathProgress(
+      tx,
+      input.userId,
+      canonical.questionId,
+    );
     await tx
       .delete(memoryStates)
       .where(
@@ -3464,6 +4217,8 @@ export async function runPendingJobs(input: {
         await runEvaluationJob(job.id);
       } else if (job.type === "repair_gap") {
         await runRepairJob(job.id);
+      } else if (job.type === "build_learning_path") {
+        await runLearningPathBackfillJob(job.id);
       } else {
         continue;
       }
@@ -3480,6 +4235,50 @@ export async function runPendingJobs(input: {
     }
   }
   return processed;
+}
+
+export async function enqueueLearningPathBackfills(userId: string): Promise<number> {
+  const db = getV2Db();
+  const runs = await db
+    .select({ runId: generationRuns.id })
+    .from(sources)
+    .innerJoin(
+      generationRuns,
+      and(
+        eq(generationRuns.userId, sources.userId),
+        eq(generationRuns.id, sources.activeRunId),
+      ),
+    )
+    .leftJoin(
+      sourceLearningPaths,
+      and(
+        eq(sourceLearningPaths.userId, generationRuns.userId),
+        eq(sourceLearningPaths.generationRunId, generationRuns.id),
+      ),
+    )
+    .where(
+      and(
+        eq(sources.userId, userId),
+        inArray(generationRuns.status, ["ready", "needs_attention"]),
+        sql`${sourceLearningPaths.id} IS NULL`,
+      ),
+    )
+    .limit(100);
+  if (runs.length === 0) return 0;
+  const inserted = await db
+    .insert(jobs)
+    .values(
+      runs.map(({ runId }) => ({
+        userId,
+        type: "build_learning_path",
+        idempotencyKey: `${runId}:${SOURCE_AGENT_POLICY_VERSION}`,
+        priority: 1,
+        payload: { runId },
+      })),
+    )
+    .onConflictDoNothing()
+    .returning({ id: jobs.id });
+  return inserted.length;
 }
 
 export async function addConceptToQuestion(input: {

@@ -82,6 +82,14 @@ export type V2Source = {
     ignored: number;
     unresolved: number;
   };
+  learningPath: {
+    status: "ready" | "fallback_ready" | "needs_attention" | "superseded";
+    focused: boolean;
+    passed: number;
+    total: number;
+    next: string | null;
+    prerequisiteGaps: number;
+  } | null;
   createdAt: string;
 };
 
@@ -106,6 +114,13 @@ export type V2ReviewItem = {
   total: number;
   estimatedMinutes: number;
   isRetry: boolean;
+  sourceContext: {
+    sourceId: string;
+    sourceTitle: string;
+    moduleTitle: string;
+    checkpoint: number;
+    checkpointTotal: number;
+  } | null;
 };
 
 export type V2ReviewSessionResponse = {
@@ -117,6 +132,8 @@ export type V2ReviewSessionResponse = {
   } | null;
   item: V2ReviewItem | null;
   retryAvailableAt: string | null;
+  waitingOnEvaluation: boolean;
+  blockedReason: string | null;
   summary: V2ReviewSummary;
   capacity: {
     targetFeasible: boolean;

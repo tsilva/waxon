@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { getV2Client, getV2Db } from "@/app/db/v2/client";
 import {
   conceptAliases,
@@ -8,12 +8,16 @@ import {
   evidenceSpans,
   generationRunArtifacts,
   generationRuns,
+  jobs,
   learnerSettings,
   questionConcepts,
   questionEmbeddings,
   questionEvidence,
   questions,
   questionVersions,
+  sourceLearningEdges,
+  sourceLearningNodes,
+  sourceLearningPaths,
   sourceMaterials,
   sources,
   sourceVersions,
@@ -28,9 +32,16 @@ import {
   judgeExistingCoverage,
   mapMasteryChunk,
   resolveSourceAgentModels,
+  sequenceLearningPath,
   type GenerationUsage,
   type MasteryTargetDraft,
 } from "./sourceAgentModel";
+import {
+  normalizeLearningPath,
+  removeSharedQuestionEdges,
+  type SequenceDraft,
+  type SequenceTarget,
+} from "./learningPath";
 import {
   conceptSlug,
   loadSourceText,
@@ -40,10 +51,11 @@ import {
   assessQuestionQuality,
   recallTargetKey,
 } from "./questionQuality";
+import { claimV2Job } from "./jobs";
 
-export const SOURCE_AGENT_POLICY_VERSION = "source-mastery-v5";
+export const SOURCE_AGENT_POLICY_VERSION = "source-mastery-v6";
 export const SOURCE_GENERATION_BUDGET = {
-  modelCalls: 12,
+  modelCalls: 14,
   inputTokens: 250_000,
   outputTokens: 40_000,
   webSearches: 3,
@@ -1267,6 +1279,213 @@ export async function matchGenerationRunStep(runId: string): Promise<void> {
     .where(eq(generationRuns.id, runId));
 }
 
+function combineGenerationUsage(
+  left: GenerationUsage,
+  right: GenerationUsage,
+): GenerationUsage {
+  return {
+    modelCalls: left.modelCalls + right.modelCalls,
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+    totalTokens: left.totalTokens + right.totalTokens,
+    cost: left.cost + right.cost,
+    webSearches: left.webSearches + right.webSearches,
+  };
+}
+
+export async function sequenceGenerationRunStep(
+  runId: string,
+  options?: { preserveRunStatus?: boolean },
+): Promise<void> {
+  if (await markCancelled(runId)) return;
+  if (await existingArtifact(runId, "sequence", "path")) return;
+  const context = await runContext(runId);
+  if (!options?.preserveRunStatus) {
+    await updateRunStage(runId, "drafting", "Sequencing the learning path", 78);
+  }
+  const match = await existingArtifact(runId, "match", "plan");
+  const items = Array.isArray(match?.payload.items)
+    ? (match.payload.items as MatchPlanItem[])
+    : [];
+  const requiredItems = items.filter(
+    (item) => item.target.requirement === "required",
+  );
+  const materials = await getV2Db()
+    .select({
+      id: sourceMaterials.id,
+      bodyText: sourceMaterials.bodyText,
+      createdAt: sourceMaterials.createdAt,
+    })
+    .from(sourceMaterials)
+    .where(
+      and(
+        eq(sourceMaterials.userId, context.run.userId),
+        eq(sourceMaterials.sourceRevisionId, context.run.sourceRevisionId),
+      ),
+    )
+    .orderBy(asc(sourceMaterials.createdAt), asc(sourceMaterials.id));
+  let cumulativeOffset = 0;
+  const materialOffset = new Map<string, number>();
+  for (const material of materials) {
+    materialOffset.set(material.id, cumulativeOffset);
+    cumulativeOffset += material.bodyText.length + 1;
+  }
+  const materialById = new Map(materials.map((material) => [material.id, material]));
+  const chunkPlan = await existingArtifact(runId, "chunk_plan", "primary");
+  const chunks = Array.isArray(chunkPlan?.payload.chunks)
+    ? (chunkPlan.payload.chunks as Array<Record<string, unknown>>)
+    : [];
+  const chunkByKey = new Map(
+    chunks.flatMap((chunk) =>
+      typeof chunk.key === "string" ? [[chunk.key, chunk] as const] : [],
+    ),
+  );
+  const mapArtifacts = await getV2Db()
+    .select({
+      key: generationRunArtifacts.artifactKey,
+      payload: generationRunArtifacts.payload,
+    })
+    .from(generationRunArtifacts)
+    .where(
+      and(
+        eq(generationRunArtifacts.generationRunId, runId),
+        eq(generationRunArtifacts.kind, "map"),
+      ),
+    );
+  const chunkKeyByTarget = new Map<string, string>();
+  for (const artifact of mapArtifacts) {
+    if (!Array.isArray(artifact.payload.targets)) continue;
+    for (const raw of artifact.payload.targets as Array<Record<string, unknown>>) {
+      if (typeof raw.key === "string") chunkKeyByTarget.set(raw.key, artifact.key);
+    }
+  }
+  const evidenceOffsets: Record<string, number> = {};
+  const targets: SequenceTarget[] = requiredItems.map((item, index) => {
+    const target = item.target;
+    const material = materialById.get(target.evidenceMaterialId);
+    const chunk = chunkByKey.get(chunkKeyByTarget.get(target.key) ?? "");
+    const chunkStart = typeof chunk?.start === "number" ? chunk.start : 0;
+    const chunkEnd = typeof chunk?.end === "number"
+      ? chunk.end
+      : material?.bodyText.length ?? 0;
+    const localOffset = material
+      ? material.bodyText.slice(chunkStart, chunkEnd).indexOf(target.evidenceQuote)
+      : -1;
+    const offset = localOffset >= 0
+      ? chunkStart + localOffset
+      : material?.bodyText.indexOf(target.evidenceQuote) ?? -1;
+    const safeOffset = Math.max(0, offset);
+    evidenceOffsets[target.key] = safeOffset;
+    return {
+      key: target.key,
+      statement: target.statement,
+      sourcePosition:
+        (materialOffset.get(target.evidenceMaterialId) ?? cumulativeOffset + index) + safeOffset,
+    };
+  });
+  const questionIds = [
+    ...new Set(requiredItems.flatMap((item) => item.questionId ? [item.questionId] : [])),
+  ];
+  const matchedRows = questionIds.length > 0
+    ? await getV2Client().pool.query<{
+        id: string;
+        prompt: string;
+        lifecycle: string;
+        latest_grade: string | null;
+      }>(
+        `SELECT q.id, qv.prompt, q.lifecycle,
+                (SELECT ge.grade
+                   FROM waxon_v2.answer_submissions a
+                   JOIN waxon_v2.grade_events ge
+                     ON ge.user_id = a.user_id AND ge.submission_id = a.id
+                  WHERE a.user_id = q.user_id AND a.question_id = q.id
+                  ORDER BY ge.created_at DESC, ge.id DESC LIMIT 1) AS latest_grade
+           FROM waxon_v2.questions q
+           JOIN waxon_v2.question_versions qv
+             ON qv.user_id = q.user_id AND qv.question_id = q.id AND qv.is_current = true
+          WHERE q.user_id = $1 AND q.id = ANY($2::uuid[])`,
+        [context.run.userId, questionIds],
+      ).then((result) => result.rows)
+    : [];
+  const matchedById = new Map(matchedRows.map((row) => [row.id, row]));
+  const agentTargets = requiredItems.map((item) => {
+    const position = targets.find((target) => target.key === item.target.key)!;
+    const matched = item.questionId ? matchedById.get(item.questionId) : null;
+    return {
+      key: item.target.key,
+      statement: item.target.statement,
+      type: item.target.type,
+      answerRubric: item.target.answerRubric,
+      concepts: item.target.concepts,
+      sourcePosition: position.sourcePosition,
+      matchedQuestion: matched
+        ? {
+            id: matched.id,
+            prompt: matched.prompt,
+            lifecycle: matched.lifecycle,
+            latestGrade: matched.latest_grade,
+          }
+        : null,
+    };
+  });
+  let sequenceUsage = { ...EMPTY_GENERATION_USAGE };
+  let draft: SequenceDraft | null = null;
+  const priorUsage = await totalUsage(runId);
+  if (priorUsage.modelCalls < SOURCE_GENERATION_BUDGET.modelCalls) {
+    const first = await sequenceLearningPath({
+      userId: context.run.userId,
+      sourceTitle: context.source.title,
+      targets: agentTargets,
+    });
+    draft = first.draft;
+    sequenceUsage = first.usage;
+  }
+  let normalized = normalizeLearningPath({ targets, draft });
+  if (
+    normalized.status === "fallback_ready" &&
+    draft &&
+    priorUsage.modelCalls + sequenceUsage.modelCalls < SOURCE_GENERATION_BUDGET.modelCalls
+  ) {
+    const repaired = await sequenceLearningPath({
+      userId: context.run.userId,
+      sourceTitle: context.source.title,
+      targets: agentTargets,
+      initialDraft: draft,
+      validationErrors: normalized.diagnostics,
+    });
+    sequenceUsage = combineGenerationUsage(sequenceUsage, repaired.usage);
+    normalized = normalizeLearningPath({
+      targets,
+      draft: repaired.draft,
+      diagnostics: repaired.draft
+        ? []
+        : ["The sequencing repair did not return a usable path."],
+    });
+  }
+  const matchedQuestionByTarget = new Map(
+    agentTargets.flatMap((target) =>
+      target.matchedQuestion
+        ? [[target.key, target.matchedQuestion.id] as const]
+        : [],
+    ),
+  );
+  normalized = {
+    ...normalized,
+    edges: removeSharedQuestionEdges(
+      normalized.edges,
+      matchedQuestionByTarget,
+    ),
+  };
+  await writeArtifact({
+    userId: context.run.userId,
+    runId,
+    kind: "sequence",
+    key: "path",
+    payload: { ...normalized, evidenceOffsets },
+    usage: sequenceUsage,
+  });
+}
+
 async function attachConcepts(
   tx: Parameters<Parameters<ReturnType<typeof getV2Db>["transaction"]>[0]>[0],
   input: { userId: string; questionId: string; names: string[] },
@@ -1318,6 +1537,7 @@ export async function persistGenerationRunStep(runId: string): Promise<void> {
     ? (match.payload.items as MatchPlanItem[])
     : [];
   const manifest = await existingArtifact(runId, "critic", "manifest");
+  const sequence = await existingArtifact(runId, "sequence", "path");
   const manifestResiduals = Array.isArray(manifest?.payload.unresolved)
     ? (manifest.payload.unresolved as unknown[]).filter(
         (value): value is string => typeof value === "string",
@@ -1340,6 +1560,12 @@ export async function persistGenerationRunStep(runId: string): Promise<void> {
           )
       : [];
   const materialById = new Map(materials.map((material) => [material.id, material]));
+  const evidenceOffsets =
+    sequence?.payload.evidenceOffsets &&
+    typeof sequence.payload.evidenceOffsets === "object" &&
+    !Array.isArray(sequence.payload.evidenceOffsets)
+      ? (sequence.payload.evidenceOffsets as Record<string, unknown>)
+      : {};
 
   const result = await getV2Db().transaction(async (tx) => {
     await tx.execute(
@@ -1394,6 +1620,10 @@ export async function persistGenerationRunStep(runId: string): Promise<void> {
     }
 
     const generated: Array<{ questionId: string; versionId: string }> = [];
+    const pathTargetRows = new Map<
+      string,
+      { targetId: string; questionId: string | null; learnable: boolean }
+    >();
     const residuals = [...manifestResiduals];
     let reusedCount = 0;
     let generatedCount = 0;
@@ -1403,7 +1633,12 @@ export async function persistGenerationRunStep(runId: string): Promise<void> {
       const target = item.target;
       const material = materialById.get(target.evidenceMaterialId);
       const quote = target.evidenceQuote.trim();
-      const quoteOffset = material?.bodyText.indexOf(quote) ?? -1;
+      const plannedOffset = evidenceOffsets[target.key];
+      const quoteOffset =
+        typeof plannedOffset === "number" &&
+        material?.bodyText.slice(plannedOffset, plannedOffset + quote.length) === quote
+          ? plannedOffset
+          : material?.bodyText.indexOf(quote) ?? -1;
       const supported = Boolean(material && quote && quoteOffset >= 0);
       const effectiveRequirement = supported
         ? target.requirement
@@ -1454,6 +1689,11 @@ export async function persistGenerationRunStep(runId: string): Promise<void> {
           .returning({ id: coverageTargets.id });
         targetId = created.id;
       }
+      pathTargetRows.set(target.key, {
+        targetId,
+        questionId: null,
+        learnable: false,
+      });
       await tx
         .delete(targetQuestions)
         .where(
@@ -1589,7 +1829,11 @@ export async function persistGenerationRunStep(runId: string): Promise<void> {
         continue;
       }
       const [currentVersion] = await tx
-        .select({ id: questionVersions.id, lifecycle: questions.lifecycle })
+        .select({
+          id: questionVersions.id,
+          lifecycle: questions.lifecycle,
+          quality: questionVersions.quality,
+        })
         .from(questionVersions)
         .innerJoin(
           questions,
@@ -1644,12 +1888,17 @@ export async function persistGenerationRunStep(runId: string): Promise<void> {
           ],
           set: { relation },
         });
+      const active = isActiveQuestion(currentVersion.lifecycle);
+      pathTargetRows.set(target.key, {
+        targetId,
+        questionId,
+        learnable: active && currentVersion.quality === "distinct",
+      });
       await attachConcepts(tx, {
         userId: context.run.userId,
         questionId,
         names: target.concepts,
       });
-      const active = isActiveQuestion(currentVersion.lifecycle);
       await tx
         .update(coverageTargets)
         .set({
@@ -1665,6 +1914,165 @@ export async function persistGenerationRunStep(runId: string): Promise<void> {
         residuals.push(`Covered only by an inactive question: ${target.statement}`);
       }
     }
+
+    const sequenceNodes = Array.isArray(sequence?.payload.nodes)
+      ? (sequence.payload.nodes as Array<{
+          key: string;
+          kind: "target" | "external_prerequisite";
+          targetKey: string | null;
+          moduleTitle: string;
+          modulePosition: number;
+          statement: string;
+          reason: string | null;
+          sourcePosition: number;
+          pedagogicalPosition: number;
+        }>)
+      : [];
+    const sequenceEdges = Array.isArray(sequence?.payload.edges)
+      ? (sequence.payload.edges as Array<{
+          prerequisiteKey: string;
+          dependentKey: string;
+        }>)
+      : [];
+    const sequenceStatus =
+      sequence?.payload.status === "ready" ||
+      sequence?.payload.status === "fallback_ready"
+        ? sequence.payload.status
+        : "fallback_ready";
+    const sequenceDiagnostics = Array.isArray(sequence?.payload.diagnostics)
+      ? (sequence.payload.diagnostics as unknown[]).filter(
+          (value): value is string => typeof value === "string",
+        )
+      : ["The learning-path artifact was unavailable during persistence."];
+    await tx
+      .update(sourceLearningPaths)
+      .set({ status: "superseded", updatedAt: new Date() })
+      .where(
+        and(
+          eq(sourceLearningPaths.userId, context.run.userId),
+          eq(sourceLearningPaths.sourceId, context.run.sourceId),
+          sql`${sourceLearningPaths.generationRunId} <> ${runId}`,
+          sql`${sourceLearningPaths.status} <> 'superseded'`,
+        ),
+      );
+    const missingPathTarget = sequenceNodes.length === 0 || sequenceNodes.some((node) => {
+      if (node.kind !== "target" || !node.targetKey) return false;
+      const linked = pathTargetRows.get(node.targetKey);
+      return !linked?.targetId || !linked.questionId || !linked.learnable;
+    });
+    const pathStatus = missingPathTarget ? "needs_attention" : sequenceStatus;
+    const [path] = await tx
+      .insert(sourceLearningPaths)
+      .values({
+        userId: context.run.userId,
+        sourceId: context.run.sourceId,
+        sourceRevisionId: context.run.sourceRevisionId,
+        generationRunId: runId,
+        status: pathStatus,
+        policyVersion: context.run.policyVersion,
+        diagnostics: sequenceDiagnostics.slice(0, 40),
+      })
+      .onConflictDoUpdate({
+        target: [
+          sourceLearningPaths.userId,
+          sourceLearningPaths.generationRunId,
+        ],
+        set: {
+          status: pathStatus,
+          policyVersion: context.run.policyVersion,
+          diagnostics: sequenceDiagnostics.slice(0, 40),
+          updatedAt: new Date(),
+        },
+      })
+      .returning({ id: sourceLearningPaths.id });
+    const nodeIdByKey = new Map<string, string>();
+    for (const node of sequenceNodes) {
+      const linked = node.targetKey ? pathTargetRows.get(node.targetKey) : null;
+      const [created] = await tx
+        .insert(sourceLearningNodes)
+        .values({
+          userId: context.run.userId,
+          pathId: path.id,
+          kind: node.kind,
+          targetId: linked?.targetId ?? null,
+          questionId: linked?.questionId ?? null,
+          moduleTitle: node.moduleTitle,
+          modulePosition: node.modulePosition,
+          sourcePosition: node.sourcePosition,
+          pedagogicalPosition: node.pedagogicalPosition,
+          statement: node.statement,
+          reason: node.reason,
+        })
+        .onConflictDoUpdate({
+          target: [
+            sourceLearningNodes.userId,
+            sourceLearningNodes.pathId,
+            sourceLearningNodes.pedagogicalPosition,
+          ],
+          set: {
+            kind: node.kind,
+            targetId: linked?.targetId ?? null,
+            questionId: linked?.questionId ?? null,
+            moduleTitle: node.moduleTitle,
+            modulePosition: node.modulePosition,
+            sourcePosition: node.sourcePosition,
+            statement: node.statement,
+            reason: node.reason,
+            updatedAt: new Date(),
+          },
+        })
+        .returning({ id: sourceLearningNodes.id });
+      nodeIdByKey.set(node.key, created.id);
+    }
+    const edgeRows = sequenceEdges.flatMap((edge) => {
+      const prerequisiteNodeId = nodeIdByKey.get(edge.prerequisiteKey);
+      const dependentNodeId = nodeIdByKey.get(edge.dependentKey);
+      return prerequisiteNodeId && dependentNodeId
+        ? [{
+            userId: context.run.userId,
+            pathId: path.id,
+            prerequisiteNodeId,
+            dependentNodeId,
+          }]
+        : [];
+    });
+    if (edgeRows.length > 0) {
+      await tx.insert(sourceLearningEdges).values(edgeRows).onConflictDoNothing();
+    }
+    await tx.execute(sql`
+      UPDATE waxon_v2.source_learning_nodes n
+         SET introduced_at = history.introduced_at,
+             passed_at = history.passed_at,
+             updated_at = now()
+        FROM (
+          SELECT candidate.id,
+                 (SELECT min(rsi.exposed_at)
+                    FROM waxon_v2.review_session_items rsi
+                   WHERE rsi.user_id = candidate.user_id
+                     AND rsi.question_id = candidate.question_id
+                     AND rsi.exposed_at IS NOT NULL) AS introduced_at,
+                 (SELECT min(a.submitted_at)
+                    FROM waxon_v2.answer_submissions a
+                    JOIN LATERAL (
+                      SELECT ge.grade
+                        FROM waxon_v2.grade_events ge
+                       WHERE ge.user_id = a.user_id
+                         AND ge.submission_id = a.id
+                       ORDER BY ge.created_at DESC, ge.id DESC
+                       LIMIT 1
+                    ) effective ON true
+                   WHERE a.user_id = candidate.user_id
+                     AND a.question_id = candidate.question_id
+                     AND a.status = 'graded'
+                     AND effective.grade IN ('good', 'easy')) AS passed_at
+            FROM waxon_v2.source_learning_nodes candidate
+           WHERE candidate.user_id = ${context.run.userId}
+             AND candidate.path_id = ${path.id}
+             AND candidate.question_id IS NOT NULL
+        ) history
+       WHERE n.user_id = ${context.run.userId}
+         AND n.id = history.id
+    `);
 
     const uniqueResiduals = [...new Set(residuals)].slice(0, 200);
     const requiredUncovered = await tx
@@ -1683,6 +2091,8 @@ export async function persistGenerationRunStep(runId: string): Promise<void> {
     return {
       ready,
       generated,
+      pathId: path.id,
+      pathStatus,
       residuals: uniqueResiduals,
       counts: {
         targets: items.length,
@@ -1701,6 +2111,223 @@ export async function persistGenerationRunStep(runId: string): Promise<void> {
     payload: result,
   });
   await updateRunStage(runId, "persisting", "Indexing new questions", 92);
+}
+
+export async function runLearningPathBackfillJob(jobId: string): Promise<void> {
+  const job = await claimV2Job(jobId, "build_learning_path");
+  if (!job) return;
+  const runId = typeof job.payload.runId === "string" ? job.payload.runId : "";
+  if (!runId) {
+    await getV2Db()
+      .update(jobs)
+      .set({ status: "failed", error: "Generation run is required.", updatedAt: new Date() })
+      .where(eq(jobs.id, job.id));
+    return;
+  }
+  try {
+    const context = await runContext(runId);
+    const [existing] = await getV2Db()
+      .select({ id: sourceLearningPaths.id })
+      .from(sourceLearningPaths)
+      .where(
+        and(
+          eq(sourceLearningPaths.userId, job.userId),
+          eq(sourceLearningPaths.generationRunId, runId),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      await sequenceGenerationRunStep(runId, { preserveRunStatus: true });
+      const sequence = await existingArtifact(runId, "sequence", "path");
+      const sequenceNodes = Array.isArray(sequence?.payload.nodes)
+        ? (sequence.payload.nodes as Array<{
+            key: string;
+            kind: "target" | "external_prerequisite";
+            targetKey: string | null;
+            moduleTitle: string;
+            modulePosition: number;
+            statement: string;
+            reason: string | null;
+            sourcePosition: number;
+            pedagogicalPosition: number;
+          }>)
+        : [];
+      const sequenceEdges = Array.isArray(sequence?.payload.edges)
+        ? (sequence.payload.edges as Array<{
+            prerequisiteKey: string;
+            dependentKey: string;
+          }>)
+        : [];
+      const links = await getV2Client().pool.query<{
+        target_key: string;
+        target_id: string;
+        question_id: string | null;
+        learnable: boolean;
+      }>(
+        `SELECT DISTINCT ON (ct.target_key)
+                ct.target_key, ct.id AS target_id, q.id AS question_id,
+                (q.lifecycle IN ('new','learning','review') AND EXISTS (
+                  SELECT 1 FROM waxon_v2.question_versions qv
+                   WHERE qv.user_id = q.user_id
+                     AND qv.question_id = q.id
+                     AND qv.is_current = true
+                     AND qv.quality_decision = 'distinct'
+                )) AS learnable
+           FROM waxon_v2.coverage_targets ct
+           LEFT JOIN waxon_v2.target_questions tq
+             ON tq.user_id = ct.user_id AND tq.target_id = ct.id
+           LEFT JOIN waxon_v2.questions q
+             ON q.user_id = tq.user_id AND q.id = tq.question_id
+          WHERE ct.user_id = $1
+            AND ct.source_revision_id = $2
+            AND ct.target_key IS NOT NULL
+          ORDER BY ct.target_key,
+                   CASE WHEN q.lifecycle IN ('new','learning','review') THEN 0 ELSE 1 END,
+                   q.updated_at DESC NULLS LAST`,
+        [job.userId, context.run.sourceRevisionId],
+      ).then((result) => result.rows);
+      const linkByKey = new Map(links.map((link) => [link.target_key, link]));
+      await getV2Db().transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${`path-backfill:${job.userId}:${runId}`}))`,
+        );
+        const [alreadyCreated] = await tx
+          .select({ id: sourceLearningPaths.id })
+          .from(sourceLearningPaths)
+          .where(
+            and(
+              eq(sourceLearningPaths.userId, job.userId),
+              eq(sourceLearningPaths.generationRunId, runId),
+            ),
+          )
+          .limit(1);
+        if (alreadyCreated) return;
+        await tx
+          .update(sourceLearningPaths)
+          .set({ status: "superseded", updatedAt: new Date() })
+          .where(
+            and(
+              eq(sourceLearningPaths.userId, job.userId),
+              eq(sourceLearningPaths.sourceId, context.run.sourceId),
+              sql`${sourceLearningPaths.status} <> 'superseded'`,
+            ),
+          );
+        const missing = sequenceNodes.length === 0 || sequenceNodes.some(
+          (node) => {
+            const link = node.targetKey ? linkByKey.get(node.targetKey) : null;
+            return node.kind === "target" && (!link?.question_id || !link.learnable);
+          },
+        );
+        const rawStatus = sequence?.payload.status;
+        const [path] = await tx
+          .insert(sourceLearningPaths)
+          .values({
+            userId: job.userId,
+            sourceId: context.run.sourceId,
+            sourceRevisionId: context.run.sourceRevisionId,
+            generationRunId: runId,
+            policyVersion: SOURCE_AGENT_POLICY_VERSION,
+            status: missing
+              ? "needs_attention"
+              : rawStatus === "ready"
+                ? "ready"
+                : "fallback_ready",
+            diagnostics: Array.isArray(sequence?.payload.diagnostics)
+              ? (sequence.payload.diagnostics as string[]).slice(0, 40)
+              : [],
+          })
+          .returning({ id: sourceLearningPaths.id });
+        const nodeIdByKey = new Map<string, string>();
+        for (const node of sequenceNodes) {
+          const link = node.targetKey ? linkByKey.get(node.targetKey) : null;
+          if (node.kind === "target" && !link) continue;
+          const [created] = await tx
+            .insert(sourceLearningNodes)
+            .values({
+              userId: job.userId,
+              pathId: path.id,
+              kind: node.kind,
+              targetId: link?.target_id ?? null,
+              questionId: link?.question_id ?? null,
+              moduleTitle: node.moduleTitle,
+              modulePosition: node.modulePosition,
+              sourcePosition: node.sourcePosition,
+              pedagogicalPosition: node.pedagogicalPosition,
+              statement: node.statement,
+              reason: node.reason,
+            })
+            .returning({ id: sourceLearningNodes.id });
+          nodeIdByKey.set(node.key, created.id);
+        }
+        const edgeRows = sequenceEdges.flatMap((edge) => {
+          const prerequisiteNodeId = nodeIdByKey.get(edge.prerequisiteKey);
+          const dependentNodeId = nodeIdByKey.get(edge.dependentKey);
+          return prerequisiteNodeId && dependentNodeId
+            ? [{
+                userId: job.userId,
+                pathId: path.id,
+                prerequisiteNodeId,
+                dependentNodeId,
+              }]
+            : [];
+        });
+        if (edgeRows.length > 0) {
+          await tx.insert(sourceLearningEdges).values(edgeRows).onConflictDoNothing();
+        }
+        await tx.execute(sql`
+          UPDATE waxon_v2.source_learning_nodes n
+             SET introduced_at = history.introduced_at,
+                 passed_at = history.passed_at,
+                 updated_at = now()
+            FROM (
+              SELECT candidate.id,
+                     (SELECT min(rsi.exposed_at)
+                        FROM waxon_v2.review_session_items rsi
+                       WHERE rsi.user_id = candidate.user_id
+                         AND rsi.question_id = candidate.question_id
+                         AND rsi.exposed_at IS NOT NULL) AS introduced_at,
+                     (SELECT min(a.submitted_at)
+                        FROM waxon_v2.answer_submissions a
+                        JOIN LATERAL (
+                          SELECT ge.grade
+                            FROM waxon_v2.grade_events ge
+                           WHERE ge.user_id = a.user_id AND ge.submission_id = a.id
+                           ORDER BY ge.created_at DESC, ge.id DESC LIMIT 1
+                        ) effective ON true
+                       WHERE a.user_id = candidate.user_id
+                         AND a.question_id = candidate.question_id
+                         AND a.status = 'graded'
+                         AND effective.grade IN ('good','easy')) AS passed_at
+                FROM waxon_v2.source_learning_nodes candidate
+               WHERE candidate.user_id = ${job.userId} AND candidate.path_id = ${path.id}
+            ) history
+           WHERE n.user_id = ${job.userId} AND n.id = history.id
+        `);
+      });
+    }
+    await getV2Db()
+      .update(jobs)
+      .set({
+        status: "succeeded",
+        progress: 100,
+        result: { runId },
+        lockedUntil: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(jobs.id, job.id));
+  } catch (error) {
+    await getV2Db()
+      .update(jobs)
+      .set({
+        status: job.attempts >= 3 ? "failed" : "pending",
+        runAfter: new Date(Date.now() + job.attempts * 30_000),
+        lockedUntil: null,
+        error: error instanceof Error ? error.message.slice(0, 2_000) : "Unknown error",
+        updatedAt: new Date(),
+      })
+      .where(eq(jobs.id, job.id));
+    throw error;
+  }
 }
 
 export async function indexGeneratedQuestionsStep(runId: string): Promise<void> {

@@ -11,6 +11,7 @@ import {
 } from "@/shared/openrouter-config.mts";
 import { normalizeGeneratedAnswerMode } from "./generatedAnswerMode";
 import type { V2AnswerMode } from "./types";
+import type { SequenceDraft } from "./learningPath";
 
 export type GenerationUsage = {
   modelCalls: number;
@@ -73,6 +74,11 @@ export type CoverageMatchDecision = {
   questionId: string | null;
   decision: "equivalent" | "distinct" | "uncertain";
   reason: string;
+};
+
+export type LearningPathSequenceResult = {
+  draft: SequenceDraft | null;
+  usage: GenerationUsage;
 };
 
 function learningModel(): string {
@@ -505,6 +511,98 @@ export async function critiqueMasteryManifest(input: {
     ],
     usage: result.usage,
   };
+}
+
+function parseSequenceDraft(value: Record<string, unknown>): SequenceDraft | null {
+  const modules = Array.isArray(value.modules)
+    ? value.modules.flatMap((raw) => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+        const item = raw as Record<string, unknown>;
+        const key = text(item.key, 120);
+        const title = text(item.title, 200);
+        return key && title ? [{ key, title }] : [];
+      })
+    : [];
+  const nodes = Array.isArray(value.nodes)
+    ? value.nodes.flatMap((raw) => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+        const item = raw as Record<string, unknown>;
+        const targetKey = text(item.targetKey, 160);
+        const moduleKey = text(item.moduleKey, 120);
+        return targetKey && moduleKey
+          ? [{
+              targetKey,
+              moduleKey,
+              prerequisiteTargetKeys: strings(item.prerequisiteTargetKeys, 8),
+              externalPrerequisiteKeys: strings(item.externalPrerequisiteKeys, 8),
+            }]
+          : [];
+      })
+    : [];
+  const externalPrerequisites = Array.isArray(value.externalPrerequisites)
+    ? value.externalPrerequisites.flatMap((raw) => {
+        if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+        const item = raw as Record<string, unknown>;
+        const key = text(item.key, 120);
+        const statement = text(item.statement, 1_000);
+        const blocksTargetKeys = strings(item.blocksTargetKeys, 16);
+        return key && statement && blocksTargetKeys.length > 0
+          ? [{
+              key,
+              statement,
+              reason: text(item.reason, 1_000),
+              blocksTargetKeys,
+            }]
+          : [];
+      })
+    : [];
+  return modules.length > 0 && nodes.length > 0
+    ? { modules, nodes, externalPrerequisites }
+    : null;
+}
+
+export async function sequenceLearningPath(input: {
+  userId: string;
+  sourceTitle: string;
+  targets: Array<{
+    key: string;
+    statement: string;
+    type: string;
+    answerRubric: string | null;
+    concepts: string[];
+    sourcePosition: number;
+    matchedQuestion: {
+      id: string;
+      prompt: string;
+      lifecycle: string;
+      latestGrade: string | null;
+    } | null;
+  }>;
+  initialDraft?: SequenceDraft | null;
+  validationErrors?: string[];
+}): Promise<LearningPathSequenceResult> {
+  if (input.targets.length === 0) {
+    return { draft: null, usage: EMPTY_GENERATION_USAGE };
+  }
+  const repair = Boolean(input.initialDraft && input.validationErrors?.length);
+  const result = await structuredRequest({
+    userId: input.userId,
+    operation: repair ? "v2.source.sequence-repair" : "v2.source.sequence",
+    model: criticModel(),
+    maxTokens: 6_000,
+    system:
+      "Design the smallest defensible prerequisite path through the supplied atomic mastery targets. Return JSON only: {modules:[{key,title}],nodes:[{targetKey,moduleKey,prerequisiteTargetKeys,externalPrerequisiteKeys}],externalPrerequisites:[{key,statement,reason,blocksTargetKeys}]}. Place every supplied target exactly once. Add only immediate prerequisite edges; never encode mere topical similarity or preferred chronology as a prerequisite. Prefer conceptual dependencies over source order, using sourcePosition only when either order is pedagogically valid. Targets mapped to the same matchedQuestion are recalled together, so never make one of those targets a prerequisite of another. External prerequisites must be genuinely necessary to answer a supplied target and absent from the supplied targets; do not create questions or pretend they came from the source. Keep modules concise and ordered from foundations through application. The learner's prior performance may satisfy a node initially but must not change the objective dependency graph. Avoid cycles, self-dependencies, duplicate keys, and more than six prerequisites per target.",
+    payload: {
+      sourceTitle: input.sourceTitle,
+      targets: input.targets,
+      initialDraft: input.initialDraft ?? undefined,
+      validationErrors: input.validationErrors ?? undefined,
+      instruction: repair
+        ? "Replace the initial draft with a complete corrected path that resolves every validation error."
+        : "Create the complete path.",
+    },
+  });
+  return { draft: parseSequenceDraft(result.parsed), usage: result.usage };
 }
 
 export async function judgeExistingCoverage(input: {

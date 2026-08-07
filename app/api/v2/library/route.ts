@@ -11,6 +11,7 @@ import {
   addConceptToQuestion,
   createDirectQuestion,
   editQuestion,
+  enqueueLearningPathBackfills,
   listLibrary,
   mergeQuestions,
   mutateQuestionLifecycle,
@@ -45,6 +46,10 @@ export async function GET(request: Request) {
       requestedLifecycle && LIFECYCLES.has(requestedLifecycle as V2Lifecycle)
         ? (requestedLifecycle as V2Lifecycle)
         : "all";
+    const backfills = await enqueueLearningPathBackfills(user.id);
+    if (backfills > 0) {
+      await startBackgroundJobs(user.id, Math.min(8, backfills));
+    }
 
     return NextResponse.json(
       await listLibrary({

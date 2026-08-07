@@ -43,6 +43,27 @@
       "when": 1786106313849,
       "tag": "0005_melodic_secret_warriors",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786112843097,
+      "tag": "0006_icy_marrow",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786113718842,
+      "tag": "0007_silky_cerebro",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786114280739,
+      "tag": "0008_lean_thunderball",
+      "breakpoints": true
     }
   ]
 }
