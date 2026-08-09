@@ -47,7 +47,6 @@ const nextConfig: NextConfig = {
     ];
   },
   outputFileTracingIncludes: {
-    "/*": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
     "/api/:path*": ["./prompts/**/*.md", "./reference/question-quality.md"],
   },
 };

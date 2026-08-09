@@ -378,6 +378,14 @@ test("v2 PDF extraction installs Node canvas globals and reads text", async () =
 
   assert.match(text, /Proximal Policy Optimization/u);
   assert.equal(typeof globalThis.DOMMatrix, "function");
+  assert.equal(
+    typeof (
+      globalThis as typeof globalThis & {
+        pdfjsWorker?: { WorkerMessageHandler?: unknown };
+      }
+    ).pdfjsWorker?.WorkerMessageHandler,
+    "function",
+  );
 });
 
 test("v2 source generation accepts common semantic answer-mode aliases", () => {

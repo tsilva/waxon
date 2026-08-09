@@ -12,6 +12,9 @@ export async function extractPdfText(bytes: Uint8Array): Promise<string> {
       : {}),
   });
 
+  // PDF.js does not publish declarations for its worker entry point.
+  // @ts-expect-error -- imported for its global WorkerMessageHandler side effect.
+  await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const loadingTask = pdfjs.getDocument({
     data: bytes,
