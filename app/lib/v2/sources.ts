@@ -39,6 +39,7 @@ import {
   recallTargetKey,
 } from "./questionQuality";
 import { extractPdfText } from "./pdf";
+import { extractRemoteSourceText } from "./sourceText";
 import { memoryRetrievability } from "./scheduler";
 
 const MAX_SOURCE_BYTES = 20 * 1024 * 1024;
@@ -115,7 +116,12 @@ function isBlockedIp(address: string): boolean {
 
 async function fetchPinnedUrl(
   url: URL,
-): Promise<{ status: number; location: string | null; body: Uint8Array }> {
+): Promise<{
+  status: number;
+  location: string | null;
+  contentType: string | null;
+  body: Uint8Array;
+}> {
   const resolved = await lookup(url.hostname, { all: true, verbatim: true });
   const allowed = resolved.find((item) => !isBlockedIp(item.address));
 
@@ -159,6 +165,10 @@ async function fetchPinnedUrl(
               typeof response.headers.location === "string"
                 ? response.headers.location
                 : null,
+            contentType:
+              typeof response.headers["content-type"] === "string"
+                ? response.headers["content-type"]
+                : null,
             body: Buffer.concat(chunks),
           });
         });
@@ -173,7 +183,10 @@ async function fetchPinnedUrl(
   });
 }
 
-async function safeFetchUrl(value: string): Promise<Uint8Array> {
+async function safeFetchUrl(value: string): Promise<{
+  body: Uint8Array;
+  contentType: string | null;
+}> {
   let current = new URL(value);
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
@@ -195,7 +208,10 @@ async function safeFetchUrl(value: string): Promise<Uint8Array> {
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`The source URL returned HTTP ${response.status}.`);
     }
-    return response.body;
+    return {
+      body: response.body,
+      contentType: response.contentType,
+    };
   }
 
   throw new Error("The source URL redirected too many times.");
@@ -633,8 +649,11 @@ export async function loadSourceText(
     return source.rawText;
   }
   if (source.kind === "url" && source.originalUrl) {
-    const bytes = await safeFetchUrl(source.originalUrl);
-    return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    const remote = await safeFetchUrl(source.originalUrl);
+    return await extractRemoteSourceText({
+      bytes: remote.body,
+      contentType: remote.contentType,
+    });
   }
   if (!source.objectUrl) {
     throw new Error("The source has no readable content.");

@@ -18,6 +18,7 @@ import { extractPdfText } from "../app/lib/v2/pdf.ts";
 import { normalizeGeneratedAnswerMode } from "../app/lib/v2/generatedAnswerMode.ts";
 import { alignEvidenceQuote } from "../app/lib/v2/evidenceQuote.ts";
 import { inferSourceCapture } from "../app/lib/v2/sourceCapture.ts";
+import { extractRemoteSourceText } from "../app/lib/v2/sourceText.ts";
 import {
   normalizeLearningPath,
   removeSharedQuestionEdges,
@@ -386,6 +387,33 @@ test("v2 PDF extraction installs Node canvas globals and reads text", async () =
     ).pdfjsWorker?.WorkerMessageHandler,
     "function",
   );
+});
+
+test("v2 remote source extraction recognizes PDF URLs by content type", async () => {
+  const text = await extractRemoteSourceText({
+    bytes: minimalTextPdf("Knowledge from a PDF URL"),
+    contentType: "application/pdf; charset=binary",
+  });
+
+  assert.match(text, /Knowledge from a PDF URL/u);
+});
+
+test("v2 remote source extraction recognizes PDFs with generic content types", async () => {
+  const text = await extractRemoteSourceText({
+    bytes: minimalTextPdf("PDF signature fallback"),
+    contentType: "application/octet-stream",
+  });
+
+  assert.match(text, /PDF signature fallback/u);
+});
+
+test("v2 remote source extraction preserves ordinary URL text", async () => {
+  const text = await extractRemoteSourceText({
+    bytes: new TextEncoder().encode("A normal article body"),
+    contentType: "text/html; charset=utf-8",
+  });
+
+  assert.equal(text, "A normal article body");
 });
 
 test("v2 source generation accepts common semantic answer-mode aliases", () => {
