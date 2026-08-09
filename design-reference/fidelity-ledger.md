@@ -4,6 +4,11 @@ Reference image: `design-reference/waxon-approved-ui.png`
 
 ## Current Loop
 
+- August 9, 2026 source-card action fix: the `Learning path` link now shares the
+  bordered mono action treatment, icon sizing, and hover/focus states of the
+  neighboring source-card buttons. Typecheck and lint pass. A fresh desktop and
+  mobile browser comparison remains pending because the required auto-port dev
+  server launch failed before the app became available.
 - Refreshed `design-reference/waxon-approved-ui.png` on June 8, 2026 from the live local app at `http://localhost:3001/review`.
 - The new composite uses a 1440x900 desktop capture and a 390x844 mobile capture stitched side by side.
 - The reference predates the July 17, 2026 navigation simplification. Current authenticated navigation is `Review` / `Library`, with `Admin` added for operators; ignore the archived `Learn` and `Tags` tabs when comparing shell spacing.
