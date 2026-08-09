@@ -788,6 +788,7 @@ textarea {
 }
 
 .v2-row-actions button,
+.v2-row-actions a,
 .v2-dialog-actions > button:not(.v2-button-primary):not(.v2-button-secondary) {
   display: inline-flex;
   align-items: center;
@@ -801,17 +802,21 @@ textarea {
   font-family: var(--font-ui);
   font-size: 12px;
   font-weight: 720;
+  text-decoration: none;
   cursor: pointer;
 }
 
 .v2-row-actions button:hover,
-.v2-row-actions button:focus-visible {
+.v2-row-actions button:focus-visible,
+.v2-row-actions a:hover,
+.v2-row-actions a:focus-visible {
   border-color: #b79a7b;
   color: var(--ink);
   outline: 0;
 }
 
-.v2-row-actions button svg {
+.v2-row-actions button svg,
+.v2-row-actions a svg {
   width: 14px;
   height: 14px;
 }
