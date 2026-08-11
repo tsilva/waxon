@@ -2,10 +2,6 @@
 [keyenv]
 version = 1
 
-[secrets.BLOB_READ_WRITE_TOKEN]
-account = "waxon/BLOB_READ_WRITE_TOKEN"
-required = true
-
 [secrets.CLERK_SECRET_KEY]
 account = "waxon/CLERK_SECRET_KEY"
 required = true

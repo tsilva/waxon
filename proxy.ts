@@ -29,7 +29,7 @@ const handleClerkMiddleware = clerkMiddleware(async (auth, request) => {
   }
 });
 
-export default function middleware(
+export default function proxy(
   ...args: Parameters<typeof handleClerkMiddleware>
 ) {
   const [request] = args;
