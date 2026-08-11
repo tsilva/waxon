@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
@@ -80,6 +81,7 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {children}
+        <Analytics />
         {googleAnalyticsId ? (
           <>
             <Script

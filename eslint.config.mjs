@@ -1,24 +1,23 @@
-import { FlatCompat } from "@eslint/eslintrc";
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTypeScript from "eslint-config-next/typescript";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
-
-const eslintConfig = [
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTypeScript,
   {
-    ignores: [
-      "next-env.d.ts",
-      ".next/**",
-      "node_modules/**",
-      "app/.well-known/workflow/**",
-    ],
+    rules: {
+      "react-hooks/preserve-manual-memoization": "off",
+      "react-hooks/purity": "off",
+      "react-hooks/set-state-in-effect": "off",
+    },
   },
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
-];
+  globalIgnores([
+    "next-env.d.ts",
+    ".next/**",
+    "node_modules/**",
+    "app/.well-known/workflow/**",
+  ]),
+]);
 
 export default eslintConfig;
