@@ -43,13 +43,13 @@ keyenv run -- pnpm db:migrate
 Non-secret model overrides may remain in `.env.local`:
 
 ```bash
-LLM_MODEL=google/gemini-3.6-flash
-LLM_EVALUATION_MODEL=google/gemini-3.6-flash
+LLM_MODEL=google/gemini-3.7-flash
+LLM_EVALUATION_MODEL=google/gemini-3.7-flash
 ```
 
 `LLM_API_KEY` is accepted when `OPENROUTER_API_KEY` is not set. The model
 variables are optional; generic chat and answer evaluation currently
-default to `google/gemini-3.6-flash`.
+default to `google/gemini-3.7-flash`.
 
 Start a development server on an available port:
 
