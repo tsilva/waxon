@@ -72,7 +72,7 @@ test("openRouterChatCompletion sends user trace identifiers", async () => {
         traceId: "trace-789",
       },
       body: {
-        model: "google/gemini-3.1-flash-lite",
+        model: "google/gemini-3.7-flash",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -109,7 +109,7 @@ test("openRouterChatCompletion preserves an explicit session id", async () => {
         userId: "user-123",
       },
       body: {
-        model: "google/gemini-3.1-flash-lite",
+        model: "google/gemini-3.7-flash",
         session_id: "review:user-123:attempt-456",
         messages: [{ role: "user", content: "hello" }],
       },
@@ -175,7 +175,7 @@ test("getOpenRouterEvaluationReasoning disables Mercury reasoning", () => {
     exclude: true,
   });
   assert.equal(
-    getOpenRouterEvaluationReasoning("google/gemini-3.1-flash-lite"),
+    getOpenRouterEvaluationReasoning("google/gemini-3.7-flash"),
     undefined,
   );
 });
@@ -232,7 +232,7 @@ test("openRouterChatCompletion mirrors body user into trace metadata", async () 
         operation: "test_operation",
       },
       body: {
-        model: "google/gemini-3.1-flash-lite",
+        model: "google/gemini-3.7-flash",
         user: "body-user",
         messages: [{ role: "user", content: "hello" }],
       },
@@ -282,7 +282,7 @@ test("openRouterChatCompletion records actual request and response payloads", as
         traceId,
       },
       body: {
-        model: "google/gemini-3.1-flash-lite",
+        model: "google/gemini-3.7-flash",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -332,7 +332,7 @@ test("listLlmTraceInteractions falls back to local traces when db read is unavai
         traceId,
       },
       body: {
-        model: "google/gemini-3.1-flash-lite",
+        model: "google/gemini-3.7-flash",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -363,7 +363,7 @@ test("recordFailedLlmTrace records an error trace for configuration failures", a
   await recordFailedLlmTrace({
     traceId,
     operation: "evaluate_answer",
-    model: "google/gemini-3.1-flash-lite",
+    model: "google/gemini-3.7-flash",
     question: "What should admin show for missing LLM configuration?",
     requestBody: {
       question: "What should admin show for missing LLM configuration?",
@@ -423,7 +423,7 @@ test("openRouterChatCompletion streams text chunks and reports activity", async 
         operation: "test_streaming",
       },
       body: {
-        model: "google/gemini-3.1-flash-lite",
+        model: "google/gemini-3.7-flash",
         messages: [{ role: "user", content: "hello" }],
       },
     });
@@ -496,7 +496,7 @@ test("openRouterChatCompletion preserves streamed tool calls", async () => {
         operation: "test_streaming_tools",
       },
       body: {
-        model: "google/gemini-3.1-flash-lite",
+        model: "google/gemini-3.7-flash",
         messages: [{ role: "user", content: "hello" }],
       },
       onToolCallDelta(toolCalls) {
