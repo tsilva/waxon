@@ -20,7 +20,8 @@
     "start": "node scripts/next-server.mjs start",
     "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mts",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "security:check": "node scripts/check-dependency-sources.mjs && pnpm audit --audit-level=low"
   },
   "dependencies": {
     "@clerk/nextjs": "7.4.2",
@@ -32,7 +33,7 @@
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.16.0",
     "next": "^16.3.0",
-    "pdfjs-dist": "6.1.200",
+    "pdfjs-dist": "6.2.108",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "ts-fsrs": "5.4.1",
@@ -47,6 +48,18 @@
     "eslint": "^9.34.0",
     "eslint-config-next": "^16.3.0",
     "typescript": "^5.9.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "@clerk/nextjs>@clerk/backend": "3.4.14",
+      "@clerk/nextjs>@clerk/react": "6.7.2",
+      "@clerk/nextjs>@clerk/shared": "4.14.0",
+      "@esbuild-kit/core-utils>esbuild": "0.25.0",
+      "@workflow/core>nanoid": "5.1.16",
+      "nanoid@<4": "3.3.18",
+      "undici@>=6 <7": "6.28.0",
+      "undici@>=7 <7.29.0": "7.29.0"
+    }
   },
   "packageManager": "pnpm@10.33.0"
 }
