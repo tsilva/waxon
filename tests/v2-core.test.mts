@@ -389,6 +389,13 @@ test("v2 PDF extraction installs Node canvas globals and reads text", async () =
   );
 });
 
+test("v2 PDF extraction rejects malformed documents", async () => {
+  await assert.rejects(
+    () => extractPdfText(new TextEncoder().encode("%PDF-1.4\nmalformed")),
+    /Invalid PDF|InvalidPDFException|PDF structure/u,
+  );
+});
+
 test("v2 remote source extraction recognizes PDF URLs by content type", async () => {
   const text = await extractRemoteSourceText({
     bytes: minimalTextPdf("Knowledge from a PDF URL"),
