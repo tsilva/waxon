@@ -3774,6 +3774,7 @@ textarea {
 }
 
 .math-literal,
+.math-blackboard,
 .math-operator,
 .math-text {
   font-style: normal;

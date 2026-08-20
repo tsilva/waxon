@@ -11,6 +11,7 @@ const mathSymbolMap: Record<string, string> = {
   nabla: "∇",
   partial: "∂",
   cdot: "·",
+  in: "∈",
   le: "≤",
   leq: "≤",
   ge: "≥",
@@ -81,6 +82,46 @@ export function renderLatexCommandText(commandName: string): string | null {
   }
 
   return mathSymbolMap[commandName] ?? commandName;
+}
+
+const doubleStruckUppercaseExceptions: Record<string, string> = {
+  C: "ℂ",
+  H: "ℍ",
+  N: "ℕ",
+  P: "ℙ",
+  Q: "ℚ",
+  R: "ℝ",
+  Z: "ℤ",
+};
+
+export function renderLatexMathbbText(value: string): string {
+  return Array.from(value, (character) => {
+    const uppercaseException = doubleStruckUppercaseExceptions[character];
+
+    if (uppercaseException) {
+      return uppercaseException;
+    }
+
+    const codePoint = character.codePointAt(0);
+
+    if (codePoint === undefined) {
+      return character;
+    }
+
+    if (codePoint >= 0x41 && codePoint <= 0x5a) {
+      return String.fromCodePoint(0x1d538 + codePoint - 0x41);
+    }
+
+    if (codePoint >= 0x61 && codePoint <= 0x7a) {
+      return String.fromCodePoint(0x1d552 + codePoint - 0x61);
+    }
+
+    if (codePoint >= 0x30 && codePoint <= 0x39) {
+      return String.fromCodePoint(0x1d7d8 + codePoint - 0x30);
+    }
+
+    return character;
+  }).join("");
 }
 
 export function isUprightMathLiteral(character: string): boolean {

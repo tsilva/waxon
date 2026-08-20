@@ -7,6 +7,7 @@ import {
   isUprightMathLiteral,
   readLatexCommand,
   renderLatexCommandText,
+  renderLatexMathbbText,
 } from "../app/lib/latexMath.ts";
 
 test("renderLatexCommandText hides transparent TeX delimiter commands", () => {
@@ -22,6 +23,12 @@ test("renderLatexCommandText maps supported math symbols and keeps unknown opera
   assert.equal(renderLatexCommandText("div"), "÷");
   assert.equal(renderLatexCommandText("leq"), "≤");
   assert.equal(renderLatexCommandText("geq"), "≥");
+  assert.equal(renderLatexCommandText("in"), "∈");
+});
+
+test("renderLatexMathbbText renders blackboard-bold number sets", () => {
+  assert.equal(renderLatexMathbbText("R"), "ℝ");
+  assert.equal(renderLatexMathbbText("CNQZ"), "ℂℕℚℤ");
 });
 
 test("renderLatexCommandText treats TeX spacing commands as spacing", () => {
