@@ -27,6 +27,7 @@ test("production builds migrate the database before compiling the app", () => {
   );
   assert.deepEqual(runner.calls, [
     { command: "pnpm", args: ["db:migrate"] },
+    { command: "pnpm", args: ["db:backfill-question-target-keys"] },
     { command: "next", args: ["build"] },
   ]);
 });
@@ -51,5 +52,18 @@ test("a failed production migration prevents an incompatible app build", () => {
   );
   assert.deepEqual(runner.calls, [
     { command: "pnpm", args: ["db:migrate"] },
+  ]);
+});
+
+test("a failed target-key repair prevents an incompatible app build", () => {
+  const runner = recordingSpawn([0, 1]);
+
+  assert.equal(
+    runBuild({ environment: { VERCEL_ENV: "production" }, spawn: runner.spawn }),
+    1,
+  );
+  assert.deepEqual(runner.calls, [
+    { command: "pnpm", args: ["db:migrate"] },
+    { command: "pnpm", args: ["db:backfill-question-target-keys"] },
   ]);
 });
