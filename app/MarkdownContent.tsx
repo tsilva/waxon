@@ -10,6 +10,7 @@ import {
   isUprightMathLiteral,
   readLatexCommand,
   renderLatexCommandText,
+  renderLatexMathbbText,
 } from "@/app/lib/latexMath";
 
 type MathParseResult = {
@@ -182,6 +183,20 @@ function renderMathNodes(expression: string): ReactNode[] {
           index = denominator.nextIndex;
           continue;
         }
+      }
+    }
+
+    if (expression.startsWith("\\mathbb", index)) {
+      const blackboard = readMathGroup(expression, index + "\\mathbb".length);
+
+      if (blackboard) {
+        nodes.push(
+          <span className="math-blackboard" key={`mathbb-${index}`}>
+            {renderLatexMathbbText(decodeLatexText(blackboard.content))}
+          </span>,
+        );
+        index = blackboard.nextIndex;
+        continue;
       }
     }
 
