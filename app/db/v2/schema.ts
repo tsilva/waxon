@@ -29,6 +29,13 @@ const updatedAt = () =>
     .notNull()
     .defaultNow();
 
+export const dataMigrationMarkers = waxonV2.table("data_migration_markers", {
+  name: text("name").primaryKey(),
+  appliedAt: timestamp("applied_at", { withTimezone: true, mode: "date" })
+    .notNull()
+    .defaultNow(),
+});
+
 export const questionLifecycle = waxonV2.enum("question_lifecycle", [
   "new",
   "learning",
