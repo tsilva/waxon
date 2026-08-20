@@ -31,10 +31,10 @@ import { buildReviewPlan, type PlanCandidate } from "./planner";
 import {
   MAX_QUESTION_BATCH,
   normalizeQuestionInput,
-  questionPromptKey,
   type LeanQuestionInput,
   type NormalizedQuestionInput,
 } from "./questionInput";
+import { rankQuestionIdsLexically } from "./questionSearch";
 import { normalizeExactAnswer } from "./questionQuality";
 import {
   applyFsrsGrade,
@@ -55,6 +55,7 @@ import type {
 } from "./types";
 import { evaluateRecall } from "./model";
 import { claimV2Job } from "./jobs";
+import { runQuestionEmbeddingJob } from "./questionEmbeddings";
 import { retryEarliestAt } from "./retryPolicy";
 
 const ACTIVE_LIFECYCLES: V2Lifecycle[] = ["new", "learning", "review"];
@@ -264,11 +265,12 @@ export async function addQuestions(input: {
       return receipt.response as { results: AddQuestionResult[] };
     }
 
+    const requestedPromptKeys = [...new Set(items.map((item) => item.promptKey))];
     const existing = await tx
       .select({
         id: questions.id,
         lifecycle: questions.lifecycle,
-        prompt: questionVersions.prompt,
+        targetKey: questions.targetKey,
         referenceAnswer: questionVersions.referenceAnswer,
       })
       .from(questions)
@@ -280,12 +282,14 @@ export async function addQuestions(input: {
           eq(questionVersions.isCurrent, true),
         ),
       )
-      .where(eq(questions.userId, input.userId));
-    const requestedPromptKeys = new Set(items.map((item) => item.promptKey));
+      .where(
+        and(
+          eq(questions.userId, input.userId),
+          inArray(questions.targetKey, requestedPromptKeys),
+        ),
+      );
     const byPromptKey = new Map(
-      existing
-        .map((row) => [questionPromptKey(row.prompt), row] as const)
-        .filter(([key]) => requestedPromptKeys.has(key)),
+      existing.map((row) => [row.targetKey, row] as const),
     );
     const [{ questionCount }] = await tx
       .select({ questionCount: count() })
@@ -300,6 +304,7 @@ export async function addQuestions(input: {
       throw new Error("Your question-bank limit is full.");
     }
     const results: AddQuestionResult[] = [];
+    const createdQuestionIds: string[] = [];
 
     for (const item of items) {
       const duplicate = byPromptKey.get(item.promptKey);
@@ -342,11 +347,22 @@ export async function addQuestions(input: {
         lifecycle: "new",
       };
       results.push(created);
+      createdQuestionIds.push(question.id);
       byPromptKey.set(item.promptKey, {
         id: question.id,
         lifecycle: "new",
-        prompt: item.prompt,
+        targetKey: item.promptKey,
         referenceAnswer: item.referenceAnswer,
+      });
+    }
+
+    if (createdQuestionIds.length > 0) {
+      await tx.insert(jobs).values({
+        userId: input.userId,
+        type: "embed_question_batch",
+        idempotencyKey: `question-search-v1:${scope}:${key}`,
+        priority: 2,
+        payload: { questionIds: createdQuestionIds },
       });
     }
 
@@ -425,6 +441,14 @@ export async function listLibrary(input: {
   const lifecycle =
     input.lifecycle && input.lifecycle !== "all" ? input.lifecycle : null;
   const pool = getV2Client().pool;
+  const rankedIds = search
+    ? await rankQuestionIdsLexically({
+        userId: input.userId,
+        query: search,
+        lifecycle,
+        limit,
+      })
+    : [];
   const rows = await pool.query<{
     id: string;
     version_id: string;
@@ -458,11 +482,12 @@ export async function listLibrary(input: {
          ON ms.user_id = q.user_id AND ms.question_id = q.id
       WHERE q.user_id = $1
         AND ($2::text IS NULL OR q.lifecycle::text = $2)
-        AND ($3 = '' OR qv.prompt ILIKE '%' || $3 || '%' OR qv.reference_answer ILIKE '%' || $3 || '%')
+        AND ($3 = '' OR q.id = ANY($5::uuid[]))
         AND q.lifecycle::text IN ('new','learning','review','flagged','paused','archived','trash')
-      ORDER BY q.updated_at DESC, q.id
+      ORDER BY CASE WHEN $3 <> '' THEN array_position($5::uuid[], q.id) END,
+               q.updated_at DESC, q.id
       LIMIT $4`,
-    [input.userId, lifecycle, search, limit],
+    [input.userId, lifecycle, search, limit, rankedIds],
   );
   const settings = await getLearnerSettings(input.userId);
   const questionsOut: V2Question[] = rows.rows.map((row) => {
@@ -2041,40 +2066,34 @@ export async function editQuestion(input: {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`question-edit:${input.userId}`}))`,
     );
-    const possibleDuplicates = await tx
-      .select({ id: questions.id, prompt: questionVersions.prompt })
+    const [duplicate] = await tx
+      .select({ id: questions.id })
       .from(questions)
-      .innerJoin(
-        questionVersions,
-        and(
-          eq(questionVersions.userId, questions.userId),
-          eq(questionVersions.questionId, questions.id),
-          eq(questionVersions.isCurrent, true),
-        ),
-      )
       .where(
         and(
           eq(questions.userId, input.userId),
+          eq(questions.targetKey, normalized.promptKey),
           ne(questions.id, input.questionId),
         ),
-      );
-    const duplicate = possibleDuplicates.find(
-      (candidate) => questionPromptKey(candidate.prompt) === normalized.promptKey,
-    );
+      )
+      .limit(1);
     if (duplicate) throw new Error("Another question already uses this prompt.");
     await tx
       .update(questionVersions)
       .set({ isCurrent: false })
       .where(eq(questionVersions.id, current.versionId));
-    await tx.insert(questionVersions).values({
-      userId: input.userId,
-      questionId: input.questionId,
-      version: current.version + 1,
-      prompt: normalized.prompt,
-      referenceAnswer: normalized.referenceAnswer,
-      displayAnswer: normalized.referenceAnswer.slice(0, 8_000),
-      mode: normalized.answerMode,
-    });
+    const [newVersion] = await tx
+      .insert(questionVersions)
+      .values({
+        userId: input.userId,
+        questionId: input.questionId,
+        version: current.version + 1,
+        prompt: normalized.prompt,
+        referenceAnswer: normalized.referenceAnswer,
+        displayAnswer: normalized.referenceAnswer.slice(0, 8_000),
+        mode: normalized.answerMode,
+      })
+      .returning({ id: questionVersions.id });
     const lifecycle = ACTIVE_LIFECYCLES.includes(current.lifecycle as V2Lifecycle)
       ? "new"
       : (current.lifecycle as V2Lifecycle);
@@ -2115,6 +2134,13 @@ export async function editQuestion(input: {
           inArray(retryObligations.status, ["queued", "deferred", "exposed"]),
         ),
       );
+    await tx.insert(jobs).values({
+      userId: input.userId,
+      type: "embed_question_batch",
+      idempotencyKey: `question-search-v1:${input.questionId}:${newVersion.id}`,
+      priority: 2,
+      payload: { questionIds: [input.questionId] },
+    });
   });
   return { resetScheduling: true };
 }
@@ -2131,7 +2157,7 @@ export async function runPendingJobs(input: {
       and(
         input.userId ? eq(jobs.userId, input.userId) : undefined,
         eq(jobs.status, "pending"),
-        eq(jobs.type, "evaluate_submission"),
+        inArray(jobs.type, ["evaluate_submission", "embed_question_batch"]),
         lte(jobs.runAfter, new Date()),
       ),
     )
@@ -2140,7 +2166,11 @@ export async function runPendingJobs(input: {
   let processed = 0;
   for (const job of pending) {
     try {
-      await runEvaluationJob(job.id);
+      if (job.type === "evaluate_submission") {
+        await runEvaluationJob(job.id);
+      } else if (job.type === "embed_question_batch") {
+        await runQuestionEmbeddingJob(job.id);
+      }
       processed += 1;
     } catch (error) {
       Sentry.captureException(error, {

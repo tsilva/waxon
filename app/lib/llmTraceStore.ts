@@ -308,9 +308,9 @@ export async function listLlmTraceInteractions(): Promise<LlmTraceInteraction[]>
 
   if (process.env.DATABASE_URL) {
     try {
-      const { getV2Db } = await import("../db/v2/client");
+      const { getV2Db } = await import("../db/v2/client.ts");
       const { llmTraceInteractions: llmTraceInteractionsTable } = await import(
-        "../db/v2/schema"
+        "../db/v2/schema.ts"
       );
       const rows = await getV2Db()
         .select()
@@ -374,9 +374,9 @@ async function persistTraceInteraction(
   }
 
   try {
-    const { getV2Db } = await import("../db/v2/client");
+    const { getV2Db } = await import("../db/v2/client.ts");
     const { llmTraceInteractions: llmTraceInteractionsTable } = await import(
-      "../db/v2/schema"
+      "../db/v2/schema.ts"
     );
     const row = traceInteractionToRow(interaction);
 

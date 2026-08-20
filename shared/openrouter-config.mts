@@ -5,6 +5,8 @@ export const OPENROUTER_EMBEDDINGS_URL =
 export const DEFAULT_OPENROUTER_CHAT_MODEL = "google/gemini-3.7-flash";
 export const DEFAULT_OPENROUTER_EVALUATION_MODEL = "google/gemini-3.7-flash";
 export const DEFAULT_EMBEDDING_MODEL = "google/gemini-embedding-2";
+export const DEFAULT_QUESTION_SEARCH_EMBEDDING_MODEL =
+  "openai/text-embedding-3-small";
 
 export type OpenRouterEnvironment = Record<string, string | undefined>;
 
@@ -43,6 +45,16 @@ export function resolveEmbeddingModel(
     env,
     variable: "EMBEDDING_MODEL",
     fallback: DEFAULT_EMBEDDING_MODEL,
+  }) as string;
+}
+
+export function resolveQuestionSearchEmbeddingModel(
+  env: OpenRouterEnvironment = process.env,
+): string {
+  return resolveOpenRouterModel({
+    env,
+    variable: "QUESTION_SEARCH_EMBEDDING_MODEL",
+    fallback: DEFAULT_QUESTION_SEARCH_EMBEDDING_MODEL,
   }) as string;
 }
 
