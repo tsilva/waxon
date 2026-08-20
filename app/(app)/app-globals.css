@@ -3808,6 +3808,23 @@ textarea {
   font-style: normal;
 }
 
+.math-accent {
+  position: relative;
+  display: inline-block;
+  line-height: 1;
+}
+
+.math-accent-hat::before {
+  position: absolute;
+  top: -0.62em;
+  left: 50%;
+  color: var(--formula-command);
+  content: "ˆ";
+  font-size: 0.72em;
+  font-style: normal;
+  transform: translateX(-50%);
+}
+
 .math-fraction {
   display: inline-grid;
   grid-template-rows: auto auto;

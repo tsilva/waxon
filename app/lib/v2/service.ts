@@ -68,6 +68,7 @@ const ALL_LIFECYCLES: V2Lifecycle[] = [
   "trash",
 ];
 const QUESTION_PAGE_LIMIT = 100;
+const SESSION_ITEM_INSERT_BATCH = 500;
 
 type V2Tx = Parameters<
   Parameters<ReturnType<typeof getV2Db>["transaction"]>[0]
@@ -164,6 +165,25 @@ export async function updateLearnerSettings(input: {
     .where(eq(learnerSettings.userId, input.userId))
     .returning();
   return row;
+}
+
+type ReviewDayBounds = {
+  start: Date;
+  end: Date;
+};
+
+async function reviewDayBounds(timezone: string): Promise<ReviewDayBounds> {
+  const [row] = await getV2Client().pool
+    .query<{ day_start: Date; day_end: Date }>(
+      `SELECT
+         date_trunc('day', now() AT TIME ZONE $1) AT TIME ZONE $1 AS day_start,
+         (date_trunc('day', now() AT TIME ZONE $1) + interval '1 day')
+           AT TIME ZONE $1 AS day_end`,
+      [timezone],
+    )
+    .then((result) => result.rows);
+  if (!row) throw new Error("Could not determine the learner's review day.");
+  return { start: row.day_start, end: row.day_end };
 }
 
 async function findReceipt<T>(
@@ -507,7 +527,10 @@ export async function listLibrary(input: {
   return { questions: questionsOut, counts, waitingNew: counts.new };
 }
 
-async function planCandidates(userId: string): Promise<PlanCandidate[]> {
+async function planCandidates(
+  userId: string,
+  day: ReviewDayBounds,
+): Promise<PlanCandidate[]> {
   const db = getV2Db();
   const rows = await db
     .select({
@@ -555,14 +578,22 @@ async function planCandidates(userId: string): Promise<PlanCandidate[]> {
           SELECT 1 FROM waxon_v2.answer_submissions pending
            WHERE pending.user_id = ${questions.userId}
              AND pending.question_id = ${questions.id}
+             AND pending.question_version_id = ${questionVersions.id}
              AND pending.status = 'pending'
+        )`,
+        sql`NOT EXISTS (
+          SELECT 1 FROM waxon_v2.answer_submissions reviewed_today
+           WHERE reviewed_today.user_id = ${questions.userId}
+             AND reviewed_today.question_id = ${questions.id}
+             AND reviewed_today.question_version_id = ${questionVersions.id}
+             AND reviewed_today.status = 'graded'
+             AND reviewed_today.submitted_at >= ${day.start}
+             AND reviewed_today.submitted_at < ${day.end}
         )`,
       ),
     )
-    .orderBy(asc(memoryStates.dueAt), asc(questions.createdAt))
-    .limit(2_000);
+    .orderBy(asc(memoryStates.dueAt), asc(questions.createdAt));
   const settings = await getLearnerSettings(userId);
-  const horizon = new Date(Date.now() + 24 * 60 * 60_000);
   return rows.map((row) => {
     const memory = row.memory?.dueAt ? storedMemory(row.memory) : null;
     return {
@@ -575,7 +606,7 @@ async function planCandidates(userId: string): Promise<PlanCandidate[]> {
         ? memoryRetrievability({
             memory,
             desiredRetention: settings.desiredRetention,
-            at: horizon,
+            at: day.end,
           })
         : null,
       importance: row.importance,
@@ -584,8 +615,11 @@ async function planCandidates(userId: string): Promise<PlanCandidate[]> {
   });
 }
 
-async function reviewCapacity(userId: string) {
-  const settings = await getLearnerSettings(userId);
+async function reviewCapacity(
+  userId: string,
+  settings: typeof learnerSettings.$inferSelect,
+  day: ReviewDayBounds,
+) {
   const [row] = await getV2Client().pool
     .query<{
       at_risk: string;
@@ -595,15 +629,28 @@ async function reviewCapacity(userId: string) {
       `SELECT
          count(*) FILTER (
            WHERE q.lifecycle::text IN ('learning','review')
-             AND ms.due_at <= now() + interval '24 hours'
+             AND ms.due_at < $3
+             AND NOT EXISTS (
+               SELECT 1 FROM waxon_v2.answer_submissions reviewed_today
+               WHERE reviewed_today.user_id = q.user_id
+                  AND reviewed_today.question_id = q.id
+                  AND reviewed_today.question_version_id = qv.id
+                  AND reviewed_today.status = 'graded'
+                  AND reviewed_today.submitted_at >= $2
+                  AND reviewed_today.submitted_at < $3
+             )
          )::text AS at_risk,
          count(*) FILTER (WHERE q.lifecycle::text = 'new')::text AS waiting_new,
          min(q.created_at) FILTER (WHERE q.lifecycle::text = 'new') AS oldest_new_at
        FROM waxon_v2.questions q
+       JOIN waxon_v2.question_versions qv
+         ON qv.user_id = q.user_id
+        AND qv.question_id = q.id
+        AND qv.is_current = true
        LEFT JOIN waxon_v2.memory_states ms
          ON ms.user_id = q.user_id AND ms.question_id = q.id
       WHERE q.user_id = $1`,
-      [userId],
+      [userId, day.start, day.end],
     )
     .then((result) => result.rows);
   const atRiskCount = Number(row?.at_risk ?? 0);
@@ -766,6 +813,12 @@ export async function getOrCreateReviewSession(
 ): Promise<V2ReviewSessionResponse> {
   const db = getV2Db();
   const settings = await getLearnerSettings(userId);
+  const day = await reviewDayBounds(settings.timezone);
+  const plan = buildReviewPlan({
+    candidates: await planCandidates(userId, day),
+    desiredRetention: settings.desiredRetention,
+    scheduledBefore: day.end,
+  });
   let session: typeof reviewSessions.$inferSelect | undefined = (
     await db
     .select()
@@ -775,12 +828,6 @@ export async function getOrCreateReviewSession(
   )[0];
 
   if (!session) {
-    const plan = buildReviewPlan({
-      candidates: await planCandidates(userId),
-      timeBudgetMinutes: settings.dailyMinutes,
-      desiredRetention: settings.desiredRetention,
-      newItemsPerDay: settings.newItemsPerDay,
-    });
     if (plan.length > 0) {
       session = await db.transaction(async (tx) => {
         await tx.execute(
@@ -805,21 +852,103 @@ export async function getOrCreateReviewSession(
             plannedCount: plan.length,
           })
           .returning();
-        await tx.insert(reviewSessionItems).values(
-          plan.map((item) => ({
-            userId,
-            sessionId: created.id,
-            questionId: item.questionId,
-            questionVersionId: item.questionVersionId,
-            position: item.position,
-            earliestAt: new Date(),
-            estimatedSeconds: item.estimatedSeconds,
-            isIntroduction: item.lifecycle === "new",
-          })),
-        );
+        const earliestAt = new Date();
+        for (let offset = 0; offset < plan.length; offset += SESSION_ITEM_INSERT_BATCH) {
+          await tx.insert(reviewSessionItems).values(
+            plan.slice(offset, offset + SESSION_ITEM_INSERT_BATCH).map((item) => ({
+              userId,
+              sessionId: created.id,
+              questionId: item.questionId,
+              questionVersionId: item.questionVersionId,
+              position: item.position,
+              earliestAt,
+              estimatedSeconds: item.estimatedSeconds,
+              isIntroduction: item.dueAt === null,
+            })),
+          );
+        }
         return created;
       });
     }
+  }
+
+  if (session && plan.length > 0) {
+    const sessionId = session.id;
+    const synchronizedSession = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`session:${userId}`}))`,
+      );
+      const [active] = await tx
+        .select()
+        .from(reviewSessions)
+        .where(
+          and(
+            eq(reviewSessions.userId, userId),
+            eq(reviewSessions.id, sessionId),
+            eq(reviewSessions.status, "active"),
+          ),
+        )
+        .limit(1);
+      if (!active) return null;
+      const existing = await tx
+        .select({ questionVersionId: reviewSessionItems.questionVersionId })
+        .from(reviewSessionItems)
+        .where(
+          and(
+            eq(reviewSessionItems.userId, userId),
+            eq(reviewSessionItems.sessionId, active.id),
+            eq(reviewSessionItems.kind, "base"),
+          ),
+        );
+      const existingVersions = new Set(existing.map((item) => item.questionVersionId));
+      const missing = plan.filter(
+        (item) => !existingVersions.has(item.questionVersionId),
+      );
+      if (missing.length === 0) return active;
+      const [lastPosition] = await tx
+        .select({ value: sql<number>`COALESCE(max(${reviewSessionItems.position}), -1)` })
+        .from(reviewSessionItems)
+        .where(
+          and(
+            eq(reviewSessionItems.userId, userId),
+            eq(reviewSessionItems.sessionId, active.id),
+          ),
+        );
+      const firstPosition = Number(lastPosition?.value ?? -1) + 1;
+      const earliestAt = new Date();
+      for (let offset = 0; offset < missing.length; offset += SESSION_ITEM_INSERT_BATCH) {
+        await tx.insert(reviewSessionItems).values(
+          missing
+            .slice(offset, offset + SESSION_ITEM_INSERT_BATCH)
+            .map((item, index) => ({
+              userId,
+              sessionId: active.id,
+              questionId: item.questionId,
+              questionVersionId: item.questionVersionId,
+              position: firstPosition + offset + index,
+              earliestAt,
+              estimatedSeconds: item.estimatedSeconds,
+              isIntroduction: item.dueAt === null,
+            })),
+        );
+      }
+      const addedSeconds = missing.reduce(
+        (sum, item) => sum + item.estimatedSeconds,
+        0,
+      );
+      const [updated] = await tx
+        .update(reviewSessions)
+        .set({
+          plannedCount: sql`${reviewSessions.plannedCount} + ${missing.length}`,
+          estimatedSeconds: sql`${reviewSessions.estimatedSeconds} + ${addedSeconds}`,
+          reservedSeconds: sql`${reviewSessions.reservedSeconds} + ${addedSeconds * 2}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(reviewSessions.id, active.id))
+        .returning();
+      return updated ?? active;
+    });
+    session = synchronizedSession ?? undefined;
   }
 
   let item = session ? await exposeNextItem(userId, session.id) : null;
@@ -845,11 +974,23 @@ export async function getOrCreateReviewSession(
   }
 
   const summary = await getReviewSummary(userId);
-  const capacity = await reviewCapacity(userId);
+  const capacity = await reviewCapacity(userId, settings, day);
   let completedCount = 0;
+  let plannedCount = 0;
   let retryAvailableAt: string | null = null;
   let waitingOnEvaluation = false;
   if (session) {
+    const [{ total }] = await db
+      .select({ total: count() })
+      .from(reviewSessionItems)
+      .where(
+        and(
+          eq(reviewSessionItems.userId, userId),
+          eq(reviewSessionItems.sessionId, session.id),
+          ne(reviewSessionItems.state, "invalidated"),
+        ),
+      );
+    plannedCount = total;
     const [{ completed }] = await db
       .select({ completed: count() })
       .from(reviewSessionItems)
@@ -893,7 +1034,7 @@ export async function getOrCreateReviewSession(
     session: session
       ? {
           id: session.id,
-          plannedCount: session.plannedCount,
+          plannedCount,
           estimatedMinutes: Math.max(1, Math.ceil(session.estimatedSeconds / 60)),
           completedCount,
         }
@@ -1041,28 +1182,70 @@ export async function actOnReviewItem(input: {
 }
 
 export async function getReviewSummary(userId: string): Promise<V2ReviewSummary> {
-  const [row] = await getV2Client().pool
-    .query<{ due_count: string; next_due: Date | null }>(
-      `SELECT count(*) FILTER (
-                WHERE q.lifecycle::text IN ('learning','review')
-                  AND ms.due_at <= now()
-                  AND NOT EXISTS (
-                    SELECT 1 FROM waxon_v2.answer_submissions pending
-                     WHERE pending.user_id = q.user_id
-                       AND pending.question_id = q.id
-                       AND pending.status = 'pending'
-                  )
-              )::text AS due_count,
-              min(ms.due_at) FILTER (WHERE ms.due_at > now()) AS next_due
-         FROM waxon_v2.questions q
-         LEFT JOIN waxon_v2.memory_states ms
-           ON ms.user_id = q.user_id AND ms.question_id = q.id
-        WHERE q.user_id = $1`,
+  const settings = await getLearnerSettings(userId);
+  const day = await reviewDayBounds(settings.timezone);
+  const [active] = await getV2Client().pool
+    .query<{ due_count: string }>(
+      `SELECT count(item.id) FILTER (
+                WHERE item.state::text IN ('queued','exposed','submitted')
+              )::text AS due_count
+         FROM waxon_v2.review_sessions session
+         LEFT JOIN waxon_v2.review_session_items item
+           ON item.user_id = session.user_id AND item.session_id = session.id
+        WHERE session.user_id = $1
+          AND session.status = 'active'
+        GROUP BY session.id
+        LIMIT 1`,
       [userId],
     )
     .then((result) => result.rows);
+  const queueRemaining = active
+    ? Number(active.due_count)
+    : buildReviewPlan({
+        candidates: await planCandidates(userId, day),
+        desiredRetention: settings.desiredRetention,
+        scheduledBefore: day.end,
+      }).length;
+  const [row] = await getV2Client().pool
+    .query<{ next_due: Date | null }>(
+      `SELECT min(candidate.effective_due) FILTER (
+                WHERE candidate.effective_due > now()
+              ) AS next_due
+         FROM (
+           SELECT CASE
+                    WHEN EXISTS (
+                      SELECT 1 FROM waxon_v2.answer_submissions reviewed_today
+                       WHERE reviewed_today.user_id = q.user_id
+                         AND reviewed_today.question_id = q.id
+                         AND reviewed_today.question_version_id = qv.id
+                         AND reviewed_today.status = 'graded'
+                         AND reviewed_today.submitted_at >= $2
+                         AND reviewed_today.submitted_at < $3
+                    ) THEN GREATEST(ms.due_at, $3)
+                    ELSE ms.due_at
+                  END AS effective_due
+             FROM waxon_v2.questions q
+             JOIN waxon_v2.question_versions qv
+               ON qv.user_id = q.user_id
+              AND qv.question_id = q.id
+              AND qv.is_current = true
+             JOIN waxon_v2.memory_states ms
+               ON ms.user_id = q.user_id AND ms.question_id = q.id
+            WHERE q.user_id = $1
+              AND q.lifecycle::text IN ('learning','review')
+              AND NOT EXISTS (
+                SELECT 1 FROM waxon_v2.answer_submissions pending
+                 WHERE pending.user_id = q.user_id
+                   AND pending.question_id = q.id
+                   AND pending.question_version_id = qv.id
+                   AND pending.status = 'pending'
+              )
+         ) candidate`,
+      [userId, day.start, day.end],
+    )
+    .then((result) => result.rows);
   return {
-    queueRemaining: Number(row?.due_count ?? 0),
+    queueRemaining,
     nextScheduledDue: row?.next_due?.getTime() ?? null,
   };
 }

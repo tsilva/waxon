@@ -6,6 +6,8 @@ import {
   isInlineMathDollarDelimiter,
   isUprightMathLiteral,
   readLatexCommand,
+  readLatexMathAtom,
+  readLatexMathGroup,
   renderLatexCommandText,
   renderLatexMathbbText,
 } from "../app/lib/latexMath.ts";
@@ -18,12 +20,32 @@ test("renderLatexCommandText hides transparent TeX delimiter commands", () => {
 test("renderLatexCommandText maps supported math symbols and keeps unknown operators readable", () => {
   assert.equal(renderLatexCommandText("approx"), "≈");
   assert.equal(renderLatexCommandText("sum"), "∑");
+  assert.equal(renderLatexCommandText("pi"), "π");
+  assert.equal(renderLatexCommandText("mid"), "∣");
   assert.equal(renderLatexCommandText("ln"), "ln");
   assert.equal(renderLatexCommandText("exp"), "exp");
   assert.equal(renderLatexCommandText("div"), "÷");
   assert.equal(renderLatexCommandText("leq"), "≤");
   assert.equal(renderLatexCommandText("geq"), "≥");
   assert.equal(renderLatexCommandText("in"), "∈");
+});
+
+test("readLatexMathGroup reads nested braced expressions", () => {
+  assert.deepEqual(readLatexMathGroup(String.raw`{x_{i}} + y`, 0), {
+    content: String.raw`x_{i}`,
+    nextIndex: 7,
+  });
+});
+
+test("readLatexMathAtom keeps TeX commands intact for scripts and accents", () => {
+  assert.deepEqual(readLatexMathAtom(String.raw`\theta(a)`, 0), {
+    content: String.raw`\theta`,
+    nextIndex: 6,
+  });
+  assert.deepEqual(readLatexMathAtom(" A > 0", 0), {
+    content: "A",
+    nextIndex: 2,
+  });
 });
 
 test("renderLatexMathbbText renders blackboard-bold number sets", () => {

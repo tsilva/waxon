@@ -82,9 +82,8 @@ test("quality gates reject broad prompts and allow atomic recall", () => {
 test("planner puts due work before new work and orders due items by risk", () => {
   const plan = buildReviewPlan({
     now,
-    timeBudgetMinutes: 10,
     desiredRetention: 0.9,
-    newItemsPerDay: 2,
+    scheduledBefore: new Date(now.getTime() + 24 * 60 * 60_000),
     candidates: [
       candidate({ questionId: "healthy", retrievability: 0.88 }),
       candidate({ questionId: "fragile", retrievability: 0.3, importance: 2 }),
@@ -106,9 +105,8 @@ test("planner puts due work before new work and orders due items by risk", () =>
 test("planner leaves flagged questions out of Review", () => {
   const plan = buildReviewPlan({
     now,
-    timeBudgetMinutes: 10,
     desiredRetention: 0.9,
-    newItemsPerDay: 2,
+    scheduledBefore: new Date(now.getTime() + 24 * 60 * 60_000),
     candidates: [
       candidate({ questionId: "due" }),
       candidate({ questionId: "flagged", lifecycle: "flagged" }),
@@ -118,12 +116,67 @@ test("planner leaves flagged questions out of Review", () => {
   assert.deepEqual(plan.map((item) => item.questionId), ["due"]);
 });
 
-test("planner enforces new admission and presentation bounds", () => {
+test("planner admits every due and unanswered question scheduled for the local day", () => {
+  const scheduledBefore = new Date(now.getTime() + 6 * 60 * 60_000);
   const plan = buildReviewPlan({
     now,
-    timeBudgetMinutes: 30,
+    scheduledBefore,
     desiredRetention: 0.9,
-    newItemsPerDay: 2,
+    candidates: [
+      candidate({ questionId: "due-1", answerMode: "exact" }),
+      candidate({ questionId: "due-2", answerMode: "exact" }),
+      candidate({
+        questionId: "later-today",
+        answerMode: "exact",
+        dueAt: new Date(scheduledBefore.getTime() - 1),
+      }),
+      candidate({
+        questionId: "tomorrow",
+        answerMode: "exact",
+        dueAt: scheduledBefore,
+      }),
+      candidate({
+        questionId: "new-1",
+        answerMode: "exact",
+        lifecycle: "new",
+        dueAt: null,
+        retrievability: null,
+      }),
+      candidate({
+        questionId: "new-2",
+        answerMode: "exact",
+        lifecycle: "new",
+        dueAt: null,
+        retrievability: null,
+      }),
+      candidate({
+        questionId: "interrupted-first-exposure",
+        answerMode: "exact",
+        lifecycle: "learning",
+        dueAt: null,
+        retrievability: null,
+      }),
+    ],
+  });
+
+  assert.deepEqual(
+    plan.map((item) => item.questionId),
+    [
+      "due-1",
+      "due-2",
+      "later-today",
+      "interrupted-first-exposure",
+      "new-1",
+      "new-2",
+    ],
+  );
+});
+
+test("planner admits every unanswered question", () => {
+  const plan = buildReviewPlan({
+    now,
+    desiredRetention: 0.9,
+    scheduledBefore: new Date(now.getTime() + 24 * 60 * 60_000),
     candidates: Array.from({ length: 80 }, (_, index) =>
       candidate({
         questionId: `new-${index}`,
@@ -133,10 +186,10 @@ test("planner enforces new admission and presentation bounds", () => {
       }),
     ),
   });
-  assert.equal(plan.length, 2);
+  assert.equal(plan.length, 80);
 });
 
-test("adding capacity cannot remove protected due work", () => {
+test("planner preserves every scheduled due question", () => {
   const candidates = Array.from({ length: 12 }, (_, index) =>
     candidate({
       questionId: `due-${index}`,
@@ -144,23 +197,13 @@ test("adding capacity cannot remove protected due work", () => {
       retrievability: 0.2 + index * 0.03,
     }),
   );
-  const smaller = buildReviewPlan({
+  const plan = buildReviewPlan({
     now,
-    timeBudgetMinutes: 5,
     desiredRetention: 0.9,
-    newItemsPerDay: 0,
+    scheduledBefore: new Date(now.getTime() + 24 * 60 * 60_000),
     candidates,
   });
-  const largerIds = new Set(
-    buildReviewPlan({
-      now,
-      timeBudgetMinutes: 10,
-      desiredRetention: 0.9,
-      newItemsPerDay: 0,
-      candidates,
-    }).map((item) => item.questionId),
-  );
-  assert.equal(smaller.every((item) => largerIds.has(item.questionId)), true);
+  assert.equal(plan.length, candidates.length);
 });
 
 test("one retry is delayed unless another question intervenes", () => {

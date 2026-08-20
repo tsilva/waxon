@@ -34,20 +34,17 @@ function risk(candidate: PlanCandidate, retention: number, now: Date): number {
 
 export function buildReviewPlan(input: {
   candidates: PlanCandidate[];
-  timeBudgetMinutes: number;
   desiredRetention: number;
-  newItemsPerDay: number;
+  scheduledBefore: Date;
   now?: Date;
-  maxPresentations?: number;
 }): PlannedCandidate[] {
   const now = input.now ?? new Date();
-  const horizon = new Date(now.getTime() + 24 * 60 * 60_000);
-  const maxPresentations = Math.min(200, input.maxPresentations ?? 200);
-  let remainingSeconds = Math.max(60, input.timeBudgetMinutes * 60);
-  let remainingBaseSlots = Math.floor(maxPresentations / 2);
   const due = input.candidates
     .filter((candidate) => candidate.lifecycle === "learning" || candidate.lifecycle === "review")
-    .filter((candidate) => candidate.dueAt !== null && candidate.dueAt <= horizon)
+    .filter(
+      (candidate) =>
+        candidate.dueAt !== null && candidate.dueAt < input.scheduledBefore,
+    )
     .sort((left, right) => {
       const riskDifference = risk(right, input.desiredRetention, now) - risk(left, input.desiredRetention, now);
       return (
@@ -57,7 +54,7 @@ export function buildReviewPlan(input: {
       );
     });
   const waiting = input.candidates
-    .filter((candidate) => candidate.lifecycle === "new")
+    .filter((candidate) => candidate.dueAt === null)
     .sort(
       (left, right) =>
         right.importance - left.importance ||
@@ -66,21 +63,12 @@ export function buildReviewPlan(input: {
     );
   const selected: PlannedCandidate[] = [];
 
-  function admit(candidate: PlanCandidate): boolean {
+  function admit(candidate: PlanCandidate): void {
     const estimate = MODE_SECONDS[candidate.answerMode];
-    const reservedSeconds = estimate * 2;
-    if (remainingBaseSlots <= 0 || reservedSeconds > remainingSeconds) return false;
     selected.push({ ...candidate, position: selected.length, estimatedSeconds: estimate });
-    remainingBaseSlots -= 1;
-    remainingSeconds -= reservedSeconds;
-    return true;
   }
 
   for (const candidate of due) admit(candidate);
-  let admittedNew = 0;
-  for (const candidate of waiting) {
-    if (admittedNew >= input.newItemsPerDay) break;
-    if (admit(candidate)) admittedNew += 1;
-  }
+  for (const candidate of waiting) admit(candidate);
   return selected;
 }
