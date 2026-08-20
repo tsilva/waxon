@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "node scripts/next-server.mjs dev",
-    "build": "next build",
+    "build": "node scripts/build.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:reset": "node scripts/reset-v2.mjs",

@@ -6,7 +6,7 @@ Question adds and edits enqueue `embed_question_batch` work after committing the
 
 ## Deploy and backfill
 
-1. Apply `drizzle-v2/0012_question_search.sql`. It enables `pg_trgm`, replaces the unused prompt-only FTS index with a weighted current-version prompt/answer index, adds the current-prompt trigram index and all-lifecycle target-key index, and creates the prompt-only `halfvec(512)` table.
+1. Apply `drizzle-v2/0012_question_search.sql`. It enables `pg_trgm`, replaces the unused prompt-only FTS index with a weighted current-version prompt/answer index, adds the current-prompt trigram index and all-lifecycle target-key index, and creates the prompt-only `halfvec(512)` table. Vercel production builds apply pending migrations before compiling and stop the deployment if migration fails; preview and local builds do not mutate a database.
 2. Keep `WAXON_QUESTION_SEARCH_MODE=lexical` (the default) while the migration settles.
 3. Inspect the repair scope without inference calls: `keyenv run -- pnpm question-search:backfill`.
 4. Run the resumable mutation explicitly: `keyenv run -- pnpm question-search:backfill -- --confirm`. Batches never exceed 50; reruns skip current model/version rows.
