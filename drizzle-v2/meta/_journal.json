@@ -78,6 +78,13 @@
       "when": 1787238137970,
       "tag": "0010_familiar_chamber",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787243165987,
+      "tag": "0011_greedy_thor",
+      "breakpoints": true
     }
   ]
 }

@@ -62,6 +62,7 @@ const ALL_LIFECYCLES: V2Lifecycle[] = [
   "new",
   "learning",
   "review",
+  "flagged",
   "paused",
   "archived",
   "trash",
@@ -438,7 +439,7 @@ export async function listLibrary(input: {
       WHERE q.user_id = $1
         AND ($2::text IS NULL OR q.lifecycle::text = $2)
         AND ($3 = '' OR qv.prompt ILIKE '%' || $3 || '%' OR qv.reference_answer ILIKE '%' || $3 || '%')
-        AND q.lifecycle::text IN ('new','learning','review','paused','archived','trash')
+        AND q.lifecycle::text IN ('new','learning','review','flagged','paused','archived','trash')
       ORDER BY q.updated_at DESC, q.id
       LIMIT $4`,
     [input.userId, lifecycle, search, limit],
@@ -491,7 +492,7 @@ export async function listLibrary(input: {
     `SELECT lifecycle::text, count(*)::text
        FROM waxon_v2.questions
       WHERE user_id = $1
-        AND lifecycle::text IN ('new','learning','review','paused','archived','trash')
+        AND lifecycle::text IN ('new','learning','review','flagged','paused','archived','trash')
       GROUP BY lifecycle`,
     [input.userId],
   );
@@ -630,6 +631,9 @@ async function exposeNextItem(
   const db = getV2Db();
   const now = new Date();
   return await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-item:${userId}`}))`,
+    );
     const fields = {
       itemId: reviewSessionItems.id,
       questionId: reviewSessionItems.questionId,
@@ -901,6 +905,139 @@ export async function getOrCreateReviewSession(
     summary,
     capacity,
   };
+}
+
+export async function actOnReviewItem(input: {
+  userId: string;
+  itemId: string;
+  action: "flag" | "next";
+}): Promise<V2ReviewSessionResponse> {
+  const db = getV2Db();
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-item:${input.userId}`}))`,
+    );
+    const [item] = await tx
+      .select()
+      .from(reviewSessionItems)
+      .where(
+        and(
+          eq(reviewSessionItems.userId, input.userId),
+          eq(reviewSessionItems.id, input.itemId),
+          eq(reviewSessionItems.state, "exposed"),
+          sql`EXISTS (
+            SELECT 1 FROM waxon_v2.review_sessions active_session
+             WHERE active_session.user_id = ${input.userId}
+               AND active_session.id = ${reviewSessionItems.sessionId}
+               AND active_session.status = 'active'
+          )`,
+        ),
+      )
+      .limit(1);
+    if (!item) throw new Error("Review item is no longer current.");
+
+    if (input.action === "next") {
+      const [maxPosition] = await tx
+        .select({
+          value: sql<number>`COALESCE(max(${reviewSessionItems.position}), -1)`,
+        })
+        .from(reviewSessionItems)
+        .where(
+          and(
+            eq(reviewSessionItems.userId, input.userId),
+            eq(reviewSessionItems.sessionId, item.sessionId),
+          ),
+        );
+      await tx
+        .update(reviewSessionItems)
+        .set({
+          state: "queued",
+          position: Number(maxPosition?.value ?? -1) + 1,
+          exposedAt: null,
+        })
+        .where(
+          and(
+            eq(reviewSessionItems.userId, input.userId),
+            eq(reviewSessionItems.id, item.id),
+            eq(reviewSessionItems.state, "exposed"),
+          ),
+        );
+      if (item.kind === "retry") {
+        await tx
+          .update(retryObligations)
+          .set({ status: "queued", updatedAt: new Date() })
+          .where(
+            and(
+              eq(retryObligations.userId, input.userId),
+              eq(retryObligations.sessionId, item.sessionId),
+              eq(retryObligations.questionId, item.questionId),
+              eq(retryObligations.status, "exposed"),
+            ),
+          );
+      }
+      return;
+    }
+
+    const [question] = await tx
+      .select({ lifecycle: questions.lifecycle })
+      .from(questions)
+      .where(
+        and(
+          eq(questions.userId, input.userId),
+          eq(questions.id, item.questionId),
+        ),
+      )
+      .limit(1);
+    if (
+      !question ||
+      !ACTIVE_LIFECYCLES.includes(question.lifecycle as V2Lifecycle)
+    ) {
+      throw new Error("Question is no longer available in Review.");
+    }
+    const priorLifecycle: V2Lifecycle = item.isIntroduction
+      ? "new"
+      : (question.lifecycle as V2Lifecycle);
+    await tx
+      .update(questions)
+      .set({
+        lifecycle: "flagged",
+        priorLifecycle,
+        suspensionReason: "Flagged during Review.",
+        deletedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(questions.userId, input.userId),
+          eq(questions.id, item.questionId),
+        ),
+      );
+    await tx
+      .update(retryObligations)
+      .set({
+        status: "waived",
+        reason: "Learner flagged the question for later review.",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(retryObligations.userId, input.userId),
+          eq(retryObligations.questionId, item.questionId),
+          inArray(retryObligations.status, ["queued", "deferred", "exposed"]),
+        ),
+      );
+    await tx
+      .update(reviewSessionItems)
+      .set({ state: "invalidated" })
+      .where(
+        and(
+          eq(reviewSessionItems.userId, input.userId),
+          eq(reviewSessionItems.questionId, item.questionId),
+          inArray(reviewSessionItems.state, ["queued", "exposed"]),
+        ),
+      );
+  });
+  return await getOrCreateReviewSession(input.userId);
 }
 
 export async function getReviewSummary(userId: string): Promise<V2ReviewSummary> {
@@ -1289,6 +1426,9 @@ export async function submitReviewAnswer(input: {
 }): Promise<V2Evaluation> {
   const now = new Date();
   const submissionId = await getV2Db().transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-item:${input.userId}`}))`,
+    );
     const [item] = await tx
       .select({
         id: reviewSessionItems.id,

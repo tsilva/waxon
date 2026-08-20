@@ -32,6 +32,7 @@ export const questionLifecycle = waxonV2.enum("question_lifecycle", [
   "new",
   "learning",
   "review",
+  "flagged",
   "paused",
   "archived",
   "trash",
