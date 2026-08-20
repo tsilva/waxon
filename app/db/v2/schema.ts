@@ -5,6 +5,7 @@ import {
   check,
   doublePrecision,
   foreignKey,
+  halfvec,
   index,
   integer,
   jsonb,
@@ -196,6 +197,7 @@ export const questions = waxonV2.table(
   (table) => [
     unique("questions_user_id_id_unique").on(table.userId, table.id),
     index("questions_user_lifecycle_idx").on(table.userId, table.lifecycle),
+    index("questions_user_target_idx").on(table.userId, table.targetKey),
     uniqueIndex("questions_active_target_unique")
       .on(table.userId, table.targetKey)
       .where(
@@ -233,9 +235,58 @@ export const questionVersions = waxonV2.table(
       columns: [table.userId, table.questionId],
       foreignColumns: [questions.userId, questions.id],
     }).onDelete("cascade"),
-    index("question_versions_prompt_search_idx").using(
+    index("question_versions_current_search_idx")
+      .using(
       "gin",
-      sql`to_tsvector('simple', ${table.prompt})`,
+      sql`(
+        setweight(to_tsvector('simple', coalesce(${table.prompt}, '')), 'A') ||
+        setweight(to_tsvector('simple', coalesce(${table.referenceAnswer}, '')), 'B')
+      )`,
+      )
+      .where(sql`${table.isCurrent} = true`),
+    index("question_versions_current_prompt_trgm_idx")
+      .using("gist", sql`${table.prompt} gist_trgm_ops`)
+      .where(sql`${table.isCurrent} = true`),
+  ],
+);
+
+export const questionSearchEmbeddings = waxonV2.table(
+  "question_search_embeddings",
+  {
+    userId: text("user_id").notNull(),
+    questionId: uuid("question_id").notNull(),
+    questionVersionId: uuid("question_version_id").notNull(),
+    model: text("model").notNull(),
+    sourceVersion: integer("source_version").notNull(),
+    sourceHash: text("source_hash").notNull(),
+    embedding: halfvec("embedding", { dimensions: 512 }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    primaryKey({
+      name: "question_search_embeddings_pk",
+      columns: [
+        table.userId,
+        table.questionId,
+        table.model,
+        table.sourceVersion,
+      ],
+    }),
+    foreignKey({
+      name: "question_search_embeddings_question_fk",
+      columns: [table.userId, table.questionId],
+      foreignColumns: [questions.userId, questions.id],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "question_search_embeddings_version_fk",
+      columns: [table.userId, table.questionVersionId],
+      foreignColumns: [questionVersions.userId, questionVersions.id],
+    }).onDelete("cascade"),
+    index("question_search_embeddings_lookup_idx").on(
+      table.userId,
+      table.model,
+      table.sourceVersion,
     ),
   ],
 );

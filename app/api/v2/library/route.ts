@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import * as Sentry from "@sentry/nextjs";
 import { NextResponse } from "next/server";
 import { consumeUserRateLimit, readJsonBodyWithLimit } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
 import { asAnswerMode, isRecord, v2Error } from "@/app/lib/v2/http";
+import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 import {
   createDirectQuestion,
   editQuestion,
@@ -20,6 +22,16 @@ const LIFECYCLES = new Set<V2Lifecycle>([
   "archived",
   "trash",
 ]);
+
+async function startEmbeddingJobsBestEffort(userId: string) {
+  try {
+    await startBackgroundJobs(userId, 4);
+  } catch (error) {
+    Sentry.captureException(error, {
+      tags: { surface: "library", stage: "start-question-embedding-jobs" },
+    });
+  }
+}
 
 export async function GET(request: Request) {
   try {
@@ -71,6 +83,9 @@ export async function POST(request: Request) {
       importance:
         typeof parsed.value.importance === "number" ? parsed.value.importance : undefined,
     });
+    if (result.status === "created") {
+      await startEmbeddingJobsBestEffort(user.id);
+    }
     return NextResponse.json({ ok: true, ...result }, { status: result.status === "created" ? 201 : 200 });
   } catch (error) {
     return v2Error(error);
@@ -109,6 +124,7 @@ export async function PATCH(request: Request) {
             ? parsed.value.importance
             : undefined,
       });
+      await startEmbeddingJobsBestEffort(user.id);
     } else {
       throw new Error("This Library action is not allowed.");
     }

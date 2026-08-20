@@ -1,6 +1,6 @@
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
-import { getV2Db } from "@/app/db/v2/client";
-import { jobs } from "@/app/db/v2/schema";
+import { getV2Db } from "../../db/v2/client.ts";
+import { jobs } from "../../db/v2/schema.ts";
 
 export async function claimV2Job(
   jobId: string,

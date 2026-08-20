@@ -20,6 +20,7 @@ const retainedTables = [
   "learner_settings",
   "questions",
   "question_versions",
+  "question_search_embeddings",
   "review_sessions",
   "review_session_items",
   "answer_submissions",
