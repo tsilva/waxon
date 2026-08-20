@@ -9,14 +9,11 @@ import {
   isInlineMathDollarDelimiter,
   isUprightMathLiteral,
   readLatexCommand,
+  readLatexMathAtom,
+  readLatexMathGroup,
   renderLatexCommandText,
   renderLatexMathbbText,
 } from "@/app/lib/latexMath";
-
-type MathParseResult = {
-  content: string;
-  nextIndex: number;
-};
 
 type InlineMarkdownOptions = {
   enableMath?: boolean;
@@ -71,55 +68,6 @@ function findClosingInlineMathDollar(source: string, startIndex: number) {
   return -1;
 }
 
-function readMathGroup(source: string, startIndex: number): MathParseResult | null {
-  if (source[startIndex] !== "{") {
-    return null;
-  }
-
-  let depth = 0;
-
-  for (let index = startIndex; index < source.length; index += 1) {
-    const character = source[index];
-
-    if (character === "{") {
-      depth += 1;
-    } else if (character === "}") {
-      depth -= 1;
-
-      if (depth === 0) {
-        return {
-          content: source.slice(startIndex + 1, index),
-          nextIndex: index + 1,
-        };
-      }
-    }
-  }
-
-  return null;
-}
-
-function readMathAtom(source: string, startIndex: number): MathParseResult {
-  const group = readMathGroup(source, startIndex);
-
-  if (group) {
-    return group;
-  }
-
-  const atomMatch = source.slice(startIndex).match(/^[A-Za-z0-9]+/);
-
-  if (atomMatch) {
-    return {
-      content: atomMatch[0],
-      nextIndex: startIndex + atomMatch[0].length,
-    };
-  }
-
-  return {
-    content: source[startIndex] ?? "",
-    nextIndex: startIndex + 1,
-  };
-}
-
 function isFormulaInlineCode(value: string): boolean {
   return /[=+\-*/^≈≤≥<>]|\\[A-Za-z]+|\b(?:cos|exp|ln|log|logit|sigmoid|sin|softmax|sum|tan|tanh)\b/iu.test(
     value,
@@ -136,7 +84,7 @@ function renderMathNodes(expression: string): ReactNode[] {
 
   while (index < expression.length) {
     if (expression.startsWith("\\operatorname", index)) {
-      const operator = readMathGroup(expression, index + "\\operatorname".length);
+      const operator = readLatexMathGroup(expression, index + "\\operatorname".length);
 
       if (operator) {
         nodes.push(
@@ -150,7 +98,7 @@ function renderMathNodes(expression: string): ReactNode[] {
     }
 
     if (expression.startsWith("\\text", index)) {
-      const text = readMathGroup(expression, index + "\\text".length);
+      const text = readLatexMathGroup(expression, index + "\\text".length);
 
       if (text) {
         nodes.push(
@@ -164,10 +112,10 @@ function renderMathNodes(expression: string): ReactNode[] {
     }
 
     if (expression.startsWith("\\frac", index)) {
-      const numerator = readMathGroup(expression, index + "\\frac".length);
+      const numerator = readLatexMathGroup(expression, index + "\\frac".length);
 
       if (numerator) {
-        const denominator = readMathGroup(expression, numerator.nextIndex);
+        const denominator = readLatexMathGroup(expression, numerator.nextIndex);
 
         if (denominator) {
           nodes.push(
@@ -187,7 +135,7 @@ function renderMathNodes(expression: string): ReactNode[] {
     }
 
     if (expression.startsWith("\\mathbb", index)) {
-      const blackboard = readMathGroup(expression, index + "\\mathbb".length);
+      const blackboard = readLatexMathGroup(expression, index + "\\mathbb".length);
 
       if (blackboard) {
         nodes.push(
@@ -203,7 +151,7 @@ function renderMathNodes(expression: string): ReactNode[] {
     const character = expression[index];
 
     if (character === "_" || character === "^") {
-      const atom = readMathAtom(expression, index + 1);
+      const atom = readLatexMathAtom(expression, index + 1);
       const Element = character === "_" ? "sub" : "sup";
 
       nodes.push(
@@ -219,6 +167,20 @@ function renderMathNodes(expression: string): ReactNode[] {
       const command = readLatexCommand(expression, index);
 
       if (command) {
+        if (command.commandName === "hat") {
+          const atom = readLatexMathAtom(expression, command.nextIndex);
+
+          if (atom.content) {
+            nodes.push(
+              <span className="math-accent math-accent-hat" key={`hat-${index}`}>
+                {renderMathNodes(atom.content)}
+              </span>,
+            );
+            index = atom.nextIndex;
+            continue;
+          }
+        }
+
         const commandText = renderLatexCommandText(command.commandName);
 
         if (commandText === null) {

@@ -18,6 +18,7 @@ import {
 import { AnswerComposer } from "@/app/AnswerComposer";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
+import { useToolbarState } from "@/app/ToolbarState";
 import type {
   V2Evaluation,
   V2Grade,
@@ -235,7 +236,6 @@ function ReviewSettings({
   const [settings, setSettings] = useState<{
     dailyMinutes: number;
     desiredRetention: number;
-    newItemsPerDay: number;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -243,7 +243,6 @@ function ReviewSettings({
     jsonRequest<{
       dailyMinutes: number;
       desiredRetention: number;
-      newItemsPerDay: number;
     }>("/api/v2/settings")
       .then(setSettings)
       .catch((caught) =>
@@ -261,7 +260,6 @@ function ReviewSettings({
         body: JSON.stringify({
           dailyMinutes: Number(form.get("dailyMinutes")),
           desiredRetention: Number(form.get("desiredRetention")) / 100,
-          newItemsPerDay: Number(form.get("newItemsPerDay")),
         }),
       });
       await onSaved();
@@ -298,6 +296,7 @@ function ReviewSettings({
                 name="dailyMinutes"
                 type="number"
               />
+              <small>Used for workload guidance, not to limit today’s Review.</small>
             </label>
             <label>
               Target retention
@@ -309,16 +308,6 @@ function ReviewSettings({
                 type="number"
               />
               <small>Percent, between 70 and 97.</small>
-            </label>
-            <label>
-              Maximum new questions per day
-              <input
-                defaultValue={settings.newItemsPerDay}
-                max={100}
-                min={0}
-                name="newItemsPerDay"
-                type="number"
-              />
             </label>
             {error ? <p className="v2-error">{error}</p> : null}
             <div className="v2-dialog-actions">
@@ -335,6 +324,7 @@ function ReviewSettings({
 }
 
 export default function ReviewApp() {
+  const { setDueCount } = useToolbarState();
   const [review, setReview] = useState<V2ReviewSessionResponse | null>(null);
   const [answer, setAnswer] = useState("");
   const [turns, setTurns] = useState<ReviewTurn[]>([]);
@@ -350,8 +340,9 @@ export default function ReviewApp() {
       "/api/v2/review/session",
     );
     setReview(next);
+    setDueCount(next.summary.queueRemaining);
     return next;
-  }, []);
+  }, [setDueCount]);
 
   useEffect(() => {
     loadSession()

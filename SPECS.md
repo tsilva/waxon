@@ -1,6 +1,6 @@
 ## PROJECT PURPOSE
 
-Waxon is a multi-user question bank and adaptive review system. Learners and their authorized agents add questions about anything they are learning, learners answer from memory in their own words, and Waxon determines the bounded daily practice that best preserves recall over time.
+Waxon is a multi-user question bank and adaptive review system. Learners and their authorized agents add questions about anything they are learning, learners answer from memory in their own words, and Waxon determines the daily practice that best preserves recall over time.
 
 ## PROJECT REQUIREMENTS
 
@@ -18,10 +18,9 @@ Waxon is a multi-user question bank and adaptive review system. Learners and the
 - Removing a question must remain reversible and preserve its immutable learning history.
 - Library must be the sole bank-management surface; Review must contain only free-text recall practice selected by the daily plan.
 - Every active question must remain eligible for future Review according to the learner's past performance; paused, archived, and logically removed questions must not create review work.
-- Adding questions through either the application or MCP must not automatically create an unbounded same-day Review backlog.
-- Review must prioritize retention-due questions before capacity-admitted first exposures.
+- Every active never-answered question must remain in Review until its first answer.
 - Every automated evaluation must provide enough corrective feedback to understand the expected answer and demonstrated gap, and the learner must be able to correct a wrong evaluation without corrupting scheduling history.
 - Review must lengthen intervals after repeated correct answers and shorten them after failed or weak answers.
 - A failed first presentation must receive exactly one delayed retry in the same resumable session; it must follow another question or wait at least ten minutes when no other question is eligible, and a failed retry must not recurse into same-day drilling.
-- Review must build a bounded daily plan according to the learner's retention target and available capacity, prioritizing forgetting risk, uncertainty, importance, and incomplete understanding.
+- Review must show every question scheduled for the learner's current local day without applying daily item, first-exposure, or time-capacity limits, prioritizing retention-due questions before first exposures and then forgetting risk, uncertainty, importance, and incomplete understanding.
 - Waxon must tell the learner when the selected retention target cannot be sustained by the available practice capacity.

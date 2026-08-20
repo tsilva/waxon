@@ -6,7 +6,13 @@ import { getCurrentUser } from "@/app/lib/auth";
 import { BROWSER_SMOKE_QUESTIONS } from "@/app/lib/browserSmokeSupport";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { questionPromptKey } from "@/app/lib/v2/questionInput";
-import { addQuestions, listLibrary } from "@/app/lib/v2/service";
+import {
+  addQuestions,
+  editQuestion,
+  listLibrary,
+  mutateQuestionLifecycle,
+  type AddQuestionResult,
+} from "@/app/lib/v2/service";
 
 function isEnabled(): boolean {
   return (
@@ -29,20 +35,54 @@ export async function POST() {
   const promptKeys = BROWSER_SMOKE_QUESTIONS.map((item) =>
     questionPromptKey(item.prompt),
   );
-  await getV2Db()
-    .delete(questions)
+  const existing = await getV2Db()
+    .select({
+      id: questions.id,
+      lifecycle: questions.lifecycle,
+      targetKey: questions.targetKey,
+    })
+    .from(questions)
     .where(
-      and(eq(questions.userId, user.id), inArray(questions.targetKey, promptKeys)),
+      and(
+        eq(questions.userId, user.id),
+        inArray(questions.targetKey, promptKeys),
+      ),
     );
-  const result = await addQuestions({
-    userId: user.id,
-    idempotencyKey: `browser-smoke-${Date.now()}`,
-    items: BROWSER_SMOKE_QUESTIONS.map((item) => ({
-      ...item,
-      answerMode: "exact" as const,
-    })),
-  });
-  return NextResponse.json({ ok: true, questions: result.results });
+  const existingByTarget = new Map(existing.map((item) => [item.targetKey, item]));
+  const results: AddQuestionResult[] = [];
+  for (const item of BROWSER_SMOKE_QUESTIONS) {
+    const targetKey = questionPromptKey(item.prompt);
+    const prior = existingByTarget.get(targetKey);
+    if (prior) {
+      if (prior.lifecycle !== "trash") {
+        await mutateQuestionLifecycle({
+          userId: user.id,
+          questionId: prior.id,
+          action: "trash",
+        });
+      }
+      await mutateQuestionLifecycle({
+        userId: user.id,
+        questionId: prior.id,
+        action: "restore",
+      });
+      await editQuestion({
+        userId: user.id,
+        questionId: prior.id,
+        ...item,
+        answerMode: "exact",
+      });
+      results.push({ id: prior.id, status: "existing", lifecycle: "new" });
+      continue;
+    }
+    const created = await addQuestions({
+      userId: user.id,
+      idempotencyKey: `browser-smoke-${targetKey}-${Date.now()}`,
+      items: [{ ...item, answerMode: "exact" }],
+    });
+    results.push(...created.results);
+  }
+  return NextResponse.json({ ok: true, questions: results });
 }
 
 export async function GET() {
@@ -54,6 +94,10 @@ export async function GET() {
   const library = await listLibrary({ userId: user.id, limit: 100 });
   return NextResponse.json({
     ok: true,
-    questions: library.questions.filter((item) => prompts.has(item.prompt)),
+    questions: library.questions.filter(
+      (item) =>
+        prompts.has(item.prompt) &&
+        ["new", "learning", "review"].includes(item.lifecycle),
+    ),
   });
 }

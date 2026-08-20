@@ -8,6 +8,7 @@ const mathSymbolMap: Record<string, string> = {
   gamma: "γ",
   lambda: "λ",
   mu: "μ",
+  pi: "π",
   nabla: "∇",
   partial: "∂",
   cdot: "·",
@@ -21,6 +22,7 @@ const mathSymbolMap: Record<string, string> = {
   div: "÷",
   neq: "≠",
   ne: "≠",
+  mid: "∣",
   sum: "∑",
   times: "×",
   theta: "θ",
@@ -46,6 +48,41 @@ export type LatexCommandReadResult = {
   commandName: string;
   nextIndex: number;
 };
+
+export type LatexMathParseResult = {
+  content: string;
+  nextIndex: number;
+};
+
+export function readLatexMathGroup(
+  source: string,
+  startIndex: number,
+): LatexMathParseResult | null {
+  if (source[startIndex] !== "{") {
+    return null;
+  }
+
+  let depth = 0;
+
+  for (let index = startIndex; index < source.length; index += 1) {
+    const character = source[index];
+
+    if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+
+      if (depth === 0) {
+        return {
+          content: source.slice(startIndex + 1, index),
+          nextIndex: index + 1,
+        };
+      }
+    }
+  }
+
+  return null;
+}
 
 export function readLatexCommand(
   source: string,
@@ -74,6 +111,46 @@ export function readLatexCommand(
   }
 
   return null;
+}
+
+export function readLatexMathAtom(
+  source: string,
+  startIndex: number,
+): LatexMathParseResult {
+  let atomStartIndex = startIndex;
+
+  while (/\s/u.test(source[atomStartIndex] ?? "")) {
+    atomStartIndex += 1;
+  }
+
+  const group = readLatexMathGroup(source, atomStartIndex);
+
+  if (group) {
+    return group;
+  }
+
+  const command = readLatexCommand(source, atomStartIndex);
+
+  if (command) {
+    return {
+      content: source.slice(atomStartIndex, command.nextIndex),
+      nextIndex: command.nextIndex,
+    };
+  }
+
+  const atomMatch = source.slice(atomStartIndex).match(/^[A-Za-z0-9]+/u);
+
+  if (atomMatch) {
+    return {
+      content: atomMatch[0],
+      nextIndex: atomStartIndex + atomMatch[0].length,
+    };
+  }
+
+  return {
+    content: source[atomStartIndex] ?? "",
+    nextIndex: atomStartIndex + 1,
+  };
 }
 
 export function renderLatexCommandText(commandName: string): string | null {

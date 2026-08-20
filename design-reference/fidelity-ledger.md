@@ -14,6 +14,7 @@ Reference image: `design-reference/waxon-approved-ui.png`
 
 - Desktop native in-app Browser verification passed for question presentation, answer submission, expandable list feedback, and learner grade correction. The loading and hydrated surfaces now share the same layout, eliminating the old-to-new UI swap.
 - Desktop and 390 px native in-app Browser verification passed for the icon-only flag/next controls, queue rotation, flagged Library classification, and restoration.
+- Desktop and 390 px native in-app Browser verification passed for Library inline formulas with Greek symbols, command subscripts, relation separators, and hats; surrounding answer text wraps without horizontal overflow.
 - Typecheck and lint passed after restoring the approved Review surface.
 - A fresh native in-app Browser comparison is required before replacing the approved composite. Verify desktop and 390 px layouts, keyboard focus, reduced motion, 200% zoom, long prompts, formulas, dialogs, and populated/empty bank states.
 - The reference predates the lean Library, so compare shared shell, typography, spacing, color, and interaction treatment rather than removed controls.
