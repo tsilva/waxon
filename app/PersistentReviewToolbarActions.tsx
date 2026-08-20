@@ -1,7 +1,7 @@
 "use client";
 
 import { useClerk, useUser } from "@clerk/nextjs";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { isAdminEmail } from "@/app/lib/adminAccess";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { ReviewToolbarActions } from "@/app/ReviewToolbar";
@@ -19,6 +19,7 @@ export function PersistentReviewToolbarActions({
   onManageLocalAccount: () => void;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const clerk = useClerk();
   const { user: clerkUser } = useUser();
   const { currentUser, dueCount } = useToolbarState();
@@ -68,7 +69,7 @@ export function PersistentReviewToolbarActions({
       }}
       onSignOut={() => {
         if (isLocalAuth) {
-          window.location.assign("/");
+          router.push("/");
         } else {
           void clerk.signOut({ redirectUrl: "/" });
         }

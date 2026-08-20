@@ -7,7 +7,7 @@ export function v2Error(error: unknown): NextResponse {
     error instanceof Error ? error.message : "An unexpected error occurred.";
   const status = /not found/iu.test(message)
     ? 404
-    : /no longer|conflict|duplicate|idempotency/iu.test(message)
+    : /no longer|conflict|duplicate|idempotency|already exists/iu.test(message)
       ? 409
       : /required|choose|must|allowed|larger|enough readable/iu.test(message)
         ? 400

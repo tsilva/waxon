@@ -474,9 +474,7 @@ export default function ReviewApp() {
                   <span>
                     {item.isRetry
                       ? "Delayed retry"
-                      : item.sourceContext
-                        ? `${item.sourceContext.sourceTitle} · ${item.sourceContext.moduleTitle} · ${item.sourceContext.checkpoint} of ${item.sourceContext.checkpointTotal}`
-                        : `Question ${item.position + 1}`}
+                      : `Question ${item.position + 1}`}
                   </span>
                   <span><Clock3 /> about {item.estimatedMinutes} min</span>
                 </div>
@@ -487,11 +485,6 @@ export default function ReviewApp() {
                     text={item.prompt}
                   />
                 </h1>
-                {item.concepts.length > 0 ? (
-                  <div className="v2-concept-chips">
-                    {item.concepts.map((concept) => <span key={concept}>{concept}</span>)}
-                  </div>
-                ) : null}
                 <form className="v2-answer-form" onSubmit={submit}>
                   <label htmlFor="v2-answer">Answer from memory, in your own words</label>
                   <textarea
@@ -547,12 +540,6 @@ export default function ReviewApp() {
                     <LoaderCircle className="v2-spin" />
                     <h1>Finishing your feedback</h1>
                     <p>Your answers are safe. The session will close as grading finishes.</p>
-                  </>
-                ) : review?.blockedReason ? (
-                  <>
-                    <Clock3 />
-                    <h1>Your learning path is paused.</h1>
-                    <p>{review.blockedReason}</p>
                   </>
                 ) : (
                   <>

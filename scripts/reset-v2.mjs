@@ -2,8 +2,10 @@
 
 import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { Pool } from "@neondatabase/serverless";
+import pg from "pg";
 import { loadLocalEnvFiles, requireEnv } from "./lib/runtime.mjs";
+
+const { Pool } = pg;
 
 loadLocalEnvFiles();
 

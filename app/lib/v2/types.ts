@@ -1,105 +1,31 @@
 export type V2AnswerMode = "exact" | "semantic" | "rubric";
 export type V2Grade = "again" | "hard" | "good" | "easy";
 export type V2Lifecycle =
-  | "draft"
   | "new"
   | "learning"
   | "review"
   | "paused"
   | "archived"
-  | "suspended"
-  | "trash"
-  | "superseded";
+  | "trash";
 
 export type V2Question = {
   id: string;
   versionId: string;
   prompt: string;
   referenceAnswer: string;
-  displayAnswer: string;
   answerMode: V2AnswerMode;
-  target: string;
   lifecycle: V2Lifecycle;
-  quality: "pending" | "distinct" | "duplicate" | "uncertain" | "rejected";
-  qualityReasons: string[];
-  duplicateOfQuestionId: string | null;
   importance: number;
   dueAt: string | null;
   retrievability: number | null;
-  concepts: string[];
-  sourceTitles: string[];
   createdAt: string;
   updatedAt: string;
 };
 
-export type V2Source = {
-  id: string;
-  kind: "direct" | "paste" | "url" | "pdf" | "text" | "topic";
-  status:
-    | "captured"
-    | "processing"
-    | "ready"
-    | "needs_attention"
-    | "failed"
-    | "cancelled"
-    | "rejected_limit"
-    | "disabled"
-    | "erasing"
-    | "erased";
-  title: string;
-  originalUrl: string | null;
-  progress: number;
-  error: string | null;
-  hasMoreAnalysis: boolean;
-  questionSetStatus: "building" | "ready" | "needs_attention";
-  mastery: {
-    status: "not_started" | "in_progress" | "currently_mastered";
-    masteredTargets: number;
-    requiredTargets: number;
-  };
-  run: {
-    id: string;
-    status:
-      | "queued"
-      | "preparing"
-      | "mapping"
-      | "matching"
-      | "drafting"
-      | "criticizing"
-      | "persisting"
-      | "ready"
-      | "needs_attention"
-      | "failed"
-      | "cancelled";
-    stage: string;
-    progress: number;
-    residualCount: number;
-  } | null;
-  coverage: {
-    covered: number;
-    weak: number;
-    missing: number;
-    ignored: number;
-    unresolved: number;
-  };
-  learningPath: {
-    status: "ready" | "fallback_ready" | "needs_attention" | "superseded";
-    focused: boolean;
-    passed: number;
-    total: number;
-    next: string | null;
-    prerequisiteGaps: number;
-  } | null;
-  createdAt: string;
-};
-
 export type V2LibraryResponse = {
   questions: V2Question[];
-  sources: V2Source[];
   counts: Record<V2Lifecycle, number>;
-  concepts: Array<{ id: string; name: string; slug: string; count: number }>;
   waitingNew: number;
-  healthCount: number;
 };
 
 export type V2ReviewItem = {
@@ -109,18 +35,10 @@ export type V2ReviewItem = {
   questionVersionId: string;
   prompt: string;
   answerMode: V2AnswerMode;
-  concepts: string[];
   position: number;
   total: number;
   estimatedMinutes: number;
   isRetry: boolean;
-  sourceContext: {
-    sourceId: string;
-    sourceTitle: string;
-    moduleTitle: string;
-    checkpoint: number;
-    checkpointTotal: number;
-  } | null;
 };
 
 export type V2ReviewSessionResponse = {

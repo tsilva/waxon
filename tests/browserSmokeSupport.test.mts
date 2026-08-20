@@ -9,7 +9,7 @@ test("browser smoke grading is limited to the two fixture questions", () => {
   assert.equal(BROWSER_SMOKE_QUESTIONS.length, 2);
 
   for (const fixture of BROWSER_SMOKE_QUESTIONS) {
-    assert.equal(isBrowserSmokeQuestion(fixture.question), true);
+    assert.equal(isBrowserSmokeQuestion(fixture.prompt), true);
   }
 
   assert.equal(
@@ -17,7 +17,7 @@ test("browser smoke grading is limited to the two fixture questions", () => {
     false,
   );
   assert.equal(
-    isBrowserSmokeQuestion(` ${BROWSER_SMOKE_QUESTIONS[0].question}`),
+    isBrowserSmokeQuestion(` ${BROWSER_SMOKE_QUESTIONS[0].prompt}`),
     false,
   );
 });

@@ -2,405 +2,158 @@
 
 import {
   Archive,
-  BookOpen,
-  Check,
-  ChevronDown,
-  CircleAlert,
-  FileText,
-  FolderSearch,
-  Link2,
+  ArchiveRestore,
+  CalendarClock,
+  Copy,
+  KeyRound,
   LoaderCircle,
-  Merge,
-  MoreHorizontal,
   Pause,
   Pencil,
   Plus,
-  RotateCcw,
-  Route,
   Search,
-  Sparkles,
-  Split,
-  Tags,
   Trash2,
-  Upload,
-  X,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
-import { inferSourceCapture } from "@/app/lib/v2/sourceCapture";
 import type {
+  V2AnswerMode,
   V2LibraryResponse,
   V2Lifecycle,
   V2Question,
 } from "@/app/lib/v2/types";
 
-type LibraryView =
-  | "all"
-  | V2Lifecycle
-  | "sources"
-  | "concepts"
-  | "attention";
-type CaptureKind = "source" | "question";
-type SourceManifest = {
-  targets: Array<{
-    id: string;
-    type: string;
-    statement: string;
-    status: "covered" | "weak" | "missing" | "ignored" | "unresolved";
-    requirement: "required" | "optional" | "excluded" | "unsupported";
-    confidence: number | null;
-    mastered: boolean;
-    ignoreReason: string | null;
-    evidenceQuote: string | null;
-    questions: Array<{
-      id: string;
-      prompt: string;
-      lifecycle: V2Lifecycle;
-    }>;
-  }>;
-};
-
-const EMPTY_LIBRARY: V2LibraryResponse = {
+const EMPTY_DATA: V2LibraryResponse = {
   questions: [],
-  sources: [],
-  counts: {
-    draft: 0,
-    new: 0,
-    learning: 0,
-    review: 0,
-    paused: 0,
-    archived: 0,
-    suspended: 0,
-    trash: 0,
-    superseded: 0,
-  },
-  concepts: [],
+  counts: { new: 0, learning: 0, review: 0, paused: 0, archived: 0, trash: 0 },
   waitingNew: 0,
-  healthCount: 0,
 };
-
-const QUESTION_VIEWS: Array<{
-  value: LibraryView;
-  label: string;
-}> = [
+const FILTERS: Array<{ value: V2Lifecycle | "all"; label: string }> = [
   { value: "all", label: "All" },
-  { value: "new", label: "Waiting" },
+  { value: "new", label: "New" },
   { value: "learning", label: "Learning" },
-  { value: "review", label: "Reviewing" },
-  { value: "attention", label: "Needs attention" },
+  { value: "review", label: "Review" },
   { value: "paused", label: "Paused" },
+  { value: "archived", label: "Archived" },
   { value: "trash", label: "Trash" },
 ];
 
-const ACTIVE_GENERATION_RUNS = new Set([
-  "queued",
-  "preparing",
-  "mapping",
-  "matching",
-  "drafting",
-  "criticizing",
-  "persisting",
-]);
-const SOURCE_BUILD_MESSAGE =
-  "Waxon is building a mastery question set in the background.";
-
-function viewCount(data: V2LibraryResponse, view: LibraryView): number | null {
-  if (view === "all") {
-    return Object.entries(data.counts)
-      .filter(([lifecycle]) => lifecycle !== "trash" && lifecycle !== "superseded")
-      .reduce((sum, [, count]) => sum + count, 0);
-  }
-  if (view === "sources") {
-    return data.sources.length;
-  }
-  if (view === "concepts") {
-    return data.concepts.length;
-  }
-  if (view === "attention") {
-    return data.healthCount;
-  }
-  return data.counts[view];
-}
-
-async function jsonRequest<T>(
-  url: string,
-  init?: RequestInit,
-): Promise<T> {
+async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", ...init });
-  const body = (await response.json().catch(() => ({}))) as {
-    error?: string;
-  };
-  if (!response.ok) {
-    throw new Error(body.error || "Waxon could not complete that action.");
-  }
+  const body = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) throw new Error(body.error || "Waxon could not complete that action.");
   return body as T;
 }
 
-function relativeDue(value: string | null): string {
-  if (!value) {
-    return "Not introduced";
-  }
-  const milliseconds = new Date(value).getTime() - Date.now();
-  if (milliseconds <= 0) {
-    return "Due now";
-  }
-  const hours = Math.ceil(milliseconds / 3_600_000);
-  if (hours < 24) {
-    return `Due in ${hours}h`;
-  }
-  return `Due in ${Math.ceil(hours / 24)}d`;
-}
-
-function lifecycleLabel(value: V2Lifecycle): string {
-  return value === "new"
-    ? "Waiting"
-    : value === "draft"
-      ? "Inbox"
-      : value[0].toUpperCase() + value.slice(1);
-}
-
-function CaptureDialog({
+function QuestionDialog({
+  question,
   onClose,
-  onCaptured,
+  onSaved,
 }: {
+  question: V2Question | null;
   onClose: () => void;
-  onCaptured: (message: string) => void;
+  onSaved: (message: string) => Promise<void>;
 }) {
-  const [kind, setKind] = useState<CaptureKind>("source");
-  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const prior = document.activeElement as HTMLElement | null;
-    dialogRef.current?.focus();
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !isSaving) {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      window.removeEventListener("keydown", closeOnEscape);
-      prior?.focus();
-    };
-  }, [isSaving, onClose]);
+  const [saving, setSaving] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setIsSaving(true);
+    setSaving(true);
     setError(null);
     const form = new FormData(event.currentTarget);
+    const payload = {
+      prompt: String(form.get("prompt") ?? ""),
+      referenceAnswer: String(form.get("referenceAnswer") ?? ""),
+      answerMode: String(form.get("answerMode") ?? "semantic") as V2AnswerMode,
+      importance: Number(form.get("importance") ?? 1),
+    };
     try {
-      if (kind === "question") {
+      if (question) {
         await jsonRequest("/api/v2/library", {
-          method: "POST",
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt: form.get("prompt"),
-            referenceAnswer: form.get("referenceAnswer"),
-            target: form.get("target"),
-            answerMode: form.get("answerMode"),
-          }),
+          body: JSON.stringify({ action: "edit", questionId: question.id, ...payload }),
         });
-        onCaptured("Question saved. Waxon is checking its quality and overlap.");
-      } else if (file) {
-        const upload = new FormData();
-        upload.set("file", file);
-        await jsonRequest("/api/v2/sources/upload", {
-          method: "POST",
-          body: upload,
-        });
-        onCaptured(SOURCE_BUILD_MESSAGE);
+        await onSaved("Question updated. Its schedule restarted conservatively.");
       } else {
-        const sourceInput = String(form.get("sourceInput") ?? "").trim();
-        if (!sourceInput) {
-          throw new Error(
-            "Enter a topic, paste source material, add a URL, or attach a file.",
-          );
-        }
-        const source = inferSourceCapture(sourceInput);
-        await jsonRequest("/api/v2/sources", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(source),
-        });
-        onCaptured(SOURCE_BUILD_MESSAGE);
+        const result = await jsonRequest<{ status: "created" | "existing" }>(
+          "/api/v2/library",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...payload,
+              idempotencyKey: crypto.randomUUID(),
+            }),
+          },
+        );
+        await onSaved(
+          result.status === "existing"
+            ? "That question was already in your bank."
+            : "Question added to your bank.",
+        );
       }
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save.");
+      setError(caught instanceof Error ? caught.message : "Could not save question.");
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
   }
 
   return (
     <div className="v2-dialog-backdrop" onMouseDown={onClose}>
       <div
-        aria-labelledby="capture-title"
+        aria-labelledby="question-dialog-title"
         aria-modal="true"
-        className="v2-dialog"
+        className="v2-dialog lean-question-dialog"
         onMouseDown={(event) => event.stopPropagation()}
-        ref={dialogRef}
         role="dialog"
-        tabIndex={-1}
       >
         <div className="v2-dialog-heading">
           <div>
-            <span className="v2-kicker">Build your bank</span>
-            <h2 id="capture-title">What do you want to learn?</h2>
+            <span className="v2-kicker">Question bank</span>
+            <h2 id="question-dialog-title">{question ? "Edit question" : "Add a question"}</h2>
           </div>
-          <button
-            aria-label="Close"
-            className="v2-icon-button"
-            disabled={isSaving}
-            onClick={onClose}
-            type="button"
-          >
-            <X aria-hidden="true" />
-          </button>
-        </div>
-        <div
-          className="v2-capture-tabs is-compact"
-          role="tablist"
-          aria-label="Capture type"
-        >
-          {(
-            [
-              ["source", "Topic or source", BookOpen],
-              ["question", "One question", Sparkles],
-            ] as const
-          ).map(([value, label, Icon]) => (
-            <button
-              aria-selected={kind === value}
-              className={kind === value ? "is-active" : ""}
-              disabled={isSaving}
-              key={value}
-              onClick={() => {
-                setKind(value);
-                setError(null);
-              }}
-              role="tab"
-              type="button"
-            >
-              <Icon aria-hidden="true" />
-              {label}
-            </button>
-          ))}
+          <button className="v2-icon-button" onClick={onClose} type="button">×</button>
         </div>
         <form className="v2-form" onSubmit={submit}>
-          {kind === "question" ? (
-            <>
-              <label>
-                Question
-                <textarea
-                  autoFocus
-                  maxLength={16_384}
-                  name="prompt"
-                  placeholder="e.g. Why does self-attention divide logits by √dₖ?"
-                  required
-                  rows={3}
-                />
-              </label>
-              <label>
-                Reference answer
-                <textarea
-                  maxLength={65_536}
-                  name="referenceAnswer"
-                  placeholder="The complete answer you want to retrieve."
-                  required
-                  rows={5}
-                />
-              </label>
-              <label>
-                Atomic recall target
-                <input
-                  maxLength={4_000}
-                  name="target"
-                  placeholder="What single thing should this test?"
-                />
-              </label>
-              <label>
-                Evaluation
-                <select defaultValue="semantic" name="answerMode">
-                  <option value="semantic">Meaning (recommended)</option>
-                  <option value="rubric">Rubric / multi-point</option>
-                  <option value="exact">Exact form</option>
-                </select>
-              </label>
-            </>
-          ) : (
-            <>
-              <label>
-                Topic, request, URL, or pasted material
-                <textarea
-                  autoFocus
-                  disabled={Boolean(file)}
-                  maxLength={1_000_000}
-                  name="sourceInput"
-                  placeholder={
-                    "Proximal Policy Optimization\n\n—or paste notes, a paper section, or a public URL"
-                  }
-                  required={!file}
-                  rows={8}
-                />
-              </label>
-              <div className="v2-source-divider"><span>or</span></div>
-              <label className="v2-file-picker is-compact">
-                <Upload aria-hidden="true" />
-                <strong>{file?.name ?? "Attach a PDF or text file"}</strong>
-                <span>PDF, Markdown, CSV, or plain text · up to 20 MB</span>
-                <input
-                  accept=".pdf,.txt,.md,.markdown,.csv,application/pdf,text/plain,text/markdown,text/csv"
-                  name="file"
-                  onChange={(event) => {
-                    setFile(event.currentTarget.files?.[0] ?? null);
-                    setError(null);
-                  }}
-                  type="file"
-                />
-              </label>
-              {file ? (
-                <button
-                  className="v2-clear-file"
-                  onClick={() => setFile(null)}
-                  type="button"
-                >
-                  <X /> Use text instead
-                </button>
-              ) : null}
-              <p className="v2-form-note">
-                Waxon maps the smallest question set that demonstrates mastery,
-                checks it against your existing bank, and only adds clear,
-                well-supported questions. For a topic, it can use model knowledge
-                and research when freshness matters.
-              </p>
-            </>
-          )}
+          <label>
+            Question
+            <textarea defaultValue={question?.prompt ?? ""} maxLength={16_384} name="prompt" required rows={4} />
+          </label>
+          <label>
+            Reference answer
+            <textarea
+              defaultValue={question?.referenceAnswer ?? ""}
+              maxLength={65_536}
+              name="referenceAnswer"
+              required
+              rows={7}
+            />
+          </label>
+          <div className="lean-question-options">
+            <label>
+              Answer style
+              <select defaultValue={question?.answerMode ?? "semantic"} name="answerMode">
+                <option value="semantic">Explain in your own words</option>
+                <option value="rubric">Cover several required points</option>
+                <option value="exact">Match an exact form</option>
+              </select>
+            </label>
+            <label>
+              Importance
+              <input defaultValue={question?.importance ?? 1} max={5} min={0.1} name="importance" step={0.1} type="number" />
+            </label>
+          </div>
+          {question ? <p className="lean-edit-warning">Editing preserves attempts but restarts scheduling so old mastery is not applied to the revised prompt.</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
           <div className="v2-dialog-actions">
-            <button
-              className="v2-button-secondary"
-              disabled={isSaving}
-              onClick={onClose}
-              type="button"
-            >
-              Cancel
-            </button>
-            <button className="v2-button-primary" disabled={isSaving} type="submit">
-              {isSaving ? <LoaderCircle className="v2-spin" /> : <Plus />}
-              {kind === "question" ? "Save question" : "Build question set"}
+            <button onClick={onClose} type="button">Cancel</button>
+            <button className="v2-button-primary" disabled={saving} type="submit">
+              {saving ? <LoaderCircle className="v2-spin" /> : null}
+              {question ? "Save question" : "Add to bank"}
             </button>
           </div>
         </form>
@@ -409,817 +162,187 @@ function CaptureDialog({
   );
 }
 
-function QuestionRow({
-  question,
-  onAction,
-}: {
-  question: V2Question;
-  onAction: (body: Record<string, unknown>) => Promise<void>;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [mode, setMode] = useState<"details" | "edit" | "split">("details");
-  const [busy, setBusy] = useState(false);
+function McpDialog({ onClose }: { onClose: () => void }) {
+  const [credential, setCredential] = useState<{ active: boolean; createdAt: string | null } | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [working, setWorking] = useState(false);
 
-  async function action(body: Record<string, unknown>) {
-    setBusy(true);
+  useEffect(() => {
+    jsonRequest<{ active: boolean; createdAt: string | null }>("/api/v2/mcp-credentials")
+      .then(setCredential)
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load agent access."));
+  }, []);
+
+  async function rotate() {
+    setWorking(true);
+    setError(null);
     try {
-      await onAction({ questionId: question.id, ...body });
+      const result = await jsonRequest<{ token: string; createdAt: string }>("/api/v2/mcp-credentials", { method: "POST" });
+      setToken(result.token);
+      setCredential({ active: true, createdAt: result.createdAt });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not create token.");
     } finally {
-      setBusy(false);
+      setWorking(false);
+    }
+  }
+
+  async function revoke() {
+    setWorking(true);
+    try {
+      await jsonRequest("/api/v2/mcp-credentials", { method: "DELETE" });
+      setToken(null);
+      setCredential({ active: false, createdAt: null });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not revoke token.");
+    } finally {
+      setWorking(false);
     }
   }
 
   return (
-    <article className={`v2-question-row ${expanded ? "is-expanded" : ""}`}>
-      <button
-        aria-expanded={expanded}
-        className="v2-question-main"
-        onClick={() => {
-          setExpanded((value) => !value);
-          setMode("details");
-        }}
-        type="button"
-      >
-        <span className={`v2-lifecycle-dot is-${question.lifecycle}`} />
-        <span>
-          <strong>{question.prompt}</strong>
-          <small>
-            {lifecycleLabel(question.lifecycle)} · {relativeDue(question.dueAt)}
-            {question.concepts.length > 0
-              ? ` · ${question.concepts.slice(0, 3).join(", ")}`
-              : ""}
-          </small>
-        </span>
-        {question.quality !== "distinct" ? (
-          <span className={`v2-quality is-${question.quality}`}>
-            {question.quality === "pending" ? "Checking" : question.quality}
-          </span>
-        ) : null}
-        <ChevronDown aria-hidden="true" />
-      </button>
-      {expanded ? (
-        <div className="v2-question-details">
-          {mode === "details" ? (
-            <>
-              <div className="v2-answer-block">
-                <span>Reference answer</span>
-                <MarkdownContent
-                  className="v2-markdown"
-                  enableMath
-                  text={question.referenceAnswer}
-                />
-              </div>
-              <dl className="v2-metadata-grid">
-                <div>
-                  <dt>Recall target</dt>
-                  <dd>{question.target}</dd>
-                </div>
-                <div>
-                  <dt>Evaluation</dt>
-                  <dd>{question.answerMode}</dd>
-                </div>
-                <div>
-                  <dt>Sources</dt>
-                  <dd>{question.sourceTitles.join(", ") || "Learner attestation"}</dd>
-                </div>
-                <div>
-                  <dt>Recall estimate</dt>
-                  <dd>
-                    {question.retrievability === null
-                      ? "Not measured"
-                      : `${Math.round(question.retrievability * 100)}%`}
-                  </dd>
-                </div>
-              </dl>
-              {question.qualityReasons.length > 0 ? (
-                <div className="v2-health-note">
-                  <CircleAlert aria-hidden="true" />
-                  <span>{question.qualityReasons.join(" ")}</span>
-                </div>
-              ) : null}
-              <div className="v2-row-actions">
-                {question.lifecycle === "draft" &&
-                question.quality === "distinct" ? (
-                  <button
-                    disabled={busy}
-                    onClick={() => action({ action: "accept" })}
-                    type="button"
-                  >
-                    <Check /> Accept into bank
-                  </button>
-                ) : null}
-                <button onClick={() => setMode("edit")} type="button">
-                  <Pencil /> Edit
-                </button>
-                <button onClick={() => setMode("split")} type="button">
-                  <Split /> Split
-                </button>
-                {question.duplicateOfQuestionId ? (
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      action({
-                        action: "merge",
-                        canonicalQuestionId: question.duplicateOfQuestionId,
-                        redundantQuestionId: question.id,
-                      })
-                    }
-                    type="button"
-                  >
-                    <Merge /> Merge into match
-                  </button>
-                ) : null}
-                {question.lifecycle === "paused" ||
-                question.lifecycle === "archived" ||
-                question.lifecycle === "trash" ? (
-                  <button
-                    disabled={busy}
-                    onClick={() => action({ action: "restore" })}
-                    type="button"
-                  >
-                    <RotateCcw /> Restore
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      disabled={busy}
-                      onClick={() => action({ action: "pause" })}
-                      type="button"
-                    >
-                      <Pause /> Pause
-                    </button>
-                    <button
-                      disabled={busy}
-                      onClick={() => action({ action: "archive" })}
-                      type="button"
-                    >
-                      <Archive /> Archive
-                    </button>
-                    <button
-                      className="is-danger"
-                      disabled={busy}
-                      onClick={() => action({ action: "trash" })}
-                      type="button"
-                    >
-                      <Trash2 /> Trash
-                    </button>
-                  </>
-                )}
-              </div>
-            </>
-          ) : mode === "edit" ? (
-            <form
-              className="v2-inline-editor"
-              onSubmit={async (event) => {
-                event.preventDefault();
-                const form = new FormData(event.currentTarget);
-                await action({
-                  action: "edit",
-                  prompt: form.get("prompt"),
-                  referenceAnswer: form.get("referenceAnswer"),
-                  target: form.get("target"),
-                  answerMode: form.get("answerMode"),
-                });
-                setMode("details");
-              }}
-            >
-              <label>
-                Question
-                <textarea defaultValue={question.prompt} name="prompt" required rows={3} />
-              </label>
-              <label>
-                Reference answer
-                <textarea
-                  defaultValue={question.referenceAnswer}
-                  name="referenceAnswer"
-                  required
-                  rows={5}
-                />
-              </label>
-              <label>
-                Recall target
-                <input defaultValue={question.target} name="target" required />
-              </label>
-              <label>
-                Evaluation
-                <select defaultValue={question.answerMode} name="answerMode">
-                  <option value="semantic">Meaning</option>
-                  <option value="rubric">Rubric</option>
-                  <option value="exact">Exact</option>
-                </select>
-              </label>
-              <p>
-                Changing the recall target resets mastery. Wording-only edits
-                preserve it.
-              </p>
-              <div className="v2-dialog-actions">
-                <button onClick={() => setMode("details")} type="button">
-                  Cancel
-                </button>
-                <button className="v2-button-primary" disabled={busy} type="submit">
-                  Save revision
-                </button>
-              </div>
-            </form>
-          ) : (
-            <form
-              className="v2-inline-editor"
-              onSubmit={async (event) => {
-                event.preventDefault();
-                const form = new FormData(event.currentTarget);
-                await action({
-                  action: "split",
-                  children: [0, 1].map((index) => ({
-                    prompt: form.get(`prompt-${index}`),
-                    referenceAnswer: form.get(`answer-${index}`),
-                    target: form.get(`target-${index}`),
-                    answerMode: question.answerMode,
-                  })),
-                });
-              }}
-            >
-              <p>
-                Replace this broad question with two atomic questions. Its
-                history remains immutable; mastery does not transfer.
-              </p>
-              {[0, 1].map((index) => (
-                <fieldset key={index}>
-                  <legend>Child question {index + 1}</legend>
-                  <label>
-                    Question
-                    <input name={`prompt-${index}`} required />
-                  </label>
-                  <label>
-                    Reference answer
-                    <textarea name={`answer-${index}`} required rows={3} />
-                  </label>
-                  <label>
-                    Recall target
-                    <input name={`target-${index}`} required />
-                  </label>
-                </fieldset>
-              ))}
-              <div className="v2-dialog-actions">
-                <button onClick={() => setMode("details")} type="button">
-                  Cancel
-                </button>
-                <button className="v2-button-primary" disabled={busy} type="submit">
-                  Create split
-                </button>
-              </div>
-            </form>
-          )}
+    <div className="v2-dialog-backdrop" onMouseDown={onClose}>
+      <div aria-labelledby="mcp-dialog-title" aria-modal="true" className="v2-dialog lean-mcp-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog">
+        <div className="v2-dialog-heading">
+          <div><span className="v2-kicker">Agent access</span><h2 id="mcp-dialog-title">Add questions through MCP</h2></div>
+          <button className="v2-icon-button" onClick={onClose} type="button">×</button>
         </div>
-      ) : null}
+        <p>Connect an agent to <code>{typeof window === "undefined" ? "/api/mcp" : `${window.location.origin}/api/mcp`}</code> with a bearer token. It can search this bank and add validated questions.</p>
+        {token ? (
+          <div className="lean-token-reveal">
+            <strong>Copy this token now. It will not be shown again.</strong>
+            <code>{token}</code>
+            <button onClick={() => navigator.clipboard.writeText(token)} type="button"><Copy /> Copy token</button>
+          </div>
+        ) : credential?.active ? (
+          <p className="lean-token-status">An active token was created {credential.createdAt ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(credential.createdAt)) : "previously"}.</p>
+        ) : null}
+        {error ? <p className="v2-error" role="alert">{error}</p> : null}
+        <div className="v2-dialog-actions">
+          {credential?.active ? <button disabled={working} onClick={revoke} type="button">Revoke token</button> : null}
+          <button className="v2-button-primary" disabled={working} onClick={rotate} type="button">
+            {working ? <LoaderCircle className="v2-spin" /> : <KeyRound />}
+            {credential?.active ? "Rotate token" : "Create token"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuestionRow({
+  question,
+  onEdit,
+  onAction,
+}: {
+  question: V2Question;
+  onEdit: () => void;
+  onAction: (action: "pause" | "archive" | "trash" | "restore") => void;
+}) {
+  const active = ["new", "learning", "review"].includes(question.lifecycle);
+  return (
+    <article className="lean-question-row">
+      <div className="lean-question-copy">
+        <div className="lean-question-meta">
+          <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle}</span>
+          {question.dueAt ? <span><CalendarClock /> {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(question.dueAt))}</span> : null}
+          {question.retrievability !== null ? <span>{Math.round(question.retrievability * 100)}% recall</span> : null}
+        </div>
+        <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
+        <details>
+          <summary>Reference answer</summary>
+          <MarkdownContent className="v2-markdown" enableMath text={question.referenceAnswer} />
+        </details>
+      </div>
+      <div className="lean-question-actions">
+        <button aria-label="Edit question" onClick={onEdit} title="Edit" type="button"><Pencil /></button>
+        {active ? <button aria-label="Pause question" onClick={() => onAction("pause")} title="Pause" type="button"><Pause /></button> : null}
+        {question.lifecycle !== "archived" && question.lifecycle !== "trash" ? <button aria-label="Archive question" onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
+        {question.lifecycle === "paused" || question.lifecycle === "archived" || question.lifecycle === "trash" ? <button aria-label="Restore question" onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
+        {question.lifecycle !== "trash" ? <button aria-label="Move question to trash" className="is-danger" onClick={() => onAction("trash")} title="Move to trash" type="button"><Trash2 /></button> : null}
+      </div>
     </article>
   );
 }
 
 export default function LibraryPageClient() {
-  const [data, setData] = useState(EMPTY_LIBRARY);
-  const [view, setView] = useState<LibraryView>("all");
-  const [query, setQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [captureOpen, setCaptureOpen] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [data, setData] = useState(EMPTY_DATA);
+  const [filter, setFilter] = useState<V2Lifecycle | "all">("all");
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
-  const [sourceManifests, setSourceManifests] = useState<
-    Record<string, SourceManifest>
-  >({});
+  const [message, setMessage] = useState<string | null>(null);
+  const [editing, setEditing] = useState<V2Question | null | undefined>(undefined);
+  const [mcpOpen, setMcpOpen] = useState(false);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback(async () => {
     const params = new URLSearchParams();
-    if (
-      view !== "all" &&
-      view !== "sources" &&
-      view !== "concepts" &&
-      view !== "attention"
-    ) {
-      params.set("lifecycle", view);
-    }
-    if (query.trim()) {
-      params.set("search", query.trim());
-    }
-    const next = await jsonRequest<V2LibraryResponse>(
-      `/api/v2/library?${params.toString()}`,
-      { signal },
-    );
-    setData(next);
-    setError(null);
-  }, [query, view]);
+    if (filter !== "all") params.set("lifecycle", filter);
+    if (search.trim()) params.set("search", search.trim());
+    const result = await jsonRequest<V2LibraryResponse>(`/api/v2/library?${params}`);
+    setData(result);
+  }, [filter, search]);
 
   useEffect(() => {
-    const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      setIsLoading(true);
-      load(controller.signal)
-        .catch((caught) => {
-          if (!controller.signal.aborted) {
-            setError(caught instanceof Error ? caught.message : "Could not load Library.");
-          }
-        })
-        .finally(() => setIsLoading(false));
-    }, query ? 180 : 0);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [load, query]);
+      setLoading(true);
+      load().catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load Library.")).finally(() => setLoading(false));
+    }, search ? 180 : 0);
+    return () => window.clearTimeout(timer);
+  }, [load, search]);
 
-  useEffect(() => {
-    const needsPolling =
-      data.sources.some(
-        (source) =>
-          (source.run && ACTIVE_GENERATION_RUNS.has(source.run.status)) ||
-          ["captured", "processing"].includes(source.status),
-      ) ||
-      data.questions.some(
-        (question) => question.quality === "pending",
-      );
-    if (!needsPolling) {
-      return;
-    }
-    const timer = window.setInterval(() => void load(), 3_000);
-    return () => window.clearInterval(timer);
-  }, [data.questions, data.sources, load]);
+  const total = useMemo(() => Object.values(data.counts).reduce((sum, value) => sum + value, 0), [data.counts]);
 
-  useEffect(() => {
-    if (
-      message === SOURCE_BUILD_MESSAGE &&
-      data.sources.length > 0 &&
-      !data.sources.some(
-        (source) =>
-          source.run && ACTIVE_GENERATION_RUNS.has(source.run.status),
-      )
-    ) {
-      setMessage(null);
-    }
-  }, [data.sources, message]);
-
-  const visibleQuestions = useMemo(
-    () =>
-      view === "attention"
-        ? data.questions.filter(
-            (question) =>
-              question.lifecycle === "draft" ||
-              question.lifecycle === "suspended" ||
-              question.quality === "uncertain" ||
-              question.quality === "duplicate" ||
-              question.quality === "rejected",
-          )
-        : data.questions,
-    [data.questions, view],
-  );
-  const readyDraftIds = useMemo(
-    () =>
-      visibleQuestions
-        .filter(
-          (question) =>
-            question.lifecycle === "draft" &&
-            question.quality === "distinct",
-        )
-        .slice(0, 50)
-        .map((question) => question.id),
-    [visibleQuestions],
-  );
-
-  async function questionAction(body: Record<string, unknown>) {
+  async function questionAction(questionId: string, action: "pause" | "archive" | "trash" | "restore") {
     setError(null);
-    try {
-      await jsonRequest("/api/v2/library", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      setMessage("Library updated.");
-      await load();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update.");
-    }
-  }
-
-  async function sourceAction(sourceId: string, action: string) {
-    setError(null);
-    try {
-      if (action === "retry") {
-        setExpandedSourceId(null);
-        setSourceManifests({});
-      }
-      if (action === "erase") {
-        const preview = await jsonRequest<{
-          sourceTitle: string;
-          evidenceLinks: number;
-          questionsLosingLastSource: number;
-        }>(`/api/v2/sources/${sourceId}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "preview-erase" }),
-        });
-        if (
-          !window.confirm(
-            `Erase “${preview.sourceTitle}” and ${preview.evidenceLinks} evidence links? ${preview.questionsLosingLastSource} question(s) will lose their last source and be suspended. This cannot be undone.`,
-          )
-        ) {
-          return;
-        }
-      }
-      await jsonRequest(`/api/v2/sources/${sourceId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      await load();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update source.");
-    }
-  }
-
-  async function toggleManifest(sourceId: string) {
-    if (expandedSourceId === sourceId) {
-      setExpandedSourceId(null);
-      return;
-    }
-    setExpandedSourceId(sourceId);
-    if (sourceManifests[sourceId]) {
-      return;
-    }
-    try {
-      const manifest = await jsonRequest<SourceManifest>(
-        `/api/v2/sources/${sourceId}`,
-      );
-      setSourceManifests((current) => ({
-        ...current,
-        [sourceId]: manifest,
-      }));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load coverage.");
-    }
+    await jsonRequest("/api/v2/library", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ questionId, action }),
+    });
+    setMessage(action === "restore" ? "Question restored." : `Question ${action === "trash" ? "moved to trash" : `${action}d`}.`);
+    await load();
   }
 
   return (
     <main className="page">
-      <section className="review-shell v2-library-shell">
+      <section className="review-shell lean-library-shell">
         <ReviewToolbar />
-        <div className="v2-library-layout" id="library-panel">
-          <aside className="v2-library-sidebar">
-            <button
-              className="v2-add-button"
-              onClick={() => setCaptureOpen(true)}
-              type="button"
-            >
-              <Plus aria-hidden="true" />
-              Add knowledge
-            </button>
-            <nav aria-label="Question bank views">
-              <span className="v2-sidebar-label">Bank</span>
-              {QUESTION_VIEWS.map((item) => (
-                <button
-                  aria-current={view === item.value ? "page" : undefined}
-                  className={view === item.value ? "is-active" : ""}
-                  key={item.value}
-                  onClick={() => setView(item.value)}
-                  type="button"
-                >
-                  <span>{item.label}</span>
-                  <small>{viewCount(data, item.value)}</small>
+        <div className="lean-library-stage" id="library-panel">
+          <header className="lean-library-heading">
+            <div><span className="v2-kicker">Question bank</span><h1>{total} questions</h1><p>Add what is worth remembering. Review handles the rest.</p></div>
+            <div>
+              <button className="lean-secondary-button" onClick={() => setMcpOpen(true)} type="button"><KeyRound /> Agent access</button>
+              <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add question</button>
+            </div>
+          </header>
+          <div className="lean-library-controls">
+            <label className="lean-search"><Search /><span className="sr-only">Search questions</span><input onChange={(event) => setSearch(event.currentTarget.value)} placeholder="Search questions and answers" type="search" value={search} /></label>
+            <nav aria-label="Question filters">
+              {FILTERS.map((item) => (
+                <button aria-pressed={filter === item.value} key={item.value} onClick={() => setFilter(item.value)} type="button">
+                  {item.label}<span>{item.value === "all" ? total : data.counts[item.value]}</span>
                 </button>
               ))}
-              <span className="v2-sidebar-label">Organize</span>
-              <button
-                className={view === "sources" ? "is-active" : ""}
-                onClick={() => setView("sources")}
-                type="button"
-              >
-                <span><BookOpen /> Sources</span>
-                <small>{data.sources.length}</small>
-              </button>
-              <button
-                className={view === "concepts" ? "is-active" : ""}
-                onClick={() => setView("concepts")}
-                type="button"
-              >
-                <span><Tags /> Concepts</span>
-                <small>{data.concepts.length}</small>
-              </button>
             </nav>
-          </aside>
-          <section className="v2-library-content">
-            <header className="v2-library-heading">
-              <div>
-                <span className="v2-kicker">One adaptive question bank</span>
-                <h1>
-                  {view === "all"
-                    ? "Your knowledge"
-                    : view === "sources"
-                      ? "Sources"
-                      : view === "concepts"
-                        ? "Concepts"
-                        : view === "attention"
-                          ? "Needs attention"
-                          : lifecycleLabel(view)}
-                </h1>
-                <p>
-                  {view === "attention"
-                    ? "Resolve ambiguity, weak questions, and likely overlap before they reach Review."
-                    : view === "sources"
-                      ? "See what each source covers—and what remains unresolved."
-                      : view === "concepts"
-                        ? "Concepts organize one shared bank; nothing needs a deck."
-                        : `${viewCount(data, view) ?? 0} questions in this view.`}
-                </p>
-              </div>
-              {view !== "sources" && view !== "concepts" ? (
-                <div className="v2-library-tools">
-                  <label className="v2-search">
-                    <Search aria-hidden="true" />
-                    <span className="sr-only">Search Library</span>
-                    <input
-                      onChange={(event) => setQuery(event.currentTarget.value)}
-                      placeholder="Search questions, answers, targets…"
-                      type="search"
-                      value={query}
-                    />
-                  </label>
-                  {readyDraftIds.length > 0 ? (
-                    <button
-                      disabled={isLoading}
-                      onClick={() =>
-                        questionAction({
-                          action: "batch-accept",
-                          questionIds: readyDraftIds,
-                        })
-                      }
-                      type="button"
-                    >
-                      <Check /> Accept {readyDraftIds.length} ready
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </header>
-            {message ? (
-              <div className="v2-toast" role="status">
-                {message}
-                <button aria-label="Dismiss" onClick={() => setMessage(null)} type="button">
-                  <X />
-                </button>
-              </div>
-            ) : null}
-            {error ? <p className="v2-error" role="alert">{error}</p> : null}
-            {view === "sources" ? (
-              <div className="v2-source-grid">
-                {data.sources.map((source) => {
-                  const total = Object.values(source.coverage).reduce(
-                    (sum, count) => sum + count,
-                    0,
-                  );
-                  const isBuilding = Boolean(
-                    source.run && ACTIVE_GENERATION_RUNS.has(source.run.status),
-                  );
-                  const canRetry =
-                    !isBuilding &&
-                    source.status !== "disabled" &&
-                    (source.questionSetStatus === "needs_attention" ||
-                      source.status === "failed" ||
-                      source.status === "cancelled");
-                  return (
-                    <article className="v2-source-card" key={source.id}>
-                      <div className="v2-source-card-heading">
-                        <span className={`v2-source-icon is-${source.kind}`}>
-                          {source.kind === "url" ? <Link2 /> : <FileText />}
-                        </span>
-                        <div>
-                          <strong>{source.title}</strong>
-                          <small>
-                            {source.kind.toUpperCase()} · {isBuilding
-                              ? source.run?.stage
-                              : source.questionSetStatus === "ready"
-                                ? "Question set ready"
-                                : "Needs attention"}
-                          </small>
-                        </div>
-                        {isBuilding ? (
-                          <LoaderCircle className="v2-spin" />
-                        ) : (
-                          <MoreHorizontal />
-                        )}
-                      </div>
-                      {isBuilding ? (
-                        <div className="v2-progress-track">
-                          <span style={{ width: `${source.progress}%` }} />
-                        </div>
-                      ) : null}
-                      <div className="v2-source-outcomes">
-                        <div>
-                          <span>Question set</span>
-                          <strong>
-                            {source.questionSetStatus === "ready"
-                              ? "Ready"
-                              : source.questionSetStatus === "building"
-                                ? "Building"
-                                : "Needs attention"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span>Mastery</span>
-                          <strong>
-                            {source.mastery.requiredTargets === 0
-                              ? "Not practiced"
-                              : `${source.mastery.masteredTargets}/${source.mastery.requiredTargets} targets`}
-                          </strong>
-                        </div>
-                      </div>
-                      <dl className="v2-coverage-grid">
-                        <div><dt>Covered</dt><dd>{source.coverage.covered}</dd></div>
-                        <div><dt>Weak</dt><dd>{source.coverage.weak}</dd></div>
-                        <div><dt>Missing</dt><dd>{source.coverage.missing}</dd></div>
-                        <div><dt>Unresolved</dt><dd>{source.coverage.unresolved}</dd></div>
-                      </dl>
-                      {total === 0 && source.status === "ready" ? (
-                        <p>No auditable targets were extracted.</p>
-                      ) : null}
-                      {source.error ? <p className="v2-error">{source.error}</p> : null}
-                      <div className="v2-row-actions">
-                        {canRetry ? (
-                          <button
-                            onClick={() => sourceAction(source.id, "retry")}
-                            type="button"
-                          >
-                            <RotateCcw /> Rebuild question set
-                          </button>
-                        ) : null}
-                        {isBuilding ? (
-                          <button
-                            onClick={() => sourceAction(source.id, "cancel")}
-                            type="button"
-                          >
-                            <X /> Cancel
-                          </button>
-                        ) : null}
-                        {source.questionSetStatus !== "building" ||
-                        source.status === "disabled" ? (
-                          <>
-                            {source.learningPath ? (
-                              <Link href={`/library/sources/${source.id}`}>
-                                <Route /> Learning path
-                              </Link>
-                            ) : null}
-                            <button
-                              onClick={() => toggleManifest(source.id)}
-                              type="button"
-                            >
-                              <BookOpen />
-                              {expandedSourceId === source.id
-                                ? "Hide manifest"
-                                : "View manifest"}
-                            </button>
-                            <button
-                              onClick={() =>
-                                sourceAction(
-                                  source.id,
-                                  source.status === "disabled"
-                                    ? "enable"
-                                    : "disable",
-                                )
-                              }
-                              type="button"
-                            >
-                              {source.status === "disabled" ? (
-                                <RotateCcw />
-                              ) : (
-                                <Pause />
-                              )}
-                              {source.status === "disabled"
-                                ? "Enable"
-                                : "Disable"}
-                            </button>
-                          </>
-                        ) : null}
-                        <button
-                          className="is-danger"
-                          onClick={() => sourceAction(source.id, "erase")}
-                          type="button"
-                        >
-                          <Trash2 /> Erase provenance
-                        </button>
-                      </div>
-                      {expandedSourceId === source.id ? (
-                        <div className="v2-source-manifest">
-                          {sourceManifests[source.id] ? (
-                            sourceManifests[source.id].targets.length > 0 ? (
-                              sourceManifests[source.id].targets.map((target) => (
-                                <details key={target.id}>
-                                  <summary>
-                                    <span className={`is-${target.status}`}>
-                                      {target.mastered ? "mastered" : target.status}
-                                    </span>
-                                    {target.statement}
-                                  </summary>
-                                  <p>
-                                    {target.requirement} · {target.type}
-                                    {target.confidence === null
-                                      ? ""
-                                      : ` · ${Math.round(target.confidence * 100)}% confidence`}
-                                  </p>
-                                  {target.evidenceQuote ? (
-                                    <blockquote>{target.evidenceQuote}</blockquote>
-                                  ) : (
-                                    <p>No exact evidence span is mapped yet.</p>
-                                  )}
-                                  {target.questions.length > 0 ? (
-                                    <ul>
-                                      {target.questions.map((question) => (
-                                        <li key={question.id}>
-                                          {question.prompt} <small>({lifecycleLabel(question.lifecycle)})</small>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  ) : (
-                                    <p>No active question covers this target yet.</p>
-                                  )}
-                                </details>
-                              ))
-                            ) : (
-                              <p>No coverage targets are available.</p>
-                            )
-                          ) : (
-                            <LoaderCircle className="v2-spin" />
-                          )}
-                        </div>
-                      ) : null}
-                    </article>
-                  );
-                })}
-                {data.sources.length === 0 ? (
-                  <div className="v2-empty">
-                    <FolderSearch />
-                    <h2>No sources yet</h2>
-                    <p>Add a paper, page, or notes. Waxon will map coverage before drafting practice.</p>
-                    <button className="v2-button-primary" onClick={() => setCaptureOpen(true)} type="button">
-                      Add your first source
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : view === "concepts" ? (
-              <div className="v2-concept-grid">
-                {data.concepts.map((concept) => (
-                  <article key={concept.id}>
-                    <Tags aria-hidden="true" />
-                    <strong>{concept.name}</strong>
-                    <span>{concept.count} questions</span>
-                  </article>
-                ))}
-                {data.concepts.length === 0 ? (
-                  <div className="v2-empty">
-                    <Tags />
-                    <h2>Concepts appear automatically</h2>
-                    <p>They are non-exclusive labels over one shared question bank.</p>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div
-                aria-busy={isLoading}
-                className={`v2-question-list ${isLoading ? "is-loading" : ""}`}
-              >
-                {visibleQuestions.map((question) => (
-                  <QuestionRow
-                    key={question.id}
-                    onAction={questionAction}
-                    question={question}
-                  />
-                ))}
-                {!isLoading && visibleQuestions.length === 0 ? (
-                  <div className="v2-empty">
-                    <Sparkles />
-                    <h2>Nothing here</h2>
-                    <p>
-                      Add one clear question or throw in source material. The
-                      bank will organize itself around evidence and concepts.
-                    </p>
-                    <button className="v2-button-primary" onClick={() => setCaptureOpen(true)} type="button">
-                      Add knowledge
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </section>
+          </div>
+          {message ? <p className="lean-library-message" role="status">{message}</p> : null}
+          {error ? <p className="v2-error" role="alert">{error}</p> : null}
+          <div className="lean-question-list">
+            {loading ? <div className="lean-library-empty"><LoaderCircle className="v2-spin" /><p>Loading questions…</p></div> : data.questions.length > 0 ? data.questions.map((question) => (
+              <QuestionRow
+                key={question.id}
+                onAction={(action) => void questionAction(question.id, action).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not update question."))}
+                onEdit={() => setEditing(question)}
+                question={question}
+              />
+            )) : <div className="lean-library-empty"><h2>{search ? "No matching questions" : "Your bank is empty"}</h2><p>{search ? "Try a different phrase or filter." : "Add one clear question and its reference answer."}</p>{!search ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
+          </div>
         </div>
       </section>
-      {captureOpen ? (
-        <CaptureDialog
-          onCaptured={(nextMessage) => {
-            setMessage(nextMessage);
-            setExpandedSourceId(null);
-            setSourceManifests({});
-            void load();
-          }}
-          onClose={() => setCaptureOpen(false)}
-        />
-      ) : null}
+      {editing !== undefined ? <QuestionDialog question={editing} onClose={() => setEditing(undefined)} onSaved={async (nextMessage) => { setMessage(nextMessage); await load(); }} /> : null}
+      {mcpOpen ? <McpDialog onClose={() => setMcpOpen(false)} /> : null}
     </main>
   );
 }
