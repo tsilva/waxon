@@ -1,39 +1,61 @@
+import { randomUUID } from "node:crypto";
 import {
   buildOpenRouterHeaders,
   OPENROUTER_CHAT_URL,
-  OPENROUTER_EMBEDDINGS_URL,
-  resolveEmbeddingModel,
   resolveOpenRouterApiKey,
   resolveOpenRouterModel,
-  DEFAULT_OPENROUTER_CHAT_MODEL,
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
 } from "@/shared/openrouter-config.mts";
 import { extractJsonObject } from "@/shared/json-object.mts";
-import { normalizeGeneratedAnswerMode } from "./generatedAnswerMode";
+import {
+  BROWSER_SMOKE_CORRECT_TOKEN,
+  isBrowserSmokeQuestion,
+} from "@/app/lib/browserSmokeSupport";
+import { beginLlmTrace, finishLlmTrace } from "@/app/lib/llmTraceStore";
 import type { V2AnswerMode, V2Grade } from "./types";
 
-async function postOpenRouter<T>(url: string, body: unknown): Promise<T> {
+async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
+  url: string,
+  body: unknown,
+  trace: { operation: string; model: string; question: string },
+): Promise<T> {
   const apiKey = resolveOpenRouterApiKey();
 
   if (!apiKey) {
     throw new Error("Model work is unavailable because no API key is configured.");
   }
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: buildOpenRouterHeaders(apiKey),
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
+  const pending = beginLlmTrace({
+    traceId: randomUUID(),
+    operation: trace.operation,
+    model: trace.model,
+    question: trace.question,
+    requestBody: body,
   });
-  const text = await response.text();
-
-  if (!response.ok) {
-    throw new Error(
-      `Model request failed (${response.status}): ${text.slice(0, 300)}`,
-    );
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: buildOpenRouterHeaders(apiKey),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        `Model request failed (${response.status}): ${text.slice(0, 300)}`,
+      );
+    }
+    const parsed = JSON.parse(text) as T;
+    await finishLlmTrace(pending, {
+      ok: true,
+      responseBody: parsed,
+      usage: parsed.usage,
+    });
+    return parsed;
+  } catch (error) {
+    await finishLlmTrace(pending, { ok: false, error });
+    throw error;
   }
-
-  return JSON.parse(text) as T;
 }
 
 function chatText(body: {
@@ -77,41 +99,6 @@ function asStringArray(value: unknown): string[] {
     : [];
 }
 
-export async function embedTexts(input: {
-  userId: string;
-  texts: string[];
-}): Promise<{ model: string; embeddings: number[][] }> {
-  const model = resolveEmbeddingModel();
-  const body = await postOpenRouter<{
-    data?: Array<{ embedding?: unknown }>;
-  }>(OPENROUTER_EMBEDDINGS_URL, {
-    model,
-    input: input.texts,
-    encoding_format: "float",
-    user: input.userId,
-  });
-  const embeddings = (body.data ?? []).map((item) => {
-    if (
-      !Array.isArray(item.embedding) ||
-      item.embedding.length !== 3_072 ||
-      !item.embedding.every(
-        (component) =>
-          typeof component === "number" && Number.isFinite(component),
-      )
-    ) {
-      throw new Error("Embedding response has an invalid shape.");
-    }
-
-    return item.embedding as number[];
-  });
-
-  if (embeddings.length !== input.texts.length) {
-    throw new Error("Embedding response count does not match its input.");
-  }
-
-  return { model, embeddings };
-}
-
 export async function evaluateRecall(input: {
   userId: string;
   prompt: string;
@@ -127,6 +114,23 @@ export async function evaluateRecall(input: {
   demonstratedGap: string | null;
   confidence: number;
 }> {
+  if (
+    process.env.WAXON_BROWSER_SMOKE_EVALUATOR === "1" &&
+    isBrowserSmokeQuestion(input.prompt)
+  ) {
+    const correct = input.answer.includes(BROWSER_SMOKE_CORRECT_TOKEN);
+    return {
+      grade: correct ? "good" : "again",
+      feedback: correct
+        ? "The smoke-test answer matched."
+        : "The smoke-test answer did not match.",
+      expectedAnswer: BROWSER_SMOKE_CORRECT_TOKEN,
+      coveredPoints: correct ? ["Required token"] : [],
+      missingPoints: correct ? [] : ["Required token"],
+      demonstratedGap: correct ? null : "Required token was missing.",
+      confidence: 1,
+    };
+  }
   const model =
     resolveOpenRouterModel({
       variable: "LLM_EVALUATION_MODEL",
@@ -134,6 +138,7 @@ export async function evaluateRecall(input: {
     }) ?? DEFAULT_OPENROUTER_EVALUATION_MODEL;
   const response = await postOpenRouter<{
     choices?: Array<{ message?: { content?: unknown } }>;
+    usage?: Record<string, unknown>;
   }>(OPENROUTER_CHAT_URL, {
     model,
     temperature: 0,
@@ -151,6 +156,10 @@ export async function evaluateRecall(input: {
         content: JSON.stringify(input),
       },
     ],
+  }, {
+    operation: "evaluate_answer",
+    model,
+    question: input.prompt,
   });
   const parsed = parseObject(chatText(response));
   const candidate = parsed.grade;
@@ -185,163 +194,5 @@ export async function evaluateRecall(input: {
         ? parsed.demonstratedGap.trim().slice(0, 4_000)
         : null,
     confidence,
-  };
-}
-
-export type GeneratedCoverageTarget = {
-  type: string;
-  statement: string;
-  evidenceQuote: string;
-  question: string | null;
-  answer: string | null;
-  displayAnswer: string | null;
-  answerMode: V2AnswerMode | null;
-  concepts: string[];
-};
-
-export async function analyzeSourceMaterial(input: {
-  userId: string;
-  title: string;
-  text: string;
-}): Promise<{
-  targets: GeneratedCoverageTarget[];
-  unresolved: string[];
-}> {
-  const model =
-    resolveOpenRouterModel({
-      variable: "LLM_LEARN_MODEL",
-      fallback: DEFAULT_OPENROUTER_CHAT_MODEL,
-    }) ?? DEFAULT_OPENROUTER_CHAT_MODEL;
-  const response = await postOpenRouter<{
-    choices?: Array<{ message?: { content?: unknown } }>;
-  }>(OPENROUTER_CHAT_URL, {
-    model,
-    temperature: 0.1,
-    max_tokens: 8_000,
-    response_format: { type: "json_object" },
-    user: input.userId,
-    messages: [
-      {
-        role: "system",
-        content:
-          "Turn source material into an auditable coverage manifest and high-quality active-recall drafts. Return JSON only: {targets:[{type,statement,evidenceQuote,question,answer,displayAnswer,answerMode,concepts}],unresolved:[string]}. answerMode must be exactly one of semantic, rubric, or exact. Use semantic for ordinary short- or long-form explanatory answers, rubric for answers with multiple independently required points, and exact only when wording or notation must match exactly. Targets must be atomic claims, distinctions, formulas, procedures, derivation steps, prerequisites, or failure modes. evidenceQuote must be an exact substring of the source. Questions must be concise, atomic, self-contained, recall-oriented, precise, and answerable only from that evidence. Do not use outside knowledge. Set question fields to null when evidence is insufficient or the target should not become a card.",
-      },
-      {
-        role: "user",
-        content: JSON.stringify({
-          title: input.title,
-          source: input.text.slice(0, 250_000),
-        }),
-      },
-    ],
-  });
-  const parsed = parseObject(chatText(response));
-  const targets = Array.isArray(parsed.targets)
-    ? parsed.targets.slice(0, 200).flatMap((raw) => {
-        if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-          return [];
-        }
-        const item = raw as Record<string, unknown>;
-        const type =
-          typeof item.type === "string" ? item.type.trim().slice(0, 80) : "";
-        const statement =
-          typeof item.statement === "string"
-            ? item.statement.trim().slice(0, 4_000)
-            : "";
-        const evidenceQuote =
-          typeof item.evidenceQuote === "string"
-            ? item.evidenceQuote.trim().slice(0, 16_000)
-            : "";
-
-        if (!type || !statement || !evidenceQuote) {
-          return [];
-        }
-
-        return [
-          {
-            type,
-            statement,
-            evidenceQuote,
-            question:
-              typeof item.question === "string" && item.question.trim()
-                ? item.question.trim().slice(0, 16_384)
-                : null,
-            answer:
-              typeof item.answer === "string" && item.answer.trim()
-                ? item.answer.trim().slice(0, 65_536)
-                : null,
-            displayAnswer:
-              typeof item.displayAnswer === "string" &&
-              item.displayAnswer.trim()
-                ? item.displayAnswer.trim().slice(0, 8_000)
-                : null,
-            answerMode: normalizeGeneratedAnswerMode(item.answerMode),
-            concepts: asStringArray(item.concepts).slice(0, 8),
-          } satisfies GeneratedCoverageTarget,
-        ];
-      })
-    : [];
-
-  return {
-    targets,
-    unresolved: asStringArray(parsed.unresolved).slice(0, 200),
-  };
-}
-
-export async function generateRepairQuestion(input: {
-  userId: string;
-  parentPrompt: string;
-  demonstratedGap: string;
-  evidence: string;
-}): Promise<{
-  question: string;
-  answer: string;
-  displayAnswer: string;
-  target: string;
-  answerMode: V2AnswerMode;
-} | null> {
-  const model =
-    resolveOpenRouterModel({
-      variable: "LLM_LEARN_MODEL",
-      fallback: DEFAULT_OPENROUTER_CHAT_MODEL,
-    }) ?? DEFAULT_OPENROUTER_CHAT_MODEL;
-  const response = await postOpenRouter<{
-    choices?: Array<{ message?: { content?: unknown } }>;
-  }>(OPENROUTER_CHAT_URL, {
-    model,
-    temperature: 0,
-    max_tokens: 1_200,
-    response_format: { type: "json_object" },
-    user: input.userId,
-    messages: [
-      {
-        role: "system",
-        content:
-          "Create at most one repair question only for the demonstrated gap. Return JSON {question,answer,displayAnswer,target,answerMode} or {question:null}. Do not ask adjacent, prerequisite, already-covered, or boundary-case knowledge. Do not reveal the answer in the question. Use only the supplied evidence.",
-      },
-      { role: "user", content: JSON.stringify(input) },
-    ],
-  });
-  const parsed = parseObject(chatText(response));
-
-  if (
-    typeof parsed.question !== "string" ||
-    typeof parsed.answer !== "string" ||
-    typeof parsed.target !== "string"
-  ) {
-    return null;
-  }
-  const mode = parsed.answerMode;
-
-  return {
-    question: parsed.question.trim().slice(0, 16_384),
-    answer: parsed.answer.trim().slice(0, 65_536),
-    displayAnswer:
-      typeof parsed.displayAnswer === "string" && parsed.displayAnswer.trim()
-        ? parsed.displayAnswer.trim().slice(0, 8_000)
-        : parsed.answer.trim().slice(0, 8_000),
-    target: parsed.target.trim().slice(0, 4_000),
-    answerMode:
-      mode === "exact" || mode === "rubric" ? mode : "semantic",
   };
 }

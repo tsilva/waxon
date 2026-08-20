@@ -10,7 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { isAdminEmail } from "@/app/lib/adminAccess";
-import type { ReviewSummary } from "@/app/lib/reviewTypes";
+import type { V2ReviewSummary } from "@/app/lib/v2/types";
 import type { UserProfile } from "@/app/lib/userProfile";
 
 type ToolbarStateValue = {
@@ -41,7 +41,7 @@ export function ToolbarStateProvider({
             cache: "no-store",
             signal: controller.signal,
           }),
-          fetch("/api/review-summary", {
+          fetch("/api/v2/review/summary", {
             cache: "no-store",
             signal: controller.signal,
           }),
@@ -56,7 +56,7 @@ export function ToolbarStateProvider({
         }
 
         if (summaryResult.status === "fulfilled" && summaryResult.value.ok) {
-          const summary = (await summaryResult.value.json()) as ReviewSummary;
+          const summary = (await summaryResult.value.json()) as V2ReviewSummary;
           setDueCount(summary.queueRemaining);
         }
       } catch {

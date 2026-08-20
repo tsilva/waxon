@@ -10,6 +10,8 @@ const isProtectedRoute = createRouteMatcher([
   "/api(.*)",
 ]);
 
+const isMcpRoute = createRouteMatcher(["/api/mcp(.*)"]);
+
 const isPublicStaticPage = createRouteMatcher([
   "/",
   "/privacy-policy",
@@ -45,6 +47,11 @@ export default function proxy(
   }
 
   if (isPublicStaticPage(request) || isPublicAppShellRoute(request)) {
+    return NextResponse.next();
+  }
+
+  // MCP uses its own revocable bearer credential instead of a browser session.
+  if (isMcpRoute(request)) {
     return NextResponse.next();
   }
 

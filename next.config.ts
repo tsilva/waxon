@@ -5,7 +5,6 @@ import { withWorkflow } from "workflow/next";
 const nextConfig: NextConfig = {
   devIndicators: false,
   htmlLimitedBots: /.*/,
-  serverExternalPackages: ["@napi-rs/canvas", "pdfjs-dist"],
   webpack(config) {
     config.module.rules.push({
       test: /\.mts$/u,

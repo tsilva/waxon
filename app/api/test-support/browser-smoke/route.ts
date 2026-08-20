@@ -1,11 +1,12 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/app/db/client";
-import { questions, users } from "@/app/db/schema";
+import { getV2Db } from "@/app/db/v2/client";
+import { questions } from "@/app/db/v2/schema";
 import { getCurrentUser } from "@/app/lib/auth";
 import { BROWSER_SMOKE_QUESTIONS } from "@/app/lib/browserSmokeSupport";
 import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
-import { questionSlug } from "@/app/lib/questionSlug";
+import { questionPromptKey } from "@/app/lib/v2/questionInput";
+import { addQuestions, listLibrary } from "@/app/lib/v2/service";
 
 function isEnabled(): boolean {
   return (
@@ -15,99 +16,44 @@ function isEnabled(): boolean {
   );
 }
 
+function disabledResponse() {
+  return NextResponse.json(
+    { ok: false, error: "Browser smoke support is disabled." },
+    { status: 404 },
+  );
+}
+
 export async function POST() {
-  if (!isEnabled()) {
-    return NextResponse.json(
-      { ok: false, error: "Browser smoke support is disabled." },
-      { status: 404 },
+  if (!isEnabled()) return disabledResponse();
+  const user = await getCurrentUser();
+  const promptKeys = BROWSER_SMOKE_QUESTIONS.map((item) =>
+    questionPromptKey(item.prompt),
+  );
+  await getV2Db()
+    .delete(questions)
+    .where(
+      and(eq(questions.userId, user.id), inArray(questions.targetKey, promptKeys)),
     );
-  }
-
-  const now = Date.now();
-  const currentUser = await getCurrentUser();
-
-  await db.transaction(async (tx) => {
-    await tx
-      .insert(users)
-      .values({
-        id: currentUser.id,
-        displayName: currentUser.displayName,
-        email: currentUser.email,
-        avatarUrl: currentUser.avatarUrl,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: users.id,
-        set: {
-          displayName: currentUser.displayName,
-          email: currentUser.email,
-          avatarUrl: currentUser.avatarUrl,
-          updatedAt: now,
-        },
-      });
-
-    await tx
-      .delete(questions)
-      .where(
-        and(
-          eq(questions.userId, currentUser.id),
-          inArray(
-            questions.questionSlug,
-            BROWSER_SMOKE_QUESTIONS.map((item) => questionSlug(item.question)),
-          ),
-        ),
-      );
-
-    await tx.insert(questions).values(
-      BROWSER_SMOKE_QUESTIONS.map((item) => ({
-        userId: currentUser.id,
-        question: item.question,
-        questionSlug: questionSlug(item.question),
-        nextDue: 0,
-        conciseAnswer: item.conciseAnswer,
-        createdAt: now,
-        updatedAt: now,
-      })),
-    );
+  const result = await addQuestions({
+    userId: user.id,
+    idempotencyKey: `browser-smoke-${Date.now()}`,
+    items: BROWSER_SMOKE_QUESTIONS.map((item) => ({
+      ...item,
+      answerMode: "exact" as const,
+    })),
   });
-
-
-  return NextResponse.json({
-    ok: true,
-    questions: BROWSER_SMOKE_QUESTIONS,
-  });
+  return NextResponse.json({ ok: true, questions: result.results });
 }
 
 export async function GET() {
-  if (!isEnabled()) {
-    return NextResponse.json(
-      { ok: false, error: "Browser smoke support is disabled." },
-      { status: 404 },
-    );
-  }
-
-  const currentUser = await getCurrentUser();
-  const rows = await db
-    .select({
-      question: questions.question,
-      nextDue: questions.nextDue,
-      lastAnswer: questions.lastAnswer,
-      lastAnswerSummary: questions.lastAnswerSummary,
-    })
-    .from(questions)
-    .where(
-      and(
-        eq(questions.userId, currentUser.id),
-        inArray(
-          questions.questionSlug,
-          BROWSER_SMOKE_QUESTIONS.map((item) => questionSlug(item.question)),
-        ),
-      ),
-    );
-
+  if (!isEnabled()) return disabledResponse();
+  const user = await getCurrentUser();
+  const prompts = new Set<string>(
+    BROWSER_SMOKE_QUESTIONS.map((item) => item.prompt),
+  );
+  const library = await listLibrary({ userId: user.id, limit: 100 });
   return NextResponse.json({
     ok: true,
-    questions: rows,
+    questions: library.questions.filter((item) => prompts.has(item.prompt)),
   });
 }

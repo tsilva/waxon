@@ -4,130 +4,75 @@
   **Build knowledge. Keep it.**
 </div>
 
-Waxon is a multi-user question bank and adaptive review system. Learners answer
-in their own words, get concise model feedback, and rely on Review to schedule
-the next recall attempt from past performance.
+Waxon is a multi-user question bank with adaptive daily Review. Learners add standalone questions, answer from memory in their own words, and let FSRS schedule the questions most at risk of being forgotten. Authorized agents can add and search questions through MCP.
 
-## Product flow
+## Product loop
 
-- **Review** grades typed recall answers and schedules the next review from the
-  learner's performance.
-- **Library** provides the unified question bank, with source and concept
-  metadata, concept-tag organization, and bank-management tools.
-- **Admin** exposes model traces, latency, token use, and cost for operators.
+- **Library** adds, searches, edits, pauses, archives, restores, and logically removes questions.
+- **Review** builds a bounded due-first daily plan, evaluates free-text recall, accepts learner grade corrections, and updates per-question memory.
+- **MCP** exposes the same isolated question service through `search_questions` and transactional `add_questions` tools.
+- **Admin** retains model traces, latency, token use, and cost for operators.
 
-## Install
+Waxon does not ingest documents or URLs, retain source provenance, generate questions in-app, organize concepts, or use embeddings.
+
+## Install and run
 
 ```bash
 git clone https://github.com/tsilva/waxon.git
 cd waxon
 pnpm install
 keyenv doctor
-```
-
-Private values declared in `.keyenv.toml`, including the pooled Neon connection,
-OpenRouter key, Clerk secret, Blob token, and Sentry token, live in macOS
-Keychain. Launch commands through `keyenv run -- ...`; Node reads the injected
-values normally from `process.env`.
-
-If migrations require a separate `DATABASE_URL_UNPOOLED`, declare it in
-`.keyenv.toml` and store it with `keyenv set DATABASE_URL_UNPOOLED`; do not put
-it in `.env`.
-
-Apply migrations before running Waxon against a new database:
-
-```bash
 keyenv run -- pnpm db:migrate
-```
-
-Non-secret model overrides may remain in `.env.local`:
-
-```bash
-LLM_MODEL=google/gemini-3.7-flash
-LLM_EVALUATION_MODEL=google/gemini-3.7-flash
-```
-
-`LLM_API_KEY` is accepted when `OPENROUTER_API_KEY` is not set. The model
-variables are optional; generic chat and answer evaluation currently
-default to `google/gemini-3.7-flash`.
-
-Start a development server on an available port:
-
-```bash
 keyenv run -- pnpm dev --port auto
 ```
 
-For linked Vercel development environments, use no-file injection:
+Secrets declared in `.keyenv.toml`—including Neon, OpenRouter, Clerk, and Sentry credentials—remain in macOS Keychain and are injected by `keyenv run -- ...`. Do not put them in `.env` files.
+
+Optional non-secret model overrides may remain in `.env.local`:
 
 ```bash
-vercel env run -e development -- keyenv run -- pnpm dev --port auto
+LLM_EVALUATION_MODEL=google/gemini-3.7-flash
 ```
 
-Open the URL printed by the command.
+`LLM_API_KEY` is accepted when `OPENROUTER_API_KEY` is not set.
 
-## Authentication
+## Authentication and MCP
 
-Production sign-in and sign-up use Clerk. Keep only its public client settings
-in `.env.local`; `CLERK_SECRET_KEY` is supplied by `keyenv` locally and by the
-deployment provider in hosted environments:
+Production browser authentication uses Clerk and all bank and learning records are user-owned. Local development uses the configured TCLV/Tiago test identity unless `NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1` is set.
 
-```bash
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=your-clerk-publishable-key
-NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
-NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-```
-
-Local development uses the TCLV/Tiago test identity so product flows can be
-tested without a Clerk browser session:
+In Library, open **Agent access**, create a personal token, and copy it immediately. Waxon stores only its SHA-256 hash. Configure the remote Streamable HTTP endpoint as:
 
 ```text
-Tiago Silva
-eng.tiago.silva@gmail.com
+https://<your-waxon-host>/api/mcp
+Authorization: Bearer waxon_mcp_...
 ```
 
-When that email already exists in the configured database, Waxon reuses the
-existing app user so their questions remain visible. Otherwise it
-creates a local fallback user. To exercise the real Clerk flow locally, disable
-the local test identity:
-
-```bash
-NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1
-```
+Rotating the token invalidates the previous value; revocation disables MCP access without affecting browser sessions.
 
 ## Commands
 
 ```bash
-pnpm dev --port auto     # start development on an available port
-pnpm build               # create a production build
-pnpm start --port auto   # run the production build on an available port
-pnpm test                # run the Node test suite
-pnpm lint                # run ESLint
-pnpm typecheck           # run TypeScript without emitting files
-pnpm db:migrate          # apply pending migrations
-pnpm db:studio           # open Drizzle Studio
+pnpm dev --port auto  # start development on an available port
+pnpm test             # run the Node test suite
+pnpm lint             # run ESLint
+pnpm typecheck        # check TypeScript
+pnpm build            # create a production build
+pnpm db:migrate       # apply normal Stage One migrations
+pnpm db:studio        # open Drizzle Studio
+pnpm lean:preflight   # print retained counts and the blob cleanup inventory
 ```
 
-The repeatable local product smoke flow lives in
-[`docs/browser-use-smoke.md`](./docs/browser-use-smoke.md). It uses the current
-Codex in-app Browser and a development-only deterministic evaluator.
+The preservation-first two-stage cleanup is documented in [`docs/lean-core-rollout.md`](./docs/lean-core-rollout.md). Do not run its Stage Two SQL until the Stage One deployment, retained-count comparison, Review journey, and blob inventory have been reviewed.
+
+The repeatable local product suite lives in [`docs/browser-use-smoke.md`](./docs/browser-use-smoke.md) and uses the native Codex in-app Browser plus a development-only deterministic evaluator.
 
 ## Implementation notes
 
-- Postgres schema declarations live in `app/db/schema.ts`; reviewed SQL
-  migrations and their ordered journal live in `drizzle/`.
-- Drizzle's schema snapshot baseline was restored at migration `0033`. Use
-  `drizzle-kit generate` for schema changes, then review generated SQL and keep
-  data-only or extension-specific SQL explicit in the migration file.
-- Questions are user-owned. `question_attempts` stores resolved answers and
-  scores, while the question row stores current scheduling state.
-- Pending and resolved answer-evaluation status is persisted in
-  `answer_evaluations`; model work begins after the submit response.
-- API routes use the Node.js runtime and are dynamic where request-time state is
-  required.
-- If no model API key is configured, model-backed operations return a clear
-  configuration failure rather than silently producing model output.
-- JavaScript dependency hardening is configured in `pnpm-workspace.yaml` and
-  `.npmrc`.
+- Lean schema declarations live in `app/db/v2/schema.ts`; reviewed Stage One migrations live in `drizzle-v2/`.
+- Question versions, submissions, evaluations, grade events, and memory states are append-only or rebuilt from immutable evidence as appropriate.
+- Exact answers are graded deterministically. Semantic and rubric answers are evaluated through the durable evaluation workflow.
+- MCP batches share Library validation, duplicate detection, limits, idempotency receipts, transactions, and user isolation.
+- JavaScript dependency hardening is configured in `pnpm-workspace.yaml` and `.npmrc`.
 
 ## License
 

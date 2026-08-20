@@ -1,5 +1,5 @@
 import { desc } from "drizzle-orm";
-import type { llmTraceInteractions } from "../db/schema";
+import type { llmTraceInteractions } from "../db/v2/schema";
 import {
   promptCacheMetricsFromOpenRouterUsage,
   toFiniteNumber,
@@ -308,11 +308,11 @@ export async function listLlmTraceInteractions(): Promise<LlmTraceInteraction[]>
 
   if (process.env.DATABASE_URL) {
     try {
-      const { db } = await import("../db/client");
+      const { getV2Db } = await import("../db/v2/client");
       const { llmTraceInteractions: llmTraceInteractionsTable } = await import(
-        "../db/schema"
+        "../db/v2/schema"
       );
-      const rows = await db
+      const rows = await getV2Db()
         .select()
         .from(llmTraceInteractionsTable)
         .orderBy(desc(llmTraceInteractionsTable.startedAt))
@@ -374,13 +374,13 @@ async function persistTraceInteraction(
   }
 
   try {
-    const { db } = await import("../db/client");
+    const { getV2Db } = await import("../db/v2/client");
     const { llmTraceInteractions: llmTraceInteractionsTable } = await import(
-      "../db/schema"
+      "../db/v2/schema"
     );
     const row = traceInteractionToRow(interaction);
 
-    await db
+    await getV2Db()
       .insert(llmTraceInteractionsTable)
       .values(row)
       .onConflictDoUpdate({
