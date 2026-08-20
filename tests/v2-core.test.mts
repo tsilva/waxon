@@ -103,6 +103,21 @@ test("planner puts due work before new work and orders due items by risk", () =>
   );
 });
 
+test("planner leaves flagged questions out of Review", () => {
+  const plan = buildReviewPlan({
+    now,
+    timeBudgetMinutes: 10,
+    desiredRetention: 0.9,
+    newItemsPerDay: 2,
+    candidates: [
+      candidate({ questionId: "due" }),
+      candidate({ questionId: "flagged", lifecycle: "flagged" }),
+    ],
+  });
+
+  assert.deepEqual(plan.map((item) => item.questionId), ["due"]);
+});
+
 test("planner enforces new admission and presentation bounds", () => {
   const plan = buildReviewPlan({
     now,

@@ -25,7 +25,7 @@ import type {
 
 const EMPTY_DATA: V2LibraryResponse = {
   questions: [],
-  counts: { new: 0, learning: 0, review: 0, paused: 0, archived: 0, trash: 0 },
+  counts: { new: 0, learning: 0, review: 0, flagged: 0, paused: 0, archived: 0, trash: 0 },
   waitingNew: 0,
 };
 const FILTERS: Array<{ value: V2Lifecycle | "all"; label: string }> = [
@@ -33,6 +33,7 @@ const FILTERS: Array<{ value: V2Lifecycle | "all"; label: string }> = [
   { value: "new", label: "New" },
   { value: "learning", label: "Learning" },
   { value: "review", label: "Review" },
+  { value: "flagged", label: "Flagged" },
   { value: "paused", label: "Paused" },
   { value: "archived", label: "Archived" },
   { value: "trash", label: "Trash" },
@@ -259,7 +260,7 @@ function QuestionRow({
         <button aria-label="Edit question" onClick={onEdit} title="Edit" type="button"><Pencil /></button>
         {active ? <button aria-label="Pause question" onClick={() => onAction("pause")} title="Pause" type="button"><Pause /></button> : null}
         {question.lifecycle !== "archived" && question.lifecycle !== "trash" ? <button aria-label="Archive question" onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
-        {question.lifecycle === "paused" || question.lifecycle === "archived" || question.lifecycle === "trash" ? <button aria-label="Restore question" onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
+        {question.lifecycle === "flagged" || question.lifecycle === "paused" || question.lifecycle === "archived" || question.lifecycle === "trash" ? <button aria-label="Restore question" onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
         {question.lifecycle !== "trash" ? <button aria-label="Move question to trash" className="is-danger" onClick={() => onAction("trash")} title="Move to trash" type="button"><Trash2 /></button> : null}
       </div>
     </article>

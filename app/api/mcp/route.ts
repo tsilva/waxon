@@ -10,6 +10,7 @@ const lifecycleSchema = z.enum([
   "new",
   "learning",
   "review",
+  "flagged",
   "paused",
   "archived",
   "trash",

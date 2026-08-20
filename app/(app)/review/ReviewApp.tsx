@@ -2,7 +2,9 @@
 
 import {
   AlertTriangle,
+  ArrowRight,
   ChevronDown,
+  Flag,
   LoaderCircle,
   Settings2,
 } from "lucide-react";
@@ -338,6 +340,7 @@ export default function ReviewApp() {
   const [turns, setTurns] = useState<ReviewTurn[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [reviewAction, setReviewAction] = useState<"flag" | "next" | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const answerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -423,7 +426,7 @@ export default function ReviewApp() {
     event.preventDefault();
     const item = review?.item;
     const responseText = answer.trim();
-    if (!item || !responseText || isSubmitting) {
+    if (!item || !responseText || isSubmitting || reviewAction) {
       return;
     }
     setIsSubmitting(true);
@@ -448,6 +451,33 @@ export default function ReviewApp() {
       setError(caught instanceof Error ? caught.message : "Could not submit.");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function actOnQuestion(action: "flag" | "next") {
+    const item = review?.item;
+    if (!item || isSubmitting || reviewAction) return;
+    setReviewAction(action);
+    setError(null);
+    try {
+      const next = await jsonRequest<V2ReviewSessionResponse>(
+        "/api/v2/review/session",
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemId: item.itemId, action }),
+        },
+      );
+      setAnswer("");
+      setReview(next);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Could not move to the next question.",
+      );
+    } finally {
+      setReviewAction(null);
     }
   }
 
@@ -494,10 +524,52 @@ export default function ReviewApp() {
           <section className="question-area">
             {isLoading ? (
               <div className="question-copy">
+                <div
+                  aria-hidden="true"
+                  className="review-question-actions review-question-actions-placeholder"
+                >
+                  <span />
+                  <span />
+                </div>
                 <h2 className="question-title">Loading next question...</h2>
               </div>
             ) : item ? (
               <div className="question-copy">
+                <div
+                  aria-busy={Boolean(reviewAction)}
+                  aria-label="Question actions"
+                  className="review-question-actions"
+                  role="group"
+                >
+                  <button
+                    aria-label="Flag question for later"
+                    className="question-flag-trigger"
+                    disabled={isSubmitting || Boolean(reviewAction)}
+                    onClick={() => void actOnQuestion("flag")}
+                    title="Flag for later"
+                    type="button"
+                  >
+                    {reviewAction === "flag" ? (
+                      <LoaderCircle aria-hidden="true" className="v2-spin" />
+                    ) : (
+                      <Flag aria-hidden="true" />
+                    )}
+                  </button>
+                  <button
+                    aria-label="Next question"
+                    className="question-next-trigger"
+                    disabled={isSubmitting || Boolean(reviewAction)}
+                    onClick={() => void actOnQuestion("next")}
+                    title="Next question"
+                    type="button"
+                  >
+                    {reviewAction === "next" ? (
+                      <LoaderCircle aria-hidden="true" className="v2-spin" />
+                    ) : (
+                      <ArrowRight aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
                 {item.isRetry ? (
                   <p className="review-question-kicker">Delayed retry</p>
                 ) : null}
@@ -582,7 +654,7 @@ export default function ReviewApp() {
             <AnswerComposer
               ariaLabel="Your answer"
               autoFocus
-              disabled={isSubmitting}
+              disabled={isSubmitting || Boolean(reviewAction)}
               id="review-answer"
               onKeyDown={(event) => {
                 if (

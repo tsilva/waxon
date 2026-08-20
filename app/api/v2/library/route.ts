@@ -15,6 +15,7 @@ const LIFECYCLES = new Set<V2Lifecycle>([
   "new",
   "learning",
   "review",
+  "flagged",
   "paused",
   "archived",
   "trash",
