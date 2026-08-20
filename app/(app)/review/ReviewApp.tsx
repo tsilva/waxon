@@ -2,13 +2,9 @@
 
 import {
   AlertTriangle,
-  ArrowRight,
-  Check,
   ChevronDown,
-  Clock3,
   LoaderCircle,
   Settings2,
-  Sparkles,
 } from "lucide-react";
 import {
   useCallback,
@@ -17,7 +13,8 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { MarkdownContent } from "@/app/MarkdownContent";
+import { AnswerComposer } from "@/app/AnswerComposer";
+import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import type {
   V2Evaluation,
@@ -50,16 +47,35 @@ function gradeLabel(grade: V2Grade | null): string {
   return grade ? grade[0].toUpperCase() + grade.slice(1) : "Waiting";
 }
 
-function FeedbackCard({
+function gradeTone(evaluation: V2Evaluation): string {
+  if (evaluation.status === "failed" || evaluation.grade === "again") {
+    return "low";
+  }
+
+  if (evaluation.grade === "hard") {
+    return "medium";
+  }
+
+  if (evaluation.grade === "good" || evaluation.grade === "easy") {
+    return "high";
+  }
+
+  return "neutral";
+}
+
+function FeedbackRow({
   turn,
   onCorrect,
 }: {
   turn: ReviewTurn;
   onCorrect: (submissionId: string, grade: V2Grade) => Promise<void>;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [savingGrade, setSavingGrade] = useState<V2Grade | null>(null);
   const evaluation = turn.evaluation;
+  const isPending = evaluation.status === "pending";
+  const grade = gradeLabel(evaluation.grade);
+  const scoreLabel = evaluation.status === "failed" ? "?" : grade.slice(0, 1);
 
   async function correct(grade: V2Grade) {
     setSavingGrade(grade);
@@ -71,97 +87,139 @@ function FeedbackCard({
   }
 
   return (
-    <article className={`v2-feedback-card is-${evaluation.status}`}>
-      <button
-        aria-expanded={open}
-        className="v2-feedback-summary"
-        onClick={() => setOpen((value) => !value)}
-        type="button"
-      >
-        {evaluation.status === "pending" ? (
-          <LoaderCircle className="v2-spin" />
-        ) : evaluation.grade === "again" || evaluation.status === "failed" ? (
-          <AlertTriangle />
+    <li
+      className={`previous-row ${isPending ? "previous-row-pending" : "previous-row-resolved"} ${open ? "previous-row-open" : "previous-row-collapsed"}`}
+    >
+      <div className="previous-score-slot">
+        {isPending ? (
+          <span className="pending-spinner" aria-label="Evaluation pending" />
         ) : (
-          <Check />
+          <span className="previous-score-shell" aria-label={`Grade ${grade}`}>
+            <span className={`previous-score score-${gradeTone(evaluation)}`}>
+              {scoreLabel}
+            </span>
+          </span>
         )}
-        <span>
-          <strong>
-            {evaluation.status === "pending"
-              ? "Checking your recall…"
-              : evaluation.status === "failed"
-                ? "Self-grade this answer"
-                : gradeLabel(evaluation.grade)}
-          </strong>
-          <small>{turn.prompt}</small>
-        </span>
-        <ChevronDown />
-      </button>
-      {open ? (
-        <div className="v2-feedback-body">
-          <div>
-            <span>Your answer</span>
-            <p>{turn.answer}</p>
-          </div>
-          {evaluation.feedback ? (
-            <div>
-              <span>Feedback</span>
+      </div>
+
+      <div className="previous-row-main-button previous-row-main-static">
+        <div className="previous-copy">
+          <div className="previous-field previous-question-field">
+            <span className="previous-label-row">
+              <span className="previous-field-label">Question</span>
+              <span className="review-grade-label">
+                {isPending
+                  ? "Evaluating…"
+                  : evaluation.status === "failed"
+                    ? "Self-grade needed"
+                    : grade}
+              </span>
+            </span>
+            <MarkdownInline
+              as="p"
+              className="previous-question"
+              enableMath
+              text={turn.prompt}
+            />
+            {isPending ? (
+              <p className="previous-question-feedback previous-question-feedback-pending">
+                Checking your recall…
+              </p>
+            ) : evaluation.feedback ? (
               <MarkdownContent
-                className="v2-markdown"
+                className="previous-question-feedback"
                 enableMath
                 text={evaluation.feedback}
               />
+            ) : (
+              <p className="previous-question-feedback">
+                Choose the grade that best matches your recall.
+              </p>
+            )}
+          </div>
+
+          <div className="previous-detail-grid" hidden={!open}>
+            <div className="previous-field">
+              <span className="previous-field-label">Your answer</span>
+              <p className="previous-answer">{turn.answer}</p>
             </div>
-          ) : null}
-          {evaluation.expectedAnswer ? (
-            <div>
-              <span>Expected answer</span>
-              <MarkdownContent
-                className="v2-markdown"
-                enableMath
-                text={evaluation.expectedAnswer}
-              />
-            </div>
-          ) : null}
-          {evaluation.coveredPoints.length > 0 ? (
-            <div className="v2-points is-covered">
-              <span>Recovered</span>
-              <ul>
-                {evaluation.coveredPoints.map((point) => <li key={point}>{point}</li>)}
-              </ul>
-            </div>
-          ) : null}
-          {evaluation.missingPoints.length > 0 ? (
-            <div className="v2-points is-missing">
-              <span>Missing</span>
-              <ul>
-                {evaluation.missingPoints.map((point) => <li key={point}>{point}</li>)}
-              </ul>
-            </div>
-          ) : null}
-          {evaluation.status !== "pending" ? (
-            <fieldset className="v2-grade-correction">
-              <legend>
-                {evaluation.grade ? "Correct the grade" : "How well did you recall it?"}
-              </legend>
-              <div>
-                {(["again", "hard", "good", "easy"] as V2Grade[]).map((grade) => (
-                  <button
-                    aria-pressed={evaluation.grade === grade}
-                    disabled={Boolean(savingGrade)}
-                    key={grade}
-                    onClick={() => correct(grade)}
-                    type="button"
-                  >
-                    {savingGrade === grade ? <LoaderCircle className="v2-spin" /> : gradeLabel(grade)}
-                  </button>
-                ))}
+            {evaluation.expectedAnswer ? (
+              <div className="previous-field">
+                <span className="previous-field-label">Expected answer</span>
+                <MarkdownContent
+                  className="previous-answer"
+                  enableMath
+                  text={evaluation.expectedAnswer}
+                />
               </div>
-            </fieldset>
-          ) : null}
+            ) : null}
+            {evaluation.coveredPoints.length > 0 ? (
+              <div className="previous-field review-feedback-points is-covered">
+                <span className="previous-field-label">Recovered</span>
+                <ul>
+                  {evaluation.coveredPoints.map((point) => (
+                    <li key={point}>{point}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {evaluation.missingPoints.length > 0 ? (
+              <div className="previous-field review-feedback-points is-missing">
+                <span className="previous-field-label">Missing</span>
+                <ul>
+                  {evaluation.missingPoints.map((point) => (
+                    <li key={point}>{point}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {!isPending ? (
+              <fieldset className="review-grade-correction">
+                <legend>
+                  {evaluation.grade
+                    ? "Correct the grade"
+                    : "How well did you recall it?"}
+                </legend>
+                <div>
+                  {(["again", "hard", "good", "easy"] as V2Grade[]).map(
+                    (nextGrade) => (
+                      <button
+                        aria-pressed={evaluation.grade === nextGrade}
+                        disabled={Boolean(savingGrade)}
+                        key={nextGrade}
+                        onClick={() => correct(nextGrade)}
+                        type="button"
+                      >
+                        {savingGrade === nextGrade ? (
+                          <LoaderCircle className="v2-spin" />
+                        ) : (
+                          gradeLabel(nextGrade)
+                        )}
+                      </button>
+                    ),
+                  )}
+                </div>
+              </fieldset>
+            ) : null}
+          </div>
         </div>
-      ) : null}
-    </article>
+
+        <span className="previous-row-meta">
+          <span className="previous-time-control">
+            <span className="previous-time">Just now</span>
+            <button
+              aria-expanded={open}
+              aria-label={open ? "Hide answer details" : "Show answer details"}
+              className="review-feedback-toggle"
+              onClick={() => setOpen((value) => !value)}
+              type="button"
+            >
+              <ChevronDown className="previous-collapse-icon" aria-hidden="true" />
+            </button>
+          </span>
+        </span>
+      </div>
+    </li>
   );
 }
 
@@ -415,162 +473,190 @@ export default function ReviewApp() {
   const item: V2ReviewItem | null = review?.item ?? null;
   const completed = review?.session?.completedCount ?? 0;
   const total = review?.session?.plannedCount ?? 0;
-  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+  const isResting = !isLoading && !item;
+  const retryAvailableAt = review?.retryAvailableAt
+    ? new Date(review.retryAvailableAt)
+    : null;
+  const retryIsDelayed = Boolean(
+    retryAvailableAt && retryAvailableAt.getTime() > Date.now(),
+  );
 
   return (
     <main className="page">
-      <section className="review-shell v2-review-shell">
+      <section className="review-shell" aria-label="Flashcard learning">
         <ReviewToolbar />
-        <div className="v2-review-stage" id="review-panel">
-          <header className="v2-review-context">
-            <div>
-              <span className="v2-kicker">Today’s minimum effective practice</span>
-              <strong>
-                {review?.session
-                  ? `${Math.max(0, total - completed)} remaining`
-                  : "Review complete"}
-              </strong>
-            </div>
-            <div className="v2-review-progress" aria-label={`${percent}% complete`}>
-              <span style={{ width: `${percent}%` }} />
-            </div>
-            <button
-              aria-label="Review settings"
-              className="v2-icon-button"
-              onClick={() => setSettingsOpen(true)}
-              type="button"
-            >
-              <Settings2 />
-            </button>
-          </header>
-          {review && !review.capacity.targetFeasible ? (
-            <div className="v2-capacity-warning">
-              <AlertTriangle aria-hidden="true" />
-              <div>
-                <strong>Your current retention target exceeds today’s capacity.</strong>
-                <span>
-                  At {review.capacity.atRiskCount} at-risk questions, the
-                  sustainable estimate is{" "}
-                  {Math.round(review.capacity.sustainableRetention * 100)}%.
-                  Waxon is prioritizing the most fragile memories first. About{" "}
-                  {review.capacity.minutesNeeded} minutes would protect all
-                  currently at-risk work.
-                </span>
-              </div>
-              <button onClick={() => setSettingsOpen(true)} type="button">
-                Adjust plan
-              </button>
-            </div>
-          ) : null}
-          <div className="v2-review-column">
+        <div
+          aria-labelledby="review-tab"
+          className={`review-stage${isResting ? " review-stage-resting" : ""}`}
+          id="review-panel"
+          role="tabpanel"
+        >
+          <section className="question-area">
             {isLoading ? (
-              <div className="v2-review-empty">
-                <LoaderCircle className="v2-spin" />
-                <h1>Building today’s plan…</h1>
+              <div className="question-copy">
+                <h2 className="question-title">Loading next question...</h2>
               </div>
             ) : item ? (
-              <section className="v2-recall-card">
-                <div className="v2-question-meta">
-                  <span>
-                    {item.isRetry
-                      ? "Delayed retry"
-                      : `Question ${item.position + 1}`}
-                  </span>
-                  <span><Clock3 /> about {item.estimatedMinutes} min</span>
-                </div>
-                <h1>
-                  <MarkdownContent
-                    className="v2-markdown"
-                    enableMath
-                    text={item.prompt}
-                  />
-                </h1>
-                <form className="v2-answer-form" onSubmit={submit}>
-                  <label htmlFor="v2-answer">Answer from memory, in your own words</label>
-                  <textarea
-                    id="v2-answer"
-                    maxLength={65_536}
-                    onChange={(event) => setAnswer(event.currentTarget.value)}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Enter" &&
-                        (event.metaKey || event.ctrlKey)
-                      ) {
-                        event.preventDefault();
-                        event.currentTarget.form?.requestSubmit();
-                      }
-                    }}
-                    placeholder="Retrieve first. Explain enough to prove you know it…"
-                    ref={answerRef}
-                    rows={7}
-                    value={answer}
-                  />
-                  <div>
-                    <small>⌘ Enter to submit</small>
-                    <button
-                      className="v2-button-primary"
-                      disabled={!answer.trim() || isSubmitting}
-                      type="submit"
-                    >
-                      {isSubmitting ? <LoaderCircle className="v2-spin" /> : <ArrowRight />}
-                      Submit and continue
+              <div className="question-copy">
+                {item.isRetry ? (
+                  <p className="review-question-kicker">Delayed retry</p>
+                ) : null}
+                <MarkdownInline
+                  as="h2"
+                  className="question-title"
+                  enableMath
+                  text={item.prompt}
+                />
+                {review && !review.capacity.targetFeasible ? (
+                  <div className="review-capacity-warning">
+                    <AlertTriangle aria-hidden="true" />
+                    <p>
+                      <strong>Today’s capacity is below your retention target.</strong>{" "}
+                      Waxon is prioritizing the most fragile memories first.
+                    </p>
+                    <button onClick={() => setSettingsOpen(true)} type="button">
+                      Adjust
                     </button>
                   </div>
-                </form>
-              </section>
+                ) : null}
+              </div>
             ) : (
-              <div className="v2-review-empty">
-                {review?.retryAvailableAt &&
-                new Date(review.retryAvailableAt).getTime() > Date.now() ? (
-                  <>
-                    <Clock3 />
-                    <h1>Your retry is deliberately delayed.</h1>
-                    <p>
-                      It unlocks at{" "}
-                      {new Intl.DateTimeFormat(undefined, {
+              <div className="resting-state">
+                <p className="resting-kicker">
+                  {retryIsDelayed
+                    ? "Delayed retry"
+                    : review?.waitingOnEvaluation ||
+                        turns.some((turn) => turn.evaluation.status === "pending")
+                      ? "Evaluation in progress"
+                      : "Today’s review"}
+                </p>
+                <h2 className="resting-title">
+                  {retryIsDelayed
+                    ? "Let it settle."
+                    : review?.waitingOnEvaluation ||
+                        turns.some((turn) => turn.evaluation.status === "pending")
+                      ? "Finishing your feedback."
+                      : "You protected what mattered today."}
+                </h2>
+                <p className="resting-copy">
+                  {retryIsDelayed && retryAvailableAt
+                    ? `The retry unlocks at ${new Intl.DateTimeFormat(undefined, {
                         hour: "numeric",
                         minute: "2-digit",
-                      }).format(new Date(review.retryAvailableAt))}
-                      . This prevents immediate repetition from masquerading as
-                      durable recall.
-                    </p>
-                  </>
-                ) : review?.waitingOnEvaluation || turns.some((turn) => turn.evaluation.status === "pending") ? (
-                  <>
-                    <LoaderCircle className="v2-spin" />
-                    <h1>Finishing your feedback</h1>
-                    <p>Your answers are safe. The session will close as grading finishes.</p>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles />
-                    <h1>You protected what mattered today.</h1>
-                    <p>
-                      {review?.summary.nextScheduledDue
+                      }).format(retryAvailableAt)} so immediate repetition does not masquerade as durable recall.`
+                    : review?.waitingOnEvaluation ||
+                        turns.some((turn) => turn.evaluation.status === "pending")
+                      ? "Your answers are safe. This session will close when grading finishes."
+                      : review?.summary.nextScheduledDue
                         ? `The next scheduled review is ${new Intl.DateTimeFormat(
                             undefined,
                             { dateStyle: "medium", timeStyle: "short" },
                           ).format(review.summary.nextScheduledDue)}.`
                         : "Add knowledge in Library whenever you learn something worth keeping."}
-                    </p>
-                  </>
-                )}
+                </p>
+                {review?.session ? (
+                  <dl className="resting-metrics">
+                    <div>
+                      <dt>{completed}</dt>
+                      <dd>reviewed today</dd>
+                    </div>
+                    <div>
+                      <dt>{Math.max(0, total - completed)}</dt>
+                      <dd>remaining</dd>
+                    </div>
+                  </dl>
+                ) : null}
               </div>
             )}
-            {error ? <p className="v2-error" role="alert">{error}</p> : null}
-            {turns.length > 0 ? (
-              <section className="v2-feedback-list" aria-label="Answer feedback">
-                <h2>Session feedback</h2>
-                {turns.map((turn) => (
-                  <FeedbackCard
+          </section>
+
+          {isLoading ? (
+            <div className="composer composer-loading" aria-hidden="true">
+              <div className="composer-row composer-loading-row">
+                <div className="composer-loading-input" />
+                <div className="composer-loading-button" />
+                <div className="composer-loading-button composer-loading-button-accent" />
+              </div>
+            </div>
+          ) : item ? (
+            <AnswerComposer
+              ariaLabel="Your answer"
+              autoFocus
+              disabled={isSubmitting}
+              id="review-answer"
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  (event.metaKey || event.ctrlKey)
+                ) {
+                  event.preventDefault();
+                  event.currentTarget.form?.requestSubmit();
+                }
+              }}
+              onSubmit={submit}
+              onValueChange={(value) => setAnswer(value)}
+              placeholder="Type your answer here..."
+              rows={4}
+              submitAriaLabel="Submit answer"
+              submitDisabled={!answer.trim() || isSubmitting}
+              submitIcon={
+                isSubmitting ? <LoaderCircle className="v2-spin" /> : undefined
+              }
+              textareaRef={answerRef}
+              value={answer}
+            />
+          ) : null}
+
+          {error ? (
+            <p className="error-message" role="alert">
+              {error}
+            </p>
+          ) : null}
+
+          <section className="previous-panel" aria-label="Answer feedback">
+            <div className="previous-header">
+              <h2>Previous answers</h2>
+              {!isLoading ? (
+                <button
+                  aria-label="Review settings"
+                  className="review-settings-button"
+                  onClick={() => setSettingsOpen(true)}
+                  type="button"
+                >
+                  <Settings2 aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
+
+            <ol className="previous-list">
+              {isLoading ? (
+                Array.from({ length: 2 }).map((_, index) => (
+                  <li
+                    className="previous-row previous-row-placeholder"
+                    key={`review-loading-placeholder-${index}`}
+                  >
+                    <div className="previous-placeholder-score" />
+                    <div className="previous-placeholder-copy">
+                      <span />
+                      <span />
+                    </div>
+                  </li>
+                ))
+              ) : turns.length > 0 ? (
+                turns.map((turn) => (
+                  <FeedbackRow
                     key={turn.evaluation.submissionId}
                     onCorrect={correctGrade}
                     turn={turn}
                   />
-                ))}
-              </section>
-            ) : null}
-          </div>
+                ))
+              ) : (
+                <li className="previous-row previous-row-empty">
+                  <p>Your answers from this session will appear here.</p>
+                </li>
+              )}
+            </ol>
+          </section>
         </div>
       </section>
       {settingsOpen ? (
