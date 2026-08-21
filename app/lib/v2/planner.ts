@@ -1,10 +1,9 @@
-import type { V2AnswerMode, V2Lifecycle } from "./types";
+import type { V2Lifecycle } from "./types";
 
 export type PlanCandidate = {
   questionId: string;
   questionVersionId: string;
   lifecycle: V2Lifecycle;
-  answerMode: V2AnswerMode;
   dueAt: Date | null;
   retrievability: number | null;
   importance: number;
@@ -16,11 +15,7 @@ export type PlannedCandidate = PlanCandidate & {
   estimatedSeconds: number;
 };
 
-const MODE_SECONDS: Record<V2AnswerMode, number> = {
-  exact: 30,
-  semantic: 60,
-  rubric: 90,
-};
+const ESTIMATED_ANSWER_SECONDS = 60;
 
 function risk(candidate: PlanCandidate, retention: number, now: Date): number {
   const retrievability = candidate.retrievability ?? 0;
@@ -64,8 +59,11 @@ export function buildReviewPlan(input: {
   const selected: PlannedCandidate[] = [];
 
   function admit(candidate: PlanCandidate): void {
-    const estimate = MODE_SECONDS[candidate.answerMode];
-    selected.push({ ...candidate, position: selected.length, estimatedSeconds: estimate });
+    selected.push({
+      ...candidate,
+      position: selected.length,
+      estimatedSeconds: ESTIMATED_ANSWER_SECONDS,
+    });
   }
 
   for (const candidate of due) admit(candidate);

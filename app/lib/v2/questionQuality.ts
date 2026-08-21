@@ -73,11 +73,3 @@ export function recallTargetKey(target: string): string {
     .update(normalizeRecallTarget(target))
     .digest("hex");
 }
-
-export function normalizeExactAnswer(value: string): string {
-  return value
-    .normalize("NFKC")
-    .trim()
-    .replace(/\s+/gu, " ")
-    .toLocaleLowerCase("und");
-}

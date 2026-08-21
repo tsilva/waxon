@@ -7,10 +7,7 @@ import {
   normalizeQuestionPrompt,
   questionPromptKey,
 } from "../app/lib/v2/questionInput.ts";
-import {
-  assessQuestionQuality,
-  normalizeExactAnswer,
-} from "../app/lib/v2/questionQuality.ts";
+import { assessQuestionQuality } from "../app/lib/v2/questionQuality.ts";
 import {
   applyFsrsGrade,
   memoryRetrievability,
@@ -28,7 +25,6 @@ function candidate(
   return {
     questionVersionId: `${overrides.questionId}-version`,
     lifecycle: "review",
-    answerMode: "semantic",
     dueAt: new Date(now.getTime() - 86_400_000),
     retrievability: 0.6,
     importance: 1,
@@ -43,7 +39,7 @@ test("lean question input is normalized and receives strong defaults", () => {
     referenceAnswer: "It schedules the next review from memory state.",
   });
   assert.equal(input.prompt, "What does FSRS schedule?");
-  assert.equal(input.answerMode, "semantic");
+  assert.equal("answerMode" in input, false);
   assert.equal(input.importance, 1);
   assert.equal(input.promptKey, questionPromptKey(input.prompt));
 });
@@ -123,35 +119,30 @@ test("planner admits every due and unanswered question scheduled for the local d
     scheduledBefore,
     desiredRetention: 0.9,
     candidates: [
-      candidate({ questionId: "due-1", answerMode: "exact" }),
-      candidate({ questionId: "due-2", answerMode: "exact" }),
+      candidate({ questionId: "due-1" }),
+      candidate({ questionId: "due-2" }),
       candidate({
         questionId: "later-today",
-        answerMode: "exact",
         dueAt: new Date(scheduledBefore.getTime() - 1),
       }),
       candidate({
         questionId: "tomorrow",
-        answerMode: "exact",
         dueAt: scheduledBefore,
       }),
       candidate({
         questionId: "new-1",
-        answerMode: "exact",
         lifecycle: "new",
         dueAt: null,
         retrievability: null,
       }),
       candidate({
         questionId: "new-2",
-        answerMode: "exact",
         lifecycle: "new",
         dueAt: null,
         retrievability: null,
       }),
       candidate({
         questionId: "interrupted-first-exposure",
-        answerMode: "exact",
         lifecycle: "learning",
         dueAt: null,
         retrievability: null,
@@ -193,7 +184,6 @@ test("planner preserves every scheduled due question", () => {
   const candidates = Array.from({ length: 12 }, (_, index) =>
     candidate({
       questionId: `due-${index}`,
-      answerMode: index % 3 === 0 ? "rubric" : "semantic",
       retrievability: 0.2 + index * 0.03,
     }),
   );
@@ -204,6 +194,7 @@ test("planner preserves every scheduled due question", () => {
     candidates,
   });
   assert.equal(plan.length, candidates.length);
+  assert.equal(plan.every((item) => item.estimatedSeconds === 60), true);
 });
 
 test("one retry is delayed unless another question intervenes", () => {
@@ -246,11 +237,6 @@ test("FSRS grows successful intervals and contracts after failure", () => {
     }) <= 1,
     true,
   );
-});
-
-test("exact answer normalization handles Unicode width and case", () => {
-  assert.equal(normalizeExactAnswer(" ＡＤＡＭＷ "), "adamw");
-  assert.equal(normalizeExactAnswer("勾配 降下"), "勾配 降下");
 });
 
 test("MCP tokens are high-entropy and hash deterministically", () => {

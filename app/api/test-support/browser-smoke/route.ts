@@ -70,7 +70,6 @@ export async function POST() {
         userId: user.id,
         questionId: prior.id,
         ...item,
-        answerMode: "exact",
       });
       results.push({ id: prior.id, status: "existing", lifecycle: "new" });
       continue;
@@ -78,7 +77,7 @@ export async function POST() {
     const created = await addQuestions({
       userId: user.id,
       idempotencyKey: `browser-smoke-${targetKey}-${Date.now()}`,
-      items: [{ ...item, answerMode: "exact" }],
+      items: [item],
     });
     results.push(...created.results);
   }

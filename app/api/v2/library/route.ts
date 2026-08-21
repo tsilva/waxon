@@ -3,7 +3,7 @@ import * as Sentry from "@sentry/nextjs";
 import { NextResponse } from "next/server";
 import { consumeUserRateLimit, readJsonBodyWithLimit } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
-import { asAnswerMode, isRecord, v2Error } from "@/app/lib/v2/http";
+import { isRecord, v2Error } from "@/app/lib/v2/http";
 import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 import {
   createDirectQuestion,
@@ -79,7 +79,6 @@ export async function POST(request: Request) {
           : randomUUID(),
       prompt,
       referenceAnswer,
-      answerMode: asAnswerMode(parsed.value.answerMode),
       importance:
         typeof parsed.value.importance === "number" ? parsed.value.importance : undefined,
     });
@@ -118,7 +117,6 @@ export async function PATCH(request: Request) {
           typeof parsed.value.referenceAnswer === "string"
             ? parsed.value.referenceAnswer
             : "",
-        answerMode: asAnswerMode(parsed.value.answerMode),
         importance:
           typeof parsed.value.importance === "number"
             ? parsed.value.importance

@@ -12,7 +12,7 @@ import {
   isBrowserSmokeQuestion,
 } from "@/app/lib/browserSmokeSupport";
 import { beginLlmTrace, finishLlmTrace } from "@/app/lib/llmTraceStore";
-import type { V2AnswerMode, V2Grade } from "./types";
+import type { V2Grade } from "./types";
 
 async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
   url: string,
@@ -104,7 +104,6 @@ export async function evaluateRecall(input: {
   prompt: string;
   referenceAnswer: string;
   answer: string;
-  answerMode: V2AnswerMode;
 }): Promise<{
   grade: V2Grade;
   feedback: string;
@@ -149,7 +148,7 @@ export async function evaluateRecall(input: {
       {
         role: "system",
         content:
-          "Evaluate free recall against the stored answer. Return JSON only with grade (again|hard|good|easy), feedback, expectedAnswer, coveredPoints, missingPoints, demonstratedGap, confidence. Use again for forgotten or substantially wrong, hard for fragile/partial recall, good for correct recall with minor omissions, easy only for complete effortless recall. Never reward fluent unsupported claims.",
+          "Evaluate free recall directly from the question, stored reference answer, and learner answer without classifying the question by answer mode. Treat paraphrases, synonymous wording, equivalent mathematical notation, and reordered explanations as correct when their meaning and required content match. Infer any required points from the question and reference answer. Require literal characters only when the question explicitly asks for exact syntax, spelling, quotation, or an identifier whose characters determine correctness. Return JSON only with grade (again|hard|good|easy), feedback, expectedAnswer, coveredPoints, missingPoints, demonstratedGap, confidence. Use again for forgotten or substantially wrong, hard for fragile or partial recall, good for correct recall with minor omissions, and easy only for complete effortless recall. Never reward fluent unsupported claims.",
       },
       {
         role: "user",
