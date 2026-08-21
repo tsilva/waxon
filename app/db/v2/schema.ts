@@ -45,7 +45,9 @@ export const questionLifecycle = waxonV2.enum("question_lifecycle", [
   "archived",
   "trash",
 ]);
-export const answerMode = waxonV2.enum("answer_mode", [
+// Transitional storage only. Remove this enum and column after the generic
+// evaluation release is serving; production migrations run before deployment.
+export const legacyEvaluationKindEnum = waxonV2.enum("answer_mode", [
   "exact",
   "semantic",
   "rubric",
@@ -224,7 +226,9 @@ export const questionVersions = waxonV2.table(
     prompt: text("prompt").notNull(),
     referenceAnswer: text("reference_answer").notNull(),
     displayAnswer: text("display_answer").notNull(),
-    mode: answerMode("answer_mode").notNull(),
+    legacyEvaluationKind: legacyEvaluationKindEnum("answer_mode")
+      .notNull()
+      .default("semantic"),
     createdAt: createdAt(),
   },
   (table) => [

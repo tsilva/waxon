@@ -205,9 +205,6 @@ const handler = createMcpHandler(
               z.object({
                 prompt: z.string().max(16_384),
                 referenceAnswer: z.string().max(65_536),
-                answerMode: z
-                  .enum(["exact", "semantic", "rubric"])
-                  .default("semantic"),
                 importance: z.number().min(0.1).max(5).default(1),
               }),
             )

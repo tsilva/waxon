@@ -33,8 +33,8 @@ test(
       await pool.query(
         `INSERT INTO waxon_v2.question_versions
            (user_id, question_id, version, prompt, reference_answer,
-            display_answer, answer_mode)
-         VALUES ($1, $2, 1, $3, $4, $4, 'semantic')`,
+            display_answer)
+         VALUES ($1, $2, 1, $3, $4, $4)`,
         [userId, questionId, prompt, answer],
       );
       await pool.query(

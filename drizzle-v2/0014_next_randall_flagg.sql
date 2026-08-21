@@ -1,0 +1,1 @@
+ALTER TABLE "waxon_v2"."question_versions" ALTER COLUMN "answer_mode" SET DEFAULT 'semantic';

@@ -1,4 +1,3 @@
-export type V2AnswerMode = "exact" | "semantic" | "rubric";
 export type V2Grade = "again" | "hard" | "good" | "easy";
 export type V2Lifecycle =
   | "new"
@@ -14,7 +13,6 @@ export type V2Question = {
   versionId: string;
   prompt: string;
   referenceAnswer: string;
-  answerMode: V2AnswerMode;
   lifecycle: V2Lifecycle;
   importance: number;
   dueAt: string | null;
@@ -35,7 +33,6 @@ export type V2ReviewItem = {
   questionId: string;
   questionVersionId: string;
   prompt: string;
-  answerMode: V2AnswerMode;
   position: number;
   total: number;
   estimatedMinutes: number;

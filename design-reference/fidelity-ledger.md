@@ -6,6 +6,7 @@ Reference image: `design-reference/waxon-approved-ui.png`
 
 - August 20, 2026 Lean Core: authenticated navigation remains `Review` / `Library`, with `Admin` visible only to operators.
 - Library is now one warm editorial question-bank surface: count, add, search, lifecycle filters, restrained row actions, and agent access. Source capture, concept organization, generation, maps, saved views, and provenance are intentionally absent.
+- Library question creation now asks only for the recall prompt, reference answer, and importance; answer-mode classification is intentionally absent.
 - Review now uses the approved question → compact composer → `Previous answers` list in both its static loading and hydrated states. The centered recall card and sticky daily-plan header are intentionally absent; capacity warnings, feedback, grade correction, and delayed retry remain.
 - Review question prompts now include two restrained icon controls above the reading text: flag for later and move to the next queued question. Their loading placeholders preserve the approved question/composer rhythm.
 - The approved reference’s typography, warm paper palette, subdued borders, header geometry, focused composer, and desktop/mobile rhythm remain authoritative. Its sample question and due count are not fixed requirements.

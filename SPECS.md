@@ -20,6 +20,7 @@ Waxon is a multi-user question bank and adaptive review system. Learners and the
 - Every active question must remain eligible for future Review according to the learner's past performance; paused, archived, and logically removed questions must not create review work.
 - Every active never-answered question must remain in Review until its first answer.
 - Every automated evaluation must provide enough corrective feedback to understand the expected answer and demonstrated gap, and the learner must be able to correct a wrong evaluation without corrupting scheduling history.
+- Waxon must evaluate all learner answers through one generic free-text evaluation path without requiring learners or question authors to classify questions by answer mode.
 - Review must lengthen intervals after repeated correct answers and shorten them after failed or weak answers.
 - A failed first presentation must receive exactly one delayed retry in the same resumable session; it must follow another question or wait at least ten minutes when no other question is eligible, and a failed retry must not recurse into same-day drilling.
 - Review must show every question scheduled for the learner's current local day without applying daily item, first-exposure, or time-capacity limits, prioritizing retention-due questions before first exposures and then forgetting risk, uncertainty, importance, and incomplete understanding.

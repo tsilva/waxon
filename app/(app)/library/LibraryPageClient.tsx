@@ -17,7 +17,6 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import type {
-  V2AnswerMode,
   V2LibraryResponse,
   V2Lifecycle,
   V2Question,
@@ -66,7 +65,6 @@ function QuestionDialog({
     const payload = {
       prompt: String(form.get("prompt") ?? ""),
       referenceAnswer: String(form.get("referenceAnswer") ?? ""),
-      answerMode: String(form.get("answerMode") ?? "semantic") as V2AnswerMode,
       importance: Number(form.get("importance") ?? 1),
     };
     try {
@@ -134,20 +132,10 @@ function QuestionDialog({
               rows={7}
             />
           </label>
-          <div className="lean-question-options">
-            <label>
-              Answer style
-              <select defaultValue={question?.answerMode ?? "semantic"} name="answerMode">
-                <option value="semantic">Explain in your own words</option>
-                <option value="rubric">Cover several required points</option>
-                <option value="exact">Match an exact form</option>
-              </select>
-            </label>
-            <label>
-              Importance
-              <input defaultValue={question?.importance ?? 1} max={5} min={0.1} name="importance" step={0.1} type="number" />
-            </label>
-          </div>
+          <label>
+            Importance
+            <input defaultValue={question?.importance ?? 1} max={5} min={0.1} name="importance" step={0.1} type="number" />
+          </label>
           {question ? <p className="lean-edit-warning">Editing preserves attempts but restarts scheduling so old mastery is not applied to the revised prompt.</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
           <div className="v2-dialog-actions">

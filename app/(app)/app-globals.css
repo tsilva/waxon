@@ -311,12 +311,6 @@
   margin-top: 9px;
 }
 
-.lean-question-options {
-  display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(120px, 1fr);
-  gap: 14px;
-}
-
 .lean-edit-warning,
 .lean-token-status {
   margin: 0;
@@ -394,16 +388,11 @@
     padding-inline: 16px;
   }
 
-  .lean-library-heading > div:last-child,
-  .lean-question-options {
+  .lean-library-heading > div:last-child {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .lean-library-heading > div:last-child {
-    display: grid;
-  }
-
-  .lean-question-options {
     display: grid;
   }
 }

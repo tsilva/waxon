@@ -35,7 +35,6 @@ import {
   type NormalizedQuestionInput,
 } from "./questionInput";
 import { rankQuestionIdsLexically } from "./questionSearch";
-import { normalizeExactAnswer } from "./questionQuality";
 import {
   applyFsrsGrade,
   memoryRetrievability,
@@ -43,7 +42,6 @@ import {
   type StoredMemoryState,
 } from "./scheduler";
 import type {
-  V2AnswerMode,
   V2Evaluation,
   V2Grade,
   V2LibraryResponse,
@@ -339,7 +337,6 @@ export async function addQuestions(input: {
         prompt: item.prompt,
         referenceAnswer: item.referenceAnswer,
         displayAnswer: item.referenceAnswer.slice(0, 8_000),
-        mode: item.answerMode,
       });
       const created: AddQuestionResult = {
         id: question.id,
@@ -383,7 +380,6 @@ export async function createDirectQuestion(input: {
   idempotencyKey: string;
   prompt: string;
   referenceAnswer: string;
-  answerMode: V2AnswerMode;
   importance?: number;
 }): Promise<{
   questionId: string;
@@ -414,7 +410,6 @@ async function currentQuestionVersion(userId: string, questionId: string) {
       version: questionVersions.version,
       prompt: questionVersions.prompt,
       referenceAnswer: questionVersions.referenceAnswer,
-      mode: questionVersions.mode,
     })
     .from(questions)
     .innerJoin(
@@ -454,7 +449,6 @@ export async function listLibrary(input: {
     version_id: string;
     prompt: string;
     reference_answer: string;
-    answer_mode: V2AnswerMode;
     lifecycle: string;
     importance: number | string;
     due_at: Date | null;
@@ -471,7 +465,7 @@ export async function listLibrary(input: {
     updated_at: Date;
   }>(
     `SELECT q.id, qv.id AS version_id, qv.prompt, qv.reference_answer,
-            qv.answer_mode, q.lifecycle::text, q.importance, ms.due_at,
+            q.lifecycle::text, q.importance, ms.due_at,
             ms.stability, ms.difficulty, ms.last_review_at, ms.elapsed_days,
             ms.scheduled_days, ms.reps, ms.lapses, ms.state AS memory_state,
             ms.learning_steps, q.created_at, q.updated_at
@@ -519,7 +513,6 @@ export async function listLibrary(input: {
       versionId: row.version_id,
       prompt: row.prompt,
       referenceAnswer: row.reference_answer,
-      answerMode: row.answer_mode,
       lifecycle: row.lifecycle as V2Lifecycle,
       importance: Number(row.importance),
       dueAt: row.due_at?.toISOString() ?? null,
@@ -562,7 +555,6 @@ async function planCandidates(
       questionId: questions.id,
       questionVersionId: questionVersions.id,
       lifecycle: questions.lifecycle,
-      answerMode: questionVersions.mode,
       dueAt: memoryStates.dueAt,
       importance: questions.importance,
       createdAt: questions.createdAt,
@@ -625,7 +617,6 @@ async function planCandidates(
       questionId: row.questionId,
       questionVersionId: row.questionVersionId,
       lifecycle: row.lifecycle as V2Lifecycle,
-      answerMode: row.answerMode,
       dueAt: row.dueAt,
       retrievability: memory
         ? memoryRetrievability({
@@ -711,7 +702,6 @@ async function exposeNextItem(
       questionId: reviewSessionItems.questionId,
       questionVersionId: reviewSessionItems.questionVersionId,
       prompt: questionVersions.prompt,
-      answerMode: questionVersions.mode,
       position: reviewSessionItems.position,
       kind: reviewSessionItems.kind,
     };
@@ -824,7 +814,6 @@ async function exposeNextItem(
       questionId: row.questionId,
       questionVersionId: row.questionVersionId,
       prompt: row.prompt,
-      answerMode: row.answerMode,
       position: row.position,
       total: itemCount,
       estimatedMinutes: Math.max(1, Math.ceil((session?.estimatedSeconds ?? 60) / 60)),
@@ -1643,8 +1632,6 @@ export async function submitReviewAnswer(input: {
         questionId: reviewSessionItems.questionId,
         questionVersionId: reviewSessionItems.questionVersionId,
         state: reviewSessionItems.state,
-        referenceAnswer: questionVersions.referenceAnswer,
-        mode: questionVersions.mode,
       })
       .from(reviewSessionItems)
       .innerJoin(
@@ -1691,49 +1678,17 @@ export async function submitReviewAnswer(input: {
       .set({ state: "submitted", submittedAt: now })
       .where(eq(reviewSessionItems.id, item.id));
 
-    if (item.mode === "exact") {
-      const accepted = item.referenceAnswer
-        .split(/\n|\|/gu)
-        .map(normalizeExactAnswer)
-        .filter(Boolean);
-      const matched = accepted.includes(normalizeExactAnswer(input.answer));
-      const [evaluation] = await tx
-        .insert(evaluations)
-        .values({
-          userId: input.userId,
-          submissionId: submission.id,
-          status: "complete",
-          evaluator: "deterministic-exact",
-          proposedGrade: matched ? "easy" : "again",
-          feedback: matched ? "Correct." : "Your answer did not match the stored exact answer.",
-          expectedAnswer: item.referenceAnswer,
-          coveredPoints: matched ? [item.referenceAnswer] : [],
-          missingPoints: matched ? [] : [item.referenceAnswer],
-          demonstratedGap: matched ? null : "The exact form was not recalled.",
-          confidence: 1,
-          completedAt: now,
-        })
-        .returning({ id: evaluations.id });
-      await applyGradeInTransaction(tx, {
-        userId: input.userId,
-        submissionId: submission.id,
-        grade: matched ? "easy" : "again",
-        origin: "deterministic",
-        evaluationId: evaluation.id,
-      });
-    } else {
-      const [evaluation] = await tx
-        .insert(evaluations)
-        .values({ userId: input.userId, submissionId: submission.id, evaluator: "model" })
-        .returning({ id: evaluations.id });
-      await tx.insert(jobs).values({
-        userId: input.userId,
-        type: "evaluate_submission",
-        idempotencyKey: submission.id,
-        priority: 0,
-        payload: { submissionId: submission.id, evaluationId: evaluation.id },
-      });
-    }
+    const [evaluation] = await tx
+      .insert(evaluations)
+      .values({ userId: input.userId, submissionId: submission.id, evaluator: "model" })
+      .returning({ id: evaluations.id });
+    await tx.insert(jobs).values({
+      userId: input.userId,
+      type: "evaluate_submission",
+      idempotencyKey: submission.id,
+      priority: 0,
+      payload: { submissionId: submission.id, evaluationId: evaluation.id },
+    });
     return submission.id;
   });
   return await getEvaluationForSubmission(input.userId, submissionId);
@@ -1789,7 +1744,6 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
       answer: answerSubmissions.answer,
       prompt: questionVersions.prompt,
       referenceAnswer: questionVersions.referenceAnswer,
-      mode: questionVersions.mode,
     })
     .from(answerSubmissions)
     .innerJoin(
@@ -1811,7 +1765,6 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
       prompt: row.prompt,
       referenceAnswer: row.referenceAnswer,
       answer: row.answer,
-      answerMode: row.mode,
     });
     if (result.confidence < 0.55) {
       await db
@@ -2056,7 +2009,6 @@ export async function editQuestion(input: {
   questionId: string;
   prompt: string;
   referenceAnswer: string;
-  answerMode: V2AnswerMode;
   importance?: number;
 }): Promise<{ resetScheduling: true }> {
   const normalized = normalizeQuestionInput(input);
@@ -2091,7 +2043,6 @@ export async function editQuestion(input: {
         prompt: normalized.prompt,
         referenceAnswer: normalized.referenceAnswer,
         displayAnswer: normalized.referenceAnswer.slice(0, 8_000),
-        mode: normalized.answerMode,
       })
       .returning({ id: questionVersions.id });
     const lifecycle = ACTIVE_LIFECYCLES.includes(current.lifecycle as V2Lifecycle)
