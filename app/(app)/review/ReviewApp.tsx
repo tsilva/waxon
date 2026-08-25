@@ -32,6 +32,13 @@ type ReviewTurn = {
   evaluation: V2Evaluation;
 };
 
+const GRADE_DISPLAY: Record<V2Grade, { label: string; value: number }> = {
+  again: { label: "Again", value: 0 },
+  hard: { label: "Hard", value: 2 },
+  good: { label: "Good", value: 3 },
+  easy: { label: "Easy", value: 4 },
+};
+
 async function jsonRequest<T>(
   url: string,
   init?: RequestInit,
@@ -47,7 +54,7 @@ async function jsonRequest<T>(
 }
 
 function gradeLabel(grade: V2Grade | null): string {
-  return grade ? grade[0].toUpperCase() + grade.slice(1) : "Waiting";
+  return grade ? GRADE_DISPLAY[grade].label : "Waiting";
 }
 
 function gradeTone(evaluation: V2Evaluation): string {
@@ -78,7 +85,10 @@ function FeedbackRow({
   const evaluation = turn.evaluation;
   const isPending = evaluation.status === "pending";
   const grade = gradeLabel(evaluation.grade);
-  const scoreLabel = evaluation.status === "failed" ? "?" : grade.slice(0, 1);
+  const scoreLabel =
+    evaluation.status === "failed" || !evaluation.grade
+      ? "?"
+      : GRADE_DISPLAY[evaluation.grade].value;
 
   async function correct(grade: V2Grade) {
     setSavingGrade(grade);
@@ -97,7 +107,14 @@ function FeedbackRow({
         {isPending ? (
           <span className="pending-spinner" aria-label="Evaluation pending" />
         ) : (
-          <span className="previous-score-shell" aria-label={`Grade ${grade}`}>
+          <span
+            className="previous-score-shell"
+            aria-label={
+              evaluation.grade
+                ? `Grade ${grade} (${GRADE_DISPLAY[evaluation.grade].value})`
+                : `Grade ${grade}`
+            }
+          >
             <span className={`previous-score score-${gradeTone(evaluation)}`}>
               {scoreLabel}
             </span>
@@ -196,7 +213,7 @@ function FeedbackRow({
                         {savingGrade === nextGrade ? (
                           <LoaderCircle className="v2-spin" />
                         ) : (
-                          gradeLabel(nextGrade)
+                          `${gradeLabel(nextGrade)} (${GRADE_DISPLAY[nextGrade].value})`
                         )}
                       </button>
                     ),
