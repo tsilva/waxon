@@ -18,52 +18,63 @@ function recordingSpawn(statuses: number[] = []) {
   };
 }
 
-test("production builds migrate the database before compiling the app", () => {
-  const runner = recordingSpawn();
-
-  assert.equal(
-    runBuild({ environment: { VERCEL_ENV: "production" }, spawn: runner.spawn }),
-    0,
-  );
-  assert.deepEqual(runner.calls, [
-    { command: "pnpm", args: ["db:migrate"] },
-    { command: "pnpm", args: ["db:backfill-question-target-keys"] },
-    { command: "next", args: ["build"] },
-  ]);
-});
-
-test("preview and local builds do not mutate a database", () => {
-  for (const environment of [{ VERCEL_ENV: "preview" }, {}]) {
+test("Vercel preview and production builds prepare the database before compiling", () => {
+  for (const vercelEnvironment of ["preview", "production"]) {
     const runner = recordingSpawn();
 
-    assert.equal(runBuild({ environment, spawn: runner.spawn }), 0);
+    assert.equal(
+      runBuild({
+        environment: { VERCEL_ENV: vercelEnvironment },
+        spawn: runner.spawn,
+      }),
+      0,
+    );
     assert.deepEqual(runner.calls, [
+      { command: "pnpm", args: ["db:migrate"] },
+      { command: "pnpm", args: ["db:backfill-question-target-keys"] },
       { command: "next", args: ["build"] },
     ]);
   }
 });
 
-test("a failed production migration prevents an incompatible app build", () => {
-  const runner = recordingSpawn([1]);
+test("local builds do not mutate a database", () => {
+  const runner = recordingSpawn();
 
-  assert.equal(
-    runBuild({ environment: { VERCEL_ENV: "production" }, spawn: runner.spawn }),
-    1,
-  );
-  assert.deepEqual(runner.calls, [
-    { command: "pnpm", args: ["db:migrate"] },
-  ]);
+  assert.equal(runBuild({ environment: {}, spawn: runner.spawn }), 0);
+  assert.deepEqual(runner.calls, [{ command: "next", args: ["build"] }]);
+});
+
+test("a failed Vercel migration prevents an incompatible app build", () => {
+  for (const vercelEnvironment of ["preview", "production"]) {
+    const runner = recordingSpawn([1]);
+
+    assert.equal(
+      runBuild({
+        environment: { VERCEL_ENV: vercelEnvironment },
+        spawn: runner.spawn,
+      }),
+      1,
+    );
+    assert.deepEqual(runner.calls, [
+      { command: "pnpm", args: ["db:migrate"] },
+    ]);
+  }
 });
 
 test("a failed target-key repair prevents an incompatible app build", () => {
-  const runner = recordingSpawn([0, 1]);
+  for (const vercelEnvironment of ["preview", "production"]) {
+    const runner = recordingSpawn([0, 1]);
 
-  assert.equal(
-    runBuild({ environment: { VERCEL_ENV: "production" }, spawn: runner.spawn }),
-    1,
-  );
-  assert.deepEqual(runner.calls, [
-    { command: "pnpm", args: ["db:migrate"] },
-    { command: "pnpm", args: ["db:backfill-question-target-keys"] },
-  ]);
+    assert.equal(
+      runBuild({
+        environment: { VERCEL_ENV: vercelEnvironment },
+        spawn: runner.spawn,
+      }),
+      1,
+    );
+    assert.deepEqual(runner.calls, [
+      { command: "pnpm", args: ["db:migrate"] },
+      { command: "pnpm", args: ["db:backfill-question-target-keys"] },
+    ]);
+  }
 });

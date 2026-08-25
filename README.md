@@ -26,7 +26,7 @@ keyenv run -- pnpm db:migrate
 keyenv run -- pnpm dev --port auto
 ```
 
-Secrets declared in `.keyenv.toml`—including Neon, OpenRouter, Clerk, and Sentry credentials—remain in macOS Keychain and are injected by `keyenv run -- ...`. Do not put them in `.env` files.
+Secrets declared in `.keyenv.toml`—including Neon, OpenRouter, Clerk, and Sentry credentials—remain in macOS Keychain and are injected by `keyenv run -- ...`. Do not put them in `.env` files. Application traffic uses Neon's pooled `DATABASE_URL`; migrations and maintenance scripts use `DATABASE_URL_UNPOOLED` when available.
 
 Optional non-secret model overrides may remain in `.env.local`:
 
@@ -59,6 +59,7 @@ pnpm lint             # run ESLint
 pnpm typecheck        # check TypeScript
 pnpm build            # create a production build
 pnpm db:migrate       # apply normal Stage One migrations
+pnpm db:compare       # compare exact row counts, foreign keys, and sequences
 pnpm db:studio        # open Drizzle Studio
 pnpm lean:preflight   # print retained counts and the blob cleanup inventory
 pnpm question-search:backfill  # dry-run the repairable embedding backfill

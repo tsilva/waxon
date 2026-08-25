@@ -15,7 +15,11 @@ export function runBuild({
   environment = process.env,
   spawn = spawnSync,
 } = {}) {
-  if (environment.VERCEL_ENV === "production") {
+  const shouldPrepareDatabase =
+    environment.VERCEL_ENV === "preview" ||
+    environment.VERCEL_ENV === "production";
+
+  if (shouldPrepareDatabase) {
     const migrationStatus = runCommand(
       spawn,
       environment,

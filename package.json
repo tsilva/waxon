@@ -11,6 +11,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:backfill-question-target-keys": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/question-target-key-backfill.mts",
+    "db:compare": "node scripts/compare-postgres-databases.mjs",
+    "clerk:migrate-users": "node scripts/migrate-clerk-users.mjs",
     "db:reset": "node scripts/reset-v2.mjs",
     "db:studio": "drizzle-kit studio",
     "lean:preflight": "node --experimental-strip-types scripts/lean-core-preflight.mts",
