@@ -4,7 +4,7 @@ import * as schema from "./schema.ts";
 
 function createV2Client() {
   const connectionString =
-    process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
+    process.env.DATABASE_URL ?? process.env.DATABASE_URL_UNPOOLED;
 
   if (!connectionString) {
     throw new Error("DATABASE_URL or DATABASE_URL_UNPOOLED is required");

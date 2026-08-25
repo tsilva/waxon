@@ -3,6 +3,7 @@ import * as Sentry from "@sentry/nextjs";
 import { eq } from "drizzle-orm";
 import { getV2Db } from "@/app/db/v2/client";
 import { learnerSettings, users } from "@/app/db/v2/schema";
+import { appUserIdForClerkUser } from "@/app/lib/clerkIdentity";
 import { isLocalTestAuthEnabled, localTestUser } from "@/app/lib/localTestAuth";
 import type { UserProfile } from "@/app/lib/userProfile";
 
@@ -25,10 +26,6 @@ function normalizeDisplayName(input: {
     input.email.split("@")[0]?.trim();
 
   return displayName || "Waxon user";
-}
-
-function appUserIdForClerkUser(clerkUserId: string): string {
-  return `clerk:${clerkUserId}`;
 }
 
 function setTraceIdentity(input: {
@@ -127,7 +124,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
   });
   const now = new Date();
 
-  const userId = appUserIdForClerkUser(clerkUserId);
+  const userId = appUserIdForClerkUser(clerkUser);
   setTraceIdentity({ userId, email, displayName });
 
   const [row] = await db

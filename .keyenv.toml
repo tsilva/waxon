@@ -10,6 +10,10 @@ required = true
 account = "waxon/DATABASE_URL"
 required = true
 
+[secrets.DATABASE_URL_UNPOOLED]
+account = "waxon/DATABASE_URL_UNPOOLED"
+required = true
+
 [secrets.OPENROUTER_API_KEY]
 account = "waxon/OPENROUTER_API_KEY"
 required = true
