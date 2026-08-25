@@ -66,6 +66,7 @@ export type V2Evaluation = {
   evaluationId: string | null;
   status: "pending" | "complete" | "failed";
   grade: V2Grade | null;
+  nextDueAt: string | null;
   feedback: string | null;
   expectedAnswer: string | null;
   coveredPoints: string[];
