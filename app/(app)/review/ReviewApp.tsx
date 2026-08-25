@@ -57,6 +57,52 @@ function gradeLabel(grade: V2Grade | null): string {
   return grade ? GRADE_DISPLAY[grade].label : "Waiting";
 }
 
+function formatPreviousAnswerSchedule(
+  nextDueAt: string | null,
+  now = Date.now(),
+): { dateTime: string; exact: string; relative: string } | null {
+  if (!nextDueAt) return null;
+  const dueAt = new Date(nextDueAt);
+  const dueTime = dueAt.getTime();
+  if (!Number.isFinite(dueTime)) return null;
+
+  const exact = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(dueAt);
+  const millisecondsUntilDue = dueTime - now;
+  if (millisecondsUntilDue <= 0) {
+    return { dateTime: dueAt.toISOString(), exact, relative: "Due now" };
+  }
+
+  const totalMinutes = Math.max(1, Math.ceil(millisecondsUntilDue / 60_000));
+  if (totalMinutes < 60) {
+    return {
+      dateTime: dueAt.toISOString(),
+      exact,
+      relative: `Due in ${totalMinutes}m`,
+    };
+  }
+
+  const totalHours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+  if (totalHours < 24) {
+    return {
+      dateTime: dueAt.toISOString(),
+      exact,
+      relative: `Due in ${totalHours}h${remainingMinutes ? ` ${remainingMinutes}m` : ""}`,
+    };
+  }
+
+  const days = Math.floor(totalHours / 24);
+  const remainingHours = totalHours % 24;
+  return {
+    dateTime: dueAt.toISOString(),
+    exact,
+    relative: `Due in ${days}d${remainingHours ? ` ${remainingHours}h` : ""}`,
+  };
+}
+
 function gradeTone(evaluation: V2Evaluation): string {
   if (evaluation.status === "failed" || evaluation.grade === "again") {
     return "low";
@@ -89,6 +135,7 @@ function FeedbackRow({
     evaluation.status === "failed" || !evaluation.grade
       ? "?"
       : GRADE_DISPLAY[evaluation.grade].value;
+  const schedule = formatPreviousAnswerSchedule(evaluation.nextDueAt);
 
   async function correct(grade: V2Grade) {
     setSavingGrade(grade);
@@ -237,6 +284,18 @@ function FeedbackRow({
               <ChevronDown className="previous-collapse-icon" aria-hidden="true" />
             </button>
           </span>
+          {schedule ? (
+            <span className="previous-secondary-meta">
+              <time
+                aria-label={`Next review scheduled for ${schedule.exact}`}
+                className="previous-schedule-label"
+                dateTime={schedule.dateTime}
+                title={schedule.exact}
+              >
+                {schedule.relative}
+              </time>
+            </span>
+          ) : null}
         </span>
       </div>
     </li>

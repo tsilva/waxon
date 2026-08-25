@@ -1712,16 +1712,40 @@ export async function getEvaluationForSubmission(
     .where(and(eq(gradeEvents.userId, userId), eq(gradeEvents.submissionId, submissionId)))
     .orderBy(desc(gradeEvents.createdAt), desc(gradeEvents.id))
     .limit(1);
+  const grade = effectiveGrade?.value ?? row.proposedGrade;
+  const status =
+    row.status === "complete" || effectiveGrade
+      ? "complete"
+      : row.status === "failed"
+        ? "failed"
+        : "pending";
+  let nextDueAt: string | null = null;
+  if (status === "complete" && grade) {
+    const [schedule] = await db
+      .select({ dueAt: memoryStates.dueAt })
+      .from(answerSubmissions)
+      .leftJoin(
+        memoryStates,
+        and(
+          eq(memoryStates.userId, answerSubmissions.userId),
+          eq(memoryStates.questionId, answerSubmissions.questionId),
+        ),
+      )
+      .where(
+        and(
+          eq(answerSubmissions.userId, userId),
+          eq(answerSubmissions.id, submissionId),
+        ),
+      )
+      .limit(1);
+    nextDueAt = schedule?.dueAt?.toISOString() ?? null;
+  }
   return {
     submissionId,
     evaluationId: row.id,
-    status:
-      row.status === "complete" || effectiveGrade
-        ? "complete"
-        : row.status === "failed"
-          ? "failed"
-          : "pending",
-    grade: effectiveGrade?.value ?? row.proposedGrade,
+    status,
+    grade,
+    nextDueAt,
     feedback: row.feedback,
     expectedAnswer: row.expectedAnswer,
     coveredPoints: row.coveredPoints,
