@@ -19,7 +19,13 @@ export type SemanticValidationController = {
   validateQuestion(): Promise<{ passes: boolean; reasons: string[] }>;
 };
 
+export type ApplicationContractClock = {
+  now(): Date;
+  set(value: Date | string): void;
+};
+
 export type ApplicationContractHarness = {
+  clock: ApplicationContractClock;
   semanticValidation: SemanticValidationController;
   provisionLearner(label: string): Promise<{
     id: string;
@@ -54,6 +60,13 @@ export async function withApplicationContract(
   ]);
   const { pool } = getV2Client();
   const createdLearnerIds = new Set<string>();
+  let currentTime = new Date("2030-08-20T10:00:00.000Z");
+  const clock: ApplicationContractClock = {
+    now: () => new Date(currentTime),
+    set(value) {
+      currentTime = new Date(value);
+    },
+  };
   let semanticValidationOutcome: SemanticValidationOutcome = "pass";
   const semanticValidation: SemanticValidationController = {
     setOutcome(outcome) {
@@ -71,7 +84,7 @@ export async function withApplicationContract(
     },
   };
   const application = createWaxonApplication({
-    clock: { now: () => new Date("2030-08-20T10:00:00.000Z") },
+    clock,
     evaluateAnswer: async ({ referenceAnswer }) => ({
       grade: "good",
       feedback: "The deterministic evaluator accepted the answer.",
@@ -90,6 +103,7 @@ export async function withApplicationContract(
 
   try {
     await run({
+      clock,
       semanticValidation,
       async provisionLearner(label) {
         const id = `application-contract-${randomUUID()}`;

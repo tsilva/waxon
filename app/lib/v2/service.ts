@@ -50,6 +50,7 @@ import type {
   V2Grade,
   V2LibraryResponse,
   V2Lifecycle,
+  V2QuestionLifecycle,
   V2Question,
   V2ReviewItem,
   V2ReviewSessionResponse,
@@ -80,8 +81,15 @@ type V2Tx = Parameters<
 export type AddQuestionResult = {
   id: string;
   status: "created" | "existing";
-  lifecycle: V2Lifecycle;
+  lifecycle: V2QuestionLifecycle;
 };
+
+function questionLifecycle(value: string): V2QuestionLifecycle {
+  if (value === "active" || ACTIVE_LIFECYCLES.includes(value as V2Lifecycle)) {
+    return "active";
+  }
+  return value === "flagged" ? "flagged" : "archived";
+}
 
 type QuestionValidationInput = {
   prompt: string;
@@ -278,11 +286,18 @@ export async function addQuestions(
     key,
     requestHash,
   );
-  if (prior) return prior;
+  if (prior) {
+    return {
+      results: prior.results.map((result) => ({
+        ...result,
+        lifecycle: questionLifecycle(result.lifecycle),
+      })),
+    };
+  }
 
   return await getV2Db().transaction(async (tx) => {
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`question-add:${input.userId}`}))`,
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
     );
     const [receipt] = await tx
       .select({
@@ -302,7 +317,13 @@ export async function addQuestions(
       if (receipt.requestHash !== requestHash) {
         throw new Error("This idempotency key was already used for different input.");
       }
-      return receipt.response as { results: AddQuestionResult[] };
+      const response = receipt.response as { results: AddQuestionResult[] };
+      return {
+        results: response.results.map((result) => ({
+          ...result,
+          lifecycle: questionLifecycle(result.lifecycle),
+        })),
+      };
     }
 
     const requestedPromptKeys = [...new Set(items.map((item) => item.promptKey))];
@@ -328,9 +349,17 @@ export async function addQuestions(
           inArray(questions.targetKey, requestedPromptKeys),
         ),
       );
-    const byPromptKey = new Map(
-      existing.map((row) => [row.targetKey, row] as const),
-    );
+    const byPromptKey = new Map<string, (typeof existing)[number]>();
+    for (const candidate of existing) {
+      const retained = byPromptKey.get(candidate.targetKey);
+      if (
+        !retained ||
+        (ACTIVE_LIFECYCLES.includes(candidate.lifecycle as V2Lifecycle) &&
+          !ACTIVE_LIFECYCLES.includes(retained.lifecycle as V2Lifecycle))
+      ) {
+        byPromptKey.set(candidate.targetKey, candidate);
+      }
+    }
     const [{ questionCount }] = await tx
       .select({ questionCount: count() })
       .from(questions)
@@ -351,15 +380,13 @@ export async function addQuestions(
       if (duplicate) {
         if (duplicate.referenceAnswer.trim() !== item.referenceAnswer) {
           throw new Error(
-            `“${item.prompt.slice(0, 120)}” already exists with a different reference answer. Edit the existing question instead.`,
+            `“${item.prompt.slice(0, 120)}” already exists with a different Answer Standard. Replace the existing Question instead.`,
           );
         }
         results.push({
           id: duplicate.id,
           status: "existing",
-          lifecycle: ALL_LIFECYCLES.includes(duplicate.lifecycle as V2Lifecycle)
-            ? (duplicate.lifecycle as V2Lifecycle)
-            : "paused",
+          lifecycle: questionLifecycle(duplicate.lifecycle),
         });
         continue;
       }
@@ -383,7 +410,7 @@ export async function addQuestions(
       const created: AddQuestionResult = {
         id: question.id,
         status: "created",
-        lifecycle: "new",
+        lifecycle: "active",
       };
       results.push(created);
       createdQuestionIds.push(question.id);
@@ -428,7 +455,7 @@ export async function createDirectQuestion(
   dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
 ): Promise<{
   questionId: string;
-  lifecycle: V2Lifecycle;
+  lifecycle: V2QuestionLifecycle;
   status: "created" | "existing";
 }> {
   const { results } = await addQuestions({
@@ -444,36 +471,10 @@ export async function createDirectQuestion(
   };
 }
 
-async function currentQuestionVersion(userId: string, questionId: string) {
-  const [row] = await getV2Db()
-    .select({
-      questionId: questions.id,
-      lifecycle: questions.lifecycle,
-      priorLifecycle: questions.priorLifecycle,
-      importance: questions.importance,
-      versionId: questionVersions.id,
-      version: questionVersions.version,
-      prompt: questionVersions.prompt,
-      referenceAnswer: questionVersions.referenceAnswer,
-    })
-    .from(questions)
-    .innerJoin(
-      questionVersions,
-      and(
-        eq(questionVersions.userId, questions.userId),
-        eq(questionVersions.questionId, questions.id),
-        eq(questionVersions.isCurrent, true),
-      ),
-    )
-    .where(and(eq(questions.userId, userId), eq(questions.id, questionId)))
-    .limit(1);
-  return row ?? null;
-}
-
 export async function listLibrary(input: {
   userId: string;
   search?: string;
-  lifecycle?: V2Lifecycle | "all";
+  lifecycle?: V2QuestionLifecycle | "all";
   limit?: number;
 }, now = defaultV2ServiceDependencies.now()): Promise<V2LibraryResponse> {
   const limit = Math.max(1, Math.min(QUESTION_PAGE_LIMIT, input.limit ?? 100));
@@ -520,7 +521,12 @@ export async function listLibrary(input: {
        LEFT JOIN waxon_v2.memory_states ms
          ON ms.user_id = q.user_id AND ms.question_id = q.id
       WHERE q.user_id = $1
-        AND ($2::text IS NULL OR q.lifecycle::text = $2)
+        AND (
+          $2::text IS NULL
+          OR ($2 = 'active' AND q.lifecycle::text IN ('new','learning','review'))
+          OR ($2 = 'flagged' AND q.lifecycle::text = 'flagged')
+          OR ($2 = 'archived' AND q.lifecycle::text IN ('paused','archived','trash'))
+        )
         AND ($3 = '' OR q.id = ANY($5::uuid[]))
         AND q.lifecycle::text IN ('new','learning','review','flagged','paused','archived','trash')
       ORDER BY CASE WHEN $3 <> '' THEN array_position($5::uuid[], q.id) END,
@@ -558,7 +564,7 @@ export async function listLibrary(input: {
       versionId: row.version_id,
       prompt: row.prompt,
       referenceAnswer: row.reference_answer,
-      lifecycle: row.lifecycle as V2Lifecycle,
+      lifecycle: questionLifecycle(row.lifecycle),
       importance: Number(row.importance),
       dueAt: row.due_at?.toISOString() ?? null,
       retrievability: memory
@@ -580,15 +586,20 @@ export async function listLibrary(input: {
       GROUP BY lifecycle`,
     [input.userId],
   );
-  const counts = Object.fromEntries(
-    ALL_LIFECYCLES.map((value) => [value, 0]),
-  ) as Record<V2Lifecycle, number>;
+  const counts: Record<V2QuestionLifecycle, number> = {
+    active: 0,
+    flagged: 0,
+    archived: 0,
+  };
   for (const row of countRows.rows) {
     if (ALL_LIFECYCLES.includes(row.lifecycle as V2Lifecycle)) {
-      counts[row.lifecycle as V2Lifecycle] = Number(row.count);
+      counts[questionLifecycle(row.lifecycle)] += Number(row.count);
     }
   }
-  return { questions: questionsOut, counts, waitingNew: counts.new };
+  const waitingNew = Number(
+    countRows.rows.find((row) => row.lifecycle === "new")?.count ?? 0,
+  );
+  return { questions: questionsOut, counts, waitingNew };
 }
 
 async function planCandidates(
@@ -1122,6 +1133,11 @@ export async function actOnReviewItem(input: {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`review-item:${input.userId}`}))`,
     );
+    if (input.action === "flag") {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
+      );
+    }
     const [item] = await tx
       .select()
       .from(reviewSessionItems)
@@ -2035,51 +2051,144 @@ export async function applyLearnerGrade(input: {
   return await getEvaluationForSubmission(input.userId, input.submissionId);
 }
 
+export async function getQuestionLearningEvidence(input: {
+  userId: string;
+  questionId: string;
+}): Promise<{
+  learnerAnswers: number;
+  evaluations: number;
+  gradeEvents: number;
+  dueAt: string | null;
+}> {
+  const [row] = await getV2Client().pool
+    .query<{
+      learner_answers: string;
+      evaluations: string;
+      grade_events: string;
+      due_at: Date | null;
+    }>(
+      `SELECT
+         (SELECT count(*)::text
+            FROM waxon_v2.answer_submissions submission
+           WHERE submission.user_id = question.user_id
+             AND submission.question_id = question.id) AS learner_answers,
+         (SELECT count(*)::text
+            FROM waxon_v2.evaluations evaluation
+            JOIN waxon_v2.answer_submissions submission
+              ON submission.user_id = evaluation.user_id
+             AND submission.id = evaluation.submission_id
+           WHERE submission.user_id = question.user_id
+             AND submission.question_id = question.id) AS evaluations,
+         (SELECT count(*)::text
+            FROM waxon_v2.grade_events event
+            JOIN waxon_v2.answer_submissions submission
+              ON submission.user_id = event.user_id
+             AND submission.id = event.submission_id
+           WHERE submission.user_id = question.user_id
+             AND submission.question_id = question.id) AS grade_events,
+         memory.due_at
+       FROM waxon_v2.questions question
+       LEFT JOIN waxon_v2.memory_states memory
+         ON memory.user_id = question.user_id
+        AND memory.question_id = question.id
+      WHERE question.user_id = $1 AND question.id = $2
+      LIMIT 1`,
+      [input.userId, input.questionId],
+    )
+    .then((result) => result.rows);
+  if (!row) throw new Error("Question not found.");
+  return {
+    learnerAnswers: Number(row.learner_answers),
+    evaluations: Number(row.evaluations),
+    gradeEvents: Number(row.grade_events),
+    dueAt: row.due_at?.toISOString() ?? null,
+  };
+}
+
 export async function mutateQuestionLifecycle(input: {
   userId: string;
   questionId: string;
-  action: "pause" | "archive" | "trash" | "restore";
+  action: "archive" | "restore";
 }, dependencies: V2ServiceDependencies = defaultV2ServiceDependencies): Promise<void> {
   const db = getV2Db();
   const now = dependencies.now();
   await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
+    );
     const [question] = await tx
       .select()
       .from(questions)
       .where(and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)))
       .limit(1);
     if (!question) throw new Error("Question not found.");
-    const previous = ALL_LIFECYCLES.includes(question.lifecycle as V2Lifecycle)
-      ? (question.lifecycle as V2Lifecycle)
-      : "paused";
-    const restored =
-      question.priorLifecycle && ACTIVE_LIFECYCLES.includes(question.priorLifecycle as V2Lifecycle)
-        ? (question.priorLifecycle as V2Lifecycle)
-        : "new";
+    if (
+      input.action === "restore" &&
+      !ACTIVE_LIFECYCLES.includes(question.lifecycle as V2Lifecycle)
+    ) {
+      const [duplicate] = await tx
+        .select({ id: questions.id })
+        .from(questions)
+        .where(
+          and(
+            eq(questions.userId, input.userId),
+            eq(questions.targetKey, question.targetKey),
+            ne(questions.id, question.id),
+            inArray(questions.lifecycle, ACTIVE_LIFECYCLES),
+          ),
+        )
+        .limit(1);
+      if (duplicate) {
+        throw new Error("Another Active Question already uses this prompt.");
+      }
+    }
+    let restoredLifecycle: V2Lifecycle = "new";
+    if (input.action === "restore") {
+      const currentLifecycle = question.lifecycle as V2Lifecycle;
+      const priorLifecycle = question.priorLifecycle as V2Lifecycle | null;
+      if (ACTIVE_LIFECYCLES.includes(currentLifecycle)) {
+        restoredLifecycle = currentLifecycle;
+      } else if (priorLifecycle && ACTIVE_LIFECYCLES.includes(priorLifecycle)) {
+        restoredLifecycle = priorLifecycle;
+      } else {
+        const [memory] = await tx
+          .select({ questionId: memoryStates.questionId })
+          .from(memoryStates)
+          .where(
+            and(
+              eq(memoryStates.userId, input.userId),
+              eq(memoryStates.questionId, input.questionId),
+            ),
+          )
+          .limit(1);
+        restoredLifecycle = memory ? "review" : "new";
+      }
+    }
     const next: V2Lifecycle =
-      input.action === "pause"
-        ? "paused"
-        : input.action === "archive"
-          ? "archived"
-          : input.action === "trash"
-            ? "trash"
-            : restored;
+      input.action === "archive" ? "archived" : restoredLifecycle;
     await tx
       .update(questions)
       .set({
         lifecycle: next,
-        priorLifecycle: input.action === "restore" ? null : previous,
+        priorLifecycle:
+          input.action === "restore"
+            ? null
+            : ALL_LIFECYCLES.includes(question.lifecycle as V2Lifecycle)
+              ? (question.lifecycle as V2Lifecycle)
+              : null,
         suspensionReason: null,
-        deletedAt: input.action === "trash" ? now : null,
+        deletedAt: null,
         updatedAt: now,
       })
-      .where(eq(questions.id, input.questionId));
-    if (input.action !== "restore") {
+      .where(
+        and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)),
+      );
+    if (input.action === "archive") {
       await tx
         .update(retryObligations)
         .set({
           status: "waived",
-          reason: `Learner requested ${input.action}.`,
+          reason: "Learner archived the Question.",
           updatedAt: now,
         })
         .where(
@@ -2099,41 +2208,61 @@ export async function mutateQuestionLifecycle(input: {
             inArray(reviewSessionItems.state, ["queued", "exposed"]),
           ),
         );
-    } else {
-      await tx
-        .update(memoryStates)
-        .set({ dueAt: now, updatedAt: now })
-        .where(
-          and(
-            eq(memoryStates.userId, input.userId),
-            eq(memoryStates.questionId, input.questionId),
-            sql`EXISTS (
-              SELECT 1 FROM waxon_v2.retry_obligations ro
-               WHERE ro.user_id = ${input.userId}
-                 AND ro.question_id = ${input.questionId}
-                 AND ro.status = 'waived'
-            )`,
-          ),
-        );
     }
   });
 }
 
-export async function editQuestion(input: {
+export async function replaceQuestion(input: {
   userId: string;
   questionId: string;
   prompt: string;
   referenceAnswer: string;
-  importance?: number;
-}, dependencies: V2ServiceDependencies = defaultV2ServiceDependencies): Promise<{ resetScheduling: true }> {
+}, dependencies: V2ServiceDependencies = defaultV2ServiceDependencies): Promise<{
+  questionId: string;
+  archivedQuestionId: string | null;
+  lifecycle: V2QuestionLifecycle;
+  status: "replaced" | "unchanged";
+}> {
   const now = dependencies.now();
   const normalized = normalizeQuestionInput(input);
-  const current = await currentQuestionVersion(input.userId, input.questionId);
-  if (!current) throw new Error("Question not found.");
-  await getV2Db().transaction(async (tx) => {
+  return await getV2Db().transaction(async (tx) => {
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`question-edit:${input.userId}`}))`,
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
     );
+    const [current] = await tx
+      .select({
+        questionId: questions.id,
+        lifecycle: questions.lifecycle,
+        targetKey: questions.targetKey,
+        importance: questions.importance,
+        prompt: questionVersions.prompt,
+        referenceAnswer: questionVersions.referenceAnswer,
+      })
+      .from(questions)
+      .innerJoin(
+        questionVersions,
+        and(
+          eq(questionVersions.userId, questions.userId),
+          eq(questionVersions.questionId, questions.id),
+          eq(questionVersions.isCurrent, true),
+        ),
+      )
+      .where(
+        and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)),
+      )
+      .limit(1);
+    if (!current) throw new Error("Question not found.");
+    if (
+      normalized.promptKey === current.targetKey &&
+      normalized.referenceAnswer === current.referenceAnswer
+    ) {
+      return {
+        questionId: current.questionId,
+        archivedQuestionId: null,
+        lifecycle: questionLifecycle(current.lifecycle),
+        status: "unchanged" as const,
+      };
+    }
     const [duplicate] = await tx
       .select({ id: questions.id })
       .from(questions)
@@ -2142,45 +2271,47 @@ export async function editQuestion(input: {
           eq(questions.userId, input.userId),
           eq(questions.targetKey, normalized.promptKey),
           ne(questions.id, input.questionId),
+          normalized.promptKey === current.targetKey
+            ? sql`${questions.lifecycle} NOT IN ('paused', 'archived', 'trash')`
+            : undefined,
         ),
       )
       .limit(1);
     if (duplicate) throw new Error("Another question already uses this prompt.");
     await tx
-      .update(questionVersions)
-      .set({ isCurrent: false })
-      .where(eq(questionVersions.id, current.versionId));
-    const [newVersion] = await tx
+      .update(questions)
+      .set({
+        lifecycle: "archived",
+        priorLifecycle: current.lifecycle,
+        suspensionReason: null,
+        deletedAt: null,
+        updatedAt: now,
+      })
+      .where(
+        and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)),
+      );
+    const [replacement] = await tx
+      .insert(questions)
+      .values({
+        userId: input.userId,
+        lifecycle: "new",
+        targetKey: normalized.promptKey,
+        importance: current.importance,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: questions.id });
+    const [replacementVersion] = await tx
       .insert(questionVersions)
       .values({
         userId: input.userId,
-        questionId: input.questionId,
-        version: current.version + 1,
+        questionId: replacement.id,
+        version: 1,
         prompt: normalized.prompt,
         referenceAnswer: normalized.referenceAnswer,
         displayAnswer: normalized.referenceAnswer.slice(0, 8_000),
       })
       .returning({ id: questionVersions.id });
-    const lifecycle = ACTIVE_LIFECYCLES.includes(current.lifecycle as V2Lifecycle)
-      ? "new"
-      : (current.lifecycle as V2Lifecycle);
-    await tx
-      .update(questions)
-      .set({
-        targetKey: normalized.promptKey,
-        importance: normalized.importance,
-        lifecycle,
-        updatedAt: now,
-      })
-      .where(and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)));
-    await tx
-      .delete(memoryStates)
-      .where(
-        and(
-          eq(memoryStates.userId, input.userId),
-          eq(memoryStates.questionId, input.questionId),
-        ),
-      );
     await tx
       .update(reviewSessionItems)
       .set({ state: "invalidated" })
@@ -2193,7 +2324,7 @@ export async function editQuestion(input: {
       );
     await tx
       .update(retryObligations)
-      .set({ status: "waived", reason: "Question edited.", updatedAt: now })
+      .set({ status: "waived", reason: "Question replaced.", updatedAt: now })
       .where(
         and(
           eq(retryObligations.userId, input.userId),
@@ -2204,12 +2335,17 @@ export async function editQuestion(input: {
     await tx.insert(jobs).values({
       userId: input.userId,
       type: "embed_question_batch",
-      idempotencyKey: `question-search-v1:${input.questionId}:${newVersion.id}`,
+      idempotencyKey: `question-search-v1:${replacement.id}:${replacementVersion.id}`,
       priority: 2,
-      payload: { questionIds: [input.questionId] },
+      payload: { questionIds: [replacement.id] },
     });
+    return {
+      questionId: replacement.id,
+      archivedQuestionId: current.questionId,
+      lifecycle: "active" as const,
+      status: "replaced" as const,
+    };
   });
-  return { resetScheduling: true };
 }
 
 export async function runPendingJobs(input: {

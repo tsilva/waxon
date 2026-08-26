@@ -8,12 +8,14 @@ export type V2Lifecycle =
   | "archived"
   | "trash";
 
+export type V2QuestionLifecycle = "active" | "flagged" | "archived";
+
 export type V2Question = {
   id: string;
   versionId: string;
   prompt: string;
   referenceAnswer: string;
-  lifecycle: V2Lifecycle;
+  lifecycle: V2QuestionLifecycle;
   importance: number;
   dueAt: string | null;
   retrievability: number | null;
@@ -23,7 +25,7 @@ export type V2Question = {
 
 export type V2LibraryResponse = {
   questions: V2Question[];
-  counts: Record<V2Lifecycle, number>;
+  counts: Record<V2QuestionLifecycle, number>;
   waitingNew: number;
 };
 

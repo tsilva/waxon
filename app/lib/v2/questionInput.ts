@@ -48,14 +48,14 @@ export function normalizeQuestionInput(
     throw new Error("Add a question prompt.");
   }
   if (!referenceAnswer) {
-    throw new Error("Add or confirm a reference answer.");
+    throw new Error("Add or confirm an Answer Standard.");
   }
   if (prompt.length > MAX_PROMPT_CHARS) {
     throw new Error(`Question prompts must be at most ${MAX_PROMPT_CHARS} characters.`);
   }
   if (referenceAnswer.length > MAX_REFERENCE_ANSWER_CHARS) {
     throw new Error(
-      `Reference answers must be at most ${MAX_REFERENCE_ANSWER_CHARS} characters.`,
+      `Answer Standards must be at most ${MAX_REFERENCE_ANSWER_CHARS} characters.`,
     );
   }
   if (!quality.passes) {
