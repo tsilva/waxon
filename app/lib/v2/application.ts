@@ -11,6 +11,7 @@ import {
 } from "./service.ts";
 import {
   applyLiveLearnerGrade,
+  flagCurrentReviewQuestion,
   getLiveEvaluation,
   getLiveReviewQueue,
   getLiveReviewSummary,
@@ -128,6 +129,17 @@ export function createWaxonApplication(
             input: Omit<Parameters<typeof applyLiveLearnerGrade>[0], "userId">,
           ) {
             return applyLiveLearnerGrade(
+              { ...input, userId },
+              serviceDependencies,
+            );
+          },
+          flag(
+            input: Omit<
+              Parameters<typeof flagCurrentReviewQuestion>[0],
+              "userId"
+            >,
+          ) {
+            return flagCurrentReviewQuestion(
               { ...input, userId },
               serviceDependencies,
             );

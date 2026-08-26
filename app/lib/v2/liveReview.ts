@@ -14,8 +14,10 @@ import {
   jobs,
   memoryStates,
   mutationReceipts,
+  questionFlags,
   questionVersions,
   questions,
+  learnerSettings,
 } from "../../db/v2/schema.ts";
 import { claimV2Job } from "./jobs.ts";
 import { evaluateRecall } from "./model.ts";
@@ -28,9 +30,11 @@ import {
   dateInTimezone,
   getLearnerReviewDay,
 } from "./settings.ts";
+import { normalizeReviewFlagInput } from "./reviewFlag.ts";
 import type {
   V2Evaluation,
   V2Grade,
+  V2QuestionFlag,
   V2ReviewQueueResponse,
   V2ReviewSummary,
 } from "./types.ts";
@@ -48,6 +52,28 @@ export const defaultReviewDependencies: ReviewDependencies = {
 type V2Tx = Parameters<
   Parameters<ReturnType<typeof getV2Db>["transaction"]>[0]
 >[0];
+
+async function learnerReviewDayInTransaction(
+  tx: V2Tx,
+  userId: string,
+  now: Date,
+): Promise<{ effectiveTimezone: string; localDay: string }> {
+  await tx
+    .insert(learnerSettings)
+    .values({ userId })
+    .onConflictDoNothing({ target: learnerSettings.userId });
+  const [settings] = await tx
+    .select({ timezone: learnerSettings.timezone })
+    .from(learnerSettings)
+    .where(eq(learnerSettings.userId, userId))
+    .limit(1);
+  if (!settings) throw new Error("Could not load learner settings.");
+  const effectiveTimezone = settings.timezone ?? "UTC";
+  return {
+    effectiveTimezone,
+    localDay: dateInTimezone(now, effectiveTimezone),
+  };
+}
 
 function checksum(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -108,6 +134,7 @@ function activeQuestionEligibility(localDay: string) {
 async function queueRows(
   userId: string,
   localDay: string,
+  database: Pick<ReturnType<typeof getV2Db>, "select"> = getV2Db(),
 ) {
   const latestEffectiveGrade = sql`(
     SELECT event.grade::text
@@ -124,7 +151,7 @@ async function queueRows(
               event.id DESC
      LIMIT 1
   )`;
-  return getV2Db()
+  return database
     .select({
       questionId: questions.id,
       questionVersionId: questionVersions.id,
@@ -229,6 +256,87 @@ export async function getLiveReviewQueue(
       nextScheduledOn: status.nextScheduledOn,
     },
   };
+}
+
+export async function flagCurrentReviewQuestion(input: {
+  userId: string;
+  questionId: string;
+  reasons?: unknown;
+  detail?: unknown;
+}, dependencies: Pick<ReviewDependencies, "now"> = defaultReviewDependencies): Promise<{
+  questionId: string;
+  lifecycle: "flagged";
+  flag: V2QuestionFlag;
+}> {
+  const questionId = input.questionId.trim();
+  if (!questionId) throw new Error("A Question is required.");
+  const normalized = normalizeReviewFlagInput(input);
+  const now = dependencies.now();
+
+  return getV2Db().transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
+    );
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${input.userId}`}))`,
+    );
+    const reviewDay = await learnerReviewDayInTransaction(
+      tx,
+      input.userId,
+      now,
+    );
+    const current = (await queueRows(input.userId, reviewDay.localDay, tx))[0];
+    if (!current || current.questionId !== questionId) {
+      throw new Error("This Question is no longer the current Review Question.");
+    }
+
+    const [question] = await tx
+      .select({ lifecycle: questions.lifecycle })
+      .from(questions)
+      .where(
+        and(
+          eq(questions.userId, input.userId),
+          eq(questions.id, questionId),
+        ),
+      )
+      .limit(1);
+    if (!question) {
+      throw new Error("This Question is no longer the current Review Question.");
+    }
+
+    await tx
+      .update(questions)
+      .set({
+        lifecycle: "flagged",
+        priorLifecycle: question.lifecycle,
+        suspensionReason: null,
+        deletedAt: null,
+        updatedAt: now,
+      })
+      .where(
+        and(eq(questions.userId, input.userId), eq(questions.id, questionId)),
+      );
+    await tx.insert(questionFlags).values({
+      userId: input.userId,
+      questionId,
+      origin: "learner",
+      reasons: normalized.reasons,
+      detail: normalized.detail,
+      createdAt: now,
+    });
+
+    return {
+      questionId,
+      lifecycle: "flagged" as const,
+      flag: {
+        origin: "learner" as const,
+        reasons: normalized.reasons,
+        detail: normalized.detail,
+        createdAt: now.toISOString(),
+        resolvedAt: null,
+      },
+    };
+  });
 }
 
 async function recentReviewAnswers(userId: string) {
@@ -354,9 +462,16 @@ export async function submitLiveReviewAnswer(
   if (!answer || !key) {
     throw new Error("A free-text answer and idempotency key are required.");
   }
-  const day = await getLearnerReviewDay(input.userId, now);
   const requestHash = reviewAnswerRequestHash(input.questionVersionId, answer);
   const submissionId = await getV2Db().transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${input.userId}`}))`,
+    );
+    const reviewDay = await learnerReviewDayInTransaction(
+      tx,
+      input.userId,
+      now,
+    );
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`review-answer:${input.userId}:${input.questionVersionId}`}))`,
     );
@@ -412,7 +527,7 @@ export async function submitLiveReviewAnswer(
         and(
           eq(questions.userId, input.userId),
           eq(questionVersions.id, input.questionVersionId),
-          activeQuestionEligibility(day.localDay),
+          activeQuestionEligibility(reviewDay.localDay),
         ),
       )
       .limit(1);
@@ -713,6 +828,9 @@ async function applyGradeInTransaction(
     .limit(1);
   if (!submission) throw new Error("Submission not found.");
   await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${input.userId}`}))`,
+  );
+  await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtext(${`review-grade:${input.userId}`}))`,
   );
   const [latestEvent] = await tx
@@ -831,8 +949,15 @@ export async function runLiveEvaluationJob(
         })
         .where(eq(evaluations.id, evaluationId));
     } else {
-      const reviewDay = await getLearnerReviewDay(job.userId, now);
       await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${job.userId}`}))`,
+        );
+        const reviewDay = await learnerReviewDayInTransaction(
+          tx,
+          job.userId,
+          now,
+        );
         await tx.execute(
           sql`SELECT pg_advisory_xact_lock(hashtext(${`review-grade:${job.userId}:${submissionId}`}))`,
         );
@@ -958,8 +1083,15 @@ export async function applyLiveLearnerGrade(
 ): Promise<V2Evaluation> {
   const db = getV2Db();
   const now = dependencies.now();
-  const reviewDay = await getLearnerReviewDay(input.userId, now);
   await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${input.userId}`}))`,
+    );
+    const reviewDay = await learnerReviewDayInTransaction(
+      tx,
+      input.userId,
+      now,
+    );
     const [submission] = await tx
       .select({ status: answerSubmissions.status })
       .from(answerSubmissions)
