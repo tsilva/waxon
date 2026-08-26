@@ -20,6 +20,7 @@ import type {
   V2QuestionLifecycle,
   V2Question,
 } from "@/app/lib/v2/types";
+import { REVIEW_FLAG_REASON_LABELS } from "@/app/lib/v2/reviewFlag";
 
 const EMPTY_DATA: V2LibraryResponse = {
   questions: [],
@@ -34,6 +35,7 @@ const FILTERS: Array<{ value: V2QuestionLifecycle | "all"; label: string }> = [
 ];
 
 const FLAG_REASON_LABELS: Record<string, string> = {
+  ...REVIEW_FLAG_REASON_LABELS,
   leading_prompt: "Leading prompt",
   not_answerable: "Not answerable",
   not_atomic: "Not atomic",
@@ -270,6 +272,9 @@ function QuestionRow({
                       <span key={reason}>{flagReasonLabel(reason)}</span>
                     ))}
                   </span>
+                ) : null}
+                {flag.detail ? (
+                  <p className="lean-flag-detail">{flag.detail}</p>
                 ) : null}
               </div>
             ))}
