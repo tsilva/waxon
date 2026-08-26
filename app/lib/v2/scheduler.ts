@@ -66,7 +66,7 @@ export function applyFsrsGrade(input: {
     request_retention: ALGORITHM_REQUEST_RETENTION,
     maximum_interval: 36_500,
     enable_fuzz: false,
-    enable_short_term: true,
+    enable_short_term: false,
   });
   const result = scheduler.next(toCard(input.memory, now), now, toRating(input.grade));
 

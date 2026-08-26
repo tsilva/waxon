@@ -71,10 +71,10 @@ function submittedDate(value: string): string {
 
 function FeedbackRow({
   turn,
-  onSelfGrade,
+  onGrade,
 }: {
   turn: V2ReviewAnswer;
-  onSelfGrade: (submissionId: string, grade: V2Grade) => Promise<void>;
+  onGrade: (submissionId: string, grade: V2Grade) => Promise<void>;
 }) {
   const evaluation = turn.evaluation;
   const isPending = evaluation.status === "pending";
@@ -91,10 +91,10 @@ function FeedbackRow({
     if (evaluation.status !== "pending") setOpen(true);
   }, [evaluation.status]);
 
-  async function selfGrade(nextGrade: V2Grade) {
+  async function applyGrade(nextGrade: V2Grade) {
     setSavingGrade(nextGrade);
     try {
-      await onSelfGrade(evaluation.submissionId, nextGrade);
+      await onGrade(evaluation.submissionId, nextGrade);
     } finally {
       setSavingGrade(null);
     }
@@ -200,16 +200,23 @@ function FeedbackRow({
                 </ul>
               </div>
             ) : null}
-            {evaluation.canSelfGrade ? (
+            {evaluation.canSelfGrade || evaluation.canCorrectGrade ? (
               <fieldset className="review-grade-correction">
-                <legend>How well did you recall it?</legend>
+                <legend>
+                  {evaluation.canSelfGrade
+                    ? "How well did you recall it?"
+                    : "Correct Answer Grade"}
+                </legend>
                 <div>
                   {(["again", "hard", "good", "easy"] as V2Grade[]).map(
                     (nextGrade) => (
                       <button
-                        disabled={Boolean(savingGrade)}
+                        aria-pressed={evaluation.grade === nextGrade}
+                        disabled={
+                          Boolean(savingGrade) || evaluation.grade === nextGrade
+                        }
                         key={nextGrade}
-                        onClick={() => selfGrade(nextGrade)}
+                        onClick={() => applyGrade(nextGrade)}
                         type="button"
                       >
                         {savingGrade === nextGrade ? (
@@ -458,7 +465,7 @@ export default function ReviewApp() {
     }
   }
 
-  async function selfGrade(submissionId: string, grade: V2Grade) {
+  async function gradeAnswer(submissionId: string, grade: V2Grade) {
     await jsonRequest(
       "/api/v2/review/evaluation",
       {
@@ -591,7 +598,7 @@ export default function ReviewApp() {
                 review.recentAnswers.map((turn) => (
                   <FeedbackRow
                     key={turn.evaluation.submissionId}
-                    onSelfGrade={selfGrade}
+                    onGrade={gradeAnswer}
                     turn={turn}
                   />
                 ))
