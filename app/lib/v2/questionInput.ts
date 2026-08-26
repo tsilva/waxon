@@ -11,13 +11,11 @@ export const MAX_REFERENCE_ANSWER_CHARS = 65_536;
 export type LeanQuestionInput = {
   prompt: string;
   referenceAnswer: string;
-  importance?: number;
 };
 
 export type NormalizedQuestionInput = {
   prompt: string;
   referenceAnswer: string;
-  importance: number;
   promptKey: string;
 };
 
@@ -35,7 +33,6 @@ export function normalizeQuestionInput(
 ): NormalizedQuestionInput {
   const prompt = input.prompt.replace(/\s+/gu, " ").trim();
   const referenceAnswer = input.referenceAnswer.trim();
-  const importance = Math.max(0.1, Math.min(5, input.importance ?? 1));
   const quality =
     assessment ??
     assessQuestionQuality({
@@ -65,7 +62,6 @@ export function normalizeQuestionInput(
   return {
     prompt,
     referenceAnswer,
-    importance,
     promptKey: questionPromptKey(prompt),
   };
 }
