@@ -10,12 +10,23 @@ export type V2Lifecycle =
 
 export type V2QuestionLifecycle = "active" | "flagged" | "archived";
 
+export type V2QuestionFlagOrigin = "waxon_validation" | "learner";
+
+export type V2QuestionFlag = {
+  origin: V2QuestionFlagOrigin;
+  reasons: string[];
+  detail: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+};
+
 export type V2Question = {
   id: string;
   versionId: string;
   prompt: string;
   referenceAnswer: string;
   lifecycle: V2QuestionLifecycle;
+  flags: V2QuestionFlag[];
   importance: number;
   dueAt: string | null;
   retrievability: number | null;
