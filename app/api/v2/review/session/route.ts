@@ -2,15 +2,14 @@ import { NextResponse } from "next/server";
 import { readJsonBodyWithLimit } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
 import { isRecord, v2Error } from "@/app/lib/v2/http";
-import {
-  actOnReviewItem,
-  getOrCreateReviewSession,
-} from "@/app/lib/v2/service";
+import { waxonApplication } from "@/app/lib/v2/application";
 
 export async function GET() {
   try {
     const user = await getCurrentUser();
-    return NextResponse.json(await getOrCreateReviewSession(user.id));
+    return NextResponse.json(
+      await waxonApplication.forLearner(user.id).review.open(),
+    );
   } catch (error) {
     return v2Error(error);
   }
@@ -21,6 +20,7 @@ export async function PATCH(request: Request) {
   if (!parsed.ok) return parsed.response;
   try {
     const user = await getCurrentUser();
+    const application = waxonApplication.forLearner(user.id);
     if (!isRecord(parsed.value)) throw new Error("A Review action is required.");
     const itemId = typeof parsed.value.itemId === "string" ? parsed.value.itemId : "";
     const action = parsed.value.action;
@@ -29,7 +29,7 @@ export async function PATCH(request: Request) {
       throw new Error("This Review action is not allowed.");
     }
     return NextResponse.json(
-      await actOnReviewItem({ userId: user.id, itemId, action }),
+      await application.review.act({ itemId, action }),
     );
   } catch (error) {
     return v2Error(error);

@@ -3,8 +3,7 @@ import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { authenticateMcpBearer } from "@/app/lib/v2/mcpCredentials";
 import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
-import { checkQuestions } from "@/app/lib/v2/questionSearch";
-import { addQuestions, listLibrary } from "@/app/lib/v2/service";
+import { waxonApplication } from "@/app/lib/v2/application";
 
 export const runtime = "nodejs";
 
@@ -64,6 +63,7 @@ const handler = createMcpHandler(
   ({ authInfo }) => {
     const userId = authInfo?.clientId;
     if (!userId) throw new Error("MCP authentication context is missing.");
+    const application = waxonApplication.forAuthorizedMcpClient(userId);
 
     const server = new McpServer({ name: "waxon", version: "1.0.0" });
     server.registerTool(
@@ -85,8 +85,7 @@ const handler = createMcpHandler(
       },
       async ({ query, limit }) => {
         if (query?.trim()) {
-          const checked = await checkQuestions({
-            userId,
+          const checked = await application.questionBank.check({
             items: [
               {
                 candidateId: "search-query",
@@ -122,8 +121,7 @@ const handler = createMcpHandler(
             structuredContent: output,
           };
         }
-        const library = await listLibrary({
-          userId,
+        const library = await application.questionBank.list({
           search: "",
           lifecycle: "all",
           limit,
@@ -184,7 +182,10 @@ const handler = createMcpHandler(
         annotations: { readOnlyHint: true, openWorldHint: false },
       },
       async ({ items, limitPerItem }) => {
-        const output = await checkQuestions({ userId, items, limitPerItem });
+        const output = await application.questionBank.check({
+          items,
+          limitPerItem,
+        });
         return {
           content: [{ type: "text", text: JSON.stringify(output) }],
           structuredContent: output,
@@ -227,11 +228,9 @@ const handler = createMcpHandler(
         },
       },
       async ({ idempotencyKey, items }) => {
-        const output = await addQuestions({
-          userId,
+        const output = await application.questionBank.add({
           idempotencyKey,
           items,
-          scope: "mcp",
         });
         try {
           await startBackgroundJobs(userId, 4);

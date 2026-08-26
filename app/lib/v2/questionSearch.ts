@@ -14,7 +14,7 @@ import {
   type QuestionSearchMode,
 } from "../../../shared/question-search.mts";
 import { questionPromptKey } from "./questionInput.ts";
-import type { V2Lifecycle } from "./types";
+import type { V2Lifecycle } from "./types.ts";
 
 const SEARCHABLE_LIFECYCLES = new Set<V2Lifecycle>([
   "new",
