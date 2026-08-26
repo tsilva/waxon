@@ -256,6 +256,14 @@
   font: 600 10px/1 var(--font-ui);
 }
 
+.lean-flag-detail {
+  flex-basis: 100%;
+  margin: 2px 0 0 20px;
+  color: var(--ink-soft);
+  font: 400 12px/1.5 var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
 .lean-question-meta {
   display: flex;
   flex-wrap: wrap;
@@ -2579,6 +2587,131 @@ textarea {
   width: 100%;
   min-width: 0;
   padding-top: 0;
+}
+
+.review-question-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 24px;
+}
+
+.review-flag-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 13px;
+  background: var(--surface-soft);
+  color: var(--muted-strong);
+  font: 650 11px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.review-flag-trigger svg {
+  width: 15px;
+  height: 15px;
+}
+
+.review-flag-trigger:hover,
+.review-flag-trigger:focus-visible {
+  border-color: color-mix(in srgb, var(--formula) 38%, var(--line));
+  background: var(--formula-soft);
+  color: var(--formula);
+  outline: 3px solid color-mix(in srgb, var(--formula) 12%, transparent);
+  outline-offset: 2px;
+}
+
+.review-flag-dialog {
+  width: min(620px, 100%);
+}
+
+.review-flag-description {
+  margin: 18px 0 22px;
+  color: var(--muted-strong);
+  font: 400 13px/1.55 var(--font-ui);
+}
+
+.review-flag-form {
+  display: grid;
+  gap: 22px;
+}
+
+.review-flag-form fieldset {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.review-flag-form legend,
+.review-flag-detail {
+  color: var(--ink-soft);
+  font: 650 12px/1.35 var(--font-ui);
+}
+
+.review-flag-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.review-flag-reasons button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--muted-strong);
+  font: 600 11px/1.2 var(--font-ui);
+  cursor: pointer;
+}
+
+.review-flag-reasons button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.review-flag-reasons button:hover,
+.review-flag-reasons button:focus-visible,
+.review-flag-reasons button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--formula) 35%, var(--line));
+  background: var(--formula-soft);
+  color: var(--formula);
+}
+
+.review-flag-reasons button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--formula) 12%, transparent);
+  outline-offset: 2px;
+}
+
+.review-flag-detail {
+  display: grid;
+  gap: 9px;
+}
+
+.review-flag-detail textarea {
+  width: 100%;
+  min-height: 108px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 12px 13px;
+  outline: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: 400 14px/1.5 var(--font-ui);
+}
+
+.review-flag-detail textarea:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .question-swap-stack {
@@ -7328,6 +7461,38 @@ textarea {
     font-size: clamp(23px, 6.2vw, 28px);
     font-weight: 400;
     line-height: 1.31;
+  }
+
+  .review-question-heading {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+
+  .review-flag-trigger {
+    justify-self: start;
+  }
+
+  .review-flag-backdrop {
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .review-flag-dialog {
+    width: 100%;
+    max-height: calc(100svh - 20px);
+    overflow: auto;
+    border-radius: 14px;
+    padding: 20px;
+  }
+
+  .review-flag-reasons {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .review-flag-reasons button {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .question-source {

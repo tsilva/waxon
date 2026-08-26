@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, LoaderCircle, Settings2, X } from "lucide-react";
+import { ChevronDown, Flag, LoaderCircle, Settings2, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -12,6 +12,7 @@ import { AnswerComposer } from "@/app/AnswerComposer";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { useToolbarState } from "@/app/ToolbarState";
+import { ReviewFlagDialog } from "./ReviewFlagDialog";
 import type {
   V2Grade,
   V2LearnerSettings,
@@ -368,8 +369,10 @@ export default function ReviewApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [flagQuestion, setFlagQuestion] = useState<V2ReviewQuestion | null>(null);
   const [error, setError] = useState<string | null>(null);
   const answerRef = useRef<HTMLTextAreaElement | null>(null);
+  const restingRef = useRef<HTMLDivElement | null>(null);
 
   const loadQueue = useCallback(async () => {
     const next = await jsonRequest<V2ReviewQueueResponse>(
@@ -498,15 +501,26 @@ export default function ReviewApp() {
               </div>
             ) : question ? (
               <div className="question-copy">
-                <MarkdownInline
-                  as="h2"
-                  className="question-title"
-                  enableMath
-                  text={question.prompt}
-                />
+                <div className="review-question-heading">
+                  <MarkdownInline
+                    as="h2"
+                    className="question-title"
+                    enableMath
+                    text={question.prompt}
+                  />
+                  <button
+                    aria-label="Flag current Question"
+                    className="review-flag-trigger"
+                    onClick={() => setFlagQuestion(question)}
+                    type="button"
+                  >
+                    <Flag aria-hidden="true" />
+                    <span>Flag</span>
+                  </button>
+                </div>
               </div>
             ) : (
-              <div className="resting-state">
+              <div className="resting-state" ref={restingRef} tabIndex={-1}>
                 <p className="resting-kicker">
                   {review?.waitingOnEvaluation
                     ? "Evaluation in progress"
@@ -616,6 +630,29 @@ export default function ReviewApp() {
           onClose={() => setSettingsOpen(false)}
           onSaved={async () => {
             await loadQueue();
+          }}
+        />
+      ) : null}
+      {flagQuestion ? (
+        <ReviewFlagDialog
+          onClose={() => setFlagQuestion(null)}
+          onSubmitted={() => {
+            (answerRef.current ?? restingRef.current)?.focus();
+          }}
+          onSubmit={async ({ reasons, detail }) => {
+            const result = await jsonRequest<{
+              review: V2ReviewQueueResponse;
+            }>("/api/v2/review/flag", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                questionId: flagQuestion.questionId,
+                reasons,
+                detail,
+              }),
+            });
+            setReview(result.review);
+            setDueCount(result.review.summary.queueRemaining);
           }}
         />
       ) : null}

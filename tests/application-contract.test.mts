@@ -732,6 +732,192 @@ test(
       );
 
       await suite.test(
+        "Review Flagging records learner reasons, preserves evidence, isolates ownership, and removes the current Question immediately",
+        async () => {
+          const learner = await provisionLearner("Review flag learner");
+          const otherLearner = await provisionLearner(
+            "Review flag isolation learner",
+          );
+          const future = await learner.direct.questionBank.add({
+            idempotencyKey: "review-flag-future-candidate",
+            items: [
+              {
+                prompt: "Which future Active Question must Review refuse to Flag?",
+                referenceAnswer: "A Question that is not the queue head.",
+              },
+            ],
+          });
+          const futureQuestionId = future.results[0]?.id ?? "";
+          const futureOpened = await learner.direct.review.open();
+          evaluation.setGrade("good");
+          const futurePending = await learner.direct.review.submitAnswer({
+            questionVersionId: futureOpened.question?.questionVersionId ?? "",
+            answer: "A Question that is not the queue head.",
+            idempotencyKey: "review-flag-future-answer",
+          });
+          await learner.direct.review.evaluatePending(futurePending.submissionId);
+          assert.equal((await learner.direct.review.open()).question, null);
+
+          const first = await learner.direct.questionBank.add({
+            idempotencyKey: "review-flag-empty-candidate",
+            items: [
+              {
+                prompt: "Which Review Question can be Flagged without a reason?",
+                referenceAnswer: "The current Review Question.",
+              },
+            ],
+          });
+          const firstQuestionId = first.results[0]?.id ?? "";
+          const opened = await learner.direct.review.open();
+          assert.equal(opened.question?.questionId, firstQuestionId);
+
+          await assert.rejects(
+            learner.direct.review.flag({
+              questionId: futureQuestionId,
+              reasons: ["prompt_unclear"],
+              detail: "This future Question is not currently exposed.",
+            }),
+            /current Review Question/u,
+          );
+          assert.equal(
+            (await learner.direct.questionBank.list()).questions.find(
+              (question) => question.id === futureQuestionId,
+            )?.lifecycle,
+            "active",
+          );
+
+          evaluation.setGrade("again");
+          const pending = await learner.direct.review.submitAnswer({
+            questionVersionId: opened.question?.questionVersionId ?? "",
+            answer: "The current Review Question.",
+            idempotencyKey: "review-flag-again-answer",
+          });
+          await learner.direct.review.evaluatePending(pending.submissionId);
+          const evidenceBefore = await learner.direct.questionBank.evidence(
+            firstQuestionId,
+          );
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            firstQuestionId,
+          );
+
+          await assert.rejects(
+            otherLearner.direct.review.flag({
+              questionId: firstQuestionId,
+              reasons: [],
+              detail: null,
+            }),
+            /current Review Question/u,
+          );
+
+          const emptyFlag = await learner.direct.review.flag({
+            questionId: firstQuestionId,
+            reasons: [],
+            detail: "",
+          });
+          assert.deepEqual(emptyFlag, {
+            questionId: firstQuestionId,
+            lifecycle: "flagged",
+            flag: {
+              origin: "learner",
+              reasons: [],
+              detail: null,
+              createdAt: clock.now().toISOString(),
+              resolvedAt: null,
+            },
+          });
+          assert.equal((await learner.direct.review.open()).question, null);
+          assert.deepEqual(
+            await learner.direct.questionBank.evidence(firstQuestionId),
+            evidenceBefore,
+          );
+
+          evaluation.setGrade("good");
+          const second = await learner.direct.questionBank.add({
+            idempotencyKey: "review-flag-reasons-candidate",
+            items: [
+              {
+                prompt: "Which Review Flag can retain several reasons?",
+                referenceAnswer: "A learner-origin Review Flag.",
+              },
+            ],
+          });
+          const secondQuestionId = second.results[0]?.id ?? "";
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            secondQuestionId,
+          );
+          await learner.direct.review.flag({
+            questionId: secondQuestionId,
+            reasons: ["prompt_unclear", "answer_standard_incorrect"],
+            detail: "  The stored explanation contradicts the prompt.  ",
+          });
+
+          const flagged = await learner.direct.questionBank.list({
+            lifecycle: "flagged",
+          });
+          assert.equal(flagged.counts.flagged, 2);
+          const flaggedById = new Map(
+            flagged.questions.map((question) => [
+              question.id,
+              {
+                lifecycle: question.lifecycle,
+                flags: question.flags.map(
+                  ({ origin, reasons, detail, resolvedAt }) => ({
+                    origin,
+                    reasons,
+                    detail,
+                    resolvedAt,
+                  }),
+                ),
+              },
+            ]),
+          );
+          assert.deepEqual(
+            flaggedById.get(firstQuestionId),
+            {
+              lifecycle: "flagged",
+              flags: [
+                {
+                  origin: "learner",
+                  reasons: [],
+                  detail: null,
+                  resolvedAt: null,
+                },
+              ],
+            },
+          );
+          assert.deepEqual(
+            flaggedById.get(secondQuestionId),
+            {
+              lifecycle: "flagged",
+              flags: [
+                {
+                  origin: "learner",
+                  reasons: [
+                    "prompt_unclear",
+                    "answer_standard_incorrect",
+                  ],
+                  detail: "The stored explanation contradicts the prompt.",
+                  resolvedAt: null,
+                },
+              ],
+            },
+          );
+
+          await learner.direct.questionBank.restore(firstQuestionId);
+          assert.deepEqual(
+            await learner.direct.questionBank.evidence(firstQuestionId),
+            evidenceBefore,
+          );
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            firstQuestionId,
+          );
+        },
+      );
+
+      await suite.test(
         "Question Bank add returns a retained conflict without duplicating identity",
         async () => {
           const learner = await provisionLearner(
@@ -1555,6 +1741,174 @@ test(
           assert.deepEqual(await otherLearner.direct.settings.get(), {
             timezone: null,
           });
+        },
+      );
+
+      await suite.test(
+        "timezone edits serialize ahead of answer and grade Local Day derivation",
+        async () => {
+          const { getV2Client } = await import("../app/db/v2/client.ts");
+          const { pool } = getV2Client();
+
+          async function waitForAdvisoryWaiters(expected: number) {
+            for (let attempt = 0; attempt < 200; attempt += 1) {
+              const result = await pool.query<{ count: number }>(
+                `SELECT count(*)::integer AS count
+                   FROM pg_stat_activity
+                  WHERE datname = current_database()
+                    AND wait_event = 'advisory'`,
+              );
+              if ((result.rows[0]?.count ?? 0) >= expected) return;
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+            throw new Error(
+              `Timed out waiting for ${expected} advisory-lock waiters.`,
+            );
+          }
+
+          async function runAfterQueuedTimezoneUpdate<T>(input: {
+            userId: string;
+            updateTimezone: () => Promise<unknown>;
+            operation: () => Promise<T>;
+          }): Promise<T> {
+            const blocker = await pool.connect();
+            let transactionOpen = false;
+            let timezoneUpdate: Promise<unknown> | undefined;
+            let operation: Promise<T> | undefined;
+            try {
+              await blocker.query("BEGIN");
+              transactionOpen = true;
+              await blocker.query(
+                "SELECT pg_advisory_xact_lock(hashtext($1))",
+                [`review-queue:${input.userId}`],
+              );
+              timezoneUpdate = input.updateTimezone();
+              await waitForAdvisoryWaiters(1);
+              operation = input.operation();
+              await waitForAdvisoryWaiters(2);
+              await blocker.query("COMMIT");
+              transactionOpen = false;
+              const [, result] = await Promise.all([
+                timezoneUpdate,
+                operation,
+              ]);
+              return result;
+            } catch (error) {
+              if (transactionOpen) await blocker.query("ROLLBACK");
+              await Promise.allSettled(
+                [timezoneUpdate, operation].filter(
+                  (pending): pending is Promise<unknown> => Boolean(pending),
+                ),
+              );
+              throw error;
+            } finally {
+              blocker.release();
+            }
+          }
+
+          clock.set("2030-08-20T10:00:00.000Z");
+          evaluation.setGrade("good");
+          const answerLearner = await provisionLearner(
+            "Serialized timezone answer learner",
+          );
+          await answerLearner.direct.questionBank.add({
+            idempotencyKey: "serialized-timezone-answer-question",
+            items: [
+              {
+                prompt: "Which Local Day authorizes a queued answer?",
+                referenceAnswer: "The Local Day read after queue serialization.",
+              },
+            ],
+          });
+          const answerOpen = await answerLearner.direct.review.open();
+          const initialAnswer = await answerLearner.direct.review.submitAnswer({
+            questionVersionId: answerOpen.question?.questionVersionId ?? "",
+            answer: "The serialized Local Day.",
+            idempotencyKey: "serialized-timezone-initial-answer",
+          });
+          assert.equal(
+            (
+              await answerLearner.direct.review.evaluatePending(
+                initialAnswer.submissionId,
+              )
+            ).nextDueOn,
+            "2030-08-23",
+          );
+          await answerLearner.direct.settings.updateTimezone("Europe/Lisbon");
+          clock.set("2030-08-22T23:30:00.000Z");
+          const dueInLisbon = await answerLearner.direct.review.open();
+          assert.equal(dueInLisbon.localDay, "2030-08-23");
+          assert.ok(dueInLisbon.question);
+          await assert.rejects(
+            runAfterQueuedTimezoneUpdate({
+              userId: answerLearner.id,
+              updateTimezone: () =>
+                answerLearner.direct.settings.updateTimezone(
+                  "America/Los_Angeles",
+                ),
+              operation: () =>
+                answerLearner.direct.review.submitAnswer({
+                  questionVersionId:
+                    dueInLisbon.question?.questionVersionId ?? "",
+                  answer: "A stale Local Day must not authorize this answer.",
+                  idempotencyKey: "serialized-timezone-stale-answer",
+                }),
+            }),
+            /no longer available in Review/u,
+          );
+          assert.equal(
+            (await answerLearner.direct.review.open()).localDay,
+            "2030-08-22",
+          );
+
+          evaluation.setGrade("again");
+          const gradeLearner = await provisionLearner(
+            "Serialized timezone grade learner",
+          );
+          await gradeLearner.direct.settings.updateTimezone("Europe/Lisbon");
+          await gradeLearner.direct.questionBank.add({
+            idempotencyKey: "serialized-timezone-grade-question",
+            items: [
+              {
+                prompt: "Which Local Day anchors a serialized Grade?",
+                referenceAnswer: "The Local Day read after the timezone edit.",
+              },
+            ],
+          });
+          const gradeOpen = await gradeLearner.direct.review.open();
+          const pendingGrade = await gradeLearner.direct.review.submitAnswer({
+            questionVersionId: gradeOpen.question?.questionVersionId ?? "",
+            answer: "The post-lock Local Day.",
+            idempotencyKey: "serialized-timezone-grade-answer",
+          });
+          const automated = await runAfterQueuedTimezoneUpdate({
+            userId: gradeLearner.id,
+            updateTimezone: () =>
+              gradeLearner.direct.settings.updateTimezone(
+                "America/Los_Angeles",
+              ),
+            operation: () =>
+              gradeLearner.direct.review.evaluatePending(
+                pendingGrade.submissionId,
+              ),
+          });
+          assert.equal(automated.nextDueOn, "2030-08-22");
+
+          await gradeLearner.direct.settings.updateTimezone("Europe/Lisbon");
+          const corrected = await runAfterQueuedTimezoneUpdate({
+            userId: gradeLearner.id,
+            updateTimezone: () =>
+              gradeLearner.direct.settings.updateTimezone(
+                "America/Los_Angeles",
+              ),
+            operation: () =>
+              gradeLearner.direct.review.grade({
+                submissionId: pendingGrade.submissionId,
+                grade: "again",
+              }),
+          });
+          assert.equal(corrected.nextDueOn, "2030-08-22");
+          evaluation.setGrade("good");
         },
       );
 

@@ -1,0 +1,316 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import { JSDOM } from "jsdom";
+
+const reviewAppPath = new URL(
+  "../app/(app)/review/ReviewApp.tsx",
+  import.meta.url,
+);
+const libraryPath = new URL(
+  "../app/(app)/library/LibraryPageClient.tsx",
+  import.meta.url,
+);
+const appStylesPath = new URL(
+  "../app/(app)/app-globals.css",
+  import.meta.url,
+);
+
+const dom = new JSDOM("<!doctype html><html><body></body></html>", {
+  url: "http://localhost/review",
+});
+for (const name of [
+  "document",
+  "HTMLElement",
+  "KeyboardEvent",
+  "MouseEvent",
+  "Node",
+  "navigator",
+] as const) {
+  Object.defineProperty(globalThis, name, {
+    configurable: true,
+    value: dom.window[name],
+  });
+}
+Object.defineProperty(globalThis, "window", {
+  configurable: true,
+  value: dom.window,
+});
+dom.window.requestAnimationFrame = (callback: FrameRequestCallback) =>
+  dom.window.setTimeout(() => callback(Date.now()), 0);
+dom.window.cancelAnimationFrame = (handle: number) => dom.window.clearTimeout(handle);
+dom.window.scrollTo = () => undefined;
+
+const React = await import("react");
+const { act } = React;
+const { createRoot } = await import("react-dom/client");
+const { ReviewFlagDialog } = await import(
+  "../app/(app)/review/ReviewFlagDialog.tsx"
+);
+
+Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
+  configurable: true,
+  value: true,
+});
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function click(element: Element) {
+  element.dispatchEvent(
+    new dom.window.MouseEvent("click", { bubbles: true, cancelable: true }),
+  );
+}
+
+function mouseDown(element: Element) {
+  element.dispatchEvent(
+    new dom.window.MouseEvent("mousedown", {
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
+function keydown(element: Element, key: string, shiftKey = false) {
+  const event = new dom.window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key,
+    shiftKey,
+  });
+  element.dispatchEvent(event);
+  return event;
+}
+
+async function frame() {
+  await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+}
+
+test("Review exposes one Flag action and no other Question Bank management action", async () => {
+  const source = await readFile(reviewAppPath, "utf8");
+
+  assert.equal(source.match(/aria-label="Flag current Question"/gu)?.length, 1);
+  for (const forbiddenAction of [
+    "Archive question",
+    "Replace question",
+    "Restore question",
+  ]) {
+    assert.equal(source.includes(forbiddenAction), false);
+  }
+});
+
+test("Review Flag dialog traps Tab during async empty submission and focuses the resting state", async () => {
+  document.body.innerHTML = '<div id="root"></div>';
+  const container = document.querySelector<HTMLDivElement>("#root");
+  assert.ok(container);
+  const save = deferred<void>();
+  const submissions: unknown[] = [];
+
+  function Harness() {
+    const [open, setOpen] = React.useState(false);
+    const restingRef = React.useRef<HTMLDivElement | null>(null);
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement(
+        "button",
+        { onClick: () => setOpen(true), type: "button" },
+        "Open",
+      ),
+      React.createElement(
+        "div",
+        { ref: restingRef, tabIndex: -1 },
+        "Queue clear",
+      ),
+      open
+        ? React.createElement(ReviewFlagDialog, {
+            onClose: () => setOpen(false),
+            onSubmit: async (input) => {
+              submissions.push(input);
+              await save.promise;
+            },
+            onSubmitted: () => restingRef.current?.focus(),
+          })
+        : null,
+    );
+  }
+
+  const root = createRoot(container);
+  await act(async () => root.render(React.createElement(Harness)));
+  const opener = Array.from(document.querySelectorAll("button")).find(
+    (button) => button.textContent === "Open",
+  );
+  assert.ok(opener);
+  await act(async () => click(opener));
+  await act(frame);
+
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+  const firstReason = document.querySelector<HTMLButtonElement>(
+    '.review-flag-reasons button',
+  );
+  const submit = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.textContent?.includes("Flag Question"),
+  );
+  const close = document.querySelector<HTMLButtonElement>(
+    'button[aria-label="Close Flag dialog"]',
+  );
+  assert.ok(dialog);
+  assert.equal(dialog.getAttribute("aria-modal"), "true");
+  assert.equal(document.activeElement, firstReason);
+  assert.ok(submit);
+  assert.ok(close);
+
+  close.focus();
+  const reverseWrap = keydown(close, "Tab", true);
+  assert.equal(reverseWrap.defaultPrevented, true);
+  assert.equal(document.activeElement, submit);
+  const forwardWrap = keydown(submit, "Tab");
+  assert.equal(forwardWrap.defaultPrevented, true);
+  assert.equal(document.activeElement, close);
+
+  submit.focus();
+  await act(async () => click(submit));
+  assert.deepEqual(submissions, [{ reasons: [], detail: "" }]);
+  assert.equal(
+    dialog.querySelectorAll("button:not([disabled]), textarea:not([disabled])")
+      .length,
+    0,
+  );
+
+  const tab = keydown(submit, "Tab");
+  assert.equal(tab.defaultPrevented, true);
+  assert.equal(document.activeElement, dialog);
+  const reverseTab = keydown(dialog, "Tab", true);
+  assert.equal(reverseTab.defaultPrevented, true);
+  assert.equal(document.activeElement, dialog);
+
+  await act(async () => {
+    save.resolve();
+    await save.promise;
+    await frame();
+  });
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.equal(document.activeElement?.textContent, "Queue clear");
+  await act(async () => root.unmount());
+});
+
+test("Review Flag dialog toggles reasons, reports errors, dismisses, and restores focus", async () => {
+  document.body.innerHTML = '<button id="opener">Flag</button><div id="root"></div>';
+  const opener = document.querySelector<HTMLButtonElement>("#opener");
+  const container = document.querySelector<HTMLDivElement>("#root");
+  assert.ok(opener);
+  assert.ok(container);
+  opener.focus();
+  let closes = 0;
+  const submissions: unknown[] = [];
+  const root = createRoot(container);
+  await act(async () =>
+    root.render(
+      React.createElement(ReviewFlagDialog, {
+        onClose: () => {
+          closes += 1;
+        },
+        onSubmit: async (input) => {
+          submissions.push(input);
+          throw new Error("Flag could not be saved.");
+        },
+        onSubmitted: () => undefined,
+      }),
+    ),
+  );
+  await act(frame);
+
+  const reasons = Array.from(
+    document.querySelectorAll<HTMLButtonElement>('.review-flag-reasons button'),
+  );
+  const [firstReason, secondReason] = reasons;
+  assert.ok(firstReason);
+  assert.ok(secondReason);
+  await act(async () => {
+    click(firstReason);
+    click(secondReason);
+  });
+  assert.equal(firstReason.getAttribute("aria-pressed"), "true");
+  assert.equal(secondReason.getAttribute("aria-pressed"), "true");
+
+  const detail = document.querySelector<HTMLTextAreaElement>(
+    'textarea[name="detail"]',
+  );
+  assert.ok(detail);
+  const setTextareaValue = Object.getOwnPropertyDescriptor(
+    dom.window.HTMLTextAreaElement.prototype,
+    "value",
+  )?.set;
+  assert.ok(setTextareaValue);
+  await act(async () => {
+    setTextareaValue.call(detail, "The expected answer conflicts with the source.");
+    detail.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+
+  const submit = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.textContent?.includes("Flag Question"),
+  );
+  assert.ok(submit);
+  await act(async () => {
+    click(submit);
+    await Promise.resolve();
+  });
+  assert.deepEqual(submissions, [
+    {
+      reasons: ["prompt_unclear", "answer_standard_incorrect"],
+      detail: "The expected answer conflicts with the source.",
+    },
+  ]);
+  assert.equal(document.querySelector('[role="alert"]')?.textContent, "Flag could not be saved.");
+
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+  const backdrop = document.querySelector<HTMLElement>(".review-flag-backdrop");
+  assert.ok(dialog);
+  assert.ok(backdrop);
+  await act(async () => mouseDown(backdrop));
+  assert.equal(closes, 1);
+  await act(async () => keydown(dialog, "Escape"));
+  assert.equal(closes, 2);
+  await act(async () => root.unmount());
+  assert.equal(document.activeElement, opener);
+});
+
+test("Review Flag modal has a narrow responsive contract and Library renders learner detail", async () => {
+  const [styles, library] = await Promise.all([
+    readFile(appStylesPath, "utf8"),
+    readFile(libraryPath, "utf8"),
+  ]);
+
+  const style = document.createElement("style");
+  style.textContent = styles;
+  document.head.append(style);
+  const narrowRules = Array.from(style.sheet?.cssRules ?? [])
+    .filter((rule): rule is CSSMediaRule => "media" in rule)
+    .filter((rule) => rule.media.mediaText === "(max-width: 760px)")
+    .flatMap((rule) => Array.from(rule.cssRules));
+  const dialogRule = narrowRules.find(
+    (rule) => "selectorText" in rule && rule.selectorText === ".review-flag-dialog",
+  ) as CSSStyleRule | undefined;
+  const reasonsRule = narrowRules.find(
+    (rule) => "selectorText" in rule && rule.selectorText === ".review-flag-reasons",
+  ) as CSSStyleRule | undefined;
+  assert.equal(
+    dialogRule?.style.getPropertyValue("max-height"),
+    "calc(100svh - 20px)",
+  );
+  assert.equal(dialogRule?.style.getPropertyValue("overflow"), "auto");
+  assert.equal(
+    reasonsRule?.style.getPropertyValue("grid-template-columns"),
+    "minmax(0, 1fr)",
+  );
+  style.remove();
+  assert.equal(library.includes("flag.detail"), true);
+  assert.equal(library.includes("lean-flag-detail"), true);
+});
