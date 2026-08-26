@@ -25,7 +25,6 @@ import { REVIEW_FLAG_REASON_LABELS } from "@/app/lib/v2/reviewFlag";
 const EMPTY_DATA: V2LibraryResponse = {
   questions: [],
   counts: { active: 0, flagged: 0, archived: 0 },
-  waitingNew: 0,
 };
 const FILTERS: Array<{ value: V2QuestionLifecycle | "all"; label: string }> = [
   { value: "all", label: "All" },

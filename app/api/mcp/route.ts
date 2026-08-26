@@ -6,7 +6,6 @@ import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 import { waxonApplication } from "@/app/lib/v2/application";
 import {
   toMcpAddResponse,
-  toMcpCheckMatch,
   toMcpRankedQuestion,
   toMcpStoredQuestion,
 } from "@/app/lib/v2/mcpContract";
@@ -180,7 +179,7 @@ const handler = createMcpHandler(
         const output = {
           results: checked.results.map((result) => ({
             ...result,
-            matches: result.matches.map(toMcpCheckMatch),
+            matches: result.matches,
           })),
         };
         return {

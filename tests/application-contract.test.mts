@@ -34,13 +34,16 @@ test(
       setQuestionLifecycle,
     }) => {
       await suite.test(
-        "the durable catalog has no plan, session, retry, capacity, or importance storage",
+        "the durable catalog exposes only the immutable Question and live Review contracts",
         async () => {
           const catalog = await databaseCatalog();
           for (const retiredTable of [
+            "daily_plans",
+            "daily_plan_items",
             "review_sessions",
             "review_session_items",
             "retry_obligations",
+            "question_versions",
           ]) {
             assert.equal(catalog.tables.includes(retiredTable), false);
           }
@@ -55,7 +58,45 @@ test(
             );
           }
           assert.equal(catalog.questionColumns.includes("importance"), false);
+          for (const retiredColumn of [
+            "prior_lifecycle",
+            "suspension_reason",
+            "deleted_at",
+          ]) {
+            assert.equal(catalog.questionColumns.includes(retiredColumn), false);
+          }
+          assert.equal(catalog.questionColumns.includes("prompt"), true);
+          assert.equal(catalog.questionColumns.includes("reference_answer"), true);
           assert.equal(catalog.questionColumns.includes("creation_order"), true);
+          assert.equal(
+            catalog.answerSubmissionColumns.includes("question_version_id"),
+            false,
+          );
+          assert.equal(
+            catalog.questionSearchEmbeddingColumns.includes(
+              "question_version_id",
+            ),
+            false,
+          );
+          assert.deepEqual(catalog.questionVersionIdLocations, []);
+          assert.deepEqual(catalog.obsoleteContractObjects, []);
+          assert.equal(catalog.evaluationColumns.includes("question_id"), true);
+          assert.equal(catalog.gradeEventColumns.includes("question_id"), true);
+          assert.deepEqual(catalog.enumValues.question_lifecycle, [
+            "active",
+            "flagged",
+            "archived",
+          ]);
+          assert.equal("answer_mode" in catalog.enumValues, false);
+          for (const retiredEnum of [
+            "retry_status",
+            "session_item_kind",
+            "session_item_state",
+            "session_kind",
+            "session_status",
+          ]) {
+            assert.equal(retiredEnum in catalog.enumValues, false);
+          }
         },
       );
 
@@ -751,7 +792,7 @@ test(
           const futureOpened = await learner.direct.review.open();
           evaluation.setGrade("good");
           const futurePending = await learner.direct.review.submitAnswer({
-            questionVersionId: futureOpened.question?.questionVersionId ?? "",
+            questionId: futureOpened.question?.questionId ?? "",
             answer: "A Question that is not the queue head.",
             idempotencyKey: "review-flag-future-answer",
           });
@@ -788,7 +829,7 @@ test(
 
           evaluation.setGrade("again");
           const pending = await learner.direct.review.submitAnswer({
-            questionVersionId: opened.question?.questionVersionId ?? "",
+            questionId: opened.question?.questionId ?? "",
             answer: "The current Review Question.",
             idempotencyKey: "review-flag-again-answer",
           });
@@ -1004,7 +1045,7 @@ test(
              END;
              $$;
              CREATE TRIGGER test_fail_mcp_question_add
-             BEFORE INSERT ON waxon_v2.question_versions
+             BEFORE INSERT ON waxon_v2.questions
              FOR EACH ROW
              EXECUTE FUNCTION waxon_v2.test_fail_mcp_question_add();`,
           );
@@ -1022,7 +1063,7 @@ test(
           } finally {
             await pool.query(
               `DROP TRIGGER IF EXISTS test_fail_mcp_question_add
-                 ON waxon_v2.question_versions;
+                 ON waxon_v2.questions;
                DROP FUNCTION IF EXISTS waxon_v2.test_fail_mcp_question_add();`,
             );
           }
@@ -1081,8 +1122,8 @@ test(
             const current = await learner.direct.review.open();
             observedOrder.push(current.question?.questionId ?? "");
             const pending = await learner.direct.review.submitAnswer({
-              questionVersionId:
-                current.question?.questionVersionId ?? "",
+              questionId:
+                current.question?.questionId ?? "",
               answer: `Position ${index + 1}.`,
               idempotencyKey: `large-live-queue-answer-${index}`,
             });
@@ -1113,7 +1154,7 @@ test(
             const opened = await learner.direct.review.open();
             assert.equal(opened.summary.queueRemaining, 1);
             const pending = await learner.direct.review.submitAnswer({
-              questionVersionId: opened.question?.questionVersionId ?? "",
+              questionId: opened.question?.questionId ?? "",
               answer: "Deterministic successful recall.",
               idempotencyKey: key,
             });
@@ -1180,7 +1221,7 @@ test(
             const opened = await learner.direct.review.open();
             observed.push(opened.question?.questionId);
             const pending = await learner.direct.review.submitAnswer({
-              questionVersionId: opened.question?.questionVersionId ?? "",
+              questionId: opened.question?.questionId ?? "",
               answer: "Deterministic successful recall.",
               idempotencyKey: `ordered-queue-answer-${index}`,
             });
@@ -1214,7 +1255,7 @@ test(
           });
           const first = await learner.direct.review.open();
           const pending = await learner.direct.review.submitAnswer({
-            questionVersionId: first.question?.questionVersionId ?? "",
+            questionId: first.question?.questionId ?? "",
             answer: "The previously answered Question.",
             idempotencyKey: "equal-day-answered-response",
           });
@@ -1245,8 +1286,8 @@ test(
             const opened = await learner.direct.review.open();
             observed.push(opened.question?.questionId);
             const response = await learner.direct.review.submitAnswer({
-              questionVersionId:
-                opened.question?.questionVersionId ?? "",
+              questionId:
+                opened.question?.questionId ?? "",
               answer: "Deterministic successful recall.",
               idempotencyKey: `equal-day-order-response-${index}`,
             });
@@ -1285,7 +1326,7 @@ test(
           async function answerCurrent(key: string) {
             const opened = await learner.direct.review.open();
             const pending = await learner.direct.review.submitAnswer({
-              questionVersionId: opened.question?.questionVersionId ?? "",
+              questionId: opened.question?.questionId ?? "",
               answer: "Deterministic recall.",
               idempotencyKey: key,
             });
@@ -1373,7 +1414,7 @@ test(
             });
             const opened = await learner.direct.review.open();
             const pending = await learner.direct.review.submitAnswer({
-              questionVersionId: opened.question?.questionVersionId ?? "",
+              questionId: opened.question?.questionId ?? "",
               answer: "Deterministic recall.",
               idempotencyKey: `${grade}-interval-answer`,
             });
@@ -1405,8 +1446,8 @@ test(
           const correctedOpen = await correctedLearner.direct.review.open();
           const correctedPending =
             await correctedLearner.direct.review.submitAnswer({
-              questionVersionId:
-                correctedOpen.question?.questionVersionId ?? "",
+              questionId:
+                correctedOpen.question?.questionId ?? "",
               answer: "On a future Local Day.",
               idempotencyKey: "delayed-successful-correction-answer",
             });
@@ -1443,7 +1484,7 @@ test(
           });
           const dstOpen = await dstLearner.direct.review.open();
           const dstPending = await dstLearner.direct.review.submitAnswer({
-            questionVersionId: dstOpen.question?.questionVersionId ?? "",
+            questionId: dstOpen.question?.questionId ?? "",
             answer: "With timezone-aware calendar dates.",
             idempotencyKey: "dst-correction-answer",
           });
@@ -1490,7 +1531,7 @@ test(
           const questionId = added.results[0]?.id ?? "";
           const firstOpen = await learner.direct.review.open();
           const firstPending = await learner.direct.review.submitAnswer({
-            questionVersionId: firstOpen.question?.questionVersionId ?? "",
+            questionId: firstOpen.question?.questionId ?? "",
             answer: "Every effective Answer Grade.",
             idempotencyKey: "correction-chain-first-answer",
           });
@@ -1502,7 +1543,7 @@ test(
           const secondOpen = await learner.direct.review.open();
           assert.equal(secondOpen.question?.questionId, questionId);
           const secondPending = await learner.direct.review.submitAnswer({
-            questionVersionId: secondOpen.question?.questionVersionId ?? "",
+            questionId: secondOpen.question?.questionId ?? "",
             answer: "Every effective Answer Grade, in order.",
             idempotencyKey: "correction-chain-second-answer",
           });
@@ -1589,7 +1630,7 @@ test(
 
           await assert.rejects(
             otherLearner.direct.review.submitAnswer({
-              questionVersionId: opened.question?.questionVersionId ?? "",
+              questionId: opened.question?.questionId ?? "",
               answer: "A cross-Learner answer must fail.",
               idempotencyKey: "cross-learner-review-answer",
             }),
@@ -1597,7 +1638,7 @@ test(
           );
 
           const answer = {
-            questionVersionId: opened.question?.questionVersionId ?? "",
+            questionId: opened.question?.questionId ?? "",
             answer:
               "It is derived from Active Questions, Local Day, and Learning Evidence.",
             idempotencyKey: "successful-review-answer",
@@ -1700,7 +1741,7 @@ test(
           });
           const opened = await learner.direct.review.open();
           const pending = await learner.direct.review.submitAnswer({
-            questionVersionId: opened.question?.questionVersionId ?? "",
+            questionId: opened.question?.questionId ?? "",
             answer: "The persisted IANA Local Day.",
             idempotencyKey: "timezone-boundary-answer",
           });
@@ -1822,7 +1863,7 @@ test(
           });
           const answerOpen = await answerLearner.direct.review.open();
           const initialAnswer = await answerLearner.direct.review.submitAnswer({
-            questionVersionId: answerOpen.question?.questionVersionId ?? "",
+            questionId: answerOpen.question?.questionId ?? "",
             answer: "The serialized Local Day.",
             idempotencyKey: "serialized-timezone-initial-answer",
           });
@@ -1848,8 +1889,8 @@ test(
                 ),
               operation: () =>
                 answerLearner.direct.review.submitAnswer({
-                  questionVersionId:
-                    dueInLisbon.question?.questionVersionId ?? "",
+                  questionId:
+                    dueInLisbon.question?.questionId ?? "",
                   answer: "A stale Local Day must not authorize this answer.",
                   idempotencyKey: "serialized-timezone-stale-answer",
                 }),
@@ -1877,7 +1918,7 @@ test(
           });
           const gradeOpen = await gradeLearner.direct.review.open();
           const pendingGrade = await gradeLearner.direct.review.submitAnswer({
-            questionVersionId: gradeOpen.question?.questionVersionId ?? "",
+            questionId: gradeOpen.question?.questionId ?? "",
             answer: "The post-lock Local Day.",
             idempotencyKey: "serialized-timezone-grade-answer",
           });
@@ -2005,7 +2046,7 @@ test(
           assert.equal(review.question?.questionId, questionId);
 
           const pending = await learner.direct.review.submitAnswer({
-            questionVersionId: review.question?.questionVersionId ?? "",
+            questionId: review.question?.questionId ?? "",
             answer: "Answers, evaluations, and grades stay immutable.",
             idempotencyKey: "immutable-evidence-answer",
           });
@@ -2131,6 +2172,165 @@ test(
       );
 
       await suite.test(
+        "repeated same-Prompt replacement archives each predecessor and preserves its Learning Evidence",
+        async () => {
+          clock.set("2030-08-20T10:00:00.000Z");
+          const learner = await provisionLearner(
+            "Repeated replacement contract learner",
+          );
+          const prompt = "What survives each immutable Question replacement?";
+          const added = await learner.direct.questionBank.add({
+            idempotencyKey: "repeated-replacement-question",
+            items: [
+              {
+                prompt,
+                referenceAnswer: "The predecessor and its Learning Evidence.",
+              },
+            ],
+          });
+          const originalId = added.results[0]?.id ?? "";
+          const originalOpen = await learner.direct.review.open();
+          const originalAnswer = await learner.direct.review.submitAnswer({
+            questionId: originalOpen.question?.questionId ?? "",
+            answer: "The predecessor and evidence survive.",
+            idempotencyKey: "repeated-replacement-original-answer",
+          });
+          await learner.direct.review.evaluatePending(originalAnswer.submissionId);
+          const originalEvidence = await learner.direct.questionBank.evidence(
+            originalId,
+          );
+
+          const firstReplacement = await learner.direct.questionBank.replace({
+            questionId: originalId,
+            prompt,
+            referenceAnswer:
+              "The Archived predecessor and all of its Learning Evidence.",
+          });
+          const firstReplacementOpen = await learner.direct.review.open();
+          assert.equal(
+            firstReplacementOpen.question?.questionId,
+            firstReplacement.questionId,
+          );
+          const firstReplacementAnswer =
+            await learner.direct.review.submitAnswer({
+              questionId: firstReplacementOpen.question?.questionId ?? "",
+              answer: "The archived predecessor and all evidence.",
+              idempotencyKey: "repeated-replacement-first-answer",
+            });
+          await learner.direct.review.evaluatePending(
+            firstReplacementAnswer.submissionId,
+          );
+          const firstReplacementEvidence =
+            await learner.direct.questionBank.evidence(
+              firstReplacement.questionId,
+            );
+
+          const secondReplacement = await learner.direct.questionBank.replace({
+            questionId: firstReplacement.questionId,
+            prompt,
+            referenceAnswer:
+              "Every Archived predecessor retains its own immutable Learning Evidence.",
+          });
+          assert.notEqual(secondReplacement.questionId, firstReplacement.questionId);
+          assert.equal(secondReplacement.lifecycle, "active");
+          const duplicate = await learner.direct.questionBank.add({
+            idempotencyKey: "repeated-replacement-duplicate",
+            items: [
+              {
+                prompt,
+                referenceAnswer:
+                  "Every Archived predecessor retains its own immutable Learning Evidence.",
+              },
+            ],
+          });
+          assert.deepEqual(
+            duplicate.results[0] && {
+              id: duplicate.results[0].id,
+              status: duplicate.results[0].status,
+              outcome: duplicate.results[0].outcome,
+            },
+            {
+              id: secondReplacement.questionId,
+              status: "existing",
+              outcome: "exact_duplicate",
+            },
+          );
+          await assert.rejects(
+            learner.direct.questionBank.restore(originalId),
+            /Another Active Question already uses this prompt/u,
+          );
+
+          const questions = (await learner.direct.questionBank.list()).questions;
+          assert.deepEqual(
+            new Map(
+              questions.map((question) => [
+                question.id,
+                {
+                  lifecycle: question.lifecycle,
+                  referenceAnswer: question.referenceAnswer,
+                  dueAt: question.dueAt,
+                },
+              ]),
+            ),
+            new Map([
+              [
+                originalId,
+                {
+                  lifecycle: "archived",
+                  referenceAnswer:
+                    "The predecessor and its Learning Evidence.",
+                  dueAt: originalEvidence.dueAt,
+                },
+              ],
+              [
+                firstReplacement.questionId,
+                {
+                  lifecycle: "archived",
+                  referenceAnswer:
+                    "The Archived predecessor and all of its Learning Evidence.",
+                  dueAt: firstReplacementEvidence.dueAt,
+                },
+              ],
+              [
+                secondReplacement.questionId,
+                {
+                  lifecycle: "active",
+                  referenceAnswer:
+                    "Every Archived predecessor retains its own immutable Learning Evidence.",
+                  dueAt: null,
+                },
+              ],
+            ]),
+          );
+          assert.deepEqual(
+            await learner.direct.questionBank.evidence(originalId),
+            originalEvidence,
+          );
+          assert.deepEqual(
+            await learner.direct.questionBank.evidence(
+              firstReplacement.questionId,
+            ),
+            firstReplacementEvidence,
+          );
+          assert.deepEqual(
+            await learner.direct.questionBank.evidence(
+              secondReplacement.questionId,
+            ),
+            {
+              learnerAnswers: 0,
+              evaluations: 0,
+              gradeEvents: 0,
+              dueAt: null,
+            },
+          );
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            secondReplacement.questionId,
+          );
+        },
+      );
+
+      await suite.test(
         "unchanged restoration preserves Learning Evidence and Review schedule",
         async () => {
           clock.set("2030-08-20T10:00:00.000Z");
@@ -2147,7 +2347,7 @@ test(
           const questionId = added.results[0]?.id ?? "";
           const review = await learner.direct.review.open();
           const pending = await learner.direct.review.submitAnswer({
-            questionVersionId: review.question?.questionVersionId ?? "",
+            questionId: review.question?.questionId ?? "",
             answer: "Its evidence and schedule.",
             idempotencyKey: "restore-evidence-answer",
           });

@@ -1,16 +1,6 @@
 import type { QuestionSearchMatch } from "./questionSearch.ts";
 import type { AddQuestionResult } from "./service.ts";
-import type { V2Question, V2QuestionLifecycle } from "./types.ts";
-
-export function canonicalMcpLifecycle(
-  value: string | null,
-): V2QuestionLifecycle | null {
-  if (value === null) return null;
-  if (["new", "learning", "review", "active"].includes(value)) {
-    return "active";
-  }
-  return value === "flagged" ? "flagged" : "archived";
-}
+import type { V2Question } from "./types.ts";
 
 export function toMcpStoredQuestion(question: V2Question) {
   return {
@@ -28,7 +18,7 @@ export function toMcpRankedQuestion(match: QuestionSearchMatch) {
     id: match.id,
     prompt: match.prompt,
     referenceAnswer: match.referenceAnswer,
-    lifecycle: canonicalMcpLifecycle(match.lifecycle) ?? "archived",
+    lifecycle: match.lifecycle ?? "archived",
     flags: match.flags,
     updatedAt: match.updatedAt ?? new Date(0).toISOString(),
     matchTypes: match.matchTypes,
@@ -38,13 +28,6 @@ export function toMcpRankedQuestion(match: QuestionSearchMatch) {
     combinedRank: match.combinedRank,
     trigramSimilarity: match.trigramSimilarity,
     semanticSimilarity: match.semanticSimilarity,
-  };
-}
-
-export function toMcpCheckMatch(match: QuestionSearchMatch) {
-  return {
-    ...match,
-    lifecycle: canonicalMcpLifecycle(match.lifecycle),
   };
 }
 

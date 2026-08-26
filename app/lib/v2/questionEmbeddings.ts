@@ -4,7 +4,6 @@ import { getV2Db } from "../../db/v2/client.ts";
 import {
   jobs,
   questionSearchEmbeddings,
-  questionVersions,
   questions,
 } from "../../db/v2/schema.ts";
 import {
@@ -47,18 +46,9 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
     const current = await db
       .select({
         questionId: questions.id,
-        questionVersionId: questionVersions.id,
-        prompt: questionVersions.prompt,
+        prompt: questions.prompt,
       })
       .from(questions)
-      .innerJoin(
-        questionVersions,
-        and(
-          eq(questionVersions.userId, questions.userId),
-          eq(questionVersions.questionId, questions.id),
-          eq(questionVersions.isCurrent, true),
-        ),
-      )
       .where(
         and(
           eq(questions.userId, job.userId),
@@ -69,7 +59,6 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
     const existing = await db
       .select({
         questionId: questionSearchEmbeddings.questionId,
-        questionVersionId: questionSearchEmbeddings.questionVersionId,
         sourceHash: questionSearchEmbeddings.sourceHash,
       })
       .from(questionSearchEmbeddings)
@@ -91,7 +80,6 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
       const prior = existingByQuestion.get(row.questionId);
       return (
         !prior ||
-        prior.questionVersionId !== row.questionVersionId ||
         prior.sourceHash !== questionSearchSourceHash(row.prompt)
       );
     });
@@ -106,7 +94,6 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
           missing.map((row, index) => ({
             userId: job.userId,
             questionId: row.questionId,
-            questionVersionId: row.questionVersionId,
             model: embedded.model,
             sourceVersion: QUESTION_SEARCH_SOURCE_VERSION,
             sourceHash: questionSearchSourceHash(row.prompt),
@@ -121,7 +108,6 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
             questionSearchEmbeddings.sourceVersion,
           ],
           set: {
-            questionVersionId: sql`excluded.question_version_id`,
             sourceHash: sql`excluded.source_hash`,
             embedding: sql`excluded.embedding`,
             updatedAt: new Date(),

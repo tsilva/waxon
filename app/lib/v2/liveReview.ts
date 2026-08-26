@@ -15,7 +15,6 @@ import {
   memoryStates,
   mutationReceipts,
   questionFlags,
-  questionVersions,
   questions,
   learnerSettings,
 } from "../../db/v2/schema.ts";
@@ -119,13 +118,12 @@ function evaluationView(input: {
 
 function activeQuestionEligibility(localDay: string) {
   return and(
-    sql`${questions.lifecycle}::text IN ('new','learning','review')`,
+    eq(questions.lifecycle, "active"),
     sql`(${memoryStates.questionId} IS NULL OR ${memoryStates.dueOn} <= ${localDay}::date)`,
     sql`NOT EXISTS (
       SELECT 1 FROM waxon_v2.answer_submissions pending
        WHERE pending.user_id = ${questions.userId}
          AND pending.question_id = ${questions.id}
-         AND pending.question_version_id = ${questionVersions.id}
          AND pending.status = 'pending'
     )`,
   );
@@ -154,19 +152,10 @@ async function queueRows(
   return database
     .select({
       questionId: questions.id,
-      questionVersionId: questionVersions.id,
-      prompt: questionVersions.prompt,
+      prompt: questions.prompt,
       scheduledFor: memoryStates.dueOn,
     })
     .from(questions)
-    .innerJoin(
-      questionVersions,
-      and(
-        eq(questionVersions.userId, questions.userId),
-        eq(questionVersions.questionId, questions.id),
-        eq(questionVersions.isCurrent, true),
-      ),
-    )
     .leftJoin(
       memoryStates,
       and(
@@ -215,7 +204,7 @@ async function reviewStatus(userId: string, now: Date) {
          JOIN waxon_v2.memory_states ms
            ON ms.user_id = q.user_id AND ms.question_id = q.id
         WHERE q.user_id = $1
-          AND q.lifecycle::text IN ('new','learning','review')
+          AND q.lifecycle::text = 'active'
           AND ms.due_on > $2::date`,
       [userId, day.localDay],
     ),
@@ -241,7 +230,6 @@ export async function getLiveReviewQueue(
     question: first
       ? {
           questionId: first.questionId,
-          questionVersionId: first.questionVersionId,
           prompt: first.prompt,
           total: status.queue.length,
           scheduledFor: first.scheduledFor,
@@ -290,27 +278,10 @@ export async function flagCurrentReviewQuestion(input: {
       throw new Error("This Question is no longer the current Review Question.");
     }
 
-    const [question] = await tx
-      .select({ lifecycle: questions.lifecycle })
-      .from(questions)
-      .where(
-        and(
-          eq(questions.userId, input.userId),
-          eq(questions.id, questionId),
-        ),
-      )
-      .limit(1);
-    if (!question) {
-      throw new Error("This Question is no longer the current Review Question.");
-    }
-
     await tx
       .update(questions)
       .set({
         lifecycle: "flagged",
-        priorLifecycle: question.lifecycle,
-        suspensionReason: null,
-        deletedAt: null,
         updatedAt: now,
       })
       .where(
@@ -360,7 +331,7 @@ async function recentReviewAnswers(userId: string) {
     `SELECT submission.id AS submission_id,
             submission.answer,
             submission.submitted_at,
-            version.prompt,
+            question.prompt,
             evaluation.id AS evaluation_id,
             evaluation.status::text AS evaluation_status,
             evaluation.proposed_grade::text AS proposed_grade,
@@ -373,9 +344,9 @@ async function recentReviewAnswers(userId: string) {
             evaluation.demonstrated_gap,
             evaluation.confidence
        FROM waxon_v2.answer_submissions submission
-       JOIN waxon_v2.question_versions version
-         ON version.user_id = submission.user_id
-        AND version.id = submission.question_version_id
+       JOIN waxon_v2.questions question
+         ON question.user_id = submission.user_id
+        AND question.id = submission.question_id
        JOIN LATERAL (
          SELECT candidate.*
            FROM waxon_v2.evaluations candidate
@@ -441,16 +412,16 @@ export async function getLiveReviewSummary(
 }
 
 function reviewAnswerRequestHash(
-  questionVersionId: string,
+  questionId: string,
   answer: string,
 ): string {
-  return checksum(JSON.stringify({ questionVersionId, answer }));
+  return checksum(JSON.stringify({ questionId, answer }));
 }
 
 export async function submitLiveReviewAnswer(
   input: {
     userId: string;
-    questionVersionId: string;
+    questionId: string;
     answer: string;
     idempotencyKey: string;
   },
@@ -462,7 +433,7 @@ export async function submitLiveReviewAnswer(
   if (!answer || !key) {
     throw new Error("A free-text answer and idempotency key are required.");
   }
-  const requestHash = reviewAnswerRequestHash(input.questionVersionId, answer);
+  const requestHash = reviewAnswerRequestHash(input.questionId, answer);
   const submissionId = await getV2Db().transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${input.userId}`}))`,
@@ -473,7 +444,7 @@ export async function submitLiveReviewAnswer(
       now,
     );
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-answer:${input.userId}:${input.questionVersionId}`}))`,
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-answer:${input.userId}:${input.questionId}`}))`,
     );
     const [receipt] = await tx
       .select({
@@ -505,17 +476,8 @@ export async function submitLiveReviewAnswer(
     const [question] = await tx
       .select({
         questionId: questions.id,
-        questionVersionId: questionVersions.id,
       })
       .from(questions)
-      .innerJoin(
-        questionVersions,
-        and(
-          eq(questionVersions.userId, questions.userId),
-          eq(questionVersions.questionId, questions.id),
-          eq(questionVersions.isCurrent, true),
-        ),
-      )
       .leftJoin(
         memoryStates,
         and(
@@ -526,7 +488,7 @@ export async function submitLiveReviewAnswer(
       .where(
         and(
           eq(questions.userId, input.userId),
-          eq(questionVersions.id, input.questionVersionId),
+          eq(questions.id, input.questionId),
           activeQuestionEligibility(reviewDay.localDay),
         ),
       )
@@ -540,7 +502,6 @@ export async function submitLiveReviewAnswer(
       .values({
         userId: input.userId,
         questionId: question.questionId,
-        questionVersionId: question.questionVersionId,
         answer,
         submittedAt: now,
       })
@@ -549,6 +510,7 @@ export async function submitLiveReviewAnswer(
       .insert(evaluations)
       .values({
         userId: input.userId,
+        questionId: question.questionId,
         submissionId: submission.id,
         evaluator: "model",
       })
@@ -845,6 +807,7 @@ async function applyGradeInTransaction(
       : eventAt;
   await tx.insert(gradeEvents).values({
     userId: input.userId,
+    questionId: submission.questionId,
     submissionId: input.submissionId,
     value: input.grade,
     origin: input.origin,
@@ -901,15 +864,15 @@ export async function runLiveEvaluationJob(
       submissionStatus: answerSubmissions.status,
       answer: answerSubmissions.answer,
       submittedAt: answerSubmissions.submittedAt,
-      prompt: questionVersions.prompt,
-      referenceAnswer: questionVersions.referenceAnswer,
+      prompt: questions.prompt,
+      referenceAnswer: questions.referenceAnswer,
     })
     .from(answerSubmissions)
     .innerJoin(
-      questionVersions,
+      questions,
       and(
-        eq(questionVersions.userId, answerSubmissions.userId),
-        eq(questionVersions.id, answerSubmissions.questionVersionId),
+        eq(questions.userId, answerSubmissions.userId),
+        eq(questions.id, answerSubmissions.questionId),
       ),
     )
     .where(
