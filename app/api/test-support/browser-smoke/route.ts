@@ -82,6 +82,7 @@ export async function POST() {
         id: replacement.questionId,
         status: replacement.status === "replaced" ? "created" : "existing",
         lifecycle: "active",
+        flags: [],
       });
       continue;
     }
