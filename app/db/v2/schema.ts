@@ -47,6 +47,10 @@ export const questionLifecycle = waxonV2.enum("question_lifecycle", [
   "archived",
   "trash",
 ]);
+export const questionFlagOrigin = waxonV2.enum("question_flag_origin", [
+  "waxon_validation",
+  "learner",
+]);
 // Transitional storage only. Remove this enum and column after the generic
 // evaluation release is serving; production migrations run before deployment.
 export const legacyEvaluationKindEnum = waxonV2.enum("answer_mode", [
@@ -229,6 +233,35 @@ export const questionVersions = waxonV2.table(
     index("question_versions_current_prompt_trgm_idx")
       .using("gist", sql`${table.prompt} gist_trgm_ops`)
       .where(sql`${table.isCurrent} = true`),
+  ],
+);
+
+export const questionFlags = waxonV2.table(
+  "question_flags",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").notNull(),
+    questionId: uuid("question_id").notNull(),
+    origin: questionFlagOrigin("origin").notNull(),
+    reasons: jsonb("reasons").$type<string[]>().notNull().default([]),
+    detail: text("detail"),
+    createdAt: createdAt(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    foreignKey({
+      name: "question_flags_question_fk",
+      columns: [table.userId, table.questionId],
+      foreignColumns: [questions.userId, questions.id],
+    }).onDelete("cascade"),
+    index("question_flags_question_created_idx").on(
+      table.userId,
+      table.questionId,
+      table.createdAt,
+    ),
+    index("question_flags_unresolved_idx")
+      .on(table.userId, table.questionId)
+      .where(sql`${table.resolvedAt} IS NULL`),
   ],
 );
 
