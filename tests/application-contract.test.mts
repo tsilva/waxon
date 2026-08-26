@@ -27,6 +27,7 @@ test(
     await withApplicationContract(async ({
       clock,
       databaseCatalog,
+      evaluation,
       provisionLearner,
       provisionDefaultLearner,
       semanticValidation,
@@ -949,7 +950,7 @@ test(
           await answerOnlyQuestion("newer-due-answer");
           await learner.direct.questionBank.archive(newerDue);
 
-          clock.set("2030-08-20T10:00:00.000Z");
+          clock.set("2030-08-21T10:00:00.000Z");
           const future = await addOne(
             "future-question",
             "Which Question remains scheduled in the future?",
@@ -984,9 +985,9 @@ test(
 
           const expectedOrder = [
             oldestDue,
-            newerDue,
             unanswered.results[0]?.id,
             unanswered.results[1]?.id,
+            newerDue,
           ];
           const observed: Array<string | undefined> = [];
           for (let index = 0; index < expectedOrder.length; index += 1) {
@@ -1033,7 +1034,7 @@ test(
           });
           await learner.direct.review.evaluatePending(pending.submissionId);
 
-          clock.set("2030-08-21T10:00:00.000Z");
+          clock.set("2030-08-23T10:00:00.000Z");
           const unanswered = await learner.direct.questionBank.add({
             idempotencyKey: "equal-day-unanswered-questions",
             items: [
@@ -1066,6 +1067,318 @@ test(
             await learner.direct.review.evaluatePending(response.submissionId);
           }
           assert.deepEqual(observed, expected);
+        },
+      );
+
+      await suite.test(
+        "Again moves behind the current queue and returns immediately when alone after reopening Review",
+        async () => {
+          clock.set("2030-08-20T10:00:00.000Z");
+          evaluation.setGrade("again");
+          const learner = await provisionLearner("Same-day Again learner");
+          const added = await learner.direct.questionBank.add({
+            idempotencyKey: "same-day-again-questions",
+            items: [
+              {
+                prompt: "Which Question receives Again?",
+                referenceAnswer: "The first Question.",
+              },
+              {
+                prompt: "Which Question follows first?",
+                referenceAnswer: "The second Question.",
+              },
+              {
+                prompt: "Which Question follows second?",
+                referenceAnswer: "The third Question.",
+              },
+            ],
+          });
+          const [againQuestion, secondQuestion, thirdQuestion] =
+            added.results.map((result) => result.id);
+
+          async function answerCurrent(key: string) {
+            const opened = await learner.direct.review.open();
+            const pending = await learner.direct.review.submitAnswer({
+              questionVersionId: opened.question?.questionVersionId ?? "",
+              answer: "Deterministic recall.",
+              idempotencyKey: key,
+            });
+            return learner.direct.review.evaluatePending(pending.submissionId);
+          }
+
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            againQuestion,
+          );
+          await answerCurrent("same-day-again-first-answer");
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            secondQuestion,
+          );
+
+          evaluation.setGrade("good");
+          await answerCurrent("same-day-again-second-answer");
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            thirdQuestion,
+          );
+          await answerCurrent("same-day-again-third-answer");
+
+          const reopenedWhenAlone = await learner.direct.review.open();
+          assert.equal(reopenedWhenAlone.summary.queueRemaining, 1);
+          assert.equal(reopenedWhenAlone.question?.questionId, againQuestion);
+
+          evaluation.setGrade("again");
+          await answerCurrent("same-day-again-only-answer");
+          const reopenedImmediately = await learner.direct.review.open();
+          assert.equal(reopenedImmediately.summary.queueRemaining, 1);
+          assert.equal(reopenedImmediately.question?.questionId, againQuestion);
+          assert.equal(reopenedImmediately.waitingOnEvaluation, false);
+          assert.deepEqual(
+            await learner.direct.questionBank.evidence(againQuestion ?? ""),
+            {
+              learnerAnswers: 2,
+              evaluations: 2,
+              gradeEvents: 2,
+              dueAt: "2030-08-20T10:00:00.000Z",
+            },
+          );
+          await learner.direct.review.open();
+          assert.equal(
+            (await learner.direct.questionBank.evidence(againQuestion ?? ""))
+              .gradeEvents,
+            2,
+          );
+          clock.set("2030-08-21T10:00:00.000Z");
+          await learner.direct.questionBank.add({
+            idempotencyKey: "next-day-after-again-question",
+            items: [
+              {
+                prompt: "Which Question was added after yesterday's Again?",
+                referenceAnswer: "The newly added Question.",
+              },
+            ],
+          });
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            againQuestion,
+          );
+          evaluation.setGrade("good");
+        },
+      );
+
+      await suite.test(
+        "Hard, Good, and Easy schedule progressively later Local Days",
+        async () => {
+          clock.set("2030-08-20T10:00:00.000Z");
+          const scheduled: string[] = [];
+
+          for (const grade of ["hard", "good", "easy"] as const) {
+            evaluation.setGrade(grade);
+            const learner = await provisionLearner(`${grade} interval learner`);
+            await learner.direct.questionBank.add({
+              idempotencyKey: `${grade}-interval-question`,
+              items: [
+                {
+                  prompt: `Which interval follows ${grade}?`,
+                  referenceAnswer: `${grade} uses its grade-history interval.`,
+                },
+              ],
+            });
+            const opened = await learner.direct.review.open();
+            const pending = await learner.direct.review.submitAnswer({
+              questionVersionId: opened.question?.questionVersionId ?? "",
+              answer: "Deterministic recall.",
+              idempotencyKey: `${grade}-interval-answer`,
+            });
+            const completed = await learner.direct.review.evaluatePending(
+              pending.submissionId,
+            );
+            assert.equal(completed.grade, grade);
+            assert.ok(completed.nextDueOn);
+            scheduled.push(completed.nextDueOn);
+          }
+
+          assert.equal(scheduled[0]! < scheduled[1]!, true);
+          assert.equal(scheduled[1]! < scheduled[2]!, true);
+
+          evaluation.setGrade("good");
+          clock.set("2030-08-20T10:00:00.000Z");
+          const correctedLearner = await provisionLearner(
+            "Delayed successful correction learner",
+          );
+          await correctedLearner.direct.questionBank.add({
+            idempotencyKey: "delayed-successful-correction-question",
+            items: [
+              {
+                prompt: "When does a delayed successful correction return?",
+                referenceAnswer: "On a future Local Day.",
+              },
+            ],
+          });
+          const correctedOpen = await correctedLearner.direct.review.open();
+          const correctedPending =
+            await correctedLearner.direct.review.submitAnswer({
+              questionVersionId:
+                correctedOpen.question?.questionVersionId ?? "",
+              answer: "On a future Local Day.",
+              idempotencyKey: "delayed-successful-correction-answer",
+            });
+          await correctedLearner.direct.review.evaluatePending(
+            correctedPending.submissionId,
+          );
+          clock.set("2030-09-10T10:00:00.000Z");
+          const correctedDates: string[] = [];
+          for (const grade of ["hard", "good", "easy"] as const) {
+            const corrected = await correctedLearner.direct.review.grade({
+              submissionId: correctedPending.submissionId,
+              grade,
+            });
+            assert.ok(corrected.nextDueOn);
+            assert.equal(corrected.nextDueOn! > "2030-09-10", true);
+            assert.equal((await correctedLearner.direct.review.open()).question, null);
+            correctedDates.push(corrected.nextDueOn);
+          }
+          assert.equal(correctedDates[0]! < correctedDates[1]!, true);
+          assert.equal(correctedDates[1]! < correctedDates[2]!, true);
+
+          clock.set("2030-08-20T10:00:00.000Z");
+          const dstLearner = await provisionLearner(
+            "DST correction learner",
+          );
+          const dstAdded = await dstLearner.direct.questionBank.add({
+            idempotencyKey: "dst-correction-question",
+            items: [
+              {
+                prompt: "How are future Local Days calculated across DST?",
+                referenceAnswer: "With calendar dates in the Learner timezone.",
+              },
+            ],
+          });
+          const dstOpen = await dstLearner.direct.review.open();
+          const dstPending = await dstLearner.direct.review.submitAnswer({
+            questionVersionId: dstOpen.question?.questionVersionId ?? "",
+            answer: "With timezone-aware calendar dates.",
+            idempotencyKey: "dst-correction-answer",
+          });
+          await dstLearner.direct.review.evaluatePending(dstPending.submissionId);
+          await dstLearner.direct.settings.updateTimezone("America/New_York");
+          clock.set("2030-11-02T16:00:00.000Z");
+          const dstHard = await dstLearner.direct.review.grade({
+            submissionId: dstPending.submissionId,
+            grade: "hard",
+          });
+          assert.equal(dstHard.nextDueOn, "2030-11-04");
+          assert.equal((await dstLearner.direct.review.open()).question, null);
+          assert.equal(
+            (
+              await dstLearner.direct.questionBank.evidence(
+                dstAdded.results[0]?.id ?? "",
+              )
+            ).dueAt,
+            "2030-11-04T05:00:00.000Z",
+          );
+          evaluation.setGrade("good");
+        },
+      );
+
+      await suite.test(
+        "correction chains replay every Learner Answer and update Review without crossing Learners",
+        async () => {
+          clock.set("2030-08-20T10:00:00.000Z");
+          evaluation.setGrade("good");
+          const learner = await provisionLearner("Correction chain learner");
+          const otherLearner = await provisionLearner(
+            "Correction isolation learner",
+          );
+          const added = await learner.direct.questionBank.add({
+            idempotencyKey: "correction-chain-question",
+            items: [
+              {
+                prompt: "What determines the rebuilt schedule?",
+                referenceAnswer:
+                  "The latest effective grade for every Learner Answer.",
+              },
+            ],
+          });
+          const questionId = added.results[0]?.id ?? "";
+          const firstOpen = await learner.direct.review.open();
+          const firstPending = await learner.direct.review.submitAnswer({
+            questionVersionId: firstOpen.question?.questionVersionId ?? "",
+            answer: "Every effective Answer Grade.",
+            idempotencyKey: "correction-chain-first-answer",
+          });
+          const firstGood = await learner.direct.review.evaluatePending(
+            firstPending.submissionId,
+          );
+
+          clock.set(`${firstGood.nextDueOn}T10:00:00.000Z`);
+          const secondOpen = await learner.direct.review.open();
+          assert.equal(secondOpen.question?.questionId, questionId);
+          const secondPending = await learner.direct.review.submitAnswer({
+            questionVersionId: secondOpen.question?.questionVersionId ?? "",
+            answer: "Every effective Answer Grade, in order.",
+            idempotencyKey: "correction-chain-second-answer",
+          });
+          const secondGood = await learner.direct.review.evaluatePending(
+            secondPending.submissionId,
+          );
+          assert.ok(secondGood.nextDueOn);
+          const firstInterval =
+            Date.parse(`${firstGood.nextDueOn}T00:00:00.000Z`) -
+            Date.parse("2030-08-20T00:00:00.000Z");
+          const secondInterval =
+            Date.parse(`${secondGood.nextDueOn}T00:00:00.000Z`) -
+            Date.parse(`${firstGood.nextDueOn}T00:00:00.000Z`);
+          assert.equal(secondInterval > firstInterval, true);
+          assert.equal((await learner.direct.review.open()).question, null);
+
+          await assert.rejects(
+            otherLearner.direct.review.grade({
+              submissionId: firstPending.submissionId,
+              grade: "hard",
+            }),
+            /Submission not found/u,
+          );
+
+          const firstHard = await learner.direct.review.grade({
+            submissionId: firstPending.submissionId,
+            grade: "hard",
+          });
+          assert.equal(firstHard.grade, "hard");
+          assert.ok(firstHard.nextDueOn);
+          assert.equal(firstHard.nextDueOn! < secondGood.nextDueOn!, true);
+
+          const firstEasy = await learner.direct.review.grade({
+            submissionId: firstPending.submissionId,
+            grade: "easy",
+          });
+          assert.equal(firstEasy.grade, "easy");
+          assert.ok(firstEasy.nextDueOn);
+          assert.equal(firstEasy.nextDueOn! > firstHard.nextDueOn!, true);
+
+          clock.set("2030-08-25T10:00:00.000Z");
+          const secondAgain = await learner.direct.review.grade({
+            submissionId: secondPending.submissionId,
+            grade: "again",
+          });
+          assert.equal(secondAgain.grade, "again");
+          assert.equal(secondAgain.nextDueOn, "2030-08-25");
+          const reopened = await learner.direct.review.open();
+          assert.equal(reopened.question?.questionId, questionId);
+          assert.equal(reopened.summary.queueRemaining, 1);
+          assert.equal((await otherLearner.direct.review.open()).question, null);
+
+          assert.deepEqual(
+            await learner.direct.questionBank.evidence(questionId),
+            {
+              learnerAnswers: 2,
+              evaluations: 2,
+              gradeEvents: 5,
+              dueAt: "2030-08-25T10:00:00.000Z",
+            },
+          );
+          evaluation.setGrade("good");
         },
       );
 
@@ -1125,6 +1438,7 @@ test(
               demonstratedGap: completed.demonstratedGap,
               nextDueOn: completed.nextDueOn,
               canSelfGrade: completed.canSelfGrade,
+              canCorrectGrade: completed.canCorrectGrade,
             },
             {
               status: "complete",
@@ -1133,8 +1447,9 @@ test(
                 "Active Questions, the Learner's Local Day, and immutable Learning Evidence.",
               demonstratedGap:
                 "No gap was demonstrated by this successful recall.",
-              nextDueOn: "2030-08-21",
+              nextDueOn: "2030-08-23",
               canSelfGrade: false,
+              canCorrectGrade: true,
             },
           );
           assert.deepEqual(
@@ -1143,14 +1458,14 @@ test(
               learnerAnswers: 1,
               evaluations: 1,
               gradeEvents: 1,
-              dueAt: "2030-08-21T00:00:00.000Z",
+              dueAt: "2030-08-23T10:00:00.000Z",
             },
           );
 
           const closedOutcome = await learner.direct.review.open();
           assert.equal(closedOutcome.question, null);
           assert.deepEqual(await learner.direct.review.open(), closedOutcome);
-          assert.equal(closedOutcome.summary.nextScheduledOn, "2030-08-21");
+          assert.equal(closedOutcome.summary.nextScheduledOn, "2030-08-23");
           assert.deepEqual(
             {
               prompt: closedOutcome.recentAnswers[0]?.prompt,
@@ -1170,11 +1485,11 @@ test(
                 "Active Questions, the Learner's Local Day, and immutable Learning Evidence.",
               demonstratedGap:
                 "No gap was demonstrated by this successful recall.",
-              nextDueOn: "2030-08-21",
+              nextDueOn: "2030-08-23",
             },
           );
 
-          clock.set("2030-08-21T10:00:00.000Z");
+          clock.set("2030-08-23T10:00:00.000Z");
           assert.equal(
             (await learner.direct.review.open()).question?.questionId,
             questionId,
@@ -1206,10 +1521,10 @@ test(
           assert.equal(
             (await learner.direct.review.evaluatePending(pending.submissionId))
               .nextDueOn,
-            "2030-08-21",
+            "2030-08-23",
           );
 
-          clock.set("2030-08-20T23:30:00.000Z");
+          clock.set("2030-08-22T23:30:00.000Z");
           assert.deepEqual(await learner.direct.settings.get(), {
             timezone: null,
           });
@@ -1222,12 +1537,12 @@ test(
             { timezone: "America/Los_Angeles" },
           );
           const westward = await learner.direct.review.open();
-          assert.equal(westward.localDay, "2030-08-20");
+          assert.equal(westward.localDay, "2030-08-22");
           assert.equal(westward.question, null);
 
           await learner.direct.settings.updateTimezone("Europe/Lisbon");
           const eastward = await learner.direct.review.open();
-          assert.equal(eastward.localDay, "2030-08-21");
+          assert.equal(eastward.localDay, "2030-08-23");
           assert.equal(eastward.question?.questionId, added.results[0]?.id);
 
           await assert.rejects(
@@ -1362,7 +1677,7 @@ test(
                 "No gap was demonstrated by this successful recall.",
             },
           );
-          assert.equal(completed.nextDueOn, "2030-08-21");
+          assert.equal(completed.nextDueOn, "2030-08-23");
 
           const evidenceBefore = await learner.direct.questionBank.evidence(
             questionId,
@@ -1371,7 +1686,7 @@ test(
             learnerAnswers: 1,
             evaluations: 1,
             gradeEvents: 1,
-            dueAt: "2030-08-21T00:00:00.000Z",
+            dueAt: "2030-08-23T10:00:00.000Z",
           });
 
           const answerReplacement = await learner.direct.questionBank.replace({
@@ -1419,7 +1734,7 @@ test(
               prompt: "What must remain immutable after Question mutation?",
               referenceAnswer:
                 "Learner Answers, evaluations, and Answer Grade history.",
-              dueAt: "2030-08-21T00:00:00.000Z",
+              dueAt: "2030-08-23T10:00:00.000Z",
             },
           );
           assert.deepEqual(
@@ -1500,7 +1815,7 @@ test(
           const restored = (await learner.direct.questionBank.list())
             .questions[0];
           assert.equal(restored?.lifecycle, "active");
-          assert.equal(restored?.dueAt, "2030-08-21T00:00:00.000Z");
+          assert.equal(restored?.dueAt, "2030-08-23T10:00:00.000Z");
           assert.deepEqual(
             await learner.direct.questionBank.evidence(questionId),
             evidenceBefore,
@@ -1509,7 +1824,7 @@ test(
             await learner.direct.review.getEvaluation(pending.submissionId),
             completed,
           );
-          clock.set("2030-08-21T10:00:00.000Z");
+          clock.set("2030-08-23T10:00:00.000Z");
           assert.equal(
             (await learner.direct.review.open()).question?.questionId,
             questionId,

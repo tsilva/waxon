@@ -79,6 +79,7 @@ export type V2Evaluation = {
   demonstratedGap: string | null;
   confidence: number | null;
   canSelfGrade: boolean;
+  canCorrectGrade: boolean;
 };
 
 export type V2ReviewSummary = {
