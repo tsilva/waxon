@@ -78,16 +78,12 @@ const adminSkeletonTableRows = Array.from({ length: 6 }, (_, index) => index);
 
 const callTypeLabels: Record<CallType, string> = {
   answer_eval: "answer eval",
-  question_generation: "question generation",
   embedding: "embedding",
-  summarization: "summarization",
 };
 
 const callTypeColors: Record<CallType, string> = {
   answer_eval: "#a67c52",
-  question_generation: "#6b8e75",
   embedding: "#cc653c",
-  summarization: "#8c5462",
 };
 
 function sumInteraction(interaction: TraceInteraction) {
@@ -269,29 +265,17 @@ function StatusPill({ status }: { status: TraceStatus }) {
 
 function operationPrompt(call: LlmCall, interaction: TraceInteraction): string {
   if (call.operation.includes("embedding")) {
-    return `Embed the source text for "${interaction.title}" so it can be compared with existing knowledge-base material.`;
-  }
-
-  if (call.operation.includes("generate_questions")) {
-    return `Generate concise review questions for "${interaction.title}". Return only questions that test durable conceptual understanding.`;
-  }
-
-  if (call.operation.includes("reference_answer")) {
-    return `Write a compact reference answer for the selected flashcard in "${interaction.title}".`;
+    return `Embed the Question prompt for "${interaction.title}" so advisory search can compare it with stored Questions.`;
   }
 
   if (call.operation.includes("feedback")) {
     return `Turn the evaluation notes for "${interaction.title}" into learner-facing feedback.`;
   }
 
-  if (call.operation.includes("summary") || call.operation.includes("context")) {
-    return `Summarize the relevant context for "${interaction.title}" while preserving technical constraints.`;
-  }
-
-  return `Evaluate the submitted answer for "${interaction.title}" against the expected rubric.`;
+  return `Evaluate the Learner Answer for "${interaction.title}" against the stored Answer Standard.`;
 }
 
-function operationResponse(call: LlmCall, interaction: TraceInteraction): string {
+function operationResponse(call: LlmCall): string {
   if (call.status === "pending") {
     return "The provider has not returned a final response for this call yet.";
   }
@@ -304,25 +288,8 @@ function operationResponse(call: LlmCall, interaction: TraceInteraction): string
     return "Embedding vector created and stored for semantic duplicate checks.";
   }
 
-  if (call.operation.includes("generate_questions")) {
-    return [
-      `Generated review questions for ${interaction.title}:`,
-      "1. Why does convolution preserve translation equivariance but not full invariance?",
-      "2. How do pooling and global aggregation change the invariances of a CNN?",
-      "3. What failure mode appears when an augmentation adds invariance the task does not support?",
-    ].join("\n");
-  }
-
-  if (call.operation.includes("reference_answer")) {
-    return "Batch normalization stabilizes intermediate activation statistics during training, which usually permits larger learning rates and improves optimization.";
-  }
-
   if (call.operation.includes("feedback")) {
     return "The answer identified the high-level idea, but it should separate label-preserving transformations from regularization effects and mention when augmentation can hurt.";
-  }
-
-  if (call.operation.includes("summary") || call.operation.includes("context")) {
-    return "Key rubric context retained: define the transformation, state the expected invariance or equivariance, and connect it to the model architecture.";
   }
 
   return JSON.stringify(
@@ -382,7 +349,7 @@ function formatCallRequest(call: LlmCall, interaction: TraceInteraction): string
   );
 }
 
-function formatCallResponse(call: LlmCall, interaction: TraceInteraction): string {
+function formatCallResponse(call: LlmCall): string {
   if (call.responsePayload) {
     return call.responsePayload;
   }
@@ -394,7 +361,7 @@ function formatCallResponse(call: LlmCall, interaction: TraceInteraction): strin
         data: [
           {
             object: "embedding",
-            embedding: "[3072 floats omitted]",
+            embedding: "[512 floats omitted]",
           },
         ],
         usage: {
@@ -414,7 +381,7 @@ function formatCallResponse(call: LlmCall, interaction: TraceInteraction): strin
         {
           message: {
             role: "assistant",
-            content: operationResponse(call, interaction),
+            content: operationResponse(call),
           },
         },
       ],
@@ -1247,10 +1214,7 @@ export function AdminPageClient({
       return "";
     }
 
-    return formatCallResponse(
-      selectedCallContext.call,
-      selectedCallContext.interaction,
-    );
+    return formatCallResponse(selectedCallContext.call);
   }, [selectedCallContext]);
 
   const selectedCacheStats = useMemo(() => {

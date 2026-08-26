@@ -273,7 +273,7 @@ function QuestionRow({
                   </span>
                 ) : null}
                 {flag.detail ? (
-                  <p className="lean-flag-detail">{flag.detail}</p>
+                  <p className="question-bank-flag-detail">{flag.detail}</p>
                 ) : null}
               </div>
             ))}
@@ -314,7 +314,7 @@ export default function LibraryPageClient() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setLoading(true);
-      load().catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load Library.")).finally(() => setLoading(false));
+      load().catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load Question Bank.")).finally(() => setLoading(false));
     }, search ? 180 : 0);
     return () => window.clearTimeout(timer);
   }, [load, search]);
@@ -334,17 +334,17 @@ export default function LibraryPageClient() {
 
   return (
     <main className="page">
-      <section className="review-shell lean-library-shell">
+      <section className="review-shell question-bank-shell">
         <ReviewToolbar />
-        <div className="lean-library-stage" id="library-panel">
-          <header className="lean-library-heading">
+        <div className="question-bank-stage" id="library-panel">
+          <header className="question-bank-heading">
             <div><span className="v2-kicker">Question bank</span><h1>{total} questions</h1><p>Add what is worth remembering. Review handles the rest.</p></div>
             <div>
               <button className="lean-secondary-button" onClick={() => setMcpOpen(true)} type="button"><KeyRound /> Agent access</button>
               <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add question</button>
             </div>
           </header>
-          <div className="lean-library-controls">
+          <div className="question-bank-controls">
             <label className="lean-search"><Search /><span className="sr-only">Search questions</span><input onChange={(event) => setSearch(event.currentTarget.value)} placeholder="Search questions and answers" type="search" value={search} /></label>
             <nav aria-label="Question filters">
               {FILTERS.map((item) => (
@@ -363,17 +363,17 @@ export default function LibraryPageClient() {
               </div>
             </section>
           ) : null}
-          {message ? <p className="lean-library-message" role="status">{message}</p> : null}
+          {message ? <p className="question-bank-message" role="status">{message}</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
           <div className="lean-question-list">
-            {loading ? <div className="lean-library-empty"><LoaderCircle className="v2-spin" /><p>Loading questions…</p></div> : data.questions.length > 0 ? data.questions.map((question) => (
+            {loading ? <div className="question-bank-empty"><LoaderCircle className="v2-spin" /><p>Loading questions…</p></div> : data.questions.length > 0 ? data.questions.map((question) => (
               <QuestionRow
                 key={question.id}
                 onAction={(action) => void questionAction(question.id, action).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not update question."))}
                 onEdit={() => setEditing(question)}
                 question={question}
               />
-            )) : <div className="lean-library-empty"><h2>{search ? "No matching questions" : filter === "flagged" ? "No Questions need attention" : filter === "archived" ? "No Archived Questions" : "Your bank is empty"}</h2><p>{search ? "Try a different phrase or filter." : filter === "flagged" ? "Nothing is waiting for attention." : filter === "archived" ? "Nothing is out of circulation." : "Add one clear Prompt and its Answer Standard."}</p>{!search && (filter === "all" || filter === "active") ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
+            )) : <div className="question-bank-empty"><h2>{search ? "No matching questions" : filter === "flagged" ? "No Questions need attention" : filter === "archived" ? "No Archived Questions" : "Your bank is empty"}</h2><p>{search ? "Try a different phrase or filter." : filter === "flagged" ? "Nothing is waiting for attention." : filter === "archived" ? "Nothing is out of circulation." : "Add one clear Prompt and its Answer Standard."}</p>{!search && (filter === "all" || filter === "active") ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
           </div>
         </div>
       </section>

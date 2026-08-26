@@ -44,9 +44,7 @@ function isTypeFilter(value: unknown): value is "all" | CallType | undefined {
     value === undefined ||
     value === "all" ||
     value === "answer_eval" ||
-    value === "question_generation" ||
-    value === "embedding" ||
-    value === "summarization"
+    value === "embedding"
   );
 }
 

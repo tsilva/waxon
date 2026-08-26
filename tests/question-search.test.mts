@@ -3,18 +3,18 @@ import test from "node:test";
 import { questionPromptKey } from "../app/lib/v2/questionInput.ts";
 import {
   normalizeQuestionSearchEmbedding,
-  normalizeQuestionSearchSource,
+  normalizeQuestionSearchPrompt,
   questionSearchAdvisory,
   questionSearchEmbeddingInput,
-  questionSearchSourceHash,
+  questionSearchPromptHash,
   reciprocalRankFuse,
   resolveQuestionSearchConfig,
 } from "../shared/question-search.mts";
 import { QUESTION_SEARCH_EVAL_CASES } from "./fixtures/question-search-eval.mts";
 
-test("question-search source normalization preserves meaningful case and notation", () => {
+test("question-search prompt normalization preserves meaningful case and notation", () => {
   assert.equal(
-    normalizeQuestionSearchSource("  Why  `HTTP`?\n$A^2$  "),
+    normalizeQuestionSearchPrompt("  Why  `HTTP`?\n$A^2$  "),
     "Why `HTTP`? $A^2$",
   );
   assert.equal(
@@ -22,8 +22,8 @@ test("question-search source normalization preserves meaningful case and notatio
     "Question:\nWhat is RRF?",
   );
   assert.notEqual(
-    questionSearchSourceHash("What is HTTP?"),
-    questionSearchSourceHash("What is http?"),
+    questionSearchPromptHash("What is HTTP?"),
+    questionSearchPromptHash("What is http?"),
   );
 });
 
@@ -72,7 +72,7 @@ test("RRF rewards agreement without comparing incompatible raw scores", () => {
   );
 });
 
-test("advice is definitive only for exact or complete hybrid coverage", () => {
+test("advice is definitive only for exact or complete hybrid search signals", () => {
   assert.equal(
     questionSearchAdvisory({ exact: true, matchCount: 0, semanticComplete: false }),
     "exact_duplicate",
