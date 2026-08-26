@@ -5,9 +5,9 @@ import { jobs } from "../../db/v2/schema.ts";
 export async function claimV2Job(
   jobId: string,
   type: string,
+  now = new Date(),
 ): Promise<typeof jobs.$inferSelect | null> {
   const db = getV2Db();
-  const now = new Date();
   const [claimed] = await db
     .update(jobs)
     .set({

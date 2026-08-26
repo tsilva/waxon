@@ -12,7 +12,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import { getV2Client, getV2Db } from "@/app/db/v2/client";
+import { getV2Client, getV2Db } from "../../db/v2/client.ts";
 import {
   answerSubmissions,
   evaluations,
@@ -26,21 +26,25 @@ import {
   retryObligations,
   reviewSessionItems,
   reviewSessions,
-} from "@/app/db/v2/schema";
-import { buildReviewPlan, type PlanCandidate } from "./planner";
+} from "../../db/v2/schema.ts";
+import { buildReviewPlan, type PlanCandidate } from "./planner.ts";
 import {
   MAX_QUESTION_BATCH,
   normalizeQuestionInput,
   type LeanQuestionInput,
   type NormalizedQuestionInput,
-} from "./questionInput";
-import { rankQuestionIdsLexically } from "./questionSearch";
+} from "./questionInput.ts";
+import {
+  assessQuestionQuality,
+  type QuestionQualityAssessment,
+} from "./questionQuality.ts";
+import { rankQuestionIdsLexically } from "./questionSearch.ts";
 import {
   applyFsrsGrade,
   memoryRetrievability,
   SCHEDULER_VERSION,
   type StoredMemoryState,
-} from "./scheduler";
+} from "./scheduler.ts";
 import type {
   V2Evaluation,
   V2Grade,
@@ -50,11 +54,11 @@ import type {
   V2ReviewItem,
   V2ReviewSessionResponse,
   V2ReviewSummary,
-} from "./types";
-import { evaluateRecall } from "./model";
-import { claimV2Job } from "./jobs";
-import { runQuestionEmbeddingJob } from "./questionEmbeddings";
-import { retryEarliestAt } from "./retryPolicy";
+} from "./types.ts";
+import { evaluateRecall } from "./model.ts";
+import { claimV2Job } from "./jobs.ts";
+import { runQuestionEmbeddingJob } from "./questionEmbeddings.ts";
+import { retryEarliestAt } from "./retryPolicy.ts";
 
 const ACTIVE_LIFECYCLES: V2Lifecycle[] = ["new", "learning", "review"];
 const ALL_LIFECYCLES: V2Lifecycle[] = [
@@ -77,6 +81,26 @@ export type AddQuestionResult = {
   id: string;
   status: "created" | "existing";
   lifecycle: V2Lifecycle;
+};
+
+type QuestionValidationInput = {
+  prompt: string;
+  referenceAnswer: string;
+  target: string;
+};
+
+export type V2ServiceDependencies = {
+  now(): Date;
+  validateQuestion(
+    input: QuestionValidationInput,
+  ): QuestionQualityAssessment | Promise<QuestionQualityAssessment>;
+  evaluateAnswer: typeof evaluateRecall;
+};
+
+export const defaultV2ServiceDependencies: V2ServiceDependencies = {
+  now: () => new Date(),
+  validateQuestion: assessQuestionQuality,
+  evaluateAnswer: evaluateRecall,
 };
 
 function checksum(value: string): string {
@@ -171,14 +195,17 @@ type ReviewDayBounds = {
   end: Date;
 };
 
-async function reviewDayBounds(timezone: string): Promise<ReviewDayBounds> {
+async function reviewDayBounds(
+  timezone: string,
+  now = defaultV2ServiceDependencies.now(),
+): Promise<ReviewDayBounds> {
   const [row] = await getV2Client().pool
     .query<{ day_start: Date; day_end: Date }>(
       `SELECT
-         date_trunc('day', now() AT TIME ZONE $1) AT TIME ZONE $1 AS day_start,
-         (date_trunc('day', now() AT TIME ZONE $1) + interval '1 day')
+         date_trunc('day', $2::timestamptz AT TIME ZONE $1) AT TIME ZONE $1 AS day_start,
+         (date_trunc('day', $2::timestamptz AT TIME ZONE $1) + interval '1 day')
            AT TIME ZONE $1 AS day_end`,
-      [timezone],
+      [timezone, now],
     )
     .then((result) => result.rows);
   if (!row) throw new Error("Could not determine the learner's review day.");
@@ -216,16 +243,31 @@ function normalizedRequestHash(items: NormalizedQuestionInput[]): string {
   return checksum(JSON.stringify(items));
 }
 
-export async function addQuestions(input: {
-  userId: string;
-  idempotencyKey: string;
-  items: LeanQuestionInput[];
-  scope?: "library" | "mcp";
-}): Promise<{ results: AddQuestionResult[] }> {
+export async function addQuestions(
+  input: {
+    userId: string;
+    idempotencyKey: string;
+    items: LeanQuestionInput[];
+    scope?: "library" | "mcp";
+  },
+  dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
+): Promise<{
+  results: AddQuestionResult[];
+}> {
   if (input.items.length === 0 || input.items.length > MAX_QUESTION_BATCH) {
     throw new Error(`Add between 1 and ${MAX_QUESTION_BATCH} questions at a time.`);
   }
-  const items = input.items.map(normalizeQuestionInput);
+  const items = await Promise.all(
+    input.items.map(async (item) => {
+      const normalized = normalizeQuestionInput(item, { passes: true, reasons: [] });
+      const assessment = await dependencies.validateQuestion({
+        prompt: normalized.prompt,
+        referenceAnswer: normalized.referenceAnswer,
+        target: normalized.prompt,
+      });
+      return normalizeQuestionInput(item, assessment);
+    }),
+  );
   const scope = input.scope === "mcp" ? "mcp-add-questions" : "library-add-questions";
   const key = input.idempotencyKey.trim().slice(0, 200);
   if (!key) throw new Error("An idempotency key is required.");
@@ -375,13 +417,16 @@ export async function addQuestions(input: {
   });
 }
 
-export async function createDirectQuestion(input: {
-  userId: string;
-  idempotencyKey: string;
-  prompt: string;
-  referenceAnswer: string;
-  importance?: number;
-}): Promise<{
+export async function createDirectQuestion(
+  input: {
+    userId: string;
+    idempotencyKey: string;
+    prompt: string;
+    referenceAnswer: string;
+    importance?: number;
+  },
+  dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
+): Promise<{
   questionId: string;
   lifecycle: V2Lifecycle;
   status: "created" | "existing";
@@ -390,7 +435,7 @@ export async function createDirectQuestion(input: {
     userId: input.userId,
     idempotencyKey: input.idempotencyKey,
     items: [input],
-  });
+  }, dependencies);
   const result = results[0];
   return {
     questionId: result.id,
@@ -430,7 +475,7 @@ export async function listLibrary(input: {
   search?: string;
   lifecycle?: V2Lifecycle | "all";
   limit?: number;
-}): Promise<V2LibraryResponse> {
+}, now = defaultV2ServiceDependencies.now()): Promise<V2LibraryResponse> {
   const limit = Math.max(1, Math.min(QUESTION_PAGE_LIMIT, input.limit ?? 100));
   const search = input.search?.trim() ?? "";
   const lifecycle =
@@ -517,10 +562,11 @@ export async function listLibrary(input: {
       importance: Number(row.importance),
       dueAt: row.due_at?.toISOString() ?? null,
       retrievability: memory
-        ? memoryRetrievability({
-            memory,
-            desiredRetention: settings.desiredRetention,
-          })
+          ? memoryRetrievability({
+              memory,
+              desiredRetention: settings.desiredRetention,
+              at: now,
+            })
         : null,
       createdAt: row.created_at.toISOString(),
       updatedAt: row.updated_at.toISOString(),
@@ -690,9 +736,9 @@ async function reviewCapacity(
 async function exposeNextItem(
   userId: string,
   sessionId: string,
+  now: Date,
 ): Promise<V2ReviewItem | null> {
   const db = getV2Db();
-  const now = new Date();
   return await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`review-item:${userId}`}))`,
@@ -824,14 +870,17 @@ async function exposeNextItem(
 
 export async function getOrCreateReviewSession(
   userId: string,
+  dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
 ): Promise<V2ReviewSessionResponse> {
   const db = getV2Db();
+  const now = dependencies.now();
   const settings = await getLearnerSettings(userId);
-  const day = await reviewDayBounds(settings.timezone);
+  const day = await reviewDayBounds(settings.timezone, now);
   const plan = buildReviewPlan({
     candidates: await planCandidates(userId, day),
     desiredRetention: settings.desiredRetention,
     scheduledBefore: day.end,
+    now,
   });
   let session: typeof reviewSessions.$inferSelect | undefined = (
     await db
@@ -866,7 +915,7 @@ export async function getOrCreateReviewSession(
             plannedCount: plan.length,
           })
           .returning();
-        const earliestAt = new Date();
+        const earliestAt = now;
         for (let offset = 0; offset < plan.length; offset += SESSION_ITEM_INSERT_BATCH) {
           await tx.insert(reviewSessionItems).values(
             plan.slice(offset, offset + SESSION_ITEM_INSERT_BATCH).map((item) => ({
@@ -929,7 +978,7 @@ export async function getOrCreateReviewSession(
           ),
         );
       const firstPosition = Number(lastPosition?.value ?? -1) + 1;
-      const earliestAt = new Date();
+      const earliestAt = now;
       for (let offset = 0; offset < missing.length; offset += SESSION_ITEM_INSERT_BATCH) {
         await tx.insert(reviewSessionItems).values(
           missing
@@ -956,7 +1005,7 @@ export async function getOrCreateReviewSession(
           plannedCount: sql`${reviewSessions.plannedCount} + ${missing.length}`,
           estimatedSeconds: sql`${reviewSessions.estimatedSeconds} + ${addedSeconds}`,
           reservedSeconds: sql`${reviewSessions.reservedSeconds} + ${addedSeconds * 2}`,
-          updatedAt: new Date(),
+          updatedAt: now,
         })
         .where(eq(reviewSessions.id, active.id))
         .returning();
@@ -965,7 +1014,7 @@ export async function getOrCreateReviewSession(
     session = synchronizedSession ?? undefined;
   }
 
-  let item = session ? await exposeNextItem(userId, session.id) : null;
+  let item = session ? await exposeNextItem(userId, session.id, now) : null;
   if (session && !item) {
     const [{ unfinished }] = await db
       .select({ unfinished: count() })
@@ -980,14 +1029,14 @@ export async function getOrCreateReviewSession(
     if (unfinished === 0) {
       await db
         .update(reviewSessions)
-        .set({ status: "completed", completedAt: new Date(), updatedAt: new Date() })
+        .set({ status: "completed", completedAt: now, updatedAt: now })
         .where(eq(reviewSessions.id, session.id));
       session = undefined;
       item = null;
     }
   }
 
-  const summary = await getReviewSummary(userId);
+  const summary = await getReviewSummary(userId, now);
   const capacity = await reviewCapacity(userId, settings, day);
   let completedCount = 0;
   let plannedCount = 0;
@@ -1066,8 +1115,9 @@ export async function actOnReviewItem(input: {
   userId: string;
   itemId: string;
   action: "flag" | "next";
-}): Promise<V2ReviewSessionResponse> {
+}, dependencies: V2ServiceDependencies = defaultV2ServiceDependencies): Promise<V2ReviewSessionResponse> {
   const db = getV2Db();
+  const now = dependencies.now();
   await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`review-item:${input.userId}`}))`,
@@ -1120,7 +1170,7 @@ export async function actOnReviewItem(input: {
       if (item.kind === "retry") {
         await tx
           .update(retryObligations)
-          .set({ status: "queued", updatedAt: new Date() })
+          .set({ status: "queued", updatedAt: now })
           .where(
             and(
               eq(retryObligations.userId, input.userId),
@@ -1159,7 +1209,7 @@ export async function actOnReviewItem(input: {
         priorLifecycle,
         suspensionReason: "Flagged during Review.",
         deletedAt: null,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(
         and(
@@ -1172,7 +1222,7 @@ export async function actOnReviewItem(input: {
       .set({
         status: "waived",
         reason: "Learner flagged the question for later review.",
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(
         and(
@@ -1192,12 +1242,15 @@ export async function actOnReviewItem(input: {
         ),
       );
   });
-  return await getOrCreateReviewSession(input.userId);
+  return await getOrCreateReviewSession(input.userId, dependencies);
 }
 
-export async function getReviewSummary(userId: string): Promise<V2ReviewSummary> {
+export async function getReviewSummary(
+  userId: string,
+  now = defaultV2ServiceDependencies.now(),
+): Promise<V2ReviewSummary> {
   const settings = await getLearnerSettings(userId);
-  const day = await reviewDayBounds(settings.timezone);
+  const day = await reviewDayBounds(settings.timezone, now);
   const [active] = await getV2Client().pool
     .query<{ due_count: string }>(
       `SELECT count(item.id) FILTER (
@@ -1223,7 +1276,7 @@ export async function getReviewSummary(userId: string): Promise<V2ReviewSummary>
   const [row] = await getV2Client().pool
     .query<{ next_due: Date | null }>(
       `SELECT min(candidate.effective_due) FILTER (
-                WHERE candidate.effective_due > now()
+                WHERE candidate.effective_due > $4
               ) AS next_due
          FROM (
            SELECT CASE
@@ -1255,7 +1308,7 @@ export async function getReviewSummary(userId: string): Promise<V2ReviewSummary>
                    AND pending.status = 'pending'
               )
          ) candidate`,
-      [userId, day.start, day.end],
+      [userId, day.start, day.end, now],
     )
     .then((result) => result.rows);
   return {
@@ -1272,11 +1325,12 @@ async function createRetryIfNeeded(
     grade: V2Grade;
     item: typeof reviewSessionItems.$inferSelect;
   },
+  now: Date,
 ): Promise<void> {
   if (input.item.kind === "retry") {
     await tx
       .update(retryObligations)
-      .set({ status: "completed", updatedAt: new Date() })
+      .set({ status: "completed", updatedAt: now })
       .where(
         and(
           eq(retryObligations.userId, input.userId),
@@ -1305,7 +1359,7 @@ async function createRetryIfNeeded(
         .set({
           status: "cancelled",
           reason: "The effective first grade no longer requires a retry.",
-          updatedAt: new Date(),
+          updatedAt: now,
         })
         .where(eq(retryObligations.id, obligation.id));
       await tx
@@ -1339,11 +1393,14 @@ async function createRetryIfNeeded(
       ),
     )
     .limit(1);
-  const earliestAt = retryEarliestAt({ hasDifferentQuestionAfter: Boolean(differentAfter) });
+  const earliestAt = retryEarliestAt({
+    hasDifferentQuestionAfter: Boolean(differentAfter),
+    now,
+  });
   if (obligation) {
     await tx
       .update(retryObligations)
-      .set({ status: "queued", earliestAt, reason: null, updatedAt: new Date() })
+      .set({ status: "queued", earliestAt, reason: null, updatedAt: now })
       .where(eq(retryObligations.id, obligation.id));
   } else {
     await tx.insert(retryObligations).values({
@@ -1404,6 +1461,7 @@ async function applyGradeInTransaction(
     origin: "deterministic" | "model" | "self" | "correction";
     evaluationId?: string | null;
   },
+  now: Date,
 ): Promise<void> {
   const [submission] = await tx
     .select()
@@ -1454,6 +1512,7 @@ async function applyGradeInTransaction(
     value: input.grade,
     origin: input.origin,
     evaluationId: input.evaluationId ?? null,
+    createdAt: now,
   });
   await tx
     .insert(memoryStates)
@@ -1486,7 +1545,7 @@ async function applyGradeInTransaction(
         state: next.state,
         learningSteps: next.learningSteps,
         schedulerVersion: SCHEDULER_VERSION,
-        updatedAt: new Date(),
+        updatedAt: now,
       },
     });
   await tx
@@ -1499,14 +1558,14 @@ async function applyGradeInTransaction(
     .where(eq(reviewSessionItems.id, item.id));
   await tx
     .update(questions)
-    .set({ lifecycle: "review", updatedAt: new Date() })
+    .set({ lifecycle: "review", updatedAt: now })
     .where(and(eq(questions.userId, input.userId), eq(questions.id, submission.questionId)));
   if (item.kind === "base" && input.grade !== "again") {
     await tx
       .update(reviewSessions)
       .set({
         reservedSeconds: sql`GREATEST(0, ${reviewSessions.reservedSeconds} - ${item.estimatedSeconds})`,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(reviewSessions.id, item.sessionId));
   }
@@ -1515,12 +1574,13 @@ async function applyGradeInTransaction(
     submissionId: input.submissionId,
     grade: input.grade,
     item,
-  });
+  }, now);
 }
 
 async function rebuildQuestionMemoryInTransaction(
   tx: V2Tx,
   input: { userId: string; questionId: string },
+  now: Date,
 ): Promise<void> {
   const [settings] = await tx
     .select({ desiredRetention: learnerSettings.desiredRetention })
@@ -1611,17 +1671,20 @@ async function rebuildQuestionMemoryInTransaction(
         state: memory.state,
         learningSteps: memory.learningSteps,
         schedulerVersion: SCHEDULER_VERSION,
-        updatedAt: new Date(),
+        updatedAt: now,
       },
     });
 }
 
-export async function submitReviewAnswer(input: {
-  userId: string;
-  itemId: string;
-  answer: string;
-}): Promise<V2Evaluation> {
-  const now = new Date();
+export async function submitReviewAnswer(
+  input: {
+    userId: string;
+    itemId: string;
+    answer: string;
+  },
+  dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
+): Promise<V2Evaluation> {
+  const now = dependencies.now();
   const submissionId = await getV2Db().transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`review-item:${input.userId}`}))`,
@@ -1756,9 +1819,13 @@ export async function getEvaluationForSubmission(
   };
 }
 
-export async function runEvaluationJob(jobId: string): Promise<void> {
+export async function runEvaluationJob(
+  jobId: string,
+  dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
+): Promise<void> {
   const db = getV2Db();
-  const job = await claimV2Job(jobId, "evaluate_submission");
+  const now = dependencies.now();
+  const job = await claimV2Job(jobId, "evaluate_submission", now);
   if (!job) return;
   const submissionId = typeof job.payload.submissionId === "string" ? job.payload.submissionId : "";
   const evaluationId = typeof job.payload.evaluationId === "string" ? job.payload.evaluationId : "";
@@ -1780,11 +1847,11 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
     .where(and(eq(answerSubmissions.userId, job.userId), eq(answerSubmissions.id, submissionId)))
     .limit(1);
   if (!row || row.submissionStatus !== "pending") {
-    await db.update(jobs).set({ status: "cancelled", updatedAt: new Date() }).where(eq(jobs.id, jobId));
+    await db.update(jobs).set({ status: "cancelled", updatedAt: now }).where(eq(jobs.id, jobId));
     return;
   }
   try {
-    const result = await evaluateRecall({
+    const result = await dependencies.evaluateAnswer({
       userId: job.userId,
       prompt: row.prompt,
       referenceAnswer: row.referenceAnswer,
@@ -1799,7 +1866,7 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
           expectedAnswer: row.referenceAnswer,
           confidence: result.confidence,
           error: "Low confidence",
-          completedAt: new Date(),
+          completedAt: now,
         })
         .where(eq(evaluations.id, evaluationId));
     } else {
@@ -1812,7 +1879,7 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
         if (!submission || submission.status !== "pending") {
           await tx
             .update(evaluations)
-            .set({ status: "superseded", completedAt: new Date() })
+            .set({ status: "superseded", completedAt: now })
             .where(eq(evaluations.id, evaluationId));
           return;
         }
@@ -1827,7 +1894,7 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
             missingPoints: result.missingPoints,
             demonstratedGap: result.demonstratedGap,
             confidence: result.confidence,
-            completedAt: new Date(),
+            completedAt: now,
           })
           .where(eq(evaluations.id, evaluationId));
         await applyGradeInTransaction(tx, {
@@ -1836,7 +1903,7 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
           grade: result.grade,
           origin: "model",
           evaluationId,
-        });
+        }, now);
       });
     }
     await db
@@ -1846,7 +1913,7 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
         progress: 100,
         lockedUntil: null,
         result: { submissionId, evaluationId },
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(jobs.id, job.id));
   } catch (error) {
@@ -1855,10 +1922,10 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
       .update(jobs)
       .set({
         status: attempts >= 3 ? "failed" : "pending",
-        runAfter: new Date(Date.now() + attempts * 30_000),
+        runAfter: new Date(now.getTime() + attempts * 30_000),
         lockedUntil: null,
         error: error instanceof Error ? error.message.slice(0, 2_000) : "Unknown error",
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(jobs.id, job.id));
     if (attempts >= 3) {
@@ -1869,7 +1936,7 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
           feedback: "Evaluation failed. Please self-grade.",
           expectedAnswer: row.referenceAnswer,
           error: error instanceof Error ? error.message.slice(0, 2_000) : "Unknown error",
-          completedAt: new Date(),
+          completedAt: now,
         })
         .where(eq(evaluations.id, evaluationId));
     }
@@ -1877,12 +1944,34 @@ export async function runEvaluationJob(jobId: string): Promise<void> {
   }
 }
 
+export async function runEvaluationForSubmission(
+  userId: string,
+  submissionId: string,
+  dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
+): Promise<V2Evaluation> {
+  const [job] = await getV2Db()
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.userId, userId),
+        eq(jobs.type, "evaluate_submission"),
+        eq(jobs.idempotencyKey, submissionId),
+      ),
+    )
+    .limit(1);
+  if (!job) throw new Error("Evaluation job not found.");
+  await runEvaluationJob(job.id, dependencies);
+  return getEvaluationForSubmission(userId, submissionId);
+}
+
 export async function applyLearnerGrade(input: {
   userId: string;
   submissionId: string;
   grade: V2Grade;
-}): Promise<V2Evaluation> {
+}, dependencies: V2ServiceDependencies = defaultV2ServiceDependencies): Promise<V2Evaluation> {
   const db = getV2Db();
+  const now = dependencies.now();
   const [submission] = await db
     .select()
     .from(answerSubmissions)
@@ -1901,10 +1990,10 @@ export async function applyLearnerGrade(input: {
         submissionId: input.submissionId,
         grade: input.grade,
         origin: "self",
-      });
+      }, now);
       await tx
         .update(evaluations)
-        .set({ status: "superseded", completedAt: new Date() })
+        .set({ status: "superseded", completedAt: now })
         .where(
           and(
             eq(evaluations.userId, input.userId),
@@ -1930,17 +2019,18 @@ export async function applyLearnerGrade(input: {
       submissionId: input.submissionId,
       value: input.grade,
       origin: "correction",
+      createdAt: now,
     });
     await rebuildQuestionMemoryInTransaction(tx, {
       userId: input.userId,
       questionId: submission.questionId,
-    });
+    }, now);
     await createRetryIfNeeded(tx, {
       userId: input.userId,
       submissionId: input.submissionId,
       grade: input.grade,
       item,
-    });
+    }, now);
   });
   return await getEvaluationForSubmission(input.userId, input.submissionId);
 }
@@ -1949,8 +2039,9 @@ export async function mutateQuestionLifecycle(input: {
   userId: string;
   questionId: string;
   action: "pause" | "archive" | "trash" | "restore";
-}): Promise<void> {
+}, dependencies: V2ServiceDependencies = defaultV2ServiceDependencies): Promise<void> {
   const db = getV2Db();
+  const now = dependencies.now();
   await db.transaction(async (tx) => {
     const [question] = await tx
       .select()
@@ -1979,8 +2070,8 @@ export async function mutateQuestionLifecycle(input: {
         lifecycle: next,
         priorLifecycle: input.action === "restore" ? null : previous,
         suspensionReason: null,
-        deletedAt: input.action === "trash" ? new Date() : null,
-        updatedAt: new Date(),
+        deletedAt: input.action === "trash" ? now : null,
+        updatedAt: now,
       })
       .where(eq(questions.id, input.questionId));
     if (input.action !== "restore") {
@@ -1989,7 +2080,7 @@ export async function mutateQuestionLifecycle(input: {
         .set({
           status: "waived",
           reason: `Learner requested ${input.action}.`,
-          updatedAt: new Date(),
+          updatedAt: now,
         })
         .where(
           and(
@@ -2011,7 +2102,7 @@ export async function mutateQuestionLifecycle(input: {
     } else {
       await tx
         .update(memoryStates)
-        .set({ dueAt: new Date(), updatedAt: new Date() })
+        .set({ dueAt: now, updatedAt: now })
         .where(
           and(
             eq(memoryStates.userId, input.userId),
@@ -2034,7 +2125,8 @@ export async function editQuestion(input: {
   prompt: string;
   referenceAnswer: string;
   importance?: number;
-}): Promise<{ resetScheduling: true }> {
+}, dependencies: V2ServiceDependencies = defaultV2ServiceDependencies): Promise<{ resetScheduling: true }> {
+  const now = dependencies.now();
   const normalized = normalizeQuestionInput(input);
   const current = await currentQuestionVersion(input.userId, input.questionId);
   if (!current) throw new Error("Question not found.");
@@ -2078,7 +2170,7 @@ export async function editQuestion(input: {
         targetKey: normalized.promptKey,
         importance: normalized.importance,
         lifecycle,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)));
     await tx
@@ -2101,7 +2193,7 @@ export async function editQuestion(input: {
       );
     await tx
       .update(retryObligations)
-      .set({ status: "waived", reason: "Question edited.", updatedAt: new Date() })
+      .set({ status: "waived", reason: "Question edited.", updatedAt: now })
       .where(
         and(
           eq(retryObligations.userId, input.userId),

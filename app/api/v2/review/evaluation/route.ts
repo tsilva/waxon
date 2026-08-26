@@ -6,21 +6,19 @@ import {
   isRecord,
   v2Error,
 } from "@/app/lib/v2/http";
-import {
-  applyLearnerGrade,
-  getEvaluationForSubmission,
-} from "@/app/lib/v2/service";
+import { waxonApplication } from "@/app/lib/v2/application";
 import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 
 export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
+    const application = waxonApplication.forLearner(user.id);
     const submissionId = new URL(request.url).searchParams.get("submissionId");
     if (!submissionId) {
       throw new Error("submissionId is required.");
     }
     return NextResponse.json(
-      await getEvaluationForSubmission(user.id, submissionId),
+      await application.review.getEvaluation(submissionId),
     );
   } catch (error) {
     return v2Error(error);
@@ -34,6 +32,7 @@ export async function POST(request: Request) {
   }
   try {
     const user = await getCurrentUser();
+    const application = waxonApplication.forLearner(user.id);
     if (!isRecord(parsed.value)) {
       throw new Error("A grade payload is required.");
     }
@@ -45,8 +44,7 @@ export async function POST(request: Request) {
     if (!submissionId || !grade) {
       throw new Error("A submission and valid grade are required.");
     }
-    const result = await applyLearnerGrade({
-      userId: user.id,
+    const result = await application.review.grade({
       submissionId,
       grade,
     });

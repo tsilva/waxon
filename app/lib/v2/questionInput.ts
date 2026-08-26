@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { assessQuestionQuality } from "./questionQuality.ts";
+import {
+  assessQuestionQuality,
+  type QuestionQualityAssessment,
+} from "./questionQuality.ts";
 
 export const MAX_QUESTION_BATCH = 50;
 export const MAX_PROMPT_CHARS = 16_384;
@@ -28,16 +31,25 @@ export function questionPromptKey(value: string): string {
 
 export function normalizeQuestionInput(
   input: LeanQuestionInput,
+  assessment?: QuestionQualityAssessment,
 ): NormalizedQuestionInput {
   const prompt = input.prompt.replace(/\s+/gu, " ").trim();
   const referenceAnswer = input.referenceAnswer.trim();
   const importance = Math.max(0.1, Math.min(5, input.importance ?? 1));
-  const quality = assessQuestionQuality({
-    prompt,
-    referenceAnswer,
-    target: prompt,
-  });
+  const quality =
+    assessment ??
+    assessQuestionQuality({
+      prompt,
+      referenceAnswer,
+      target: prompt,
+    });
 
+  if (!prompt) {
+    throw new Error("Add a question prompt.");
+  }
+  if (!referenceAnswer) {
+    throw new Error("Add or confirm a reference answer.");
+  }
   if (prompt.length > MAX_PROMPT_CHARS) {
     throw new Error(`Question prompts must be at most ${MAX_PROMPT_CHARS} characters.`);
   }

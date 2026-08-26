@@ -5,14 +5,14 @@ import {
   resolveOpenRouterApiKey,
   resolveOpenRouterModel,
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
-} from "@/shared/openrouter-config.mts";
-import { extractJsonObject } from "@/shared/json-object.mts";
+} from "../../../shared/openrouter-config.mts";
+import { extractJsonObject } from "../../../shared/json-object.mts";
 import {
   BROWSER_SMOKE_CORRECT_TOKEN,
   isBrowserSmokeQuestion,
-} from "@/app/lib/browserSmokeSupport";
-import { beginLlmTrace, finishLlmTrace } from "@/app/lib/llmTraceStore";
-import type { V2Grade } from "./types";
+} from "../browserSmokeSupport.ts";
+import { beginLlmTrace, finishLlmTrace } from "../llmTraceStore.ts";
+import type { V2Grade } from "./types.ts";
 
 async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
   url: string,
