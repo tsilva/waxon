@@ -23,7 +23,7 @@ keyenv run -- pnpm dev --port auto
 
 From a tab already open to the app, issue same-origin `POST /api/test-support/browser-smoke` and require `200` with two results. A `404` means the development guard is disabled; stop instead of weakening it.
 
-After applying a responsive viewport override, reload the route and wait for visible Review or Library content before capturing a screenshot; capturing before the in-app Browser repaints can produce a blank image despite a populated DOM.
+After applying a responsive viewport override, reload the route and wait for visible Review or Question Bank content before capturing a screenshot; capturing before the in-app Browser repaints can produce a blank image despite a populated DOM.
 
 ## Stable answers
 
@@ -41,13 +41,13 @@ This answer deliberately omits the required token.
 
 ## Acceptance journey
 
-1. **Empty/add/search/edit:** In Library, add a unique standalone question, find it by search, edit its answer, confirm the edit warning, then pause and restore it. Confirm no source, generation, concept, provenance, or document controls appear.
-2. **Complete daily Review:** Seed the fixtures, open Review, and confirm every active unanswered fixture appears in the daily-plan remaining count and can be answered in free text regardless of the stored daily-minute or new-item settings.
-3. **Correct and incorrect evaluation:** Submit the stable correct token for one fixture and the incorrect text for the other. Confirm `Good` or `Easy` for the correct response, `Again` for the incorrect response, and visible expected-answer/missing-point feedback.
-4. **Correction and delayed retry:** Change the incorrect first grade to `Good`, then back to `Again`; confirm scheduling is rebuilt and exactly one retry is offered only after another question or the ten-minute minimum. Confirm a failed retry does not create another same-day retry.
-5. **Future scheduling:** Complete a successful answer and confirm Library shows a future due date and recall estimate.
-6. **MCP visibility:** In Library create a personal token, call `check_questions` with a unique candidate and confirm its per-item coverage/advisory, then call `add_questions` with a unique idempotency key. Repeat the add and confirm one `created` result followed by the identical prior result. Check the same prompt again and require `exact_duplicate`, including its full stored answer and lifecycle. Search for the MCP-added question in Library and through ranked `search_questions`. Revoke the token and confirm the endpoint returns `401`.
-7. **Responsive and console check:** Verify desktop and 390 px Library/Review layouts, keyboard focus, and no unexpected browser console errors.
+1. **Empty/add/search/edit:** In Question Bank, add a unique standalone question, find it by search, edit its answer, confirm the edit warning, then archive and restore it. Confirm no source, generation, concept, provenance, or document controls appear.
+2. **Live Review Queue:** Seed the fixtures, open Review, and confirm every Active unanswered fixture appears immediately in the queue count and can be answered in unrestricted free text. Confirm no daily-plan, session, daily-minute, capacity, new-item, importance, retention-target, flag, skip, or retry control or warning appears.
+3. **Successful evaluation feedback:** Submit the stable correct token for one fixture. Confirm `Good` or `Easy`, visible Answer Standard and Demonstrated Gap feedback, and a visible future scheduled Local Day.
+4. **Local Day:** Confirm Review automatically persists a detected IANA timezone. Edit it through Local Day settings, save, reopen the dialog, and confirm the saved value remains while Review refreshes.
+5. **Reconstruction:** Reload or close and reopen Review after successful recall. Confirm the answered Question stays out of the current queue and the same future schedule is reconstructed without a session-recovery prompt.
+6. **MCP visibility:** In Question Bank create a personal token, call `check_questions` with a unique candidate and confirm its per-item coverage/advisory, then call `add_questions` with a unique idempotency key. Repeat the add and confirm one `created` result followed by the identical prior result. Check the same prompt again and require `exact_duplicate`, including its full stored answer and lifecycle. Search for the MCP-added question in Question Bank and through ranked `search_questions`. Revoke the token and confirm the endpoint returns `401`.
+7. **Responsive and console check:** Verify desktop and 390 px Question Bank/Review layouts, keyboard focus, timezone dialog containment, and no unexpected browser console errors.
 
 Use accessible roles and visible names, take fresh DOM snapshots before changing locator strategy, and wait for content rather than `networkidle`. Do not stop or restart an existing server.
 

@@ -203,7 +203,6 @@ const handler = createMcpHandler(
               z.object({
                 prompt: z.string().max(16_384),
                 referenceAnswer: z.string().max(65_536),
-                importance: z.number().min(0.1).max(5).default(1),
               }),
             )
             .min(1)
