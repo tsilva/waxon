@@ -47,7 +47,7 @@ export function assessQuestionQuality(input: {
   }
 
   if (!answer) {
-    reasons.push("Add or confirm a reference answer.");
+    reasons.push("Add or confirm an Answer Standard.");
   } else if (answer.length > 65_536) {
     reasons.push("Reduce the answer or split the recall target.");
   }

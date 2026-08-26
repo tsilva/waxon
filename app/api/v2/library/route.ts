@@ -6,16 +6,12 @@ import { getCurrentUser } from "@/app/lib/auth";
 import { isRecord, v2Error } from "@/app/lib/v2/http";
 import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 import { waxonApplication } from "@/app/lib/v2/application";
-import type { V2Lifecycle } from "@/app/lib/v2/types";
+import type { V2QuestionLifecycle } from "@/app/lib/v2/types";
 
-const LIFECYCLES = new Set<V2Lifecycle>([
-  "new",
-  "learning",
-  "review",
+const LIFECYCLES = new Set<V2QuestionLifecycle>([
+  "active",
   "flagged",
-  "paused",
   "archived",
-  "trash",
 ]);
 
 async function startEmbeddingJobsBestEffort(userId: string) {
@@ -35,8 +31,8 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const requested = url.searchParams.get("lifecycle");
     const lifecycle =
-      requested && LIFECYCLES.has(requested as V2Lifecycle)
-        ? (requested as V2Lifecycle)
+      requested && LIFECYCLES.has(requested as V2QuestionLifecycle)
+        ? (requested as V2QuestionLifecycle)
         : "all";
     return NextResponse.json(
       await application.questionBank.list({
@@ -98,29 +94,29 @@ export async function PATCH(request: Request) {
     const questionId =
       typeof parsed.value.questionId === "string" ? parsed.value.questionId : "";
     if (!questionId) throw new Error("A question is required.");
-    if (["pause", "archive", "trash", "restore"].includes(parsed.value.action)) {
-      await application.questionBank.mutate({
-        questionId,
-        action: parsed.value.action as "pause" | "archive" | "trash" | "restore",
-      });
-    } else if (parsed.value.action === "edit") {
-      await application.questionBank.edit({
+    let replacement:
+      | Awaited<ReturnType<typeof application.questionBank.replace>>
+      | undefined;
+    if (parsed.value.action === "archive") {
+      await application.questionBank.archive(questionId);
+    } else if (parsed.value.action === "restore") {
+      await application.questionBank.restore(questionId);
+    } else if (parsed.value.action === "replace") {
+      replacement = await application.questionBank.replace({
         questionId,
         prompt: typeof parsed.value.prompt === "string" ? parsed.value.prompt : "",
         referenceAnswer:
           typeof parsed.value.referenceAnswer === "string"
             ? parsed.value.referenceAnswer
             : "",
-        importance:
-          typeof parsed.value.importance === "number"
-            ? parsed.value.importance
-            : undefined,
       });
-      await startEmbeddingJobsBestEffort(user.id);
+      if (replacement.status === "replaced") {
+        await startEmbeddingJobsBestEffort(user.id);
+      }
     } else {
       throw new Error("This Library action is not allowed.");
     }
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, ...replacement });
   } catch (error) {
     return v2Error(error);
   }

@@ -14,7 +14,7 @@ import {
   type QuestionSearchMode,
 } from "../../../shared/question-search.mts";
 import { questionPromptKey } from "./questionInput.ts";
-import type { V2Lifecycle } from "./types.ts";
+import type { V2Lifecycle, V2QuestionLifecycle } from "./types.ts";
 
 const SEARCHABLE_LIFECYCLES = new Set<V2Lifecycle>([
   "new",
@@ -141,7 +141,7 @@ async function lexicalRows(input: {
   userId: string;
   candidates: readonly SearchCandidate[];
   branchLimit: number;
-  lifecycle?: V2Lifecycle | null;
+  lifecycle?: V2Lifecycle | V2QuestionLifecycle | null;
 }): Promise<StoredSearchRow[]> {
   if (input.candidates.length === 0) return [];
   const candidates = input.candidates.map((candidate) => ({
@@ -171,7 +171,12 @@ async function lexicalRows(input: {
               AND qv.question_id = q.id
               AND qv.is_current = true
             WHERE q.user_id = $1
-              AND ($5::text IS NULL OR q.lifecycle::text = $5)
+              AND (
+                $5::text IS NULL
+                OR ($5 = 'active' AND q.lifecycle::text IN ('new','learning','review'))
+                OR ($5 = 'archived' AND q.lifecycle::text IN ('paused','archived','trash'))
+                OR q.lifecycle::text = $5
+              )
               AND q.lifecycle::text IN
                   ('new','learning','review','flagged','paused','archived','trash')
               AND (
@@ -193,7 +198,12 @@ async function lexicalRows(input: {
               AND qv.question_id = q.id
               AND qv.is_current = true
             WHERE q.user_id = $1
-              AND ($5::text IS NULL OR q.lifecycle::text = $5)
+              AND (
+                $5::text IS NULL
+                OR ($5 = 'active' AND q.lifecycle::text IN ('new','learning','review'))
+                OR ($5 = 'archived' AND q.lifecycle::text IN ('paused','archived','trash'))
+                OR q.lifecycle::text = $5
+              )
               AND q.lifecycle::text IN
                   ('new','learning','review','flagged','paused','archived','trash')
               AND similarity(qv.prompt, input.query) >= $4
@@ -791,7 +801,7 @@ export async function checkQuestions(input: {
 export async function rankQuestionIdsLexically(input: {
   userId: string;
   query: string;
-  lifecycle?: V2Lifecycle | null;
+  lifecycle?: V2Lifecycle | V2QuestionLifecycle | null;
   limit: number;
 }): Promise<string[]> {
   const branchLimit = Math.min(100, Math.max(25, input.limit * 3));
@@ -806,7 +816,12 @@ export async function rankQuestionIdsLexically(input: {
          FROM waxon_v2.questions
         WHERE user_id = $1
           AND target_key = $2
-          AND ($3::text IS NULL OR lifecycle::text = $3)
+          AND (
+            $3::text IS NULL
+            OR ($3 = 'active' AND lifecycle::text IN ('new','learning','review'))
+            OR ($3 = 'archived' AND lifecycle::text IN ('paused','archived','trash'))
+            OR lifecycle::text = $3
+          )
           AND lifecycle::text IN
               ('new','learning','review','flagged','paused','archived','trash')
         ORDER BY updated_at DESC, id`,

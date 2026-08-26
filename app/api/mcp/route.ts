@@ -7,15 +7,15 @@ import { waxonApplication } from "@/app/lib/v2/application";
 
 export const runtime = "nodejs";
 
-const lifecycleSchema = z.enum([
-  "new",
-  "learning",
-  "review",
-  "flagged",
-  "paused",
-  "archived",
-  "trash",
-]);
+const lifecycleSchema = z.enum(["active", "flagged", "archived"]);
+
+function canonicalLifecycle(value: string | null) {
+  if (value === null) return null;
+  if (["new", "learning", "review", "active"].includes(value)) {
+    return "active" as const;
+  }
+  return value === "flagged" ? ("flagged" as const) : ("archived" as const);
+}
 
 const questionSummarySchema = z.object({
   id: z.string(),
@@ -103,7 +103,7 @@ const handler = createMcpHandler(
                 id: match.id,
                 prompt: match.prompt,
                 referenceAnswer: match.referenceAnswer,
-                lifecycle: match.lifecycle ?? "paused",
+                lifecycle: canonicalLifecycle(match.lifecycle) ?? "archived",
                 updatedAt: match.updatedAt ?? new Date(0).toISOString(),
                 matchTypes: match.matchTypes,
                 exactPrompt: match.exactPrompt,
@@ -149,7 +149,7 @@ const handler = createMcpHandler(
       {
         title: "Check questions before adding",
         description:
-          "Call before add_questions. A duplicate asks for the same recall target, not merely the same topic. Reuse, edit, or restore an exact or clearly equivalent existing question. A related question asking for a different fact, direction, condition, or explanation is distinct. Advice is read-only and semantic matches require your comparison.",
+          "Call before add_questions. A duplicate asks for the same recall target, not merely the same topic. Reuse, replace, or restore an exact or clearly equivalent existing Question. A related Question asking for a different fact, direction, condition, or explanation is distinct. Advice is read-only and semantic matches require your comparison.",
         inputSchema: z.object({
           items: z
             .array(
@@ -182,10 +182,19 @@ const handler = createMcpHandler(
         annotations: { readOnlyHint: true, openWorldHint: false },
       },
       async ({ items, limitPerItem }) => {
-        const output = await application.questionBank.check({
+        const checked = await application.questionBank.check({
           items,
           limitPerItem,
         });
+        const output = {
+          results: checked.results.map((result) => ({
+            ...result,
+            matches: result.matches.map((match) => ({
+              ...match,
+              lifecycle: canonicalLifecycle(match.lifecycle),
+            })),
+          })),
+        };
         return {
           content: [{ type: "text", text: JSON.stringify(output) }],
           structuredContent: output,

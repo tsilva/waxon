@@ -8,9 +8,9 @@ import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
 import { questionPromptKey } from "@/app/lib/v2/questionInput";
 import {
   addQuestions,
-  editQuestion,
   listLibrary,
   mutateQuestionLifecycle,
+  replaceQuestion,
   type AddQuestionResult,
 } from "@/app/lib/v2/service";
 
@@ -48,30 +48,41 @@ export async function POST() {
         inArray(questions.targetKey, promptKeys),
       ),
     );
-  const existingByTarget = new Map(existing.map((item) => [item.targetKey, item]));
+  const existingByTarget = new Map<string, (typeof existing)[number]>();
+  for (const candidate of existing) {
+    const retained = existingByTarget.get(candidate.targetKey);
+    if (
+      !retained ||
+      ["new", "learning", "review"].includes(candidate.lifecycle)
+    ) {
+      existingByTarget.set(candidate.targetKey, candidate);
+    }
+  }
   const results: AddQuestionResult[] = [];
   for (const item of BROWSER_SMOKE_QUESTIONS) {
     const targetKey = questionPromptKey(item.prompt);
     const prior = existingByTarget.get(targetKey);
     if (prior) {
-      if (prior.lifecycle !== "trash") {
-        await mutateQuestionLifecycle({
-          userId: user.id,
-          questionId: prior.id,
-          action: "trash",
-        });
-      }
-      await mutateQuestionLifecycle({
-        userId: user.id,
-        questionId: prior.id,
-        action: "restore",
-      });
-      await editQuestion({
+      const replacement = await replaceQuestion({
         userId: user.id,
         questionId: prior.id,
         ...item,
       });
-      results.push({ id: prior.id, status: "existing", lifecycle: "new" });
+      if (
+        replacement.status === "unchanged" &&
+        replacement.lifecycle !== "active"
+      ) {
+        await mutateQuestionLifecycle({
+          userId: user.id,
+          questionId: replacement.questionId,
+          action: "restore",
+        });
+      }
+      results.push({
+        id: replacement.questionId,
+        status: replacement.status === "replaced" ? "created" : "existing",
+        lifecycle: "active",
+      });
       continue;
     }
     const created = await addQuestions({
@@ -96,7 +107,7 @@ export async function GET() {
     questions: library.questions.filter(
       (item) =>
         prompts.has(item.prompt) &&
-        ["new", "learning", "review"].includes(item.lifecycle),
+        item.lifecycle === "active",
     ),
   });
 }
