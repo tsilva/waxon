@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, LoaderCircle, Settings2 } from "lucide-react";
+import { ChevronDown, LoaderCircle, Settings2, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -316,7 +316,7 @@ function TimezoneSettings({
             onClick={onClose}
             type="button"
           >
-            ×
+            <X aria-hidden="true" />
           </button>
         </div>
         {settings ? (
@@ -331,7 +331,6 @@ function TimezoneSettings({
                 required
                 type="text"
               />
-              <small>Review uses this timezone to determine your Local Day.</small>
             </label>
             <datalist id="iana-timezones">
               <option value="UTC" />
@@ -516,7 +515,7 @@ export default function ReviewApp() {
                     ? "Your answer is saved while the evaluator finishes."
                     : nextScheduled
                       ? `The next scheduled Review is ${nextScheduled}.`
-                      : "Add an Active Question in Library whenever you learn something worth keeping."}
+                      : "Add an Active Question to your Question Bank whenever you learn something worth keeping."}
                 </p>
               </div>
             )}
