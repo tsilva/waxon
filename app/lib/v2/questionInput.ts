@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+
 export const MAX_QUESTION_BATCH = 50;
 export const MAX_PROMPT_CHARS = 16_384;
 export const MAX_REFERENCE_ANSWER_CHARS = 65_536;
@@ -6,13 +7,11 @@ export const MAX_REFERENCE_ANSWER_CHARS = 65_536;
 export type LeanQuestionInput = {
   prompt: string;
   referenceAnswer: string;
-  importance?: number;
 };
 
 export type NormalizedQuestionInput = {
   prompt: string;
   referenceAnswer: string;
-  importance: number;
   promptKey: string;
 };
 
@@ -43,7 +42,6 @@ export function normalizeQuestionInput(
   }
   const prompt = input.prompt.replace(/\s+/gu, " ").trim();
   const referenceAnswer = input.referenceAnswer.trim();
-  const importance = Math.max(0.1, Math.min(5, input.importance ?? 1));
 
   if (!prompt) {
     throw new Error("Add a question prompt.");
@@ -54,7 +52,6 @@ export function normalizeQuestionInput(
   return {
     prompt,
     referenceAnswer,
-    importance,
     promptKey: questionPromptKey(prompt),
   };
 }

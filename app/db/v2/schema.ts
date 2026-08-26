@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  bigserial,
   boolean,
   check,
+  date,
   doublePrecision,
   foreignKey,
   halfvec,
@@ -80,34 +82,6 @@ export const evaluationStatus = waxonV2.enum("evaluation_status", [
   "failed",
   "superseded",
 ]);
-export const sessionStatus = waxonV2.enum("session_status", [
-  "active",
-  "completed",
-  "abandoned",
-]);
-export const sessionKind = waxonV2.enum("session_kind", [
-  "primary",
-  "supplemental",
-]);
-export const sessionItemKind = waxonV2.enum("session_item_kind", [
-  "base",
-  "retry",
-]);
-export const sessionItemState = waxonV2.enum("session_item_state", [
-  "queued",
-  "exposed",
-  "submitted",
-  "evaluated",
-  "invalidated",
-]);
-export const retryStatus = waxonV2.enum("retry_status", [
-  "queued",
-  "deferred",
-  "cancelled",
-  "waived",
-  "exposed",
-  "completed",
-]);
 export const jobStatus = waxonV2.enum("job_status", [
   "pending",
   "running",
@@ -136,10 +110,7 @@ export const learnerSettings = waxonV2.table("learner_settings", {
   userId: text("user_id")
     .primaryKey()
     .references(() => users.id, { onDelete: "cascade" }),
-  dailyMinutes: integer("daily_minutes").notNull().default(10),
-  desiredRetention: doublePrecision("desired_retention").notNull().default(0.9),
-  newItemsPerDay: integer("new_items_per_day").notNull().default(5),
-  timezone: text("timezone").notNull().default("UTC"),
+  timezone: text("timezone"),
   autoAcceptHighConfidence: boolean("auto_accept_high_confidence")
     .notNull()
     .default(true),
@@ -202,7 +173,7 @@ export const questions = waxonV2.table(
     priorLifecycle: questionLifecycle("prior_lifecycle"),
     suspensionReason: text("suspension_reason"),
     targetKey: text("target_key").notNull(),
-    importance: doublePrecision("importance").notNull().default(1),
+    creationOrder: bigserial("creation_order", { mode: "number" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
@@ -335,87 +306,6 @@ export const questionSearchEmbeddings = waxonV2.table(
   ],
 );
 
-export const reviewSessions = waxonV2.table(
-  "review_sessions",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    kind: sessionKind("kind").notNull().default("primary"),
-    status: sessionStatus("status").notNull().default("active"),
-    timeBudgetMinutes: integer("time_budget_minutes").notNull(),
-    desiredRetention: doublePrecision("desired_retention").notNull(),
-    estimatedSeconds: integer("estimated_seconds").notNull().default(0),
-    reservedSeconds: integer("reserved_seconds").notNull().default(0),
-    plannedCount: integer("planned_count").notNull().default(0),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-    completedAt: timestamp("completed_at", {
-      withTimezone: true,
-      mode: "date",
-    }),
-  },
-  (table) => [
-    unique("review_sessions_user_id_id_unique").on(table.userId, table.id),
-    uniqueIndex("review_sessions_one_active_per_user")
-      .on(table.userId)
-      .where(sql`${table.status} = 'active'`),
-  ],
-);
-
-export const reviewSessionItems = waxonV2.table(
-  "review_session_items",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id").notNull(),
-    sessionId: uuid("session_id").notNull(),
-    questionId: uuid("question_id").notNull(),
-    questionVersionId: uuid("question_version_id").notNull(),
-    kind: sessionItemKind("kind").notNull().default("base"),
-    position: integer("position").notNull(),
-    state: sessionItemState("state").notNull().default("queued"),
-    earliestAt: timestamp("earliest_at", {
-      withTimezone: true,
-      mode: "date",
-    }).notNull(),
-    exposedAt: timestamp("exposed_at", { withTimezone: true, mode: "date" }),
-    submittedAt: timestamp("submitted_at", { withTimezone: true, mode: "date" }),
-    estimatedSeconds: integer("estimated_seconds").notNull().default(60),
-    isIntroduction: boolean("is_introduction").notNull().default(false),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    unique("review_session_items_user_id_id_unique").on(table.userId, table.id),
-    unique("review_session_items_position_unique").on(
-      table.userId,
-      table.sessionId,
-      table.position,
-    ),
-    foreignKey({
-      name: "review_session_items_session_fk",
-      columns: [table.userId, table.sessionId],
-      foreignColumns: [reviewSessions.userId, reviewSessions.id],
-    }).onDelete("cascade"),
-    foreignKey({
-      name: "review_session_items_question_fk",
-      columns: [table.userId, table.questionId],
-      foreignColumns: [questions.userId, questions.id],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "review_session_items_version_fk",
-      columns: [table.userId, table.questionVersionId],
-      foreignColumns: [questionVersions.userId, questionVersions.id],
-    }).onDelete("restrict"),
-    index("review_session_items_next_idx").on(
-      table.userId,
-      table.sessionId,
-      table.state,
-      table.position,
-    ),
-  ],
-);
-
 export const answerSubmissions = waxonV2.table(
   "answer_submissions",
   {
@@ -423,7 +313,6 @@ export const answerSubmissions = waxonV2.table(
     userId: text("user_id").notNull(),
     questionId: uuid("question_id").notNull(),
     questionVersionId: uuid("question_version_id").notNull(),
-    sessionItemId: uuid("session_item_id").notNull(),
     answer: text("answer").notNull(),
     status: submissionStatus("status").notNull().default("pending"),
     submittedAt: timestamp("submitted_at", {
@@ -434,7 +323,6 @@ export const answerSubmissions = waxonV2.table(
   },
   (table) => [
     unique("answer_submissions_user_id_id_unique").on(table.userId, table.id),
-    unique("answer_submissions_item_unique").on(table.userId, table.sessionItemId),
     foreignKey({
       name: "answer_submissions_question_fk",
       columns: [table.userId, table.questionId],
@@ -444,11 +332,6 @@ export const answerSubmissions = waxonV2.table(
       name: "answer_submissions_version_fk",
       columns: [table.userId, table.questionVersionId],
       foreignColumns: [questionVersions.userId, questionVersions.id],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "answer_submissions_item_fk",
-      columns: [table.userId, table.sessionItemId],
-      foreignColumns: [reviewSessionItems.userId, reviewSessionItems.id],
     }).onDelete("restrict"),
     index("answer_submissions_pending_question_idx").on(
       table.userId,
@@ -523,6 +406,7 @@ export const memoryStates = waxonV2.table(
     userId: text("user_id").notNull(),
     questionId: uuid("question_id").notNull(),
     dueAt: timestamp("due_at", { withTimezone: true, mode: "date" }).notNull(),
+    dueOn: date("due_on", { mode: "string" }).notNull(),
     lastReviewAt: timestamp("last_review_at", {
       withTimezone: true,
       mode: "date",
@@ -548,48 +432,7 @@ export const memoryStates = waxonV2.table(
       columns: [table.userId, table.questionId],
       foreignColumns: [questions.userId, questions.id],
     }).onDelete("cascade"),
-    index("memory_states_due_idx").on(table.userId, table.dueAt),
-  ],
-);
-
-export const retryObligations = waxonV2.table(
-  "retry_obligations",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id").notNull(),
-    firstSubmissionId: uuid("first_submission_id").notNull(),
-    questionId: uuid("question_id").notNull(),
-    questionVersionId: uuid("question_version_id").notNull(),
-    sessionId: uuid("session_id").notNull(),
-    status: retryStatus("status").notNull().default("queued"),
-    earliestAt: timestamp("earliest_at", {
-      withTimezone: true,
-      mode: "date",
-    }).notNull(),
-    reason: text("reason"),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    unique("retry_obligations_submission_unique").on(
-      table.userId,
-      table.firstSubmissionId,
-    ),
-    foreignKey({
-      name: "retry_obligations_submission_fk",
-      columns: [table.userId, table.firstSubmissionId],
-      foreignColumns: [answerSubmissions.userId, answerSubmissions.id],
-    }).onDelete("cascade"),
-    foreignKey({
-      name: "retry_obligations_question_fk",
-      columns: [table.userId, table.questionId],
-      foreignColumns: [questions.userId, questions.id],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "retry_obligations_session_fk",
-      columns: [table.userId, table.sessionId],
-      foreignColumns: [reviewSessions.userId, reviewSessions.id],
-    }).onDelete("cascade"),
+    index("memory_states_due_idx").on(table.userId, table.dueOn),
   ],
 );
 
