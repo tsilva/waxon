@@ -1,11 +1,11 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { getV2Db } from "@/app/db/v2/client";
-import { mcpCredentials } from "@/app/db/v2/schema";
+import { getV2Db } from "../../db/v2/client.ts";
+import { mcpCredentials } from "../../db/v2/schema.ts";
 import {
   createMcpToken,
   hashMcpToken,
   MCP_TOKEN_PREFIX,
-} from "./mcpToken";
+} from "./mcpToken.ts";
 
 export async function getMcpCredentialStatus(userId: string) {
   const db = getV2Db();

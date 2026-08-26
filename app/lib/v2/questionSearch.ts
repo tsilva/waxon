@@ -14,7 +14,11 @@ import {
   type QuestionSearchMode,
 } from "../../../shared/question-search.mts";
 import { questionPromptKey } from "./questionInput.ts";
-import type { V2Lifecycle, V2QuestionLifecycle } from "./types.ts";
+import type {
+  V2Lifecycle,
+  V2QuestionFlag,
+  V2QuestionLifecycle,
+} from "./types.ts";
 
 const SEARCHABLE_LIFECYCLES = new Set<V2Lifecycle>([
   "new",
@@ -63,6 +67,7 @@ export type QuestionSearchMatch = {
   prompt: string;
   referenceAnswer: string;
   lifecycle: V2Lifecycle | null;
+  flags: V2QuestionFlag[];
   updatedAt: string | null;
   matchTypes: Array<"exact" | "full_text" | "trigram" | "semantic">;
   exactPrompt: boolean;
@@ -459,6 +464,7 @@ function bankMatch(input: {
     prompt: row.prompt,
     referenceAnswer: row.reference_answer,
     lifecycle: asLifecycle(row.lifecycle),
+    flags: [],
     updatedAt: row.updated_at.toISOString(),
     matchTypes,
     exactPrompt: false,
@@ -470,6 +476,42 @@ function bankMatch(input: {
       ? Number(input.semantic.semantic_similarity)
       : null,
   };
+}
+
+async function questionFlagsById(
+  userId: string,
+  questionIds: readonly string[],
+): Promise<Map<string, V2QuestionFlag[]>> {
+  if (questionIds.length === 0) return new Map();
+  const result = await getV2Client().pool.query<{
+    question_id: string;
+    origin: V2QuestionFlag["origin"];
+    reasons: string[];
+    detail: string | null;
+    created_at: Date;
+    resolved_at: Date | null;
+  }>(
+    `SELECT question_id, origin::text, reasons, detail, created_at, resolved_at
+       FROM waxon_v2.question_flags
+      WHERE user_id = $1
+        AND question_id = ANY($2::uuid[])
+      ORDER BY created_at, id`,
+    [userId, [...new Set(questionIds)]],
+  );
+  const flagsByQuestionId = new Map<string, V2QuestionFlag[]>();
+  for (const row of result.rows) {
+    flagsByQuestionId.set(row.question_id, [
+      ...(flagsByQuestionId.get(row.question_id) ?? []),
+      {
+        origin: row.origin,
+        reasons: row.reasons,
+        detail: row.detail,
+        createdAt: row.created_at.toISOString(),
+        resolvedAt: row.resolved_at?.toISOString() ?? null,
+      },
+    ]);
+  }
+  return flagsByQuestionId;
 }
 
 export async function checkQuestions(input: {
@@ -612,8 +654,7 @@ export async function checkQuestions(input: {
   const useHybrid =
     hybridConfigured && semanticResult.succeeded && semanticResult.complete;
 
-  return {
-    results: candidates.map((candidate) => {
+  const results: QuestionCheckResult[] = candidates.map((candidate) => {
       const bankExact = exactBank.get(candidate.candidateId) ?? [];
       const batchExact = exactBatch.get(candidate.candidateId);
       if (bankExact.length > 0 || batchExact) {
@@ -625,6 +666,7 @@ export async function checkQuestions(input: {
             prompt: row.prompt,
             referenceAnswer: row.reference_answer,
             lifecycle: asLifecycle(row.lifecycle),
+            flags: [],
             updatedAt: row.updated_at.toISOString(),
             matchTypes: ["exact" as const],
             exactPrompt: true,
@@ -643,6 +685,7 @@ export async function checkQuestions(input: {
                   prompt: batchExact.prompt,
                   referenceAnswer: batchExact.referenceAnswer,
                   lifecycle: null,
+                  flags: [],
                   updatedAt: null,
                   matchTypes: ["exact" as const],
                   exactPrompt: true,
@@ -751,6 +794,7 @@ export async function checkQuestions(input: {
           prompt: earlier.prompt,
           referenceAnswer: earlier.referenceAnswer,
           lifecycle: null,
+          flags: [],
           updatedAt: null,
           matchTypes: [
             ...(lexicalRank >= 0 ? (["trigram"] as const) : []),
@@ -794,7 +838,24 @@ export async function checkQuestions(input: {
         },
         matches,
       };
-    }),
+    });
+  const flagsByQuestionId = await questionFlagsById(
+    input.userId,
+    results.flatMap((result) =>
+      result.matches
+        .filter((match) => match.source === "bank")
+        .map((match) => match.id),
+    ),
+  );
+  return {
+    results: results.map((result) => ({
+      ...result,
+      matches: result.matches.map((match) =>
+        match.source === "bank"
+          ? { ...match, flags: flagsByQuestionId.get(match.id) ?? [] }
+          : match,
+      ),
+    })),
   };
 }
 
