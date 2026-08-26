@@ -81,8 +81,13 @@ export async function POST() {
       results.push({
         id: replacement.questionId,
         status: replacement.status === "replaced" ? "created" : "existing",
+        outcome:
+          replacement.status === "replaced"
+            ? "created_active"
+            : "exact_duplicate",
         lifecycle: "active",
         flags: [],
+        answerStandardConflict: false,
       });
       continue;
     }

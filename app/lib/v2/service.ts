@@ -83,8 +83,14 @@ type V2Tx = Parameters<
 export type AddQuestionResult = {
   id: string;
   status: "created" | "existing";
+  outcome:
+    | "created_active"
+    | "created_flagged"
+    | "idempotent_replay"
+    | "exact_duplicate";
   lifecycle: V2QuestionLifecycle;
   flags: Array<Pick<V2QuestionFlag, "origin" | "reasons">>;
+  answerStandardConflict: boolean;
 };
 
 function questionLifecycle(value: string): V2QuestionLifecycle {
@@ -316,6 +322,19 @@ function normalizedRequestHash(items: NormalizedQuestionInput[]): string {
   return checksum(JSON.stringify(items));
 }
 
+function idempotentReplayResult(
+  result: AddQuestionResult,
+): AddQuestionResult {
+  return {
+    ...result,
+    status: "existing",
+    outcome: "idempotent_replay",
+    lifecycle: questionLifecycle(result.lifecycle),
+    flags: result.flags ?? [],
+    answerStandardConflict: result.answerStandardConflict ?? false,
+  };
+}
+
 export async function addQuestions(
   input: {
     userId: string;
@@ -343,11 +362,7 @@ export async function addQuestions(
   );
   if (prior) {
     return {
-      results: prior.results.map((result) => ({
-        ...result,
-        lifecycle: questionLifecycle(result.lifecycle),
-        flags: result.flags ?? [],
-      })),
+      results: prior.results.map(idempotentReplayResult),
     };
   }
   const assessments = await Promise.all(
@@ -378,11 +393,7 @@ export async function addQuestions(
       }
       const response = receipt.response as { results: AddQuestionResult[] };
       return {
-        results: response.results.map((result) => ({
-          ...result,
-          lifecycle: questionLifecycle(result.lifecycle),
-          flags: result.flags ?? [],
-        })),
+        results: response.results.map(idempotentReplayResult),
       };
     }
 
@@ -470,16 +481,14 @@ export async function addQuestions(
       };
       const duplicate = byPromptKey.get(item.promptKey);
       if (duplicate) {
-        if (duplicate.referenceAnswer.trim() !== item.referenceAnswer) {
-          throw new Error(
-            `“${item.prompt.slice(0, 120)}” already exists with a different Answer Standard. Replace the existing Question instead.`,
-          );
-        }
         results.push({
           id: duplicate.id,
           status: "existing",
+          outcome: "exact_duplicate",
           lifecycle: questionLifecycle(duplicate.lifecycle),
           flags: flagsByQuestionId.get(duplicate.id) ?? [],
+          answerStandardConflict:
+            duplicate.referenceAnswer.trim() !== item.referenceAnswer,
         });
         continue;
       }
@@ -516,8 +525,10 @@ export async function addQuestions(
       const created: AddQuestionResult = {
         id: question.id,
         status: "created",
+        outcome: flag ? "created_flagged" : "created_active",
         lifecycle: flag ? "flagged" : "active",
         flags: flag ? [flag] : [],
+        answerStandardConflict: false,
       };
       results.push(created);
       createdQuestionIds.push(question.id);
@@ -565,7 +576,9 @@ export async function createDirectQuestion(
   questionId: string;
   lifecycle: V2QuestionLifecycle;
   status: "created" | "existing";
+  outcome: AddQuestionResult["outcome"];
   flags: Array<Pick<V2QuestionFlag, "origin" | "reasons">>;
+  answerStandardConflict: boolean;
 }> {
   const { results } = await addQuestions({
     userId: input.userId,
@@ -577,7 +590,9 @@ export async function createDirectQuestion(
     questionId: result.id,
     lifecycle: result.lifecycle,
     status: result.status,
+    outcome: result.outcome,
     flags: result.flags,
+    answerStandardConflict: result.answerStandardConflict,
   };
 }
 
