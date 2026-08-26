@@ -12,7 +12,7 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - Review now uses the approved question → compact composer → `Previous answers` list in both its static loading and hydrated states. Review is a live queue without a daily plan, session, capacity warning, retry control, flag action, or skip action.
 - Review detects and persists the learner's IANA timezone, exposes it through a compact Local Day settings dialog, and refreshes queue membership after an edit.
 - The Local Day dialog uses the standard icon-first close control and keeps the timezone field self-explanatory without feature-description copy.
-- Resolved Review feedback uses numeric score badges, exposes the Answer Standard and Demonstrated Gap, and shows the next scheduled Local Day after successful recall. Self-grading remains only as the evaluator-failure fallback.
+- Resolved Review feedback uses numeric score badges, exposes the Answer Standard and Demonstrated Gap, shows the next scheduled Local Day, and keeps the existing four-grade control available for append-only Evaluation Correction; evaluator failures use the same control for self-grading.
 - The approved reference’s typography, warm paper palette, subdued borders, header geometry, focused composer, and desktop/mobile rhythm remain authoritative. Its sample question and due count are not fixed requirements.
 
 ## Verification status

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   and,
+  asc,
   desc,
   eq,
   sql,
@@ -26,7 +27,6 @@ import {
 import {
   dateInTimezone,
   getLearnerReviewDay,
-  type LearnerReviewDay,
 } from "./settings.ts";
 import type {
   V2Evaluation,
@@ -51,25 +51,6 @@ type V2Tx = Parameters<
 
 function checksum(value: string): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function storedMemory(
-  row: typeof memoryStates.$inferSelect | undefined,
-): StoredMemoryState | null {
-  return row
-    ? {
-        dueAt: row.dueAt,
-        lastReviewAt: row.lastReviewAt,
-        stability: row.stability,
-        difficulty: row.difficulty,
-        elapsedDays: row.elapsedDays,
-        scheduledDays: row.scheduledDays,
-        reps: row.reps,
-        lapses: row.lapses,
-        state: row.state,
-        learningSteps: row.learningSteps,
-      }
-    : null;
 }
 
 function evaluationView(input: {
@@ -106,6 +87,7 @@ function evaluationView(input: {
     confidence: input.confidence,
     canSelfGrade:
       input.evaluationStatus === "failed" && !input.effectiveGrade,
+    canCorrectGrade: Boolean(input.effectiveGrade),
   };
 }
 
@@ -127,6 +109,21 @@ async function queueRows(
   userId: string,
   localDay: string,
 ) {
+  const latestEffectiveGrade = sql`(
+    SELECT event.grade::text
+      FROM waxon_v2.answer_submissions submission
+      JOIN waxon_v2.grade_events event
+        ON event.user_id = submission.user_id
+       AND event.submission_id = submission.id
+     WHERE submission.user_id = ${questions.userId}
+       AND submission.question_id = ${questions.id}
+     ORDER BY submission.submitted_at DESC,
+              submission.created_at DESC,
+              submission.id DESC,
+              event.created_at DESC,
+              event.id DESC
+     LIMIT 1
+  )`;
   return getV2Db()
     .select({
       questionId: questions.id,
@@ -159,6 +156,17 @@ async function queueRows(
     .orderBy(
       sql`COALESCE(${memoryStates.dueOn}, ${localDay}::date) ASC`,
       sql`(${memoryStates.questionId} IS NULL) DESC`,
+      sql`CASE
+        WHEN ${memoryStates.dueOn} = ${localDay}::date
+         AND ${latestEffectiveGrade} = 'again'
+        THEN 1 ELSE 0
+      END ASC`,
+      sql`CASE
+        WHEN ${memoryStates.dueOn} = ${localDay}::date
+         AND ${latestEffectiveGrade} = 'again'
+        THEN ${memoryStates.updatedAt}
+        ELSE NULL
+      END ASC NULLS FIRST`,
       questions.creationOrder,
       questions.id,
     );
@@ -510,23 +518,191 @@ export async function getLiveEvaluation(
   });
 }
 
+async function rebuildMemoryFromGradeHistory(
+  tx: V2Tx,
+  input: {
+    userId: string;
+    questionId: string;
+    effectiveTimezone: string;
+    currentLocalDay: string;
+  },
+  gradedAt: Date,
+  eventOrderAt: Date,
+): Promise<void> {
+  const submissions = await tx
+    .select({
+      id: answerSubmissions.id,
+      submittedAt: answerSubmissions.submittedAt,
+    })
+    .from(answerSubmissions)
+    .where(
+      and(
+        eq(answerSubmissions.userId, input.userId),
+        eq(answerSubmissions.questionId, input.questionId),
+        eq(answerSubmissions.status, "graded"),
+      ),
+    )
+    .orderBy(
+      asc(answerSubmissions.submittedAt),
+      asc(answerSubmissions.createdAt),
+      asc(answerSubmissions.id),
+    );
+  const events = await tx
+    .select({
+      submissionId: gradeEvents.submissionId,
+      grade: gradeEvents.value,
+    })
+    .from(gradeEvents)
+    .innerJoin(
+      answerSubmissions,
+      and(
+        eq(answerSubmissions.userId, gradeEvents.userId),
+        eq(answerSubmissions.id, gradeEvents.submissionId),
+      ),
+    )
+    .where(
+      and(
+        eq(gradeEvents.userId, input.userId),
+        eq(answerSubmissions.questionId, input.questionId),
+      ),
+    )
+    .orderBy(
+      asc(gradeEvents.createdAt),
+      asc(gradeEvents.id),
+    );
+  const latestGrades = new Map<string, V2Grade>();
+  for (const event of events) {
+    latestGrades.set(event.submissionId, event.grade);
+  }
+
+  let rebuilt: StoredMemoryState | null = null;
+  let latestGrade: V2Grade | null = null;
+  for (const submission of submissions) {
+    const grade = latestGrades.get(submission.id);
+    if (!grade) continue;
+    latestGrade = grade;
+    const calculated = applyFsrsGrade({
+      memory: rebuilt,
+      grade,
+      now: submission.submittedAt,
+    });
+    rebuilt =
+      grade === "again"
+        ? {
+            ...calculated,
+            dueAt: submission.submittedAt,
+            scheduledDays: 0,
+          }
+        : calculated;
+  }
+
+  if (!rebuilt || !latestGrade) {
+    await tx
+      .delete(memoryStates)
+      .where(
+        and(
+          eq(memoryStates.userId, input.userId),
+          eq(memoryStates.questionId, input.questionId),
+        ),
+      );
+    return;
+  }
+  let stored =
+    latestGrade === "again"
+      ? { ...rebuilt, dueAt: gradedAt, scheduledDays: 0 }
+      : rebuilt;
+  let dueOn =
+    latestGrade === "again"
+      ? input.currentLocalDay
+      : dateInTimezone(stored.dueAt, input.effectiveTimezone);
+  if (latestGrade !== "again" && dueOn <= input.currentLocalDay) {
+    const intervalDays = Math.max(1, stored.scheduledDays);
+    const shifted = await tx.execute<{
+      due_at: Date | string;
+      due_on: string;
+    }>(sql`
+      SELECT
+        (
+          (${input.currentLocalDay}::date + ${intervalDays}::integer)::timestamp
+          AT TIME ZONE ${input.effectiveTimezone}
+        ) AS due_at,
+        (${input.currentLocalDay}::date + ${intervalDays}::integer)::text AS due_on
+    `);
+    const future = shifted.rows[0];
+    if (!future) {
+      throw new Error("Could not schedule the next Local Day.");
+    }
+    const futureDueAt =
+      future.due_at instanceof Date
+        ? future.due_at
+        : new Date(future.due_at);
+    if (!Number.isFinite(futureDueAt.getTime())) {
+      throw new Error("Could not schedule the next Local Day.");
+    }
+    stored = {
+      ...stored,
+      dueAt: futureDueAt,
+    };
+    dueOn = future.due_on;
+  }
+
+  await tx
+    .insert(memoryStates)
+    .values({
+      userId: input.userId,
+      questionId: input.questionId,
+      dueAt: stored.dueAt,
+      dueOn,
+      lastReviewAt: stored.lastReviewAt,
+      stability: stored.stability,
+      difficulty: stored.difficulty,
+      elapsedDays: stored.elapsedDays,
+      scheduledDays: stored.scheduledDays,
+      reps: stored.reps,
+      lapses: stored.lapses,
+      state: stored.state,
+      learningSteps: stored.learningSteps,
+      schedulerVersion: SCHEDULER_VERSION,
+      updatedAt: eventOrderAt,
+    })
+    .onConflictDoUpdate({
+      target: [memoryStates.userId, memoryStates.questionId],
+      set: {
+        dueAt: stored.dueAt,
+        dueOn,
+        lastReviewAt: stored.lastReviewAt,
+        stability: stored.stability,
+        difficulty: stored.difficulty,
+        elapsedDays: stored.elapsedDays,
+        scheduledDays: stored.scheduledDays,
+        reps: stored.reps,
+        lapses: stored.lapses,
+        state: stored.state,
+        learningSteps: stored.learningSteps,
+        schedulerVersion: SCHEDULER_VERSION,
+        updatedAt: eventOrderAt,
+      },
+    });
+}
+
 async function applyGradeInTransaction(
   tx: V2Tx,
   input: {
     userId: string;
     submissionId: string;
     grade: V2Grade;
-    origin: "model" | "self";
+    origin: "model" | "self" | "correction";
     evaluationId?: string | null;
-    reviewDay: LearnerReviewDay;
+    effectiveTimezone: string;
+    currentLocalDay: string;
   },
   eventAt: Date,
 ): Promise<void> {
-  await tx.execute(
-    sql`SELECT pg_advisory_xact_lock(hashtext(${`review-grade:${input.userId}:${input.submissionId}`}))`,
-  );
   const [submission] = await tx
-    .select()
+    .select({
+      id: answerSubmissions.id,
+      questionId: answerSubmissions.questionId,
+    })
     .from(answerSubmissions)
     .where(
       and(
@@ -536,80 +712,27 @@ async function applyGradeInTransaction(
     )
     .limit(1);
   if (!submission) throw new Error("Submission not found.");
-  const [memory] = await tx
-    .select()
-    .from(memoryStates)
-    .where(
-      and(
-        eq(memoryStates.userId, input.userId),
-        eq(memoryStates.questionId, submission.questionId),
-      ),
-    )
-    .limit(1);
-  const calculated = applyFsrsGrade({
-    memory: storedMemory(memory),
-    grade: input.grade,
-    now: submission.submittedAt,
-  });
-  const successful = input.grade !== "again";
-  const dueAt =
-    successful && calculated.dueAt < input.reviewDay.dayEnd
-      ? input.reviewDay.dayEnd
-      : calculated.dueAt;
-  const calculatedDueOn = dateInTimezone(
-    dueAt,
-    input.reviewDay.effectiveTimezone,
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${`review-grade:${input.userId}`}))`,
   );
-  const dueOn = successful
-    ? calculatedDueOn < input.reviewDay.nextLocalDay
-      ? input.reviewDay.nextLocalDay
-      : calculatedDueOn
-    : input.reviewDay.localDay;
-
+  const [latestEvent] = await tx
+    .select({ createdAt: gradeEvents.createdAt })
+    .from(gradeEvents)
+    .where(eq(gradeEvents.userId, input.userId))
+    .orderBy(desc(gradeEvents.createdAt), desc(gradeEvents.id))
+    .limit(1);
+  const createdAt =
+    latestEvent && latestEvent.createdAt >= eventAt
+      ? new Date(latestEvent.createdAt.getTime() + 1)
+      : eventAt;
   await tx.insert(gradeEvents).values({
     userId: input.userId,
     submissionId: input.submissionId,
     value: input.grade,
     origin: input.origin,
     evaluationId: input.evaluationId ?? null,
-    createdAt: eventAt,
+    createdAt,
   });
-  await tx
-    .insert(memoryStates)
-    .values({
-      userId: input.userId,
-      questionId: submission.questionId,
-      dueAt,
-      dueOn,
-      lastReviewAt: calculated.lastReviewAt,
-      stability: calculated.stability,
-      difficulty: calculated.difficulty,
-      elapsedDays: calculated.elapsedDays,
-      scheduledDays: calculated.scheduledDays,
-      reps: calculated.reps,
-      lapses: calculated.lapses,
-      state: calculated.state,
-      learningSteps: calculated.learningSteps,
-      schedulerVersion: SCHEDULER_VERSION,
-    })
-    .onConflictDoUpdate({
-      target: [memoryStates.userId, memoryStates.questionId],
-      set: {
-        dueAt,
-        dueOn,
-        lastReviewAt: calculated.lastReviewAt,
-        stability: calculated.stability,
-        difficulty: calculated.difficulty,
-        elapsedDays: calculated.elapsedDays,
-        scheduledDays: calculated.scheduledDays,
-        reps: calculated.reps,
-        lapses: calculated.lapses,
-        state: calculated.state,
-        learningSteps: calculated.learningSteps,
-        schedulerVersion: SCHEDULER_VERSION,
-        updatedAt: eventAt,
-      },
-    });
   await tx
     .update(answerSubmissions)
     .set({ status: "graded" })
@@ -619,6 +742,17 @@ async function applyGradeInTransaction(
         eq(answerSubmissions.id, submission.id),
       ),
     );
+  await rebuildMemoryFromGradeHistory(
+    tx,
+    {
+      userId: input.userId,
+      questionId: submission.questionId,
+      effectiveTimezone: input.effectiveTimezone,
+      currentLocalDay: input.currentLocalDay,
+    },
+    eventAt,
+    createdAt,
+  );
 }
 
 function demonstratedGapFor(input: {
@@ -697,10 +831,7 @@ export async function runLiveEvaluationJob(
         })
         .where(eq(evaluations.id, evaluationId));
     } else {
-      const reviewDay = await getLearnerReviewDay(
-        job.userId,
-        row.submittedAt,
-      );
+      const reviewDay = await getLearnerReviewDay(job.userId, now);
       await db.transaction(async (tx) => {
         await tx.execute(
           sql`SELECT pg_advisory_xact_lock(hashtext(${`review-grade:${job.userId}:${submissionId}`}))`,
@@ -744,7 +875,8 @@ export async function runLiveEvaluationJob(
             grade: result.grade,
             origin: "model",
             evaluationId,
-            reviewDay,
+            effectiveTimezone: reviewDay.effectiveTimezone,
+            currentLocalDay: reviewDay.localDay,
           },
           now,
         );
@@ -825,26 +957,9 @@ export async function applyLiveLearnerGrade(
   dependencies: Pick<ReviewDependencies, "now"> = defaultReviewDependencies,
 ): Promise<V2Evaluation> {
   const db = getV2Db();
-  const [submitted] = await db
-    .select({ submittedAt: answerSubmissions.submittedAt })
-    .from(answerSubmissions)
-    .where(
-      and(
-        eq(answerSubmissions.userId, input.userId),
-        eq(answerSubmissions.id, input.submissionId),
-      ),
-    )
-    .limit(1);
-  if (!submitted) throw new Error("Submission not found.");
-  const reviewDay = await getLearnerReviewDay(
-    input.userId,
-    submitted.submittedAt,
-  );
   const now = dependencies.now();
+  const reviewDay = await getLearnerReviewDay(input.userId, now);
   await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-grade:${input.userId}:${input.submissionId}`}))`,
-    );
     const [submission] = await tx
       .select({ status: answerSubmissions.status })
       .from(answerSubmissions)
@@ -856,26 +971,35 @@ export async function applyLiveLearnerGrade(
       )
       .limit(1);
     if (!submission) throw new Error("Submission not found.");
-    if (submission.status !== "pending") {
-      throw new Error("Grade correction is outside this Review Queue tracer path.");
-    }
-    const [failedEvaluation] = await tx
-      .select({ id: evaluations.id })
+    const [latestEvaluation] = await tx
+      .select({ id: evaluations.id, status: evaluations.status })
       .from(evaluations)
       .where(
         and(
           eq(evaluations.userId, input.userId),
           eq(evaluations.submissionId, input.submissionId),
-          eq(evaluations.status, "failed"),
         ),
       )
+      .orderBy(desc(evaluations.createdAt), desc(evaluations.id))
       .limit(1);
-    if (!failedEvaluation) {
+    if (!latestEvaluation) {
+      throw new Error("Evaluation not found.");
+    }
+    if (submission.status === "pending" && latestEvaluation.status !== "failed") {
       throw new Error("Self-grading is available only after evaluation fails.");
+    }
+    if (submission.status !== "pending" && submission.status !== "graded") {
+      throw new Error("This Learner Answer cannot be graded.");
     }
     await applyGradeInTransaction(
       tx,
-      { ...input, origin: "self", reviewDay },
+      {
+        ...input,
+        origin: submission.status === "pending" ? "self" : "correction",
+        evaluationId: latestEvaluation.id,
+        effectiveTimezone: reviewDay.effectiveTimezone,
+        currentLocalDay: reviewDay.localDay,
+      },
       now,
     );
     await tx
