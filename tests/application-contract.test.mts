@@ -5,6 +5,16 @@ import {
   withApplicationContract,
 } from "./support/application-contract-harness.mts";
 import { questionPromptKey } from "../app/lib/v2/questionInput.ts";
+import { authorizeMcpRequest } from "../app/lib/v2/mcpAuthorization.ts";
+import {
+  revokeMcpCredential,
+  rotateMcpCredential,
+} from "../app/lib/v2/mcpCredentials.ts";
+import {
+  toMcpAddResponse,
+  toMcpRankedQuestion,
+  toMcpStoredQuestion,
+} from "../app/lib/v2/mcpContract.ts";
 
 test(
   "application contract",
@@ -199,6 +209,34 @@ test(
       );
 
       await suite.test(
+        "revoked MCP credentials receive an unauthorized response",
+        async () => {
+          const learner = await provisionLearner("MCP credential learner");
+          const { token } = await rotateMcpCredential(learner.id);
+          const request = () =>
+            new Request("https://waxon.example/api/mcp", {
+              headers: { authorization: `Bearer ${token}` },
+            });
+
+          const authorized = await authorizeMcpRequest(request());
+          assert.deepEqual(authorized, {
+            authorized: true,
+            userId: learner.id,
+          });
+
+          await revokeMcpCredential(learner.id);
+          const revoked = await authorizeMcpRequest(request());
+          assert.equal(revoked.authorized, false);
+          if (revoked.authorized) return;
+          assert.equal(revoked.response.status, 401);
+          assert.equal(
+            revoked.response.headers.get("www-authenticate"),
+            'Bearer realm="Waxon MCP"',
+          );
+        },
+      );
+
+      await suite.test(
         "Authorized MCP Client add shares validation quarantine and durable visibility",
         async () => {
           const learner = await provisionLearner("MCP validation learner");
@@ -233,6 +271,286 @@ test(
             ["flagged", "flagged"],
           );
           semanticValidation.setOutcome("pass");
+        },
+      );
+
+      await suite.test(
+        "Authorized MCP Client add reports canonical creation, replay, and duplicate outcomes",
+        async () => {
+          const learner = await provisionLearner("MCP add outcome learner");
+          const activeInput = {
+            prompt: "What makes an Authorized MCP Client retry idempotent?",
+            referenceAnswer:
+              "The same learner-scoped idempotency key returns the retained Question.",
+          };
+
+          semanticValidation.setOutcome("pass");
+          const active = await learner.authorizedMcpClient.questionBank.add({
+            idempotencyKey: "mcp-active-create",
+            items: [activeInput],
+          });
+          const activeOutput = toMcpAddResponse(active);
+          assert.deepEqual(activeOutput.results[0] && {
+            status: activeOutput.results[0].status,
+            outcome: activeOutput.results[0].outcome,
+            lifecycle: activeOutput.results[0].lifecycle,
+            flags: activeOutput.results[0].flags,
+            answerStandardConflict:
+              activeOutput.results[0].answerStandardConflict,
+          }, {
+            status: "created",
+            outcome: "created_active",
+            lifecycle: "active",
+            flags: [],
+            answerStandardConflict: false,
+          });
+
+          semanticValidation.setOutcome("fail");
+          const flagged = await learner.authorizedMcpClient.questionBank.add({
+            idempotencyKey: "mcp-flagged-create",
+            items: [
+              {
+                prompt: "Which outcome?",
+                referenceAnswer: "A validation-Flagged Question.",
+              },
+            ],
+          });
+          assert.deepEqual(flagged.results[0] && {
+            status: flagged.results[0].status,
+            outcome: flagged.results[0].outcome,
+            lifecycle: flagged.results[0].lifecycle,
+            flags: flagged.results[0].flags,
+            answerStandardConflict:
+              flagged.results[0].answerStandardConflict,
+          }, {
+            status: "created",
+            outcome: "created_flagged",
+            lifecycle: "flagged",
+            flags: [{ origin: "waxon_validation", reasons: ["not_atomic"] }],
+            answerStandardConflict: false,
+          });
+
+          semanticValidation.setOutcome("pass");
+          const replay = await learner.authorizedMcpClient.questionBank.add({
+            idempotencyKey: "mcp-active-create",
+            items: [activeInput],
+          });
+          assert.deepEqual(replay.results[0] && {
+            id: replay.results[0].id,
+            status: replay.results[0].status,
+            outcome: replay.results[0].outcome,
+            lifecycle: replay.results[0].lifecycle,
+            answerStandardConflict:
+              replay.results[0].answerStandardConflict,
+          }, {
+            id: active.results[0]?.id,
+            status: "existing",
+            outcome: "idempotent_replay",
+            lifecycle: "active",
+            answerStandardConflict: false,
+          });
+
+          await learner.direct.questionBank.archive(active.results[0]?.id ?? "");
+          const archivedDuplicate =
+            await learner.authorizedMcpClient.questionBank.add({
+              idempotencyKey: "mcp-archived-duplicate",
+              items: [
+                {
+                  prompt:
+                    "  WHAT MAKES AN AUTHORIZED MCP CLIENT RETRY IDEMPOTENT?  ",
+                  referenceAnswer: activeInput.referenceAnswer,
+                },
+              ],
+            });
+          assert.deepEqual(archivedDuplicate.results[0] && {
+            id: archivedDuplicate.results[0].id,
+            status: archivedDuplicate.results[0].status,
+            outcome: archivedDuplicate.results[0].outcome,
+            lifecycle: archivedDuplicate.results[0].lifecycle,
+            answerStandardConflict:
+              archivedDuplicate.results[0].answerStandardConflict,
+          }, {
+            id: active.results[0]?.id,
+            status: "existing",
+            outcome: "exact_duplicate",
+            lifecycle: "archived",
+            answerStandardConflict: false,
+          });
+
+          const conflictingAnswer =
+            await learner.authorizedMcpClient.questionBank.add({
+              idempotencyKey: "mcp-conflicting-answer",
+              items: [
+                {
+                  prompt: activeInput.prompt,
+                  referenceAnswer: "A conflicting Answer Standard.",
+                },
+              ],
+            });
+          assert.deepEqual(conflictingAnswer.results[0] && {
+            id: conflictingAnswer.results[0].id,
+            outcome: conflictingAnswer.results[0].outcome,
+            lifecycle: conflictingAnswer.results[0].lifecycle,
+            answerStandardConflict:
+              conflictingAnswer.results[0].answerStandardConflict,
+          }, {
+            id: active.results[0]?.id,
+            outcome: "exact_duplicate",
+            lifecycle: "archived",
+            answerStandardConflict: true,
+          });
+
+          const withinBatch =
+            await learner.authorizedMcpClient.questionBank.add({
+              idempotencyKey: "mcp-within-batch-duplicate",
+              items: [
+                {
+                  prompt:
+                    "Which identity is retained for a duplicate within one MCP batch?",
+                  referenceAnswer: "The first Question identity.",
+                },
+                {
+                  prompt:
+                    "  WHICH IDENTITY IS RETAINED FOR A DUPLICATE WITHIN ONE MCP BATCH?  ",
+                  referenceAnswer: "A conflicting Answer Standard.",
+                },
+              ],
+            });
+          assert.deepEqual(
+            withinBatch.results.map((result) => ({
+              id: result.id,
+              outcome: result.outcome,
+              answerStandardConflict: result.answerStandardConflict,
+            })),
+            [
+              {
+                id: withinBatch.results[0]?.id,
+                outcome: "created_active",
+                answerStandardConflict: false,
+              },
+              {
+                id: withinBatch.results[0]?.id,
+                outcome: "exact_duplicate",
+                answerStandardConflict: true,
+              },
+            ],
+          );
+        },
+      );
+
+      await suite.test(
+        "Authorized MCP Client concurrent adds retain one Question identity",
+        async () => {
+          const learner = await provisionLearner("MCP concurrent add learner");
+          semanticValidation.setOutcome("pass");
+          const input = {
+            prompt: "Why are concurrent Authorized MCP Client adds duplicate-safe?",
+            referenceAnswer:
+              "The learner Question Bank serializes canonical Prompt identity decisions.",
+          };
+          const [first, second] = await Promise.all([
+            learner.authorizedMcpClient.questionBank.add({
+              idempotencyKey: "mcp-concurrent-first",
+              items: [input],
+            }),
+            learner.authorizedMcpClient.questionBank.add({
+              idempotencyKey: "mcp-concurrent-second",
+              items: [{ ...input, prompt: `  ${input.prompt.toUpperCase()}  ` }],
+            }),
+          ]);
+          const results = [first.results[0], second.results[0]];
+          assert.equal(new Set(results.map((result) => result?.id)).size, 1);
+          assert.deepEqual(
+            results.map((result) => result?.outcome).sort(),
+            ["created_active", "exact_duplicate"],
+          );
+          assert.equal((await learner.direct.questionBank.list()).questions.length, 1);
+        },
+      );
+
+      await suite.test(
+        "Authorized MCP Client search returns Flag Reasons without cross-Learner leakage",
+        async () => {
+          const learnerA = await provisionLearner("MCP search learner A");
+          const learnerB = await provisionLearner("MCP search learner B");
+          semanticValidation.setOutcome("fail");
+          const prompt =
+            "Which Flag Reason is visible to the owning Authorized MCP Client?";
+          const addedA = await learnerA.authorizedMcpClient.questionBank.add({
+            idempotencyKey: "mcp-search-flag-a",
+            items: [{ prompt, referenceAnswer: "Only learner A's reason." }],
+          });
+          const addedB = await learnerB.authorizedMcpClient.questionBank.add({
+            idempotencyKey: "mcp-search-flag-b",
+            items: [{ prompt, referenceAnswer: "Only learner B's reason." }],
+          });
+
+          const searched = await learnerA.authorizedMcpClient.questionBank.check({
+            items: [
+              { candidateId: "flag-search", prompt, referenceAnswer: "" },
+            ],
+            limitPerItem: 5,
+          });
+          const bankMatches = searched.results[0]?.matches.filter(
+            (match) => match.source === "bank",
+          ).map(toMcpRankedQuestion);
+          assert.deepEqual(
+            bankMatches?.map((match) => ({
+              id: match.id,
+              lifecycle: match.lifecycle,
+              flags: match.flags.map(({ origin, reasons }) => ({
+                origin,
+                reasons,
+              })),
+            })),
+            [
+              {
+                id: addedA.results[0]?.id,
+                lifecycle: "flagged",
+                flags: [
+                  { origin: "waxon_validation", reasons: ["not_atomic"] },
+                ],
+              },
+            ],
+          );
+          assert.notEqual(addedA.results[0]?.id, addedB.results[0]?.id);
+          const listed = await learnerA.authorizedMcpClient.questionBank.list({
+            lifecycle: "flagged",
+          });
+          assert.deepEqual(
+            listed.questions.map(toMcpStoredQuestion).map((question) => ({
+              id: question.id,
+              lifecycle: question.lifecycle,
+              flags: question.flags.map(({ origin, reasons }) => ({
+                origin,
+                reasons,
+              })),
+            })),
+            [
+              {
+                id: addedA.results[0]?.id,
+                lifecycle: "flagged",
+                flags: [
+                  { origin: "waxon_validation", reasons: ["not_atomic"] },
+                ],
+              },
+            ],
+          );
+
+          semanticValidation.setOutcome("pass");
+          const similar = await learnerA.authorizedMcpClient.questionBank.add({
+            idempotencyKey: "mcp-similar-but-distinct",
+            items: [
+              {
+                prompt:
+                  "Why are Flag Reasons visible to an owning Authorized MCP Client?",
+                referenceAnswer:
+                  "Similarity is advisory and this different recall target stays distinct.",
+              },
+            ],
+          });
+          assert.equal(similar.results[0]?.outcome, "created_active");
+          assert.notEqual(similar.results[0]?.id, addedA.results[0]?.id);
         },
       );
 
@@ -343,10 +661,12 @@ test(
             {
               id: duplicateId,
               status: "existing",
+              outcome: "exact_duplicate",
               lifecycle: "flagged",
               flags: [
                 { origin: "waxon_validation", reasons: ["not_atomic"] },
               ],
+              answerStandardConflict: false,
             },
           ]);
 
@@ -411,7 +731,7 @@ test(
       );
 
       await suite.test(
-        "Question Bank mutations roll back atomically when one item conflicts",
+        "Question Bank add returns a retained conflict without duplicating identity",
         async () => {
           const learner = await provisionLearner(
             "Transactional contract learner",
@@ -427,30 +747,110 @@ test(
             ],
           });
 
-          await assert.rejects(
-            learner.direct.questionBank.add({
-              idempotencyKey: "rolled-back-batch",
-              items: [
-                {
-                  prompt:
-                    "Which Question should roll back with its failed batch?",
-                  referenceAnswer:
-                    "The first Question in the failed batch.",
-                },
-                {
-                  prompt: "What does an application transaction preserve?",
-                  referenceAnswer: "A conflicting Answer Standard.",
-                },
-              ],
-            }),
-            /already exists with a different Answer Standard/u,
+          const added = await learner.direct.questionBank.add({
+            idempotencyKey: "retained-conflict-batch",
+            items: [
+              {
+                prompt:
+                  "Which Question commits beside a retained conflict?",
+                referenceAnswer:
+                  "The new Question in the same successful batch.",
+              },
+              {
+                prompt: "What does an application transaction preserve?",
+                referenceAnswer: "A conflicting Answer Standard.",
+              },
+            ],
+          });
+          assert.deepEqual(
+            added.results.map((result) => ({
+              outcome: result.outcome,
+              answerStandardConflict: result.answerStandardConflict,
+            })),
+            [
+              { outcome: "created_active", answerStandardConflict: false },
+              { outcome: "exact_duplicate", answerStandardConflict: true },
+            ],
           );
 
           assert.deepEqual(
             (await learner.direct.questionBank.list()).questions.map(
               (question) => question.prompt,
-            ),
-            ["What does an application transaction preserve?"],
+            ).sort(),
+            [
+              "What does an application transaction preserve?",
+              "Which Question commits beside a retained conflict?",
+            ].sort(),
+          );
+        },
+      );
+
+      await suite.test(
+        "Authorized MCP Client add rolls back durable writes and its receipt together",
+        async () => {
+          const learner = await provisionLearner("MCP rollback learner");
+          semanticValidation.setOutcome("pass");
+          const failedPrompt =
+            "Which MCP Question triggers the injected transaction failure?";
+          const items = [
+            {
+              prompt: "Which MCP Question must roll back with its batch?",
+              referenceAnswer: "The first Question inserted by the transaction.",
+            },
+            {
+              prompt: failedPrompt,
+              referenceAnswer: "The second Question triggers the test failure.",
+            },
+          ];
+          const { getV2Client } = await import("../app/db/v2/client.ts");
+          const { pool } = getV2Client();
+          await pool.query(
+            `CREATE OR REPLACE FUNCTION waxon_v2.test_fail_mcp_question_add()
+             RETURNS trigger
+             LANGUAGE plpgsql
+             AS $$
+             BEGIN
+               IF NEW.prompt = '${failedPrompt}' THEN
+                 RAISE EXCEPTION 'Injected MCP add failure';
+               END IF;
+               RETURN NEW;
+             END;
+             $$;
+             CREATE TRIGGER test_fail_mcp_question_add
+             BEFORE INSERT ON waxon_v2.question_versions
+             FOR EACH ROW
+             EXECUTE FUNCTION waxon_v2.test_fail_mcp_question_add();`,
+          );
+          try {
+            await assert.rejects(
+              learner.authorizedMcpClient.questionBank.add({
+                idempotencyKey: "mcp-transaction-rollback",
+                items,
+              }),
+              (error: unknown) =>
+                error instanceof Error &&
+                error.cause instanceof Error &&
+                /Injected MCP add failure/u.test(error.cause.message),
+            );
+          } finally {
+            await pool.query(
+              `DROP TRIGGER IF EXISTS test_fail_mcp_question_add
+                 ON waxon_v2.question_versions;
+               DROP FUNCTION IF EXISTS waxon_v2.test_fail_mcp_question_add();`,
+            );
+          }
+
+          assert.deepEqual(
+            (await learner.direct.questionBank.list()).questions,
+            [],
+          );
+          const retried = await learner.authorizedMcpClient.questionBank.add({
+            idempotencyKey: "mcp-transaction-rollback",
+            items,
+          });
+          assert.deepEqual(
+            retried.results.map((result) => result.outcome),
+            ["created_active", "created_active"],
           );
         },
       );
@@ -877,8 +1277,10 @@ test(
             {
               id: questionId,
               status: "existing",
+              outcome: "exact_duplicate",
               lifecycle: "archived",
               flags: [],
+              answerStandardConflict: false,
             },
           ]);
 

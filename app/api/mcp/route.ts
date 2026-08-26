@@ -1,27 +1,36 @@
 import * as Sentry from "@sentry/nextjs";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { authenticateMcpBearer } from "@/app/lib/v2/mcpCredentials";
+import { authorizeMcpRequest } from "@/app/lib/v2/mcpAuthorization";
 import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 import { waxonApplication } from "@/app/lib/v2/application";
+import {
+  toMcpAddResponse,
+  toMcpCheckMatch,
+  toMcpRankedQuestion,
+  toMcpStoredQuestion,
+} from "@/app/lib/v2/mcpContract";
 
 export const runtime = "nodejs";
 
 const lifecycleSchema = z.enum(["active", "flagged", "archived"]);
-
-function canonicalLifecycle(value: string | null) {
-  if (value === null) return null;
-  if (["new", "learning", "review", "active"].includes(value)) {
-    return "active" as const;
-  }
-  return value === "flagged" ? ("flagged" as const) : ("archived" as const);
-}
+const flagOriginSchema = z.enum(["waxon_validation", "learner"]);
+const flagSummarySchema = z.object({
+  origin: flagOriginSchema,
+  reasons: z.array(z.string()),
+});
+const flagSchema = flagSummarySchema.extend({
+  detail: z.string().nullable(),
+  createdAt: z.string(),
+  resolvedAt: z.string().nullable(),
+});
 
 const questionSummarySchema = z.object({
   id: z.string(),
   prompt: z.string(),
   referenceAnswer: z.string(),
   lifecycle: lifecycleSchema,
+  flags: z.array(flagSchema),
   updatedAt: z.string(),
   matchTypes: z
     .array(z.enum(["exact", "full_text", "trigram", "semantic"]))
@@ -47,6 +56,7 @@ const searchMatchSchema = z.object({
   prompt: z.string(),
   referenceAnswer: z.string(),
   lifecycle: lifecycleSchema.nullable(),
+  flags: z.array(flagSchema),
   updatedAt: z.string().nullable(),
   matchTypes: z.array(
     z.enum(["exact", "full_text", "trigram", "semantic"]),
@@ -99,20 +109,7 @@ const handler = createMcpHandler(
           const output = {
             questions: result.matches
               .filter((match) => match.source === "bank")
-              .map((match) => ({
-                id: match.id,
-                prompt: match.prompt,
-                referenceAnswer: match.referenceAnswer,
-                lifecycle: canonicalLifecycle(match.lifecycle) ?? "archived",
-                updatedAt: match.updatedAt ?? new Date(0).toISOString(),
-                matchTypes: match.matchTypes,
-                exactPrompt: match.exactPrompt,
-                lexicalRank: match.lexicalRank,
-                semanticRank: match.semanticRank,
-                combinedRank: match.combinedRank,
-                trigramSimilarity: match.trigramSimilarity,
-                semanticSimilarity: match.semanticSimilarity,
-              })),
+              .map(toMcpRankedQuestion),
             searchMode: result.searchMode,
             coverage: result.coverage,
           };
@@ -127,13 +124,7 @@ const handler = createMcpHandler(
           limit,
         });
         const output = {
-          questions: library.questions.map((question) => ({
-            id: question.id,
-            prompt: question.prompt,
-            referenceAnswer: question.referenceAnswer,
-            lifecycle: question.lifecycle,
-            updatedAt: question.updatedAt,
-          })),
+          questions: library.questions.map(toMcpStoredQuestion),
           searchMode: null,
           coverage: null,
         };
@@ -189,10 +180,7 @@ const handler = createMcpHandler(
         const output = {
           results: checked.results.map((result) => ({
             ...result,
-            matches: result.matches.map((match) => ({
-              ...match,
-              lifecycle: canonicalLifecycle(match.lifecycle),
-            })),
+            matches: result.matches.map(toMcpCheckMatch),
           })),
         };
         return {
@@ -207,7 +195,7 @@ const handler = createMcpHandler(
       {
         title: "Add Waxon questions",
         description:
-          "Atomically add up to 50 standalone questions to the authenticated learner's bank. Call check_questions first and compare any review_similar matches by recall target.",
+          "Atomically add up to 50 standalone questions to the authenticated learner's bank. Results distinguish Active creation, validation Flagging, idempotent replay, and exact duplicate retention. A duplicate with answerStandardConflict=true retains the existing Question identity and should be inspected or replaced deliberately. Call check_questions first and compare any review_similar matches by recall target; similarity never blocks add.",
         inputSchema: z.object({
           idempotencyKey: z.string().trim().min(1).max(200),
           items: z
@@ -225,7 +213,15 @@ const handler = createMcpHandler(
             z.object({
               id: z.string(),
               status: z.enum(["created", "existing"]),
+              outcome: z.enum([
+                "created_active",
+                "created_flagged",
+                "idempotent_replay",
+                "exact_duplicate",
+              ]),
               lifecycle: lifecycleSchema,
+              flags: z.array(flagSummarySchema),
+              answerStandardConflict: z.boolean(),
             }),
           ),
         }),
@@ -240,13 +236,7 @@ const handler = createMcpHandler(
           idempotencyKey,
           items,
         });
-        const output = {
-          results: added.results.map(({ id, lifecycle, status }) => ({
-            id,
-            lifecycle,
-            status,
-          })),
-        };
+        const output = toMcpAddResponse(added);
         try {
           await startBackgroundJobs(userId, 4);
         } catch (error) {
@@ -282,13 +272,9 @@ async function handleMcp(request: Request) {
   if (!requestOriginIsValid(request)) {
     return new Response("Forbidden", { status: 403 });
   }
-  const userId = await authenticateMcpBearer(request);
-  if (!userId) {
-    return new Response("Unauthorized", {
-      status: 401,
-      headers: { "WWW-Authenticate": 'Bearer realm="Waxon MCP"' },
-    });
-  }
+  const authorization = await authorizeMcpRequest(request);
+  if (!authorization.authorized) return authorization.response;
+  const { userId } = authorization;
   return handler.fetch(request, {
     authInfo: {
       token: "[validated personal token]",
