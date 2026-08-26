@@ -30,6 +30,10 @@ export type ApplicationContractClock = {
   set(value: Date | string): void;
 };
 
+export type EvaluationController = {
+  setGrade(grade: "again" | "hard" | "good" | "easy"): void;
+};
+
 type ApplicationContractLearner = {
   id: string;
   direct: ReturnType<
@@ -44,6 +48,7 @@ type ApplicationContractLearner = {
 
 export type ApplicationContractHarness = {
   clock: ApplicationContractClock;
+  evaluation: EvaluationController;
   semanticValidation: SemanticValidationController;
   databaseCatalog(): Promise<{
     tables: string[];
@@ -87,6 +92,12 @@ export async function withApplicationContract(
     },
   };
   let semanticValidationOutcome: SemanticValidationOutcome = "pass";
+  let evaluationGrade: "again" | "hard" | "good" | "easy" = "good";
+  const evaluation: EvaluationController = {
+    setGrade(grade) {
+      evaluationGrade = grade;
+    },
+  };
   const semanticValidation: SemanticValidationController = {
     setOutcome(outcome) {
       semanticValidationOutcome = outcome;
@@ -109,7 +120,7 @@ export async function withApplicationContract(
     },
   };
   const evaluateAnswer = async ({ referenceAnswer }: { referenceAnswer: string }) => ({
-    grade: "good" as const,
+    grade: evaluationGrade,
     feedback: "The deterministic evaluator accepted the answer.",
     expectedAnswer: referenceAnswer,
     coveredPoints: ["Application contract"],
@@ -149,6 +160,7 @@ export async function withApplicationContract(
     }
     await run({
       clock,
+      evaluation,
       semanticValidation,
       async databaseCatalog() {
         const [tables, learnerSettingColumns, questionColumns] =

@@ -120,23 +120,29 @@ test("default quality assessment rejects known defects and accepts clear recall"
   }
 });
 
-test("FSRS grows successful intervals and contracts after failure", () => {
+test("Answer Grades alone produce progressive and adaptive intervals", () => {
+  const hard = applyFsrsGrade({ memory: null, grade: "hard", now });
   const first = applyFsrsGrade({
     memory: null,
     grade: "good",
     now,
   });
+  const easy = applyFsrsGrade({ memory: null, grade: "easy", now });
   const second = applyFsrsGrade({
     memory: first,
     grade: "good",
-    now: new Date(first.dueAt.getTime() + 1_000),
+    now: first.dueAt,
   });
   const failed = applyFsrsGrade({
     memory: second,
     grade: "again",
-    now: new Date(second.dueAt.getTime() + 1_000),
+    now: second.dueAt,
   });
-  assert.equal(second.scheduledDays >= first.scheduledDays, true);
+
+  assert.equal(hard.scheduledDays < first.scheduledDays, true);
+  assert.equal(first.scheduledDays < easy.scheduledDays, true);
+  assert.equal(second.scheduledDays > first.scheduledDays, true);
+  assert.equal(failed.scheduledDays < second.scheduledDays, true);
   assert.equal(failed.lapses > second.lapses, true);
 });
 
