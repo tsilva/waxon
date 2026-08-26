@@ -18,6 +18,13 @@ Before every task in this repository, use the `$specs-author` skill to read the 
 - Never edit `SPECS.md` from inference. Propose the exact change, explain why it reflects stakeholder intent, and edit the file only after the user explicitly approves that exact change.
 - Keep `SPECS.md` complete, concise, and compacted. It must contain stakeholder intent rather than implementation, architecture, operations, or transient project detail.
 
+## Superset Provider Lock
+
+- Use only Codex for Superset workers unless the user explicitly authorizes another provider.
+- Never substitute Claude, Copilot, OpenCode, or another agent when Codex fails, is unavailable, or requires authentication. Stop and ask the user.
+- Use two-stage dispatch: launch a no-write identity preflight, verify that the terminal is running Codex, and only then send the implementation task.
+- Tell the user which provider was verified before implementation begins.
+
 ## Agent skills
 
 ### Issue tracker
