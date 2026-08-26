@@ -15,6 +15,7 @@ import {
   jobs,
   memoryStates,
   mutationReceipts,
+  questionFlags,
   questionVersions,
   questions,
 } from "../../db/v2/schema.ts";
@@ -32,6 +33,7 @@ import { rankQuestionIdsLexically } from "./questionSearch.ts";
 import type {
   V2LibraryResponse,
   V2Lifecycle,
+  V2QuestionFlag,
   V2QuestionLifecycle,
   V2Question,
 } from "./types.ts";
@@ -51,10 +53,15 @@ const ALL_LIFECYCLES: V2Lifecycle[] = [
 ];
 const QUESTION_PAGE_LIMIT = 100;
 
+type V2Tx = Parameters<
+  Parameters<ReturnType<typeof getV2Db>["transaction"]>[0]
+>[0];
+
 export type AddQuestionResult = {
   id: string;
   status: "created" | "existing";
   lifecycle: V2QuestionLifecycle;
+  flags: Array<Pick<V2QuestionFlag, "origin" | "reasons">>;
 };
 
 function questionLifecycle(value: string): V2QuestionLifecycle {
@@ -83,6 +90,70 @@ export const defaultV2ServiceDependencies: V2ServiceDependencies = {
   validateQuestion: assessQuestionQuality,
   evaluateAnswer: evaluateRecall,
 };
+
+const MACHINE_REASON_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u;
+
+function normalizedValidationAssessment(
+  assessment: QuestionQualityAssessment,
+): QuestionQualityAssessment {
+  if (assessment.outcome === "pass") {
+    return { outcome: "pass", reasons: [] };
+  }
+  const reasons = [
+    ...new Set(
+      assessment.reasons.filter((reason) => MACHINE_REASON_PATTERN.test(reason)),
+    ),
+  ];
+  if (reasons.length > 0) return { outcome: assessment.outcome, reasons };
+  return {
+    outcome: assessment.outcome,
+    reasons: [
+      assessment.outcome === "fail"
+        ? "semantic_quality_failed"
+        : assessment.outcome === "inconclusive"
+          ? "semantic_validation_inconclusive"
+          : "semantic_validation_unavailable",
+    ],
+  };
+}
+
+async function validateQuestionCandidate(
+  item: NormalizedQuestionInput,
+  dependencies: V2ServiceDependencies,
+): Promise<QuestionQualityAssessment> {
+  try {
+    return normalizedValidationAssessment(
+      await dependencies.validateQuestion({
+        prompt: item.prompt,
+        referenceAnswer: item.referenceAnswer,
+        target: item.prompt,
+      }),
+    );
+  } catch {
+    return {
+      outcome: "unavailable",
+      reasons: ["semantic_validation_unavailable"],
+    };
+  }
+}
+
+async function resolveQuestionFlags(
+  tx: V2Tx,
+  userId: string,
+  questionId: string,
+  resolvedAt: Date,
+): Promise<void> {
+  await tx
+    .update(questionFlags)
+    .set({ resolvedAt })
+    .where(
+      and(
+        eq(questionFlags.userId, userId),
+        eq(questionFlags.questionId, questionId),
+        sql`${questionFlags.resolvedAt} IS NULL`,
+      ),
+    );
+}
 
 function checksum(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -133,17 +204,7 @@ export async function addQuestions(
   if (input.items.length === 0 || input.items.length > MAX_QUESTION_BATCH) {
     throw new Error(`Add between 1 and ${MAX_QUESTION_BATCH} questions at a time.`);
   }
-  const items = await Promise.all(
-    input.items.map(async (item) => {
-      const normalized = normalizeQuestionInput(item, { passes: true, reasons: [] });
-      const assessment = await dependencies.validateQuestion({
-        prompt: normalized.prompt,
-        referenceAnswer: normalized.referenceAnswer,
-        target: normalized.prompt,
-      });
-      return normalizeQuestionInput(item, assessment);
-    }),
-  );
+  const items = input.items.map((item) => normalizeQuestionInput(item));
   const scope = input.scope === "mcp" ? "mcp-add-questions" : "library-add-questions";
   const key = input.idempotencyKey.trim().slice(0, 200);
   if (!key) throw new Error("An idempotency key is required.");
@@ -159,9 +220,13 @@ export async function addQuestions(
       results: prior.results.map((result) => ({
         ...result,
         lifecycle: questionLifecycle(result.lifecycle),
+        flags: result.flags ?? [],
       })),
     };
   }
+  const assessments = await Promise.all(
+    items.map((item) => validateQuestionCandidate(item, dependencies)),
+  );
 
   return await getV2Db().transaction(async (tx) => {
     await tx.execute(
@@ -190,6 +255,7 @@ export async function addQuestions(
         results: response.results.map((result) => ({
           ...result,
           lifecycle: questionLifecycle(result.lifecycle),
+          flags: result.flags ?? [],
         })),
       };
     }
@@ -228,6 +294,34 @@ export async function addQuestions(
         byPromptKey.set(candidate.targetKey, candidate);
       }
     }
+    const existingFlags = existing.length > 0
+      ? await tx
+          .select({
+            questionId: questionFlags.questionId,
+            origin: questionFlags.origin,
+            reasons: questionFlags.reasons,
+          })
+          .from(questionFlags)
+          .where(
+            and(
+              eq(questionFlags.userId, input.userId),
+              inArray(
+                questionFlags.questionId,
+                existing.map((question) => question.id),
+              ),
+              sql`${questionFlags.resolvedAt} IS NULL`,
+            ),
+          )
+      : [];
+    const flagsByQuestionId = new Map<
+      string,
+      Array<Pick<V2QuestionFlag, "origin" | "reasons">>
+    >();
+    for (const flag of existingFlags) {
+      const retained = flagsByQuestionId.get(flag.questionId) ?? [];
+      retained.push({ origin: flag.origin, reasons: flag.reasons });
+      flagsByQuestionId.set(flag.questionId, retained);
+    }
     const [{ questionCount }] = await tx
       .select({ questionCount: count() })
       .from(questions)
@@ -243,7 +337,11 @@ export async function addQuestions(
     const results: AddQuestionResult[] = [];
     const createdQuestionIds: string[] = [];
 
-    for (const item of items) {
+    for (const [index, item] of items.entries()) {
+      const assessment = assessments[index] ?? {
+        outcome: "unavailable" as const,
+        reasons: ["semantic_validation_unavailable"],
+      };
       const duplicate = byPromptKey.get(item.promptKey);
       if (duplicate) {
         if (duplicate.referenceAnswer.trim() !== item.referenceAnswer) {
@@ -255,14 +353,21 @@ export async function addQuestions(
           id: duplicate.id,
           status: "existing",
           lifecycle: questionLifecycle(duplicate.lifecycle),
+          flags: flagsByQuestionId.get(duplicate.id) ?? [],
         });
         continue;
       }
+      const flag = assessment.outcome === "pass"
+        ? null
+        : {
+            origin: "waxon_validation" as const,
+            reasons: assessment.reasons,
+          };
       const [question] = await tx
         .insert(questions)
         .values({
           userId: input.userId,
-          lifecycle: "new",
+          lifecycle: flag ? "flagged" : "new",
           targetKey: item.promptKey,
         })
         .returning({ id: questions.id });
@@ -274,19 +379,28 @@ export async function addQuestions(
         referenceAnswer: item.referenceAnswer,
         displayAnswer: item.referenceAnswer.slice(0, 8_000),
       });
+      if (flag) {
+        await tx.insert(questionFlags).values({
+          userId: input.userId,
+          questionId: question.id,
+          ...flag,
+        });
+      }
       const created: AddQuestionResult = {
         id: question.id,
         status: "created",
-        lifecycle: "active",
+        lifecycle: flag ? "flagged" : "active",
+        flags: flag ? [flag] : [],
       };
       results.push(created);
       createdQuestionIds.push(question.id);
       byPromptKey.set(item.promptKey, {
         id: question.id,
-        lifecycle: "new",
+        lifecycle: flag ? "flagged" : "new",
         targetKey: item.promptKey,
         referenceAnswer: item.referenceAnswer,
       });
+      flagsByQuestionId.set(question.id, created.flags);
     }
 
     if (createdQuestionIds.length > 0) {
@@ -323,6 +437,7 @@ export async function createDirectQuestion(
   questionId: string;
   lifecycle: V2QuestionLifecycle;
   status: "created" | "existing";
+  flags: Array<Pick<V2QuestionFlag, "origin" | "reasons">>;
 }> {
   const { results } = await addQuestions({
     userId: input.userId,
@@ -334,6 +449,7 @@ export async function createDirectQuestion(
     questionId: result.id,
     lifecycle: result.lifecycle,
     status: result.status,
+    flags: result.flags,
   };
 }
 
@@ -365,9 +481,25 @@ export async function listLibrary(input: {
     due_at: Date | null;
     created_at: Date;
     updated_at: Date;
+    flags: V2QuestionFlag[];
   }>(
     `SELECT q.id, qv.id AS version_id, qv.prompt, qv.reference_answer,
-            q.lifecycle::text, ms.due_at, q.created_at, q.updated_at
+            q.lifecycle::text, ms.due_at, q.created_at, q.updated_at,
+            COALESCE(
+              (SELECT jsonb_agg(
+                 jsonb_build_object(
+                   'origin', flag.origin::text,
+                   'reasons', flag.reasons,
+                   'detail', flag.detail,
+                   'createdAt', flag.created_at,
+                   'resolvedAt', flag.resolved_at
+                 ) ORDER BY flag.created_at, flag.id
+               )
+                 FROM waxon_v2.question_flags flag
+                WHERE flag.user_id = q.user_id
+                  AND flag.question_id = q.id),
+              '[]'::jsonb
+            ) AS flags
        FROM waxon_v2.questions q
        JOIN waxon_v2.question_versions qv
          ON qv.user_id = q.user_id AND qv.question_id = q.id AND qv.is_current = true
@@ -393,6 +525,7 @@ export async function listLibrary(input: {
       prompt: row.prompt,
       referenceAnswer: row.reference_answer,
       lifecycle: questionLifecycle(row.lifecycle),
+      flags: row.flags,
       dueAt: row.due_at?.toISOString() ?? null,
       createdAt: row.created_at.toISOString(),
       updatedAt: row.updated_at.toISOString(),
@@ -553,6 +686,9 @@ export async function mutateQuestionLifecycle(input: {
       .where(
         and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)),
       );
+    if (question.lifecycle === "flagged") {
+      await resolveQuestionFlags(tx, input.userId, input.questionId, now);
+    }
   });
 }
 
@@ -633,6 +769,7 @@ export async function replaceQuestion(input: {
       .where(
         and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)),
       );
+    await resolveQuestionFlags(tx, input.userId, input.questionId, now);
     const [replacement] = await tx
       .insert(questions)
       .values({

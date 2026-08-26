@@ -236,10 +236,17 @@ const handler = createMcpHandler(
         },
       },
       async ({ idempotencyKey, items }) => {
-        const output = await application.questionBank.add({
+        const added = await application.questionBank.add({
           idempotencyKey,
           items,
         });
+        const output = {
+          results: added.results.map(({ id, lifecycle, status }) => ({
+            id,
+            lifecycle,
+            status,
+          })),
+        };
         try {
           await startBackgroundJobs(userId, 4);
         } catch (error) {

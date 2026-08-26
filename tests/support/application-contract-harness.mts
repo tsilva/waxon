@@ -16,12 +16,30 @@ export type SemanticValidationOutcome =
 
 export type SemanticValidationController = {
   setOutcome(outcome: SemanticValidationOutcome): void;
-  validateQuestion(): Promise<{ passes: boolean; reasons: string[] }>;
+  validateQuestion(): Promise<
+    | { outcome: "pass"; reasons: [] }
+    | {
+        outcome: "fail" | "inconclusive" | "unavailable";
+        reasons: string[];
+      }
+  >;
 };
 
 export type ApplicationContractClock = {
   now(): Date;
   set(value: Date | string): void;
+};
+
+type ApplicationContractLearner = {
+  id: string;
+  direct: ReturnType<
+    ReturnType<ApplicationContractModule["createWaxonApplication"]>["forLearner"]
+  >;
+  authorizedMcpClient: ReturnType<
+    ReturnType<
+      ApplicationContractModule["createWaxonApplication"]
+    >["forAuthorizedMcpClient"]
+  >;
 };
 
 export type ApplicationContractHarness = {
@@ -37,17 +55,8 @@ export type ApplicationContractHarness = {
     questionId: string,
     lifecycle: "flagged",
   ): Promise<void>;
-  provisionLearner(label: string): Promise<{
-    id: string;
-    direct: ReturnType<
-      ReturnType<ApplicationContractModule["createWaxonApplication"]>["forLearner"]
-    >;
-    authorizedMcpClient: ReturnType<
-      ReturnType<
-        ApplicationContractModule["createWaxonApplication"]
-      >["forAuthorizedMcpClient"]
-    >;
-  }>;
+  provisionLearner(label: string): Promise<ApplicationContractLearner>;
+  provisionDefaultLearner(label: string): Promise<ApplicationContractLearner>;
 };
 
 export async function withApplicationContract(
@@ -83,36 +92,61 @@ export async function withApplicationContract(
       semanticValidationOutcome = outcome;
     },
     async validateQuestion() {
-      return semanticValidationOutcome === "pass"
-        ? { passes: true, reasons: [] }
-        : {
-            passes: false,
-            reasons: [
-              `Deterministic semantic validation ${semanticValidationOutcome}.`,
-            ],
-          };
+      if (semanticValidationOutcome === "unavailable") {
+        throw new Error("Deterministic semantic validation is unavailable.");
+      }
+      if (semanticValidationOutcome === "pass") {
+        return { outcome: "pass", reasons: [] };
+      }
+      return {
+        outcome: semanticValidationOutcome,
+        reasons: [
+          semanticValidationOutcome === "fail"
+            ? "not_atomic"
+            : "semantic_validation_inconclusive",
+        ],
+      };
     },
   };
+  const evaluateAnswer = async ({ referenceAnswer }: { referenceAnswer: string }) => ({
+    grade: "good" as const,
+    feedback: "The deterministic evaluator accepted the answer.",
+    expectedAnswer: referenceAnswer,
+    coveredPoints: ["Application contract"],
+    missingPoints: [],
+    demonstratedGap: null,
+    confidence: 1,
+  });
   const application = createWaxonApplication({
     clock,
-    evaluateAnswer: async () => ({
-      grade: "good",
-      feedback: "The deterministic evaluator accepted the answer.",
-      expectedAnswer:
-        "This evaluator paraphrase must not replace the stored Answer Standard.",
-      coveredPoints: ["Application contract"],
-      missingPoints: [],
-      demonstratedGap: null,
-      confidence: 1,
-    }),
+    evaluateAnswer,
     validateQuestion: semanticValidation.validateQuestion,
   });
+  const defaultApplication = createWaxonApplication({ clock, evaluateAnswer });
   const productionFetch = globalThis.fetch;
   globalThis.fetch = async () => {
     throw new Error("Application contract tests must not call a live model.");
   };
 
   try {
+    async function provisionLearner(
+      label: string,
+      selectedApplication: typeof application,
+    ): Promise<ApplicationContractLearner> {
+      const id = `application-contract-${randomUUID()}`;
+      const email = `${id}@example.test`;
+      await pool.query(
+        `INSERT INTO waxon_v2.users (id, display_name, email)
+         VALUES ($1, $2, $3)`,
+        [id, label, email],
+      );
+      createdLearnerIds.add(id);
+      return {
+        id,
+        direct: selectedApplication.forLearner(id),
+        authorizedMcpClient: selectedApplication.forAuthorizedMcpClient(id),
+      };
+    }
     await run({
       clock,
       semanticValidation,
@@ -156,20 +190,11 @@ export async function withApplicationContract(
           [learnerId, questionId, lifecycle, clock.now()],
         );
       },
-      async provisionLearner(label) {
-        const id = `application-contract-${randomUUID()}`;
-        const email = `${id}@example.test`;
-        await pool.query(
-          `INSERT INTO waxon_v2.users (id, display_name, email)
-           VALUES ($1, $2, $3)`,
-          [id, label, email],
-        );
-        createdLearnerIds.add(id);
-        return {
-          id,
-          direct: application.forLearner(id),
-          authorizedMcpClient: application.forAuthorizedMcpClient(id),
-        };
+      provisionLearner(label) {
+        return provisionLearner(label, application);
+      },
+      provisionDefaultLearner(label) {
+        return provisionLearner(label, defaultApplication);
       },
     });
   } finally {

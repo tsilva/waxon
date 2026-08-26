@@ -5,6 +5,7 @@ import {
   ArchiveRestore,
   CalendarClock,
   Copy,
+  Flag,
   KeyRound,
   LoaderCircle,
   Pencil,
@@ -31,6 +32,22 @@ const FILTERS: Array<{ value: V2QuestionLifecycle | "all"; label: string }> = [
   { value: "flagged", label: "Flagged" },
   { value: "archived", label: "Archived" },
 ];
+
+const FLAG_REASON_LABELS: Record<string, string> = {
+  leading_prompt: "Leading prompt",
+  not_answerable: "Not answerable",
+  not_atomic: "Not atomic",
+  not_recall_oriented: "Not recall-oriented",
+  not_self_contained: "Not self-contained",
+  prompt_too_vague: "Prompt too vague",
+  semantic_quality_failed: "Quality check failed",
+  semantic_validation_inconclusive: "Validation inconclusive",
+  semantic_validation_unavailable: "Validation unavailable",
+};
+
+function flagReasonLabel(reason: string): string {
+  return FLAG_REASON_LABELS[reason] ?? reason.replaceAll("_", " ");
+}
 
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", ...init });
@@ -62,7 +79,10 @@ function QuestionDialog({
     };
     try {
       if (question) {
-        const result = await jsonRequest<{ status: "replaced" | "unchanged" }>("/api/v2/library", {
+        const result = await jsonRequest<{
+          lifecycle: V2QuestionLifecycle;
+          status: "replaced" | "unchanged";
+        }>("/api/v2/library", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "replace", questionId: question.id, ...payload }),
@@ -70,10 +90,13 @@ function QuestionDialog({
         await onSaved(
           result.status === "unchanged"
             ? "No replacement was needed because the Question is unchanged."
-            : "Replacement added. The original Question was archived.",
+            : "Active replacement added. The original Question was archived.",
         );
       } else {
-        const result = await jsonRequest<{ status: "created" | "existing" }>(
+        const result = await jsonRequest<{
+          lifecycle: V2QuestionLifecycle;
+          status: "created" | "existing";
+        }>(
           "/api/v2/library",
           {
             method: "POST",
@@ -87,7 +110,9 @@ function QuestionDialog({
         await onSaved(
           result.status === "existing"
             ? "That question was already in your bank."
-            : "Question added to your bank.",
+            : result.lifecycle === "flagged"
+              ? "Question saved to Flagged for attention."
+              : "Active Question added to your bank.",
         );
       }
       onClose();
@@ -222,6 +247,7 @@ function QuestionRow({
   onEdit: () => void;
   onAction: (action: "archive" | "restore") => void;
 }) {
+  const unresolvedFlags = question.flags.filter((flag) => !flag.resolvedAt);
   return (
     <article className="lean-question-row">
       <div className="lean-question-copy">
@@ -230,13 +256,32 @@ function QuestionRow({
           {question.dueAt ? <span><CalendarClock /> {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(question.dueAt))}</span> : null}
         </div>
         <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
+        {question.lifecycle === "flagged" && unresolvedFlags.length > 0 ? (
+          <div className="lean-flag-evidence" aria-label="Flag reasons">
+            {unresolvedFlags.map((flag, flagIndex) => (
+              <div key={`${flag.origin}-${flag.createdAt}-${flagIndex}`}>
+                <span className="lean-flag-origin">
+                  <Flag />
+                  {flag.origin === "waxon_validation" ? "Waxon validation" : "Learner flag"}
+                </span>
+                {flag.reasons.length > 0 ? (
+                  <span className="lean-flag-reasons">
+                    {flag.reasons.map((reason) => (
+                      <span key={reason}>{flagReasonLabel(reason)}</span>
+                    ))}
+                  </span>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
         <details>
           <summary>Answer standard</summary>
           <MarkdownContent className="v2-markdown" enableMath text={question.referenceAnswer} />
         </details>
       </div>
       <div className="lean-question-actions">
-        <button aria-label="Replace question" onClick={onEdit} title="Replace" type="button"><Pencil /></button>
+        <button aria-label="Replace question" onClick={onEdit} title={question.lifecycle === "flagged" ? "Replace with new Active Question" : "Replace"} type="button"><Pencil /></button>
         {question.lifecycle !== "archived" ? <button aria-label="Archive question" onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
         {question.lifecycle !== "active" ? <button aria-label="Restore question" onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
       </div>
@@ -305,6 +350,15 @@ export default function LibraryPageClient() {
               ))}
             </nav>
           </div>
+          {filter === "flagged" ? (
+            <section className="lean-attention-inbox" aria-label="Flagged Question attention inbox">
+              <Flag />
+              <div>
+                <strong>Attention inbox</strong>
+                <p>Flagged Questions needing a decision.</p>
+              </div>
+            </section>
+          ) : null}
           {message ? <p className="lean-library-message" role="status">{message}</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
           <div className="lean-question-list">
@@ -315,7 +369,7 @@ export default function LibraryPageClient() {
                 onEdit={() => setEditing(question)}
                 question={question}
               />
-            )) : <div className="lean-library-empty"><h2>{search ? "No matching questions" : "Your bank is empty"}</h2><p>{search ? "Try a different phrase or filter." : "Add one clear Prompt and its Answer Standard."}</p>{!search ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
+            )) : <div className="lean-library-empty"><h2>{search ? "No matching questions" : filter === "flagged" ? "No Questions need attention" : filter === "archived" ? "No Archived Questions" : "Your bank is empty"}</h2><p>{search ? "Try a different phrase or filter." : filter === "flagged" ? "Nothing is waiting for attention." : filter === "archived" ? "Nothing is out of circulation." : "Add one clear Prompt and its Answer Standard."}</p>{!search && (filter === "all" || filter === "active") ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
           </div>
         </div>
       </section>

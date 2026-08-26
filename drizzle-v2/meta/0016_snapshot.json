@@ -1,6 +1,6 @@
 {
-  "id": "e893263e-159c-4c12-8b10-ab135f3e28e6",
-  "prevId": "ae9aa7cf-d214-47e7-997d-bf5255e20d1b",
+  "id": "9c78aefc-91a6-4d31-8776-aec227ffcca6",
+  "prevId": "e893263e-159c-4c12-8b10-ab135f3e28e6",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -29,12 +29,6 @@
         },
         "question_version_id": {
           "name": "question_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_item_id": {
-          "name": "session_item_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -128,22 +122,6 @@
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
-        },
-        "answer_submissions_item_fk": {
-          "name": "answer_submissions_item_fk",
-          "tableFrom": "answer_submissions",
-          "tableTo": "review_session_items",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "session_item_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -154,14 +132,6 @@
           "columns": [
             "user_id",
             "id"
-          ]
-        },
-        "answer_submissions_item_unique": {
-          "name": "answer_submissions_item_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "session_item_id"
           ]
         }
       },
@@ -648,33 +618,11 @@
           "primaryKey": true,
           "notNull": true
         },
-        "daily_minutes": {
-          "name": "daily_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 10
-        },
-        "desired_retention": {
-          "name": "desired_retention",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0.9
-        },
-        "new_items_per_day": {
-          "name": "new_items_per_day",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 5
-        },
         "timezone": {
           "name": "timezone",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'UTC'"
+          "notNull": false
         },
         "auto_accept_high_confidence": {
           "name": "auto_accept_high_confidence",
@@ -904,6 +852,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "due_on": {
+          "name": "due_on",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
         "last_review_at": {
           "name": "last_review_at",
           "type": "timestamp with time zone",
@@ -992,7 +946,7 @@
               "nulls": "last"
             },
             {
-              "expression": "due_at",
+              "expression": "due_on",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1594,12 +1548,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "importance": {
-          "name": "importance",
-          "type": "double precision",
+        "creation_order": {
+          "name": "creation_order",
+          "type": "bigserial",
           "primaryKey": false,
-          "notNull": true,
-          "default": 1
+          "notNull": true
         },
         "created_at": {
           "name": "created_at",
@@ -1708,490 +1661,6 @@
       "uniqueConstraints": {
         "questions_user_id_id_unique": {
           "name": "questions_user_id_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.retry_obligations": {
-      "name": "retry_obligations",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "first_submission_id": {
-          "name": "first_submission_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_id": {
-          "name": "question_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_version_id": {
-          "name": "question_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "retry_status",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "earliest_at": {
-          "name": "earliest_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "retry_obligations_submission_fk": {
-          "name": "retry_obligations_submission_fk",
-          "tableFrom": "retry_obligations",
-          "tableTo": "answer_submissions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "first_submission_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "retry_obligations_question_fk": {
-          "name": "retry_obligations_question_fk",
-          "tableFrom": "retry_obligations",
-          "tableTo": "questions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "retry_obligations_session_fk": {
-          "name": "retry_obligations_session_fk",
-          "tableFrom": "retry_obligations",
-          "tableTo": "review_sessions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "session_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "retry_obligations_submission_unique": {
-          "name": "retry_obligations_submission_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "first_submission_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.review_session_items": {
-      "name": "review_session_items",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_id": {
-          "name": "question_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_version_id": {
-          "name": "question_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "session_item_kind",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'base'"
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "session_item_state",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "earliest_at": {
-          "name": "earliest_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "exposed_at": {
-          "name": "exposed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "submitted_at": {
-          "name": "submitted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "estimated_seconds": {
-          "name": "estimated_seconds",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 60
-        },
-        "is_introduction": {
-          "name": "is_introduction",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "review_session_items_next_idx": {
-          "name": "review_session_items_next_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "state",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "position",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "review_session_items_session_fk": {
-          "name": "review_session_items_session_fk",
-          "tableFrom": "review_session_items",
-          "tableTo": "review_sessions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "session_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "review_session_items_question_fk": {
-          "name": "review_session_items_question_fk",
-          "tableFrom": "review_session_items",
-          "tableTo": "questions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "review_session_items_version_fk": {
-          "name": "review_session_items_version_fk",
-          "tableFrom": "review_session_items",
-          "tableTo": "question_versions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_version_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "review_session_items_user_id_id_unique": {
-          "name": "review_session_items_user_id_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "id"
-          ]
-        },
-        "review_session_items_position_unique": {
-          "name": "review_session_items_position_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "session_id",
-            "position"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.review_sessions": {
-      "name": "review_sessions",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "session_kind",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'primary'"
-        },
-        "status": {
-          "name": "status",
-          "type": "session_status",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'active'"
-        },
-        "time_budget_minutes": {
-          "name": "time_budget_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "desired_retention": {
-          "name": "desired_retention",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "estimated_seconds": {
-          "name": "estimated_seconds",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "reserved_seconds": {
-          "name": "reserved_seconds",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "planned_count": {
-          "name": "planned_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "review_sessions_one_active_per_user": {
-          "name": "review_sessions_one_active_per_user",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"waxon_v2\".\"review_sessions\".\"status\" = 'active'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "review_sessions_user_id_users_id_fk": {
-          "name": "review_sessions_user_id_users_id_fk",
-          "tableFrom": "review_sessions",
-          "tableTo": "users",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "review_sessions_user_id_id_unique": {
-          "name": "review_sessions_user_id_id_unique",
           "nullsNotDistinct": false,
           "columns": [
             "user_id",
@@ -2408,54 +1877,6 @@
         "paused",
         "archived",
         "trash"
-      ]
-    },
-    "waxon_v2.retry_status": {
-      "name": "retry_status",
-      "schema": "waxon_v2",
-      "values": [
-        "queued",
-        "deferred",
-        "cancelled",
-        "waived",
-        "exposed",
-        "completed"
-      ]
-    },
-    "waxon_v2.session_item_kind": {
-      "name": "session_item_kind",
-      "schema": "waxon_v2",
-      "values": [
-        "base",
-        "retry"
-      ]
-    },
-    "waxon_v2.session_item_state": {
-      "name": "session_item_state",
-      "schema": "waxon_v2",
-      "values": [
-        "queued",
-        "exposed",
-        "submitted",
-        "evaluated",
-        "invalidated"
-      ]
-    },
-    "waxon_v2.session_kind": {
-      "name": "session_kind",
-      "schema": "waxon_v2",
-      "values": [
-        "primary",
-        "supplemental"
-      ]
-    },
-    "waxon_v2.session_status": {
-      "name": "session_status",
-      "schema": "waxon_v2",
-      "values": [
-        "active",
-        "completed",
-        "abandoned"
       ]
     },
     "waxon_v2.submission_status": {

@@ -7,6 +7,7 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - August 20, 2026 Lean Core: authenticated navigation remains `Review` / `Library`, with `Admin` visible only to operators.
 - Library is now one warm editorial question-bank surface: count, add, search, lifecycle filters, restrained row actions, and agent access. Source capture, concept organization, generation, maps, saved views, and provenance are intentionally absent.
 - Library now presents only Active, Flagged, and Archived filters; Question replacement is explicit, while Pause and Trash controls are absent.
+- The Flagged filter is a distinct attention inbox with compact Waxon-validation or Learner origin labels, machine-readable reason badges rendered as readable labels, and restore, replace, or archive resolution controls.
 - Library Question creation asks only for the Prompt and Answer Standard; answer-mode classification and importance are intentionally absent.
 - Review now uses the approved question → compact composer → `Previous answers` list in both its static loading and hydrated states. Review is a live queue without a daily plan, session, capacity warning, retry control, flag action, or skip action.
 - Review detects and persists the learner's IANA timezone, exposes it through a compact Local Day settings dialog, and refreshes queue membership after an edit.
@@ -20,4 +21,5 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - Desktop and 390 px native in-app Browser verification passed for Library inline formulas with Greek symbols, command subscripts, relation separators, and hats; surrounding answer text wraps without horizontal overflow.
 - Typecheck and lint passed after restoring the approved Review surface.
 - A fresh native in-app Browser comparison is required before replacing the approved composite. Verify desktop and 390 px layouts, keyboard focus, reduced motion, 200% zoom, long prompts, formulas, dialogs, and populated/empty bank states.
+- Issue #13 independent native in-app Browser acceptance passed at desktop and 390 × 844: validation-created Flagged Questions showed their attention inbox, Waxon origin and reason labels, stayed out of Review, completed restore/replace/archive paths, and remained horizontally contained with accessible actions. No console errors appeared; one unrelated pre-existing Next smooth-scroll warning remained.
 - The reference predates the lean Library, so compare shared shell, typography, spacing, color, and interaction treatment rather than removed controls.

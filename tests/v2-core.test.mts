@@ -34,24 +34,90 @@ test("prompt normalization supports exact duplicate detection", () => {
   );
 });
 
-test("quality gates reject broad prompts and allow atomic recall", () => {
-  assert.equal(
+test("default quality assessment rejects known defects and accepts clear recall", () => {
+  assert.deepEqual(
     assessQuestionQuality({
       prompt: "Explain everything about transformers?",
       referenceAnswer: "A very broad answer.",
       target: "Transformers",
-    }).passes,
-    false,
+    }),
+    { outcome: "fail", reasons: ["not_atomic"] },
   );
-  assert.equal(
+  assert.deepEqual(
+    assessQuestionQuality({
+      prompt: "What color is it?",
+      referenceAnswer: "Blue.",
+      target: "What color is it?",
+    }),
+    { outcome: "fail", reasons: ["not_self_contained"] },
+  );
+  assert.deepEqual(
+    assessQuestionQuality({
+      prompt: "What is the capital of Portugal?",
+      referenceAnswer: "I don't know.",
+      target: "What is the capital of Portugal?",
+    }),
+    { outcome: "fail", reasons: ["not_answerable"] },
+  );
+  assert.deepEqual(
     assessQuestionQuality({
       prompt: "Why are attention logits divided by the square root of key dimension?",
       referenceAnswer:
         "It controls their variance so softmax does not saturate as key dimension grows.",
       target: "Purpose of scaled dot-product attention",
-    }).passes,
-    true,
+    }),
+    { outcome: "pass", reasons: [] },
   );
+  for (const candidate of [
+    {
+      prompt: "Who founded the company?",
+      referenceAnswer: "Alice.",
+    },
+    {
+      prompt: "What is it and why?",
+      referenceAnswer: "Because.",
+    },
+    {
+      prompt: "What is a worker process?",
+      referenceAnswer: "A process.",
+    },
+  ]) {
+    assert.notEqual(
+      assessQuestionQuality({ ...candidate, target: candidate.prompt }).outcome,
+      "pass",
+    );
+  }
+  for (const candidate of [
+    {
+      prompt: "What protection is provided by TLS?",
+      referenceAnswer:
+        "TLS provides confidentiality, integrity, and peer authentication for data in transit.",
+    },
+    {
+      prompt: "Which muscles are attached to the scapula?",
+      referenceAnswer:
+        "Seventeen muscles attach to the scapula, including the rotator cuff and trapezius muscles.",
+    },
+    {
+      prompt: "Why does it rain?",
+      referenceAnswer:
+        "Water vapor condenses into droplets that become heavy enough to fall from clouds.",
+    },
+    {
+      prompt: "What does it mean for a function to be continuous?",
+      referenceAnswer:
+        "Small changes in the input produce arbitrarily small changes in the output around each point.",
+    },
+    {
+      prompt: "Which protocol is connection-oriented, TCP or UDP?",
+      referenceAnswer: "TCP.",
+    },
+  ]) {
+    assert.deepEqual(
+      assessQuestionQuality({ ...candidate, target: candidate.prompt }),
+      { outcome: "pass", reasons: [] },
+    );
+  }
 });
 
 test("FSRS grows successful intervals and contracts after failure", () => {
