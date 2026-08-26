@@ -5,12 +5,13 @@ import {
   applyLearnerGrade,
   createDirectQuestion,
   defaultV2ServiceDependencies,
-  editQuestion,
+  getQuestionLearningEvidence,
   getEvaluationForSubmission,
   getOrCreateReviewSession,
   getReviewSummary,
   listLibrary,
   mutateQuestionLifecycle,
+  replaceQuestion,
   runEvaluationForSubmission,
   submitReviewAnswer,
   type V2ServiceDependencies,
@@ -72,21 +73,10 @@ export function createWaxonApplication(
               serviceDependencies,
             );
           },
-          edit(
-            input: Omit<Parameters<typeof editQuestion>[0], "userId">,
+          replace(
+            input: Omit<Parameters<typeof replaceQuestion>[0], "userId">,
           ) {
-            return editQuestion({ ...input, userId }, serviceDependencies);
-          },
-          mutate(
-            input: Omit<
-              Parameters<typeof mutateQuestionLifecycle>[0],
-              "userId"
-            >,
-          ) {
-            return mutateQuestionLifecycle(
-              { ...input, userId },
-              serviceDependencies,
-            );
+            return replaceQuestion({ ...input, userId }, serviceDependencies);
           },
           archive(questionId: string) {
             return mutateQuestionLifecycle(
@@ -99,6 +89,9 @@ export function createWaxonApplication(
               { userId, questionId, action: "restore" },
               serviceDependencies,
             );
+          },
+          evidence(questionId: string) {
+            return getQuestionLearningEvidence({ userId, questionId });
           },
         },
         review: {

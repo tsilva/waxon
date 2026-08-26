@@ -7,35 +7,29 @@ import {
   Copy,
   KeyRound,
   LoaderCircle,
-  Pause,
   Pencil,
   Plus,
   Search,
-  Trash2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import type {
   V2LibraryResponse,
-  V2Lifecycle,
+  V2QuestionLifecycle,
   V2Question,
 } from "@/app/lib/v2/types";
 
 const EMPTY_DATA: V2LibraryResponse = {
   questions: [],
-  counts: { new: 0, learning: 0, review: 0, flagged: 0, paused: 0, archived: 0, trash: 0 },
+  counts: { active: 0, flagged: 0, archived: 0 },
   waitingNew: 0,
 };
-const FILTERS: Array<{ value: V2Lifecycle | "all"; label: string }> = [
+const FILTERS: Array<{ value: V2QuestionLifecycle | "all"; label: string }> = [
   { value: "all", label: "All" },
-  { value: "new", label: "New" },
-  { value: "learning", label: "Learning" },
-  { value: "review", label: "Review" },
+  { value: "active", label: "Active" },
   { value: "flagged", label: "Flagged" },
-  { value: "paused", label: "Paused" },
   { value: "archived", label: "Archived" },
-  { value: "trash", label: "Trash" },
 ];
 
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
@@ -65,16 +59,19 @@ function QuestionDialog({
     const payload = {
       prompt: String(form.get("prompt") ?? ""),
       referenceAnswer: String(form.get("referenceAnswer") ?? ""),
-      importance: Number(form.get("importance") ?? 1),
     };
     try {
       if (question) {
-        await jsonRequest("/api/v2/library", {
+        const result = await jsonRequest<{ status: "replaced" | "unchanged" }>("/api/v2/library", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "edit", questionId: question.id, ...payload }),
+          body: JSON.stringify({ action: "replace", questionId: question.id, ...payload }),
         });
-        await onSaved("Question updated. Its schedule restarted conservatively.");
+        await onSaved(
+          result.status === "unchanged"
+            ? "No replacement was needed because the Question is unchanged."
+            : "Replacement added. The original Question was archived.",
+        );
       } else {
         const result = await jsonRequest<{ status: "created" | "existing" }>(
           "/api/v2/library",
@@ -113,17 +110,17 @@ function QuestionDialog({
         <div className="v2-dialog-heading">
           <div>
             <span className="v2-kicker">Question bank</span>
-            <h2 id="question-dialog-title">{question ? "Edit question" : "Add a question"}</h2>
+            <h2 id="question-dialog-title">{question ? "Replace question" : "Add a question"}</h2>
           </div>
           <button className="v2-icon-button" onClick={onClose} type="button">×</button>
         </div>
         <form className="v2-form" onSubmit={submit}>
           <label>
-            Question
+            Prompt
             <textarea defaultValue={question?.prompt ?? ""} maxLength={16_384} name="prompt" required rows={4} />
           </label>
           <label>
-            Reference answer
+            Answer standard
             <textarea
               defaultValue={question?.referenceAnswer ?? ""}
               maxLength={65_536}
@@ -132,17 +129,13 @@ function QuestionDialog({
               rows={7}
             />
           </label>
-          <label>
-            Importance
-            <input defaultValue={question?.importance ?? 1} max={5} min={0.1} name="importance" step={0.1} type="number" />
-          </label>
-          {question ? <p className="lean-edit-warning">Editing preserves attempts but restarts scheduling so old mastery is not applied to the revised prompt.</p> : null}
+          {question ? <p className="lean-edit-warning">Replacing creates a new Active Question with reset mastery and archives this Question with its Learning Evidence intact.</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
           <div className="v2-dialog-actions">
             <button onClick={onClose} type="button">Cancel</button>
             <button className="v2-button-primary" disabled={saving} type="submit">
               {saving ? <LoaderCircle className="v2-spin" /> : null}
-              {question ? "Save question" : "Add to bank"}
+              {question ? "Replace question" : "Add to bank"}
             </button>
           </div>
         </form>
@@ -227,29 +220,26 @@ function QuestionRow({
 }: {
   question: V2Question;
   onEdit: () => void;
-  onAction: (action: "pause" | "archive" | "trash" | "restore") => void;
+  onAction: (action: "archive" | "restore") => void;
 }) {
-  const active = ["new", "learning", "review"].includes(question.lifecycle);
   return (
     <article className="lean-question-row">
       <div className="lean-question-copy">
         <div className="lean-question-meta">
-          <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle}</span>
+          <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle[0]?.toUpperCase()}{question.lifecycle.slice(1)}</span>
           {question.dueAt ? <span><CalendarClock /> {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(question.dueAt))}</span> : null}
           {question.retrievability !== null ? <span>{Math.round(question.retrievability * 100)}% recall</span> : null}
         </div>
         <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
         <details>
-          <summary>Reference answer</summary>
+          <summary>Answer standard</summary>
           <MarkdownContent className="v2-markdown" enableMath text={question.referenceAnswer} />
         </details>
       </div>
       <div className="lean-question-actions">
-        <button aria-label="Edit question" onClick={onEdit} title="Edit" type="button"><Pencil /></button>
-        {active ? <button aria-label="Pause question" onClick={() => onAction("pause")} title="Pause" type="button"><Pause /></button> : null}
-        {question.lifecycle !== "archived" && question.lifecycle !== "trash" ? <button aria-label="Archive question" onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
-        {question.lifecycle === "flagged" || question.lifecycle === "paused" || question.lifecycle === "archived" || question.lifecycle === "trash" ? <button aria-label="Restore question" onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
-        {question.lifecycle !== "trash" ? <button aria-label="Move question to trash" className="is-danger" onClick={() => onAction("trash")} title="Move to trash" type="button"><Trash2 /></button> : null}
+        <button aria-label="Replace question" onClick={onEdit} title="Replace" type="button"><Pencil /></button>
+        {question.lifecycle !== "archived" ? <button aria-label="Archive question" onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
+        {question.lifecycle !== "active" ? <button aria-label="Restore question" onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
       </div>
     </article>
   );
@@ -257,7 +247,7 @@ function QuestionRow({
 
 export default function LibraryPageClient() {
   const [data, setData] = useState(EMPTY_DATA);
-  const [filter, setFilter] = useState<V2Lifecycle | "all">("all");
+  const [filter, setFilter] = useState<V2QuestionLifecycle | "all">("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -283,14 +273,14 @@ export default function LibraryPageClient() {
 
   const total = useMemo(() => Object.values(data.counts).reduce((sum, value) => sum + value, 0), [data.counts]);
 
-  async function questionAction(questionId: string, action: "pause" | "archive" | "trash" | "restore") {
+  async function questionAction(questionId: string, action: "archive" | "restore") {
     setError(null);
     await jsonRequest("/api/v2/library", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ questionId, action }),
     });
-    setMessage(action === "restore" ? "Question restored." : `Question ${action === "trash" ? "moved to trash" : `${action}d`}.`);
+    setMessage(action === "restore" ? "Question restored." : "Question archived.");
     await load();
   }
 
@@ -326,7 +316,7 @@ export default function LibraryPageClient() {
                 onEdit={() => setEditing(question)}
                 question={question}
               />
-            )) : <div className="lean-library-empty"><h2>{search ? "No matching questions" : "Your bank is empty"}</h2><p>{search ? "Try a different phrase or filter." : "Add one clear question and its reference answer."}</p>{!search ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
+            )) : <div className="lean-library-empty"><h2>{search ? "No matching questions" : "Your bank is empty"}</h2><p>{search ? "Try a different phrase or filter." : "Add one clear Prompt and its Answer Standard."}</p>{!search ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
           </div>
         </div>
       </section>

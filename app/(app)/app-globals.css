@@ -217,14 +217,7 @@
   text-transform: uppercase;
 }
 
-.lean-lifecycle.is-new,
-.lean-lifecycle.is-learning {
-  border-color: rgb(166 124 82 / 34%);
-  background: rgb(247 241 227 / 84%);
-  color: var(--accent-hover);
-}
-
-.lean-lifecycle.is-review {
+.lean-lifecycle.is-active {
   border-color: rgb(89 123 91 / 28%);
   background: rgb(237 245 237 / 70%);
   color: #496d4b;
