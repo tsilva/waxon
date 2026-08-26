@@ -17,27 +17,106 @@ test(
     await withApplicationContract(async ({
       clock,
       provisionLearner,
+      provisionDefaultLearner,
       semanticValidation,
     }) => {
       await suite.test(
-        "semantic validation outcomes are deterministic without defining Question behavior",
+        "semantic validation pass activates while fail, inconclusive, and unavailable quarantine",
         async () => {
-          for (const outcome of [
-            "pass",
-            "fail",
-            "inconclusive",
-            "unavailable",
-          ] as const) {
+          const learner = await provisionLearner("Validation contract learner");
+          const expectations = [
+            { outcome: "pass", lifecycle: "active", reasons: [] },
+            { outcome: "fail", lifecycle: "flagged", reasons: ["not_atomic"] },
+            {
+              outcome: "inconclusive",
+              lifecycle: "flagged",
+              reasons: ["semantic_validation_inconclusive"],
+            },
+            {
+              outcome: "unavailable",
+              lifecycle: "flagged",
+              reasons: ["semantic_validation_unavailable"],
+            },
+          ] as const;
+
+          for (const expectation of expectations) {
+            const { outcome } = expectation;
             semanticValidation.setOutcome(outcome);
-            assert.deepEqual(await semanticValidation.validateQuestion(), {
-              passes: outcome === "pass",
-              reasons:
-                outcome === "pass"
-                  ? []
-                  : [`Deterministic semantic validation ${outcome}.`],
+            const added = await learner.direct.questionBank.add({
+              idempotencyKey: `semantic-validation-${outcome}`,
+              items: [
+                {
+                  prompt: `What is the ${outcome} semantic validation outcome?`,
+                  referenceAnswer: `The deterministic outcome is ${outcome}.`,
+                },
+              ],
             });
+
+            assert.equal(added.results[0]?.status, "created");
+            assert.equal(added.results[0]?.lifecycle, expectation.lifecycle);
+            assert.deepEqual(added.results[0]?.flags, expectation.reasons.length === 0
+              ? []
+              : [{ origin: "waxon_validation", reasons: expectation.reasons }]);
           }
+
+          const questions = (await learner.direct.questionBank.list()).questions;
+          for (const expectation of expectations) {
+            const question = questions.find((candidate) =>
+              candidate.prompt.includes(expectation.outcome),
+            );
+            assert.equal(question?.lifecycle, expectation.lifecycle);
+            assert.deepEqual(
+              question?.flags.map(({ origin, reasons }) => ({ origin, reasons })),
+              expectation.reasons.length === 0
+                ? []
+                : [{ origin: "waxon_validation", reasons: expectation.reasons }],
+            );
+          }
+
           semanticValidation.setOutcome("pass");
+        },
+      );
+
+      await suite.test(
+        "production default activates a clear valid Question without a model",
+        async () => {
+          const learner = await provisionDefaultLearner(
+            "Default validation learner",
+          );
+          const active = await learner.direct.questionBank.add({
+            idempotencyKey: "default-valid-question",
+            items: [
+              {
+                prompt: "What is the capital of Portugal?",
+                referenceAnswer: "Lisbon.",
+              },
+            ],
+          });
+          assert.deepEqual(active.results[0] && {
+            lifecycle: active.results[0].lifecycle,
+            flags: active.results[0].flags,
+          }, { lifecycle: "active", flags: [] });
+          assert.equal(
+            (await learner.direct.review.open()).item?.questionId,
+            active.results[0]?.id,
+          );
+
+          const questionable = await learner.direct.questionBank.add({
+            idempotencyKey: "default-questionable-question",
+            items: [
+              {
+                prompt: "What color is it?",
+                referenceAnswer: "Blue.",
+              },
+            ],
+          });
+          assert.deepEqual(questionable.results[0]?.flags, [
+            {
+              origin: "waxon_validation",
+              reasons: ["not_self_contained"],
+            },
+          ]);
+          assert.equal(questionable.results[0]?.lifecycle, "flagged");
         },
       );
 
@@ -83,6 +162,256 @@ test(
             ),
             [added.results[0]?.id],
           );
+        },
+      );
+
+      await suite.test(
+        "Authorized MCP Client add shares validation quarantine and durable visibility",
+        async () => {
+          const learner = await provisionLearner("MCP validation learner");
+          const expectations = [
+            { outcome: "fail", reason: "not_atomic" },
+            {
+              outcome: "unavailable",
+              reason: "semantic_validation_unavailable",
+            },
+          ] as const;
+
+          for (const { outcome, reason } of expectations) {
+            semanticValidation.setOutcome(outcome);
+            const added = await learner.authorizedMcpClient.questionBank.add({
+              idempotencyKey: `mcp-validation-${outcome}`,
+              items: [
+                {
+                  prompt: `What is the MCP ${outcome} validation outcome?`,
+                  referenceAnswer: `The deterministic outcome is ${outcome}.`,
+                },
+              ],
+            });
+            assert.equal(added.results[0]?.lifecycle, "flagged");
+            assert.deepEqual(added.results[0]?.flags, [
+              { origin: "waxon_validation", reasons: [reason] },
+            ]);
+          }
+
+          assert.deepEqual(
+            (await learner.direct.questionBank.list({ lifecycle: "flagged" }))
+              .questions.map((question) => question.lifecycle),
+            ["flagged", "flagged"],
+          );
+          semanticValidation.setOutcome("pass");
+        },
+      );
+
+      await suite.test(
+        "structurally unusable candidates are rejected without storage",
+        async () => {
+          const learner = await provisionLearner("Structural contract learner");
+          semanticValidation.setOutcome("fail");
+          const candidates = [
+            {
+              prompt: "",
+              referenceAnswer: "An empty Prompt cannot be stored.",
+              error: /Add a question prompt/u,
+            },
+            {
+              prompt: 42 as never,
+              referenceAnswer: "A malformed Prompt cannot be stored.",
+              error: /Question Prompt must be text/u,
+            },
+            {
+              prompt: `${"x".repeat(16_384)}?`,
+              referenceAnswer: "An out-of-bounds Prompt cannot be stored.",
+              error: /at most 16384 characters/u,
+            },
+            {
+              prompt: "Why must an empty Answer Standard be rejected?",
+              referenceAnswer: "",
+              error: /Add or confirm an Answer Standard/u,
+            },
+            {
+              prompt: "Why must a malformed Answer Standard be rejected?",
+              referenceAnswer: 42 as never,
+              error: /Answer Standard must be text/u,
+            },
+            {
+              prompt: "Why must an oversized Answer Standard be rejected?",
+              referenceAnswer: "x".repeat(65_537),
+              error: /at most 65536 characters/u,
+            },
+          ];
+
+          for (const [index, candidate] of candidates.entries()) {
+            await assert.rejects(
+              learner.direct.questionBank.add({
+                idempotencyKey: `structural-rejection-${index}`,
+                items: [candidate],
+              }),
+              candidate.error,
+            );
+          }
+
+          assert.deepEqual(
+            (await learner.direct.questionBank.list()).questions,
+            [],
+          );
+          semanticValidation.setOutcome("pass");
+        },
+      );
+
+      await suite.test(
+        "Flagged Questions preserve evidence through restore, replacement, and archive",
+        async () => {
+          const learner = await provisionLearner("Flag resolution learner");
+          const otherLearner = await provisionLearner("Flag isolation learner");
+          semanticValidation.setOutcome("fail");
+          const added = await learner.direct.questionBank.add({
+            idempotencyKey: "flag-resolution-candidates",
+            items: [
+              {
+                prompt: "Which Flagged Question should be restored unchanged?",
+                referenceAnswer: "The restoration candidate.",
+              },
+              {
+                prompt: "Which Flagged Question should be replaced immutably?",
+                referenceAnswer: "The replacement candidate.",
+              },
+              {
+                prompt: "Which Flagged Question should be archived without replacement?",
+                referenceAnswer: "The archive candidate.",
+              },
+              {
+                prompt: "Which Flagged Prompt must remain one identity?",
+                referenceAnswer: "The exact normalized duplicate candidate.",
+              },
+            ],
+          });
+          const [restoreId, replaceId, archiveId, duplicateId] = added.results.map(
+            (result) => result.id,
+          );
+
+          assert.equal((await learner.direct.review.open()).item, null);
+          await assert.rejects(
+            otherLearner.direct.questionBank.restore(restoreId ?? ""),
+            /Question not found/u,
+          );
+
+          semanticValidation.setOutcome("pass");
+          const duplicate = await learner.direct.questionBank.add({
+            idempotencyKey: "flag-resolution-duplicate",
+            items: [
+              {
+                prompt: "  WHICH FLAGGED PROMPT MUST REMAIN ONE IDENTITY?  ",
+                referenceAnswer: "The exact normalized duplicate candidate.",
+              },
+            ],
+          });
+          assert.deepEqual(duplicate.results, [
+            {
+              id: duplicateId,
+              status: "existing",
+              lifecycle: "flagged",
+              flags: [
+                { origin: "waxon_validation", reasons: ["not_atomic"] },
+              ],
+            },
+          ]);
+
+          await learner.direct.questionBank.restore(restoreId ?? "");
+          semanticValidation.setOutcome("unavailable");
+          const replacement = await learner.direct.questionBank.replace({
+            questionId: replaceId ?? "",
+            prompt: "What makes a resolved replacement a new Question?",
+            referenceAnswer: "It has a new identity and reset mastery.",
+          });
+          assert.equal(replacement.lifecycle, "active");
+          semanticValidation.setOutcome("pass");
+          await learner.direct.questionBank.archive(archiveId ?? "");
+
+          const questions = (await learner.direct.questionBank.list()).questions;
+          const restored = questions.find((question) => question.id === restoreId);
+          const replacedOriginal = questions.find(
+            (question) => question.id === replaceId,
+          );
+          const archived = questions.find((question) => question.id === archiveId);
+          const replacementQuestion = questions.find(
+            (question) => question.id === replacement.questionId,
+          );
+          assert.equal(restored?.lifecycle, "active");
+          assert.equal(replacedOriginal?.lifecycle, "archived");
+          assert.equal(archived?.lifecycle, "archived");
+          assert.equal(replacementQuestion?.lifecycle, "active");
+          assert.deepEqual(replacementQuestion?.flags, []);
+          for (const resolved of [restored, replacedOriginal, archived]) {
+            assert.deepEqual(
+              resolved?.flags.map(({ origin, reasons, resolvedAt }) => ({
+                origin,
+                reasons,
+                resolved: resolvedAt !== null,
+              })),
+              [
+                {
+                  origin: "waxon_validation",
+                  reasons: ["not_atomic"],
+                  resolved: true,
+                },
+              ],
+            );
+          }
+          assert.deepEqual(
+            await learner.direct.questionBank.evidence(replacement.questionId),
+            {
+              learnerAnswers: 0,
+              evaluations: 0,
+              gradeEvents: 0,
+              dueAt: null,
+            },
+          );
+          assert.equal(
+            new Set([restoreId, replacement.questionId]).has(
+              (await learner.direct.review.open()).item?.questionId ?? "",
+            ),
+            true,
+          );
+          semanticValidation.setOutcome("pass");
+        },
+      );
+
+      await suite.test(
+        "Flag evidence distinguishes learner action from Waxon validation",
+        async () => {
+          const learner = await provisionLearner("Flag origin learner");
+          semanticValidation.setOutcome("pass");
+          const added = await learner.direct.questionBank.add({
+            idempotencyKey: "learner-flag-origin",
+            items: [
+              {
+                prompt: "Which origin identifies a learner-created Flag?",
+                referenceAnswer: "The machine-readable learner origin.",
+              },
+            ],
+          });
+          const questionId = added.results[0]?.id ?? "";
+          const review = await learner.direct.review.open();
+          assert.equal(review.item?.questionId, questionId);
+
+          await learner.direct.review.act({
+            itemId: review.item?.itemId ?? "",
+            action: "flag",
+          });
+          const flagged = (await learner.direct.questionBank.list({
+            lifecycle: "flagged",
+          })).questions[0];
+          assert.equal(flagged?.id, questionId);
+          assert.deepEqual(
+            flagged?.flags.map(({ origin, reasons, resolvedAt }) => ({
+              origin,
+              reasons,
+              resolvedAt,
+            })),
+            [{ origin: "learner", reasons: [], resolvedAt: null }],
+          );
+          assert.notEqual((await learner.direct.review.open()).item?.questionId, questionId);
         },
       );
 
@@ -162,7 +491,12 @@ test(
             ],
           });
           assert.deepEqual(duplicate.results, [
-            { id: questionId, status: "existing", lifecycle: "archived" },
+            {
+              id: questionId,
+              status: "existing",
+              lifecycle: "archived",
+              flags: [],
+            },
           ]);
 
           const archived = await learner.direct.questionBank.list({
