@@ -51,10 +51,7 @@ export async function POST() {
   const existingByTarget = new Map<string, (typeof existing)[number]>();
   for (const candidate of existing) {
     const retained = existingByTarget.get(candidate.targetKey);
-    if (
-      !retained ||
-      ["new", "learning", "review"].includes(candidate.lifecycle)
-    ) {
+    if (!retained || candidate.lifecycle === "active") {
       existingByTarget.set(candidate.targetKey, candidate);
     }
   }

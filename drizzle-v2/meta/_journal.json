@@ -120,6 +120,13 @@
       "when": 1787761591373,
       "tag": "0016_shallow_pet_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787770107580,
+      "tag": "0017_issue18_contract_cleanup",
+      "breakpoints": true
     }
   ]
 }

@@ -56,27 +56,23 @@ const lexicalSql = `
   ), fts AS (
     SELECT q.id,
            row_number() OVER (ORDER BY ts_rank_cd(
-             setweight(to_tsvector('simple', coalesce(qv.prompt, '')), 'A') ||
-             setweight(to_tsvector('simple', coalesce(qv.reference_answer, '')), 'B'),
+             setweight(to_tsvector('simple', coalesce(q.prompt, '')), 'A') ||
+             setweight(to_tsvector('simple', coalesce(q.reference_answer, '')), 'B'),
              query.tsquery, 32
            ) DESC, q.id) AS rank
       FROM waxon_v2.questions q
-      JOIN waxon_v2.question_versions qv
-        ON qv.user_id = q.user_id AND qv.question_id = q.id AND qv.is_current = true
       CROSS JOIN query
      WHERE q.user_id = $1
        AND (
-         setweight(to_tsvector('simple', coalesce(qv.prompt, '')), 'A') ||
-         setweight(to_tsvector('simple', coalesce(qv.reference_answer, '')), 'B')
+         setweight(to_tsvector('simple', coalesce(q.prompt, '')), 'A') ||
+         setweight(to_tsvector('simple', coalesce(q.reference_answer, '')), 'B')
        ) @@ query.tsquery
      ORDER BY rank
      LIMIT 25
   ), trigram AS (
-    SELECT q.id, row_number() OVER (ORDER BY qv.prompt <-> $2, q.id) AS rank
+    SELECT q.id, row_number() OVER (ORDER BY q.prompt <-> $2, q.id) AS rank
       FROM waxon_v2.questions q
-      JOIN waxon_v2.question_versions qv
-        ON qv.user_id = q.user_id AND qv.question_id = q.id AND qv.is_current = true
-     WHERE q.user_id = $1 AND similarity(qv.prompt, $2) >= 0.3
+     WHERE q.user_id = $1 AND similarity(q.prompt, $2) >= 0.3
      ORDER BY rank
      LIMIT 25
   ), scores AS (
@@ -97,12 +93,8 @@ try {
       [userId],
     ),
     pool.query<{ prompt: string }>(
-      `SELECT qv.prompt
+      `SELECT q.prompt
          FROM waxon_v2.questions q
-         JOIN waxon_v2.question_versions qv
-           ON qv.user_id = q.user_id
-          AND qv.question_id = q.id
-          AND qv.is_current = true
         WHERE q.user_id = $1
         ORDER BY q.updated_at DESC
         LIMIT 20`,

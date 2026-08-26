@@ -19,7 +19,6 @@ const retainedTables = [
   "users",
   "learner_settings",
   "questions",
-  "question_versions",
   "question_search_embeddings",
   "answer_submissions",
   "evaluations",

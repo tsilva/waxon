@@ -408,7 +408,7 @@ export default function ReviewApp() {
 
   useEffect(() => {
     answerRef.current?.focus();
-  }, [review?.question?.questionVersionId]);
+  }, [review?.question?.questionId]);
 
   useEffect(() => {
     if (!review?.recentAnswers.some(
@@ -453,7 +453,7 @@ export default function ReviewApp() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            questionVersionId: question.questionVersionId,
+            questionId: question.questionId,
             answer: responseText,
             idempotencyKey: crypto.randomUUID(),
           }),

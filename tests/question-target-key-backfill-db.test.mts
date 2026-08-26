@@ -26,16 +26,9 @@ test(
       );
       await pool.query(
         `INSERT INTO waxon_v2.questions
-           (id, user_id, lifecycle, target_key)
-         VALUES ($1, $2, 'new', $3)`,
-        [questionId, userId, `legacy:${randomUUID()}`],
-      );
-      await pool.query(
-        `INSERT INTO waxon_v2.question_versions
-           (user_id, question_id, version, prompt, reference_answer,
-            display_answer)
-         VALUES ($1, $2, 1, $3, $4, $4)`,
-        [userId, questionId, prompt, answer],
+           (id, user_id, prompt, reference_answer, lifecycle, target_key)
+         VALUES ($1, $2, $3, $4, 'active', $5)`,
+        [questionId, userId, prompt, answer, `legacy:${randomUUID()}`],
       );
       await pool.query(
         `DELETE FROM waxon_v2.data_migration_markers
@@ -49,12 +42,8 @@ test(
         prompt: string;
         reference_answer: string;
       }>(
-        `SELECT question.target_key, version.prompt, version.reference_answer
+        `SELECT question.target_key, question.prompt, question.reference_answer
            FROM waxon_v2.questions question
-           JOIN waxon_v2.question_versions version
-             ON version.user_id = question.user_id
-            AND version.question_id = question.id
-            AND version.is_current = true
           WHERE question.user_id = $1 AND question.id = $2`,
         [userId, questionId],
       );

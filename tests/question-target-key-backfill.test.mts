@@ -10,7 +10,7 @@ test("target-key repair prefers an already-canonical active question", () => {
     {
       id: "older-stale",
       userId: "learner",
-      lifecycle: "new",
+      lifecycle: "active",
       targetKey: "legacy-concept-key",
       prompt,
       createdAt: new Date("2026-01-01T00:00:00Z"),
@@ -18,7 +18,7 @@ test("target-key repair prefers an already-canonical active question", () => {
     {
       id: "already-canonical",
       userId: "learner",
-      lifecycle: "review",
+      lifecycle: "active",
       targetKey: desiredKey,
       prompt,
       createdAt: new Date("2026-02-01T00:00:00Z"),
@@ -49,7 +49,7 @@ test("target-key repair assigns the normalized prompt key to a unique legacy row
     {
       id: "legacy",
       userId: "learner",
-      lifecycle: "learning",
+      lifecycle: "active",
       targetKey: "old-target-key",
       prompt,
       createdAt: new Date("2026-01-01T00:00:00Z"),
@@ -60,7 +60,7 @@ test("target-key repair assigns the normalized prompt key to a unique legacy row
     {
       id: "legacy",
       userId: "learner",
-      lifecycle: "learning",
+      lifecycle: "active",
       targetKey: questionPromptKey(prompt),
     },
   ]);

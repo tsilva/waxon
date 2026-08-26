@@ -4,7 +4,7 @@ import { questionPromptKey } from "../app/lib/v2/questionInput.ts";
 
 const MIGRATION_NAME = "question-prompt-keys-v1";
 const UPDATE_BATCH_SIZE = 500;
-const ACTIVE_TARGET_LIFECYCLES = new Set(["new", "learning", "review"]);
+const ACTIVE_TARGET_LIFECYCLES = new Set(["active"]);
 
 export type QuestionTargetKeyRow = {
   id: string;
@@ -131,12 +131,8 @@ export async function backfillQuestionTargetKeys(pool: Pool): Promise<{
       created_at: Date;
     }>(
       `SELECT question.id, question.user_id, question.lifecycle::text,
-              question.target_key, version.prompt, question.created_at
+              question.target_key, question.prompt, question.created_at
          FROM waxon_v2.questions question
-         JOIN waxon_v2.question_versions version
-           ON version.user_id = question.user_id
-          AND version.question_id = question.id
-          AND version.is_current = true
         ORDER BY question.user_id, question.created_at, question.id`,
     );
     const rows: QuestionTargetKeyRow[] = result.rows.map((row) => ({
