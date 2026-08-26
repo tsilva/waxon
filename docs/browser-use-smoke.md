@@ -1,4 +1,4 @@
-# Lean Core browser suite
+# Question Bank and Review browser suite
 
 This is the source of truth for Waxon’s local end-to-end product check. Run it with the project-level `run-browser-use-suite` skill and the native Codex in-app Browser.
 
@@ -41,12 +41,12 @@ This answer deliberately omits the required token.
 
 ## Acceptance journey
 
-1. **Empty/add/search/edit:** In Question Bank, add a unique standalone question, find it by search, edit its answer, confirm the edit warning, then archive and restore it. Confirm no source, generation, concept, provenance, or document controls appear.
-2. **Live Review Queue:** Seed the fixtures, open Review, and confirm every Active unanswered fixture appears immediately in the queue count and can be answered in unrestricted free text. Confirm no daily-plan, session, daily-minute, capacity, new-item, importance, retention-target, flag, skip, or retry control or warning appears.
+1. **Empty/add/search/edit:** In Question Bank, add a unique standalone Question, find it by search, replace its Answer Standard, confirm the replacement warning, then archive and restore it. Confirm the page exposes only Question Bank inputs and actions.
+2. **Live Review Queue:** Seed the fixtures, open Review, and confirm every Active unanswered fixture appears immediately in the queue count and can be answered in unrestricted free text. Confirm Review exposes exactly one Flag action and no archive, restore, replace, unflag, daily-plan, session, daily-minute, capacity, new-item, importance, retention-target, skip, or retry control or warning.
 3. **Successful evaluation feedback:** Submit the stable correct token for one fixture. Confirm `Good` or `Easy`, visible Answer Standard and Demonstrated Gap feedback, and a visible future scheduled Local Day.
 4. **Local Day:** Confirm Review automatically persists a detected IANA timezone. Edit it through Local Day settings, save, reopen the dialog, and confirm the saved value remains while Review refreshes.
 5. **Reconstruction:** Reload or close and reopen Review after successful recall. Confirm the answered Question stays out of the current queue and the same future schedule is reconstructed without a session-recovery prompt.
-6. **MCP visibility:** In Question Bank create a personal token, call `check_questions` with a unique candidate and confirm its per-item coverage/advisory, then call `add_questions` with a unique idempotency key. Repeat the add and confirm one `created` result followed by the identical prior result. Check the same prompt again and require `exact_duplicate`, including its full stored answer and lifecycle. Search for the MCP-added question in Question Bank and through ranked `search_questions`. Revoke the token and confirm the endpoint returns `401`.
+6. **MCP visibility:** In Question Bank create a personal token, call `check_questions` with a unique candidate and confirm its per-item signals/advisory, then call `add_questions` with a unique idempotency key. Repeat the add and confirm the first result has `status: created` with a `created_active` or `created_flagged` outcome, while the retry retains the same Question ID and returns `status: existing` with `outcome: idempotent_replay`. Check the same Prompt again and require `exact_duplicate`, including its full stored Answer Standard and lifecycle. Search for the MCP-added Question in Question Bank and through ranked `search_questions`. Revoke the token and confirm the endpoint returns `401`.
 7. **Responsive and console check:** Verify desktop and 390 px Question Bank/Review layouts, keyboard focus, timezone dialog containment, and no unexpected browser console errors.
 
 Use accessible roles and visible names, take fresh DOM snapshots before changing locator strategy, and wait for content rather than `networkidle`. Do not stop or restart an existing server.

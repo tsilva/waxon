@@ -27,13 +27,6 @@ export function runBuild({
       ["db:migrate"],
     );
     if (migrationStatus !== 0) return migrationStatus;
-    const backfillStatus = runCommand(
-      spawn,
-      environment,
-      "pnpm",
-      ["db:backfill-question-target-keys"],
-    );
-    if (backfillStatus !== 0) return backfillStatus;
   }
 
   return runCommand(spawn, environment, "next", ["build"]);

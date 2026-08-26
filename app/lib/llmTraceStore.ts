@@ -5,22 +5,13 @@ import {
   toFiniteNumber,
 } from "./openRouterUsageMetrics.ts";
 
-export type LlmTraceCallType =
-  | "answer_eval"
-  | "question_generation"
-  | "embedding"
-  | "summarization";
+export type LlmTraceCallType = "answer_eval" | "embedding";
 
 export type LlmTraceStatus = "ok" | "pending" | "error";
 
 export type LlmTraceInteractionKind =
   | "Answer evaluation"
-  | "Question generation"
-  | "Reference answer"
-  | "Embedding"
-  | "Knowledge memory"
-  | "Quality gate"
-  | "Summarization"
+  | "Question search"
   | "Other";
 
 export type LlmTraceCall = {
@@ -88,22 +79,6 @@ export function classifyLlmCallType(operation: string): LlmTraceCallType {
     return "embedding";
   }
 
-  if (
-    normalizedOperation.includes("generate") ||
-    normalizedOperation.includes("dedupe") ||
-    normalizedOperation.includes("gate")
-  ) {
-    return "question_generation";
-  }
-
-  if (
-    normalizedOperation.includes("reference") ||
-    normalizedOperation.includes("summary") ||
-    normalizedOperation.includes("memory")
-  ) {
-    return "summarization";
-  }
-
   return "answer_eval";
 }
 
@@ -117,30 +92,7 @@ export function classifyLlmInteractionKind(
   }
 
   if (normalizedOperation.includes("embedding")) {
-    return "Embedding";
-  }
-
-  if (normalizedOperation.includes("gate")) {
-    return "Quality gate";
-  }
-
-  if (normalizedOperation.includes("memory")) {
-    return "Knowledge memory";
-  }
-
-  if (normalizedOperation.includes("reference")) {
-    return "Reference answer";
-  }
-
-  if (
-    normalizedOperation.includes("generate") ||
-    normalizedOperation.includes("dedupe")
-  ) {
-    return "Question generation";
-  }
-
-  if (normalizedOperation.includes("summary")) {
-    return "Summarization";
+    return "Question search";
   }
 
   return "Other";
@@ -476,12 +428,7 @@ function isTraceInteractionKind(
 ): value is LlmTraceInteraction["kind"] {
   return (
     value === "Answer evaluation" ||
-    value === "Question generation" ||
-    value === "Reference answer" ||
-    value === "Embedding" ||
-    value === "Knowledge memory" ||
-    value === "Quality gate" ||
-    value === "Summarization" ||
+    value === "Question search" ||
     value === "Other"
   );
 }
@@ -493,9 +440,7 @@ function isTraceStatus(value: string): value is LlmTraceStatus {
 function isTraceCallType(value: unknown): value is LlmTraceCallType {
   return (
     value === "answer_eval" ||
-    value === "question_generation" ||
-    value === "embedding" ||
-    value === "summarization"
+    value === "embedding"
   );
 }
 

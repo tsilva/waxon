@@ -43,13 +43,13 @@ const questionSummarySchema = z.object({
 });
 
 const searchModeSchema = z.enum(["lexical", "hybrid", "lexical_fallback"]);
-const coverageSchema = z.object({
+const searchSignalsSchema = z.object({
   exact: z.boolean(),
   lexical: z.boolean(),
   semantic: z.boolean(),
 });
 const searchMatchSchema = z.object({
-  source: z.enum(["bank", "batch"]),
+  origin: z.enum(["bank", "batch"]),
   id: z.string(),
   candidateId: z.string().nullable(),
   prompt: z.string(),
@@ -88,7 +88,7 @@ const handler = createMcpHandler(
         outputSchema: z.object({
           questions: z.array(questionSummarySchema),
           searchMode: searchModeSchema.nullable(),
-          coverage: coverageSchema.nullable(),
+          signals: searchSignalsSchema.nullable(),
         }),
         annotations: { readOnlyHint: true, openWorldHint: false },
       },
@@ -107,10 +107,10 @@ const handler = createMcpHandler(
           const result = checked.results[0];
           const output = {
             questions: result.matches
-              .filter((match) => match.source === "bank")
+              .filter((match) => match.origin === "bank")
               .map(toMcpRankedQuestion),
             searchMode: result.searchMode,
-            coverage: result.coverage,
+            signals: result.signals,
           };
           return {
             content: [{ type: "text", text: JSON.stringify(output) }],
@@ -125,7 +125,7 @@ const handler = createMcpHandler(
         const output = {
           questions: library.questions.map(toMcpStoredQuestion),
           searchMode: null,
-          coverage: null,
+          signals: null,
         };
         return {
           content: [{ type: "text", text: JSON.stringify(output) }],
@@ -164,7 +164,7 @@ const handler = createMcpHandler(
                 "search_incomplete",
               ]),
               searchMode: searchModeSchema,
-              coverage: coverageSchema,
+              signals: searchSignalsSchema,
               matches: z.array(searchMatchSchema),
             }),
           ),

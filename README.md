@@ -8,12 +8,12 @@ Waxon is a multi-user question bank with adaptive daily Review. Learners add sta
 
 ## Product loop
 
-- **Library** adds, searches, edits, pauses, archives, restores, and logically removes questions.
-- **Review** builds a bounded due-first daily plan, evaluates free-text recall, accepts learner grade corrections, and updates per-question memory.
+- **Question Bank** adds, searches, replaces, flags, archives, restores, and unflags Questions.
+- **Review** derives a live due-first queue, evaluates free-text recall, accepts Answer Grade corrections, and updates per-Question scheduling state.
 - **MCP** exposes the same isolated question service through `search_questions`, pre-add `check_questions`, and transactional `add_questions` tools.
 - **Admin** retains model traces, latency, token use, and cost for operators.
 
-Waxon does not ingest documents or URLs, retain source provenance, generate questions in-app, or organize concepts. Optional prompt-only embeddings improve MCP search but are never required to add a question.
+Waxon stores standalone Questions and immutable Learning Evidence. Optional prompt-only embeddings improve advisory MCP search but are never required to add a Question.
 
 ## Install and run
 
@@ -25,6 +25,23 @@ keyenv doctor
 keyenv run -- pnpm db:migrate
 keyenv run -- pnpm dev --port auto
 ```
+
+`db:migrate` expects the clean migration history. For an existing installation,
+the issue #19 clean break intentionally discards all Waxon data and migration
+metadata before applying the baseline:
+
+```bash
+keyenv run -- pnpm db:reset -- --confirm-clean-break
+```
+
+Run that destructive replacement once before deploying a build that contains
+the clean baseline. The reset removes Waxon's application schema, migration
+metadata, and named former Waxon tables in `public`; unrelated `public` objects
+and extensions remain. The destructive drops, clean-baseline installation, and
+matching Drizzle migration record commit atomically. An external dependency on
+a former Waxon object, or any baseline installation failure, blocks and rolls
+back the entire reset for explicit operator resolution. The reset has no
+legacy-data upgrade path and cannot be undone after a successful commit.
 
 Secrets declared in `.keyenv.toml`—including Neon, OpenRouter, Clerk, and Sentry credentials—remain in macOS Keychain and are injected by `keyenv run -- ...`. Do not put them in `.env` files. Application traffic uses Neon's pooled `DATABASE_URL`; migrations and maintenance scripts use `DATABASE_URL_UNPOOLED` when available.
 
@@ -41,7 +58,7 @@ WAXON_QUESTION_SEARCH_MODE=lexical
 
 Production browser authentication uses Clerk and all bank and learning records are user-owned. Local development uses the configured TCLV/Tiago test identity unless `NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1` is set.
 
-In Library, open **Agent access**, create a personal token, and copy it immediately. Waxon stores only its SHA-256 hash. Configure the remote Streamable HTTP endpoint as:
+In Question Bank, open **Agent access**, create a personal token, and copy it immediately. Waxon stores only its SHA-256 hash. Configure the remote Streamable HTTP endpoint as:
 
 ```text
 https://<your-waxon-host>/api/mcp
@@ -58,28 +75,22 @@ pnpm test             # run the Node test suite
 pnpm lint             # run ESLint
 pnpm typecheck        # check TypeScript
 pnpm build            # create a production build
-pnpm db:migrate       # apply normal Stage One migrations
-pnpm db:compare       # compare exact row counts, foreign keys, and sequences
+pnpm db:migrate       # create or verify the clean database baseline
+pnpm db:reset -- --confirm-clean-break  # discard Waxon data and recreate the baseline
 pnpm db:studio        # open Drizzle Studio
-pnpm lean:preflight   # print retained counts and the blob cleanup inventory
-pnpm question-search:backfill  # dry-run the repairable embedding backfill
 pnpm question-search:evaluate  # inspect/score the 120-case retrieval fixture
 pnpm question-search:benchmark -- --user-id=<id>  # measure a learner bank
 ```
 
-The preservation-first two-stage cleanup is documented in [`docs/lean-core-rollout.md`](./docs/lean-core-rollout.md). Do not run its Stage Two SQL until the Stage One deployment, retained-count comparison, Review journey, and blob inventory have been reviewed.
-
 The repeatable local product suite lives in [`docs/browser-use-smoke.md`](./docs/browser-use-smoke.md) and uses the native Codex in-app Browser plus a development-only deterministic evaluator.
-
-Question-search rollout, backfill, evaluation, and latency gates are documented in [`docs/question-search-rollout.md`](./docs/question-search-rollout.md).
 
 ## Implementation notes
 
-- Lean schema declarations live in `app/db/v2/schema.ts`; reviewed Stage One migrations live in `drizzle-v2/`.
-- Question versions, submissions, evaluations, grade events, and memory states are append-only or rebuilt from immutable evidence as appropriate.
-- Exact answers are graded deterministically. Semantic and rubric answers are evaluated through the durable evaluation workflow.
-- MCP batches share Library validation, duplicate detection, limits, idempotency receipts, transactions, and user isolation.
-- Library uses weighted full-text plus trigram relevance. MCP can add one compact prompt embedding and RRF, with a visible lexical fallback and no server-side LLM reranker.
+- Schema declarations live in `app/db/v2/schema.ts`; the clean baseline lives in `drizzle-v2/`.
+- Questions are immutable; Learner Answers, evaluations, and Answer Grade events remain immutable Learning Evidence, while scheduling state is derived from effective grades.
+- Every Learner Answer follows the same free-text evaluation workflow.
+- MCP batches share Question Bank validation, duplicate detection, limits, idempotency receipts, transactions, and user isolation.
+- Question Bank uses weighted full-text plus trigram relevance. MCP can add one compact prompt embedding and RRF, with a visible lexical fallback and no server-side LLM reranker.
 - JavaScript dependency hardening is configured in `pnpm-workspace.yaml` and `.npmrc`.
 
 ## License

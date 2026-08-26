@@ -16,7 +16,7 @@ import { applyFsrsGrade } from "../app/lib/v2/scheduler.ts";
 const now = new Date("2026-07-25T10:00:00.000Z");
 
 
-test("lean question input is normalized and receives strong defaults", () => {
+test("Question input is normalized and receives strong defaults", () => {
   const input = normalizeQuestionInput({
     prompt: "  What   does   FSRS schedule? ",
     referenceAnswer: "It schedules the next review from memory state.",

@@ -3,7 +3,7 @@ import * as Sentry from "@sentry/nextjs";
 import { getV2Client } from "../../db/v2/client.ts";
 import { beginLlmTrace, finishLlmTrace } from "../llmTraceStore.ts";
 import {
-  QUESTION_SEARCH_SOURCE_VERSION,
+  QUESTION_SEARCH_EMBEDDING_VERSION,
   QUESTION_SEARCH_TRIGRAM_THRESHOLD,
   questionSearchAdvisory,
   questionSearchVectorLiteral,
@@ -50,7 +50,7 @@ type BatchTrigramRow = {
 };
 
 export type QuestionSearchMatch = {
-  source: "bank" | "batch";
+  origin: "bank" | "batch";
   id: string;
   candidateId: string | null;
   prompt: string;
@@ -71,7 +71,7 @@ export type QuestionCheckResult = {
   candidateId: string;
   advisory: QuestionSearchAdvisory;
   searchMode: QuestionSearchMode;
-  coverage: { exact: boolean; lexical: boolean; semantic: boolean };
+  signals: { exact: boolean; lexical: boolean; semantic: boolean };
   matches: QuestionSearchMatch[];
 };
 
@@ -359,7 +359,7 @@ async function semanticRows(input: {
              ON q.user_id = qse.user_id AND q.id = qse.question_id
           WHERE qse.user_id = $1
             AND qse.model = $3
-            AND qse.source_version = $4
+            AND qse.embedding_version = $4
             AND -(qse.embedding <#> input.embedding) >= $5
             AND q.lifecycle::text IN ('active','flagged','archived')
           ORDER BY qse.embedding <#> input.embedding, q.id
@@ -369,7 +369,7 @@ async function semanticRows(input: {
       input.userId,
       JSON.stringify(vectors),
       input.model,
-      QUESTION_SEARCH_SOURCE_VERSION,
+      QUESTION_SEARCH_EMBEDDING_VERSION,
       input.threshold,
       input.branchLimit,
     ],
@@ -377,7 +377,7 @@ async function semanticRows(input: {
   return result.rows;
 }
 
-async function semanticCoverageComplete(
+async function semanticSearchComplete(
   userId: string,
   model: string,
 ): Promise<boolean> {
@@ -389,13 +389,13 @@ async function semanticCoverageComplete(
            ON qse.user_id = q.user_id
           AND qse.question_id = q.id
           AND qse.model = $2
-          AND qse.source_version = $3
+          AND qse.embedding_version = $3
         WHERE q.user_id = $1
           AND q.lifecycle::text IN ('active','flagged','archived')
           AND qse.question_id IS NULL
         LIMIT 1
      ) AS complete`,
-    [userId, model, QUESTION_SEARCH_SOURCE_VERSION],
+    [userId, model, QUESTION_SEARCH_EMBEDDING_VERSION],
   );
   return result.rows[0]?.complete === true;
 }
@@ -408,7 +408,7 @@ function bankMatch(input: {
   combinedRank: number;
 }): QuestionSearchMatch {
   const row = input.signal?.row ?? input.semantic;
-  if (!row) throw new Error("Question-search match is missing its source row.");
+  if (!row) throw new Error("Question-search match is missing its stored row.");
   const matchTypes: QuestionSearchMatch["matchTypes"] = [];
   if (input.signal?.fullTextRank !== null && input.signal?.fullTextRank !== undefined) {
     matchTypes.push("full_text");
@@ -418,7 +418,7 @@ function bankMatch(input: {
   }
   if (input.semantic) matchTypes.push("semantic");
   return {
-    source: "bank",
+    origin: "bank",
     id: row.id,
     candidateId: null,
     prompt: row.prompt,
@@ -546,7 +546,7 @@ export async function checkQuestions(input: {
           input.userId,
           nonExact.map((candidate) => candidate.prompt),
         ),
-        semanticCoverageComplete(input.userId, config.model),
+        semanticSearchComplete(input.userId, config.model),
       ]);
       semanticResult = {
         rows: await semanticRows({
@@ -620,7 +620,7 @@ export async function checkQuestions(input: {
       if (bankExact.length > 0 || batchExact) {
         const matches: QuestionSearchMatch[] = [
           ...bankExact.map((row, index) => ({
-            source: "bank" as const,
+            origin: "bank" as const,
             id: row.id,
             candidateId: null,
             prompt: row.prompt,
@@ -639,7 +639,7 @@ export async function checkQuestions(input: {
           ...(batchExact
             ? [
                 {
-                  source: "batch" as const,
+                  origin: "batch" as const,
                   id: batchExact.candidateId,
                   candidateId: batchExact.candidateId,
                   prompt: batchExact.prompt,
@@ -662,7 +662,7 @@ export async function checkQuestions(input: {
           candidateId: candidate.candidateId,
           advisory: "exact_duplicate" as const,
           searchMode: "lexical" as const,
-          coverage: { exact: true, lexical: false, semantic: false },
+          signals: { exact: true, lexical: false, semantic: false },
           matches: matches.slice(0, limit),
         };
       }
@@ -748,7 +748,7 @@ export async function checkQuestions(input: {
         const lexicalRank = batchLexicalIds.indexOf(candidateId);
         const semanticRank = batchSemanticIds.indexOf(candidateId);
         return {
-          source: "batch" as const,
+          origin: "batch" as const,
           id: earlier.candidateId,
           candidateId: earlier.candidateId,
           prompt: earlier.prompt,
@@ -791,7 +791,7 @@ export async function checkQuestions(input: {
           semanticComplete,
         }),
         searchMode,
-        coverage: {
+        signals: {
           exact: true,
           lexical: true,
           semantic: semanticComplete,
@@ -803,7 +803,7 @@ export async function checkQuestions(input: {
     input.userId,
     results.flatMap((result) =>
       result.matches
-        .filter((match) => match.source === "bank")
+        .filter((match) => match.origin === "bank")
         .map((match) => match.id),
     ),
   );
@@ -811,7 +811,7 @@ export async function checkQuestions(input: {
     results: results.map((result) => ({
       ...result,
       matches: result.matches.map((match) =>
-        match.source === "bank"
+        match.origin === "bank"
           ? { ...match, flags: flagsByQuestionId.get(match.id) ?? [] }
           : match,
       ),
