@@ -45,6 +45,16 @@ type ApplicationContractLearner = {
 export type ApplicationContractHarness = {
   clock: ApplicationContractClock;
   semanticValidation: SemanticValidationController;
+  databaseCatalog(): Promise<{
+    tables: string[];
+    learnerSettingColumns: string[];
+    questionColumns: string[];
+  }>;
+  setQuestionLifecycle(
+    learnerId: string,
+    questionId: string,
+    lifecycle: "flagged",
+  ): Promise<void>;
   provisionLearner(label: string): Promise<ApplicationContractLearner>;
   provisionDefaultLearner(label: string): Promise<ApplicationContractLearner>;
 };
@@ -140,6 +150,46 @@ export async function withApplicationContract(
     await run({
       clock,
       semanticValidation,
+      async databaseCatalog() {
+        const [tables, learnerSettingColumns, questionColumns] =
+          await Promise.all([
+            pool.query<{ tableName: string }>(
+              `SELECT table_name AS "tableName"
+                 FROM information_schema.tables
+                WHERE table_schema = 'waxon_v2'
+                ORDER BY table_name`,
+            ),
+            pool.query<{ columnName: string }>(
+              `SELECT column_name AS "columnName"
+                 FROM information_schema.columns
+                WHERE table_schema = 'waxon_v2'
+                  AND table_name = 'learner_settings'
+                ORDER BY ordinal_position`,
+            ),
+            pool.query<{ columnName: string }>(
+              `SELECT column_name AS "columnName"
+                 FROM information_schema.columns
+                WHERE table_schema = 'waxon_v2'
+                  AND table_name = 'questions'
+                ORDER BY ordinal_position`,
+            ),
+          ]);
+        return {
+          tables: tables.rows.map((row) => row.tableName),
+          learnerSettingColumns: learnerSettingColumns.rows.map(
+            (row) => row.columnName,
+          ),
+          questionColumns: questionColumns.rows.map((row) => row.columnName),
+        };
+      },
+      async setQuestionLifecycle(learnerId, questionId, lifecycle) {
+        await pool.query(
+          `UPDATE waxon_v2.questions
+              SET lifecycle = $3, updated_at = $4
+            WHERE user_id = $1 AND id = $2`,
+          [learnerId, questionId, lifecycle, clock.now()],
+        );
+      },
       provisionLearner(label) {
         return provisionLearner(label, application);
       },
@@ -153,10 +203,6 @@ export async function withApplicationContract(
     if (ids.length > 0) {
       await pool.query(
         `DELETE FROM waxon_v2.answer_submissions WHERE user_id = ANY($1::text[])`,
-        [ids],
-      );
-      await pool.query(
-        `DELETE FROM waxon_v2.review_sessions WHERE user_id = ANY($1::text[])`,
         [ids],
       );
       await pool.query(

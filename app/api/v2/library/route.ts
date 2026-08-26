@@ -70,8 +70,6 @@ export async function POST(request: Request) {
           : randomUUID(),
       prompt,
       referenceAnswer,
-      importance:
-        typeof parsed.value.importance === "number" ? parsed.value.importance : undefined,
     });
     if (result.status === "created") {
       await startEmbeddingJobsBestEffort(user.id);
