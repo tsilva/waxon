@@ -5,9 +5,9 @@ import { v2Error } from "@/app/lib/v2/http";
 
 export async function GET() {
   try {
-    const user = await getCurrentUser();
+    const learner = await getCurrentUser();
     return NextResponse.json(
-      await waxonApplication.forLearner(user.id).review.open(),
+      await waxonApplication.forLearner(learner.id).review.open(),
     );
   } catch (error) {
     return v2Error(error);
