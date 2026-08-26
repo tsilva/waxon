@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getV2Client, getV2Db } from "../../db/v2/client.ts";
 import { learnerSettings } from "../../db/v2/schema.ts";
 import type { V2LearnerSettings } from "./types.ts";
@@ -47,14 +47,22 @@ export async function updateLearnerTimezone(input: {
   timezone: string;
 }): Promise<V2LearnerSettings> {
   const timezone = normalizeIanaTimezone(input.timezone);
-  await getLearnerSettings(input.userId);
-  const [row] = await getV2Db()
-    .update(learnerSettings)
-    .set({ timezone, updatedAt: new Date() })
-    .where(eq(learnerSettings.userId, input.userId))
-    .returning({ timezone: learnerSettings.timezone });
-  if (!row) throw new Error("Could not save the learner timezone.");
-  return row;
+  return getV2Db().transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${input.userId}`}))`,
+    );
+    await tx
+      .insert(learnerSettings)
+      .values({ userId: input.userId })
+      .onConflictDoNothing({ target: learnerSettings.userId });
+    const [row] = await tx
+      .update(learnerSettings)
+      .set({ timezone, updatedAt: new Date() })
+      .where(eq(learnerSettings.userId, input.userId))
+      .returning({ timezone: learnerSettings.timezone });
+    if (!row) throw new Error("Could not save the learner timezone.");
+    return row;
+  });
 }
 
 export async function getLearnerReviewDay(

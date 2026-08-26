@@ -20,7 +20,7 @@
     "question-search:evaluate": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/question-search-evaluate.mts",
     "question-search:benchmark": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/question-search-benchmark.mts",
     "start": "node scripts/next-server.mjs start",
-    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/*.test.mts",
+    "test": "node --import tsx --test tests/*.test.mts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "security:check": "node scripts/check-dependency-sources.mjs && pnpm audit --audit-level=low"
@@ -42,6 +42,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "3.3.5",
+    "@types/jsdom": "21.1.7",
     "@types/node": "^24.3.0",
     "@types/pg": "8.15.5",
     "@types/react": "^19.1.12",
@@ -49,6 +50,8 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.34.0",
     "eslint-config-next": "^16.3.0",
+    "jsdom": "26.1.0",
+    "tsx": "4.23.11",
     "typescript": "^5.9.2"
   },
   "pnpm": {

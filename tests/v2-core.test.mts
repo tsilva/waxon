@@ -7,6 +7,10 @@ import {
   questionPromptKey,
 } from "../app/lib/v2/questionInput.ts";
 import { assessQuestionQuality } from "../app/lib/v2/questionQuality.ts";
+import {
+  normalizeReviewFlagInput,
+  REVIEW_FLAG_REASONS,
+} from "../app/lib/v2/reviewFlag.ts";
 import { applyFsrsGrade } from "../app/lib/v2/scheduler.ts";
 
 const now = new Date("2026-07-25T10:00:00.000Z");
@@ -153,4 +157,30 @@ test("MCP tokens are high-entropy and hash deterministically", () => {
   assert.notEqual(first, second);
   assert.equal(hashMcpToken(first), hashMcpToken(first));
   assert.notEqual(hashMcpToken(first), hashMcpToken(second));
+});
+
+test("Review Flag input accepts empty data and normalizes known multi-select reasons", () => {
+  assert.equal(REVIEW_FLAG_REASONS.length >= 4, true);
+  assert.deepEqual(normalizeReviewFlagInput({ reasons: [], detail: "  " }), {
+    reasons: [],
+    detail: null,
+  });
+  assert.deepEqual(
+    normalizeReviewFlagInput({
+      reasons: [
+        "prompt_unclear",
+        "answer_standard_incorrect",
+        "prompt_unclear",
+      ],
+      detail: "  The explanation contradicts the prompt.  ",
+    }),
+    {
+      reasons: ["prompt_unclear", "answer_standard_incorrect"],
+      detail: "The explanation contradicts the prompt.",
+    },
+  );
+  assert.throws(
+    () => normalizeReviewFlagInput({ reasons: ["unknown_reason"] }),
+    /recognized Flag Reason/u,
+  );
 });
