@@ -15,20 +15,9 @@ import {
 } from "../../../shared/question-search.mts";
 import { questionPromptKey } from "./questionInput.ts";
 import type {
-  V2Lifecycle,
   V2QuestionFlag,
   V2QuestionLifecycle,
 } from "./types.ts";
-
-const SEARCHABLE_LIFECYCLES = new Set<V2Lifecycle>([
-  "new",
-  "learning",
-  "review",
-  "flagged",
-  "paused",
-  "archived",
-  "trash",
-]);
 
 type SearchCandidate = {
   candidateId: string;
@@ -66,7 +55,7 @@ export type QuestionSearchMatch = {
   candidateId: string | null;
   prompt: string;
   referenceAnswer: string;
-  lifecycle: V2Lifecycle | null;
+  lifecycle: V2QuestionLifecycle | null;
   flags: V2QuestionFlag[];
   updatedAt: string | null;
   matchTypes: Array<"exact" | "full_text" | "trigram" | "semantic">;
@@ -93,10 +82,11 @@ type LexicalSignals = {
   trigramSimilarity: number | null;
 };
 
-function asLifecycle(value: string): V2Lifecycle {
-  return SEARCHABLE_LIFECYCLES.has(value as V2Lifecycle)
-    ? (value as V2Lifecycle)
-    : "paused";
+function asLifecycle(value: string): V2QuestionLifecycle {
+  if (value === "active" || value === "flagged" || value === "archived") {
+    return value;
+  }
+  throw new Error(`Unknown Question lifecycle: ${value}`);
 }
 
 function queryText(prompt: string): string {
@@ -117,17 +107,12 @@ async function exactBankMatches(
   const result = await getV2Client().pool.query<
     Omit<StoredSearchRow, "candidate_id"> & { target_key: string }
   >(
-    `SELECT q.id, q.target_key, qv.prompt, qv.reference_answer,
+    `SELECT q.id, q.target_key, q.prompt, q.reference_answer,
             q.lifecycle::text, q.updated_at
        FROM waxon_v2.questions q
-       JOIN waxon_v2.question_versions qv
-         ON qv.user_id = q.user_id
-        AND qv.question_id = q.id
-        AND qv.is_current = true
       WHERE q.user_id = $1
         AND q.target_key = ANY($2::text[])
-        AND q.lifecycle::text IN
-            ('new','learning','review','flagged','paused','archived','trash')`,
+        AND q.lifecycle::text IN ('active','flagged','archived')`,
     [userId, keys],
   );
   const matches = new Map<string, StoredSearchRow[]>();
@@ -146,7 +131,7 @@ async function lexicalRows(input: {
   userId: string;
   candidates: readonly SearchCandidate[];
   branchLimit: number;
-  lifecycle?: V2Lifecycle | V2QuestionLifecycle | null;
+  lifecycle?: V2QuestionLifecycle | null;
 }): Promise<StoredSearchRow[]> {
   if (input.candidates.length === 0) return [];
   const candidates = input.candidates.map((candidate) => ({
@@ -162,31 +147,24 @@ async function lexicalRows(input: {
        SELECT input.candidate_id, hit.*, 'full_text'::text AS match_type
          FROM input
          CROSS JOIN LATERAL (
-           SELECT q.id, qv.prompt, qv.reference_answer, q.lifecycle::text,
+           SELECT q.id, q.prompt, q.reference_answer, q.lifecycle::text,
                   q.updated_at,
                   ts_rank_cd(
-                    setweight(to_tsvector('simple', coalesce(qv.prompt, '')), 'A') ||
-                    setweight(to_tsvector('simple', coalesce(qv.reference_answer, '')), 'B'),
+                    setweight(to_tsvector('simple', coalesce(q.prompt, '')), 'A') ||
+                    setweight(to_tsvector('simple', coalesce(q.reference_answer, '')), 'B'),
                     websearch_to_tsquery('simple', input.query),
                     32
                   ) AS score
              FROM waxon_v2.questions q
-             JOIN waxon_v2.question_versions qv
-               ON qv.user_id = q.user_id
-              AND qv.question_id = q.id
-              AND qv.is_current = true
             WHERE q.user_id = $1
               AND (
                 $5::text IS NULL
-                OR ($5 = 'active' AND q.lifecycle::text IN ('new','learning','review'))
-                OR ($5 = 'archived' AND q.lifecycle::text IN ('paused','archived','trash'))
                 OR q.lifecycle::text = $5
               )
-              AND q.lifecycle::text IN
-                  ('new','learning','review','flagged','paused','archived','trash')
+              AND q.lifecycle::text IN ('active','flagged','archived')
               AND (
-                setweight(to_tsvector('simple', coalesce(qv.prompt, '')), 'A') ||
-                setweight(to_tsvector('simple', coalesce(qv.reference_answer, '')), 'B')
+                setweight(to_tsvector('simple', coalesce(q.prompt, '')), 'A') ||
+                setweight(to_tsvector('simple', coalesce(q.reference_answer, '')), 'B')
               ) @@ websearch_to_tsquery('simple', input.query)
             ORDER BY score DESC, q.updated_at DESC, q.id
             LIMIT $3
@@ -195,24 +173,17 @@ async function lexicalRows(input: {
        SELECT input.candidate_id, hit.*, 'trigram'::text AS match_type
          FROM input
          CROSS JOIN LATERAL (
-           SELECT q.id, qv.prompt, qv.reference_answer, q.lifecycle::text,
-                  q.updated_at, similarity(qv.prompt, input.query) AS score
+           SELECT q.id, q.prompt, q.reference_answer, q.lifecycle::text,
+                  q.updated_at, similarity(q.prompt, input.query) AS score
              FROM waxon_v2.questions q
-             JOIN waxon_v2.question_versions qv
-               ON qv.user_id = q.user_id
-              AND qv.question_id = q.id
-              AND qv.is_current = true
             WHERE q.user_id = $1
               AND (
                 $5::text IS NULL
-                OR ($5 = 'active' AND q.lifecycle::text IN ('new','learning','review'))
-                OR ($5 = 'archived' AND q.lifecycle::text IN ('paused','archived','trash'))
                 OR q.lifecycle::text = $5
               )
-              AND q.lifecycle::text IN
-                  ('new','learning','review','flagged','paused','archived','trash')
-              AND similarity(qv.prompt, input.query) >= $4
-            ORDER BY qv.prompt <-> input.query, q.updated_at DESC, q.id
+              AND q.lifecycle::text IN ('active','flagged','archived')
+              AND similarity(q.prompt, input.query) >= $4
+            ORDER BY q.prompt <-> input.query, q.updated_at DESC, q.id
             LIMIT $3
          ) hit
      )
@@ -377,7 +348,7 @@ async function semanticRows(input: {
      SELECT input.candidate_id, hit.*
        FROM input
        CROSS JOIN LATERAL (
-         SELECT q.id, qv.prompt, qv.reference_answer, q.lifecycle::text,
+         SELECT q.id, q.prompt, q.reference_answer, q.lifecycle::text,
                 q.updated_at,
                 -(qse.embedding <#> input.embedding) AS semantic_similarity,
                 row_number() OVER (
@@ -386,16 +357,11 @@ async function semanticRows(input: {
            FROM waxon_v2.question_search_embeddings qse
            JOIN waxon_v2.questions q
              ON q.user_id = qse.user_id AND q.id = qse.question_id
-           JOIN waxon_v2.question_versions qv
-             ON qv.user_id = qse.user_id
-            AND qv.id = qse.question_version_id
-            AND qv.is_current = true
           WHERE qse.user_id = $1
             AND qse.model = $3
             AND qse.source_version = $4
             AND -(qse.embedding <#> input.embedding) >= $5
-            AND q.lifecycle::text IN
-                ('new','learning','review','flagged','paused','archived','trash')
+            AND q.lifecycle::text IN ('active','flagged','archived')
           ORDER BY qse.embedding <#> input.embedding, q.id
           LIMIT $6
        ) hit`,
@@ -419,19 +385,13 @@ async function semanticCoverageComplete(
     `SELECT NOT EXISTS (
        SELECT 1
          FROM waxon_v2.questions q
-         JOIN waxon_v2.question_versions qv
-           ON qv.user_id = q.user_id
-          AND qv.question_id = q.id
-          AND qv.is_current = true
          LEFT JOIN waxon_v2.question_search_embeddings qse
            ON qse.user_id = q.user_id
           AND qse.question_id = q.id
-          AND qse.question_version_id = qv.id
           AND qse.model = $2
           AND qse.source_version = $3
         WHERE q.user_id = $1
-          AND q.lifecycle::text IN
-              ('new','learning','review','flagged','paused','archived','trash')
+          AND q.lifecycle::text IN ('active','flagged','archived')
           AND qse.question_id IS NULL
         LIMIT 1
      ) AS complete`,
@@ -862,7 +822,7 @@ export async function checkQuestions(input: {
 export async function rankQuestionIdsLexically(input: {
   userId: string;
   query: string;
-  lifecycle?: V2Lifecycle | V2QuestionLifecycle | null;
+  lifecycle?: V2QuestionLifecycle | null;
   limit: number;
 }): Promise<string[]> {
   const branchLimit = Math.min(100, Math.max(25, input.limit * 3));
@@ -879,12 +839,9 @@ export async function rankQuestionIdsLexically(input: {
           AND target_key = $2
           AND (
             $3::text IS NULL
-            OR ($3 = 'active' AND lifecycle::text IN ('new','learning','review'))
-            OR ($3 = 'archived' AND lifecycle::text IN ('paused','archived','trash'))
             OR lifecycle::text = $3
           )
-          AND lifecycle::text IN
-              ('new','learning','review','flagged','paused','archived','trash')
+          AND lifecycle::text IN ('active','flagged','archived')
         ORDER BY updated_at DESC, id`,
       [input.userId, questionPromptKey(input.query), input.lifecycle ?? null],
     ),

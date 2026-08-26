@@ -27,9 +27,9 @@ export async function POST(request: Request) {
     if (!isRecord(parsed.value)) {
       throw new Error("An answer payload is required.");
     }
-    const questionVersionId =
-      typeof parsed.value.questionVersionId === "string"
-        ? parsed.value.questionVersionId
+    const questionId =
+      typeof parsed.value.questionId === "string"
+        ? parsed.value.questionId
         : "";
     const answer =
       typeof parsed.value.answer === "string"
@@ -39,13 +39,13 @@ export async function POST(request: Request) {
       typeof parsed.value.idempotencyKey === "string"
         ? parsed.value.idempotencyKey.slice(0, 200)
         : "";
-    if (!questionVersionId || !answer.trim() || !idempotencyKey) {
+    if (!questionId || !answer.trim() || !idempotencyKey) {
       throw new Error(
         "A Review Question, free-text answer, and idempotency key are required.",
       );
     }
     const evaluation = await application.review.submitAnswer({
-      questionVersionId,
+      questionId,
       answer,
       idempotencyKey,
     });

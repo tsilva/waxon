@@ -13,10 +13,8 @@ import {
 import { getV2Client, getV2Db } from "../../db/v2/client.ts";
 import {
   jobs,
-  memoryStates,
   mutationReceipts,
   questionFlags,
-  questionVersions,
   questions,
 } from "../../db/v2/schema.ts";
 import {
@@ -32,7 +30,6 @@ import {
 import { rankQuestionIdsLexically } from "./questionSearch.ts";
 import type {
   V2LibraryResponse,
-  V2Lifecycle,
   V2QuestionFlag,
   V2QuestionLifecycle,
   V2Question,
@@ -41,16 +38,6 @@ import { evaluateRecall } from "./model.ts";
 import { runLiveEvaluationJob } from "./liveReview.ts";
 import { runQuestionEmbeddingJob } from "./questionEmbeddings.ts";
 
-const ACTIVE_LIFECYCLES: V2Lifecycle[] = ["new", "learning", "review"];
-const ALL_LIFECYCLES: V2Lifecycle[] = [
-  "new",
-  "learning",
-  "review",
-  "flagged",
-  "paused",
-  "archived",
-  "trash",
-];
 const QUESTION_PAGE_LIMIT = 100;
 
 type V2Tx = Parameters<
@@ -69,13 +56,6 @@ export type AddQuestionResult = {
   flags: Array<Pick<V2QuestionFlag, "origin" | "reasons">>;
   answerStandardConflict: boolean;
 };
-
-function questionLifecycle(value: string): V2QuestionLifecycle {
-  if (value === "active" || ACTIVE_LIFECYCLES.includes(value as V2Lifecycle)) {
-    return "active";
-  }
-  return value === "flagged" ? "flagged" : "archived";
-}
 
 type QuestionValidationInput = {
   prompt: string;
@@ -203,9 +183,6 @@ function idempotentReplayResult(
     ...result,
     status: "existing",
     outcome: "idempotent_replay",
-    lifecycle: questionLifecycle(result.lifecycle),
-    flags: result.flags ?? [],
-    answerStandardConflict: result.answerStandardConflict ?? false,
   };
 }
 
@@ -277,17 +254,9 @@ export async function addQuestions(
         id: questions.id,
         lifecycle: questions.lifecycle,
         targetKey: questions.targetKey,
-        referenceAnswer: questionVersions.referenceAnswer,
+        referenceAnswer: questions.referenceAnswer,
       })
       .from(questions)
-      .innerJoin(
-        questionVersions,
-        and(
-          eq(questionVersions.userId, questions.userId),
-          eq(questionVersions.questionId, questions.id),
-          eq(questionVersions.isCurrent, true),
-        ),
-      )
       .where(
         and(
           eq(questions.userId, input.userId),
@@ -297,11 +266,7 @@ export async function addQuestions(
     const byPromptKey = new Map<string, (typeof existing)[number]>();
     for (const candidate of existing) {
       const retained = byPromptKey.get(candidate.targetKey);
-      if (
-        !retained ||
-        (ACTIVE_LIFECYCLES.includes(candidate.lifecycle as V2Lifecycle) &&
-          !ACTIVE_LIFECYCLES.includes(retained.lifecycle as V2Lifecycle))
-      ) {
+      if (!retained || candidate.lifecycle === "active") {
         byPromptKey.set(candidate.targetKey, candidate);
       }
     }
@@ -359,7 +324,7 @@ export async function addQuestions(
           id: duplicate.id,
           status: "existing",
           outcome: "exact_duplicate",
-          lifecycle: questionLifecycle(duplicate.lifecycle),
+          lifecycle: duplicate.lifecycle,
           flags: flagsByQuestionId.get(duplicate.id) ?? [],
           answerStandardConflict:
             duplicate.referenceAnswer.trim() !== item.referenceAnswer,
@@ -376,18 +341,12 @@ export async function addQuestions(
         .insert(questions)
         .values({
           userId: input.userId,
-          lifecycle: flag ? "flagged" : "new",
+          prompt: item.prompt,
+          referenceAnswer: item.referenceAnswer,
+          lifecycle: flag ? "flagged" : "active",
           targetKey: item.promptKey,
         })
         .returning({ id: questions.id });
-      await tx.insert(questionVersions).values({
-        userId: input.userId,
-        questionId: question.id,
-        version: 1,
-        prompt: item.prompt,
-        referenceAnswer: item.referenceAnswer,
-        displayAnswer: item.referenceAnswer.slice(0, 8_000),
-      });
       if (flag) {
         await tx.insert(questionFlags).values({
           userId: input.userId,
@@ -407,7 +366,7 @@ export async function addQuestions(
       createdQuestionIds.push(question.id);
       byPromptKey.set(item.promptKey, {
         id: question.id,
-        lifecycle: flag ? "flagged" : "new",
+        lifecycle: flag ? "flagged" : "active",
         targetKey: item.promptKey,
         referenceAnswer: item.referenceAnswer,
       });
@@ -489,7 +448,6 @@ export async function listLibrary(input: {
     : [];
   const rows = await pool.query<{
     id: string;
-    version_id: string;
     prompt: string;
     reference_answer: string;
     lifecycle: string;
@@ -498,7 +456,7 @@ export async function listLibrary(input: {
     updated_at: Date;
     flags: V2QuestionFlag[];
   }>(
-    `SELECT q.id, qv.id AS version_id, qv.prompt, qv.reference_answer,
+    `SELECT q.id, q.prompt, q.reference_answer,
             q.lifecycle::text, ms.due_at, q.created_at, q.updated_at,
             COALESCE(
               (SELECT jsonb_agg(
@@ -516,19 +474,15 @@ export async function listLibrary(input: {
               '[]'::jsonb
             ) AS flags
        FROM waxon_v2.questions q
-       JOIN waxon_v2.question_versions qv
-         ON qv.user_id = q.user_id AND qv.question_id = q.id AND qv.is_current = true
        LEFT JOIN waxon_v2.memory_states ms
          ON ms.user_id = q.user_id AND ms.question_id = q.id
       WHERE q.user_id = $1
         AND (
           $2::text IS NULL
-          OR ($2 = 'active' AND q.lifecycle::text IN ('new','learning','review'))
-          OR ($2 = 'flagged' AND q.lifecycle::text = 'flagged')
-          OR ($2 = 'archived' AND q.lifecycle::text IN ('paused','archived','trash'))
+          OR q.lifecycle::text = $2
         )
         AND ($3 = '' OR q.id = ANY($5::uuid[]))
-        AND q.lifecycle::text IN ('new','learning','review','flagged','paused','archived','trash')
+        AND q.lifecycle::text IN ('active','flagged','archived')
       ORDER BY CASE WHEN $3 <> '' THEN array_position($5::uuid[], q.id) END,
                q.updated_at DESC, q.id
       LIMIT $4`,
@@ -536,10 +490,9 @@ export async function listLibrary(input: {
   );
   const questionsOut: V2Question[] = rows.rows.map((row) => ({
       id: row.id,
-      versionId: row.version_id,
       prompt: row.prompt,
       referenceAnswer: row.reference_answer,
-      lifecycle: questionLifecycle(row.lifecycle),
+      lifecycle: row.lifecycle as V2QuestionLifecycle,
       flags: row.flags,
       dueAt: row.due_at?.toISOString() ?? null,
       createdAt: row.created_at.toISOString(),
@@ -549,7 +502,7 @@ export async function listLibrary(input: {
     `SELECT lifecycle::text, count(*)::text
        FROM waxon_v2.questions
       WHERE user_id = $1
-        AND lifecycle::text IN ('new','learning','review','flagged','paused','archived','trash')
+        AND lifecycle::text IN ('active','flagged','archived')
       GROUP BY lifecycle`,
     [input.userId],
   );
@@ -559,14 +512,11 @@ export async function listLibrary(input: {
     archived: 0,
   };
   for (const row of countRows.rows) {
-    if (ALL_LIFECYCLES.includes(row.lifecycle as V2Lifecycle)) {
-      counts[questionLifecycle(row.lifecycle)] += Number(row.count);
+    if (row.lifecycle === "active" || row.lifecycle === "flagged" || row.lifecycle === "archived") {
+      counts[row.lifecycle] += Number(row.count);
     }
   }
-  const waitingNew = Number(
-    countRows.rows.find((row) => row.lifecycle === "new")?.count ?? 0,
-  );
-  return { questions: questionsOut, counts, waitingNew };
+  return { questions: questionsOut, counts };
 }
 
 export async function getQuestionLearningEvidence(input: {
@@ -642,7 +592,7 @@ export async function mutateQuestionLifecycle(input: {
     if (!question) throw new Error("Question not found.");
     if (
       input.action === "restore" &&
-      !ACTIVE_LIFECYCLES.includes(question.lifecycle as V2Lifecycle)
+      question.lifecycle !== "active"
     ) {
       const [duplicate] = await tx
         .select({ id: questions.id })
@@ -652,7 +602,7 @@ export async function mutateQuestionLifecycle(input: {
             eq(questions.userId, input.userId),
             eq(questions.targetKey, question.targetKey),
             ne(questions.id, question.id),
-            inArray(questions.lifecycle, ACTIVE_LIFECYCLES),
+            eq(questions.lifecycle, "active"),
           ),
         )
         .limit(1);
@@ -660,42 +610,12 @@ export async function mutateQuestionLifecycle(input: {
         throw new Error("Another Active Question already uses this prompt.");
       }
     }
-    let restoredLifecycle: V2Lifecycle = "new";
-    if (input.action === "restore") {
-      const currentLifecycle = question.lifecycle as V2Lifecycle;
-      const priorLifecycle = question.priorLifecycle as V2Lifecycle | null;
-      if (ACTIVE_LIFECYCLES.includes(currentLifecycle)) {
-        restoredLifecycle = currentLifecycle;
-      } else if (priorLifecycle && ACTIVE_LIFECYCLES.includes(priorLifecycle)) {
-        restoredLifecycle = priorLifecycle;
-      } else {
-        const [memory] = await tx
-          .select({ questionId: memoryStates.questionId })
-          .from(memoryStates)
-          .where(
-            and(
-              eq(memoryStates.userId, input.userId),
-              eq(memoryStates.questionId, input.questionId),
-            ),
-          )
-          .limit(1);
-        restoredLifecycle = memory ? "review" : "new";
-      }
-    }
-    const next: V2Lifecycle =
-      input.action === "archive" ? "archived" : restoredLifecycle;
+    const next: V2QuestionLifecycle =
+      input.action === "archive" ? "archived" : "active";
     await tx
       .update(questions)
       .set({
         lifecycle: next,
-        priorLifecycle:
-          input.action === "restore"
-            ? null
-            : ALL_LIFECYCLES.includes(question.lifecycle as V2Lifecycle)
-              ? (question.lifecycle as V2Lifecycle)
-              : null,
-        suspensionReason: null,
-        deletedAt: null,
         updatedAt: now,
       })
       .where(
@@ -729,18 +649,10 @@ export async function replaceQuestion(input: {
         questionId: questions.id,
         lifecycle: questions.lifecycle,
         targetKey: questions.targetKey,
-        prompt: questionVersions.prompt,
-        referenceAnswer: questionVersions.referenceAnswer,
+        prompt: questions.prompt,
+        referenceAnswer: questions.referenceAnswer,
       })
       .from(questions)
-      .innerJoin(
-        questionVersions,
-        and(
-          eq(questionVersions.userId, questions.userId),
-          eq(questionVersions.questionId, questions.id),
-          eq(questionVersions.isCurrent, true),
-        ),
-      )
       .where(
         and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)),
       )
@@ -753,7 +665,7 @@ export async function replaceQuestion(input: {
       return {
         questionId: current.questionId,
         archivedQuestionId: null,
-        lifecycle: questionLifecycle(current.lifecycle),
+        lifecycle: current.lifecycle,
         status: "unchanged" as const,
       };
     }
@@ -766,7 +678,7 @@ export async function replaceQuestion(input: {
           eq(questions.targetKey, normalized.promptKey),
           ne(questions.id, input.questionId),
           normalized.promptKey === current.targetKey
-            ? sql`${questions.lifecycle} NOT IN ('paused', 'archived', 'trash')`
+            ? ne(questions.lifecycle, "archived")
             : undefined,
         ),
       )
@@ -776,9 +688,6 @@ export async function replaceQuestion(input: {
       .update(questions)
       .set({
         lifecycle: "archived",
-        priorLifecycle: current.lifecycle,
-        suspensionReason: null,
-        deletedAt: null,
         updatedAt: now,
       })
       .where(
@@ -789,27 +698,18 @@ export async function replaceQuestion(input: {
       .insert(questions)
       .values({
         userId: input.userId,
-        lifecycle: "new",
+        prompt: normalized.prompt,
+        referenceAnswer: normalized.referenceAnswer,
+        lifecycle: "active",
         targetKey: normalized.promptKey,
         createdAt: now,
         updatedAt: now,
       })
       .returning({ id: questions.id });
-    const [replacementVersion] = await tx
-      .insert(questionVersions)
-      .values({
-        userId: input.userId,
-        questionId: replacement.id,
-        version: 1,
-        prompt: normalized.prompt,
-        referenceAnswer: normalized.referenceAnswer,
-        displayAnswer: normalized.referenceAnswer.slice(0, 8_000),
-      })
-      .returning({ id: questionVersions.id });
     await tx.insert(jobs).values({
       userId: input.userId,
       type: "embed_question_batch",
-      idempotencyKey: `question-search-v1:${replacement.id}:${replacementVersion.id}`,
+      idempotencyKey: `question-search-v1:${replacement.id}`,
       priority: 2,
       payload: { questionIds: [replacement.id] },
     });

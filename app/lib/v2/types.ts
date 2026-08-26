@@ -1,13 +1,4 @@
 export type V2Grade = "again" | "hard" | "good" | "easy";
-export type V2Lifecycle =
-  | "new"
-  | "learning"
-  | "review"
-  | "flagged"
-  | "paused"
-  | "archived"
-  | "trash";
-
 export type V2QuestionLifecycle = "active" | "flagged" | "archived";
 
 export type V2QuestionFlagOrigin = "waxon_validation" | "learner";
@@ -22,7 +13,6 @@ export type V2QuestionFlag = {
 
 export type V2Question = {
   id: string;
-  versionId: string;
   prompt: string;
   referenceAnswer: string;
   lifecycle: V2QuestionLifecycle;
@@ -35,12 +25,10 @@ export type V2Question = {
 export type V2LibraryResponse = {
   questions: V2Question[];
   counts: Record<V2QuestionLifecycle, number>;
-  waitingNew: number;
 };
 
 export type V2ReviewQuestion = {
   questionId: string;
-  questionVersionId: string;
   prompt: string;
   total: number;
   scheduledFor: string | null;

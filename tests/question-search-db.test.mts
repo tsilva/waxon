@@ -28,21 +28,21 @@ test(
       userId: string;
       prompt: string;
       answer: string;
-      lifecycle: "new" | "archived";
+      lifecycle: "active" | "archived";
     }) {
       const questionId = randomUUID();
       await pool.query(
         `INSERT INTO waxon_v2.questions
-           (id, user_id, lifecycle, target_key)
-         VALUES ($1, $2, $3::waxon_v2.question_lifecycle, $4)`,
-        [questionId, input.userId, input.lifecycle, questionPromptKey(input.prompt)],
-      );
-      await pool.query(
-        `INSERT INTO waxon_v2.question_versions
-           (user_id, question_id, version, prompt, reference_answer,
-            display_answer)
-         VALUES ($1, $2, 1, $3, $4, $4)`,
-        [input.userId, questionId, input.prompt, input.answer],
+           (id, user_id, prompt, reference_answer, lifecycle, target_key)
+         VALUES ($1, $2, $3, $4, $5::waxon_v2.question_lifecycle, $6)`,
+        [
+          questionId,
+          input.userId,
+          input.prompt,
+          input.answer,
+          input.lifecycle,
+          questionPromptKey(input.prompt),
+        ],
       );
       return questionId;
     }
@@ -64,13 +64,13 @@ test(
         userId: userA,
         prompt: lexicalPrompt,
         answer: "The server reuses the recorded result for the same key.",
-        lifecycle: "new",
+        lifecycle: "active",
       });
       await addQuestion({
         userId: userB,
         prompt: exactPrompt,
         answer: "This other learner's answer must remain isolated.",
-        lifecycle: "new",
+        lifecycle: "active",
       });
 
       const exact = await checkQuestions({

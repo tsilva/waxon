@@ -54,6 +54,13 @@ export type ApplicationContractHarness = {
     tables: string[];
     learnerSettingColumns: string[];
     questionColumns: string[];
+    answerSubmissionColumns: string[];
+    evaluationColumns: string[];
+    gradeEventColumns: string[];
+    questionSearchEmbeddingColumns: string[];
+    questionVersionIdLocations: string[];
+    obsoleteContractObjects: string[];
+    enumValues: Record<string, string[]>;
   }>;
   setQuestionLifecycle(
     learnerId: string,
@@ -163,7 +170,18 @@ export async function withApplicationContract(
       evaluation,
       semanticValidation,
       async databaseCatalog() {
-        const [tables, learnerSettingColumns, questionColumns] =
+        const [
+          tables,
+          learnerSettingColumns,
+          questionColumns,
+          answerSubmissionColumns,
+          evaluationColumns,
+          gradeEventColumns,
+          questionSearchEmbeddingColumns,
+          enumValues,
+          questionVersionIdLocations,
+          obsoleteContractObjects,
+        ] =
           await Promise.all([
             pool.query<{ tableName: string }>(
               `SELECT table_name AS "tableName"
@@ -185,13 +203,95 @@ export async function withApplicationContract(
                   AND table_name = 'questions'
                 ORDER BY ordinal_position`,
             ),
+            pool.query<{ columnName: string }>(
+              `SELECT column_name AS "columnName"
+                 FROM information_schema.columns
+                WHERE table_schema = 'waxon_v2'
+                  AND table_name = 'answer_submissions'
+                ORDER BY ordinal_position`,
+            ),
+            pool.query<{ columnName: string }>(
+              `SELECT column_name AS "columnName"
+                 FROM information_schema.columns
+                WHERE table_schema = 'waxon_v2'
+                  AND table_name = 'evaluations'
+                ORDER BY ordinal_position`,
+            ),
+            pool.query<{ columnName: string }>(
+              `SELECT column_name AS "columnName"
+                 FROM information_schema.columns
+                WHERE table_schema = 'waxon_v2'
+                  AND table_name = 'grade_events'
+                ORDER BY ordinal_position`,
+            ),
+            pool.query<{ columnName: string }>(
+              `SELECT column_name AS "columnName"
+                 FROM information_schema.columns
+                WHERE table_schema = 'waxon_v2'
+                  AND table_name = 'question_search_embeddings'
+                ORDER BY ordinal_position`,
+            ),
+            pool.query<{ enumName: string; enumValue: string }>(
+              `SELECT type.typname AS "enumName", enum.enumlabel AS "enumValue"
+                 FROM pg_type type
+                 JOIN pg_namespace namespace ON namespace.oid = type.typnamespace
+                 JOIN pg_enum enum ON enum.enumtypid = type.oid
+                WHERE namespace.nspname = 'waxon_v2'
+                ORDER BY type.typname, enum.enumsortorder`,
+            ),
+            pool.query<{ location: string }>(
+              `SELECT table_name || '.' || column_name AS location
+                 FROM information_schema.columns
+                WHERE table_schema = 'waxon_v2'
+                  AND column_name = 'question_version_id'
+                ORDER BY table_name`,
+            ),
+            pool.query<{ objectName: string }>(
+              `SELECT 'constraint:' || constraint_name AS "objectName"
+                 FROM information_schema.table_constraints
+                WHERE constraint_schema = 'waxon_v2'
+                  AND constraint_name IN (
+                    'answer_submissions_version_fk',
+                    'question_search_embeddings_version_fk',
+                    'question_embeddings_version_fk',
+                    'question_evidence_version_fk',
+                    'question_versions_question_fk'
+                  )
+                UNION ALL
+               SELECT 'index:' || indexname AS "objectName"
+                 FROM pg_indexes
+                WHERE schemaname = 'waxon_v2'
+                  AND indexname LIKE 'question_versions_%'
+                ORDER BY "objectName"`,
+            ),
           ]);
+        const valuesByEnum: Record<string, string[]> = {};
+        for (const row of enumValues.rows) {
+          valuesByEnum[row.enumName] = [
+            ...(valuesByEnum[row.enumName] ?? []),
+            row.enumValue,
+          ];
+        }
         return {
           tables: tables.rows.map((row) => row.tableName),
           learnerSettingColumns: learnerSettingColumns.rows.map(
             (row) => row.columnName,
           ),
           questionColumns: questionColumns.rows.map((row) => row.columnName),
+          answerSubmissionColumns: answerSubmissionColumns.rows.map(
+            (row) => row.columnName,
+          ),
+          evaluationColumns: evaluationColumns.rows.map((row) => row.columnName),
+          gradeEventColumns: gradeEventColumns.rows.map((row) => row.columnName),
+          questionSearchEmbeddingColumns:
+            questionSearchEmbeddingColumns.rows.map((row) => row.columnName),
+          questionVersionIdLocations: questionVersionIdLocations.rows.map(
+            (row) => row.location,
+          ),
+          obsoleteContractObjects: obsoleteContractObjects.rows.map(
+            (row) => row.objectName,
+          ),
+          enumValues: valuesByEnum,
         };
       },
       async setQuestionLifecycle(learnerId, questionId, lifecycle) {
