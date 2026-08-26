@@ -5,7 +5,7 @@ import {
 } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
 import { isRecord, v2Error } from "@/app/lib/v2/http";
-import { submitReviewAnswer } from "@/app/lib/v2/service";
+import { waxonApplication } from "@/app/lib/v2/application";
 import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 
 export async function POST(request: Request) {
@@ -15,6 +15,7 @@ export async function POST(request: Request) {
   }
   try {
     const user = await getCurrentUser();
+    const application = waxonApplication.forLearner(user.id);
     const limited = consumeUserRateLimit({
       userId: user.id,
       route: "v2-review-answer",
@@ -35,8 +36,7 @@ export async function POST(request: Request) {
     if (!itemId || !answer.trim()) {
       throw new Error("A Review item and free-text answer are required.");
     }
-    const evaluation = await submitReviewAnswer({
-      userId: user.id,
+    const evaluation = await application.review.submitAnswer({
       itemId,
       answer,
     });

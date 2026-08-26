@@ -5,12 +5,7 @@ import { consumeUserRateLimit, readJsonBodyWithLimit } from "@/app/lib/apiLimits
 import { getCurrentUser } from "@/app/lib/auth";
 import { isRecord, v2Error } from "@/app/lib/v2/http";
 import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
-import {
-  createDirectQuestion,
-  editQuestion,
-  listLibrary,
-  mutateQuestionLifecycle,
-} from "@/app/lib/v2/service";
+import { waxonApplication } from "@/app/lib/v2/application";
 import type { V2Lifecycle } from "@/app/lib/v2/types";
 
 const LIFECYCLES = new Set<V2Lifecycle>([
@@ -36,6 +31,7 @@ async function startEmbeddingJobsBestEffort(userId: string) {
 export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
+    const application = waxonApplication.forLearner(user.id);
     const url = new URL(request.url);
     const requested = url.searchParams.get("lifecycle");
     const lifecycle =
@@ -43,8 +39,7 @@ export async function GET(request: Request) {
         ? (requested as V2Lifecycle)
         : "all";
     return NextResponse.json(
-      await listLibrary({
-        userId: user.id,
+      await application.questionBank.list({
         lifecycle,
         search: url.searchParams.get("search") ?? "",
       }),
@@ -59,6 +54,7 @@ export async function POST(request: Request) {
   if (!parsed.ok) return parsed.response;
   try {
     const user = await getCurrentUser();
+    const application = waxonApplication.forLearner(user.id);
     const limited = consumeUserRateLimit({
       userId: user.id,
       route: "v2-question-add",
@@ -71,8 +67,7 @@ export async function POST(request: Request) {
       typeof parsed.value.referenceAnswer === "string"
         ? parsed.value.referenceAnswer
         : "";
-    const result = await createDirectQuestion({
-      userId: user.id,
+    const result = await application.questionBank.create({
       idempotencyKey:
         typeof parsed.value.idempotencyKey === "string"
           ? parsed.value.idempotencyKey.slice(0, 200)
@@ -96,6 +91,7 @@ export async function PATCH(request: Request) {
   if (!parsed.ok) return parsed.response;
   try {
     const user = await getCurrentUser();
+    const application = waxonApplication.forLearner(user.id);
     if (!isRecord(parsed.value) || typeof parsed.value.action !== "string") {
       throw new Error("An action is required.");
     }
@@ -103,14 +99,12 @@ export async function PATCH(request: Request) {
       typeof parsed.value.questionId === "string" ? parsed.value.questionId : "";
     if (!questionId) throw new Error("A question is required.");
     if (["pause", "archive", "trash", "restore"].includes(parsed.value.action)) {
-      await mutateQuestionLifecycle({
-        userId: user.id,
+      await application.questionBank.mutate({
         questionId,
         action: parsed.value.action as "pause" | "archive" | "trash" | "restore",
       });
     } else if (parsed.value.action === "edit") {
-      await editQuestion({
-        userId: user.id,
+      await application.questionBank.edit({
         questionId,
         prompt: typeof parsed.value.prompt === "string" ? parsed.value.prompt : "",
         referenceAnswer:

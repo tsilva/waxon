@@ -24,6 +24,8 @@ Before every task in this repository, use the `$specs-author` skill to read the 
 - Never substitute Claude, Copilot, OpenCode, or another agent when Codex fails, is unavailable, or requires authentication. Stop and ask the user.
 - Use two-stage dispatch: launch a no-write identity preflight, verify that the terminal is running Codex, and only then send the implementation task.
 - Tell the user which provider was verified before implementation begins.
+- For a Superset implementation of a GitHub issue, finish by pushing the worker branch and opening a pull request unless the user explicitly requests local-only work or full shipping.
+- Leave the pull request unmerged until the user explicitly approves the merge, and close the issue through the merged pull request rather than before integration.
 
 ## Agent skills
 

@@ -1,4 +1,4 @@
-import type { V2Lifecycle } from "./types";
+import type { V2Lifecycle } from "./types.ts";
 
 export type PlanCandidate = {
   questionId: string;
