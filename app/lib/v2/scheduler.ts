@@ -9,6 +9,7 @@ import {
 import type { V2Grade } from "./types.ts";
 
 export const SCHEDULER_VERSION = "fsrs-6-waxon-v2";
+const ALGORITHM_REQUEST_RETENTION = 0.9;
 
 export type StoredMemoryState = {
   dueAt: Date;
@@ -58,12 +59,11 @@ function toCard(memory: StoredMemoryState | null, now: Date): Card {
 export function applyFsrsGrade(input: {
   memory: StoredMemoryState | null;
   grade: V2Grade;
-  desiredRetention: number;
   now?: Date;
 }): StoredMemoryState {
   const now = input.now ?? new Date();
   const scheduler = fsrs({
-    request_retention: Math.max(0.7, Math.min(0.97, input.desiredRetention)),
+    request_retention: ALGORITHM_REQUEST_RETENTION,
     maximum_interval: 36_500,
     enable_fuzz: false,
     enable_short_term: true,
@@ -82,24 +82,6 @@ export function applyFsrsGrade(input: {
     state: result.card.state,
     learningSteps: result.card.learning_steps,
   };
-}
-
-export function memoryRetrievability(input: {
-  memory: StoredMemoryState;
-  desiredRetention: number;
-  at?: Date;
-}): number {
-  const scheduler = fsrs({
-    request_retention: Math.max(0.7, Math.min(0.97, input.desiredRetention)),
-    maximum_interval: 36_500,
-    enable_fuzz: false,
-  });
-
-  return scheduler.get_retrievability(
-    toCard(input.memory, input.at ?? new Date()),
-    input.at ?? new Date(),
-    false,
-  );
 }
 
 export function scoreToGrade(score: number): V2Grade {
