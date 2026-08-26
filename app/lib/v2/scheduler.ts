@@ -6,7 +6,7 @@ import {
   type Card,
   type Grade,
 } from "ts-fsrs";
-import type { V2Grade } from "./types";
+import type { V2Grade } from "./types.ts";
 
 export const SCHEDULER_VERSION = "fsrs-6-waxon-v2";
 
