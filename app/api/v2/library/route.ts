@@ -70,8 +70,6 @@ export async function POST(request: Request) {
           : randomUUID(),
       prompt,
       referenceAnswer,
-      importance:
-        typeof parsed.value.importance === "number" ? parsed.value.importance : undefined,
     });
     if (result.status === "created") {
       await startEmbeddingJobsBestEffort(user.id);
@@ -101,6 +99,13 @@ export async function PATCH(request: Request) {
       await application.questionBank.archive(questionId);
     } else if (parsed.value.action === "restore") {
       await application.questionBank.restore(questionId);
+    } else if (parsed.value.action === "flag") {
+      const flagged = await application.questionBank.flag({
+        questionId,
+        reasons: parsed.value.reasons,
+        detail: parsed.value.detail,
+      });
+      return NextResponse.json({ ok: true, ...flagged });
     } else if (parsed.value.action === "replace") {
       replacement = await application.questionBank.replace({
         questionId,
@@ -114,7 +119,7 @@ export async function PATCH(request: Request) {
         await startEmbeddingJobsBestEffort(user.id);
       }
     } else {
-      throw new Error("This Library action is not allowed.");
+      throw new Error("This Question Bank action is not allowed.");
     }
     return NextResponse.json({ ok: true, ...replacement });
   } catch (error) {

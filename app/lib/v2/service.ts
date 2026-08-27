@@ -4,30 +4,19 @@ import {
   and,
   asc,
   count,
-  desc,
   eq,
   inArray,
   lte,
   ne,
-  or,
   sql,
 } from "drizzle-orm";
 import { getV2Client, getV2Db } from "../../db/v2/client.ts";
 import {
-  answerSubmissions,
-  evaluations,
-  gradeEvents,
   jobs,
-  learnerSettings,
-  memoryStates,
   mutationReceipts,
-  questionVersions,
+  questionFlags,
   questions,
-  retryObligations,
-  reviewSessionItems,
-  reviewSessions,
 } from "../../db/v2/schema.ts";
-import { buildReviewPlan, type PlanCandidate } from "./planner.ts";
 import {
   MAX_QUESTION_BATCH,
   normalizeQuestionInput,
@@ -39,40 +28,18 @@ import {
   type QuestionQualityAssessment,
 } from "./questionQuality.ts";
 import { rankQuestionIdsLexically } from "./questionSearch.ts";
-import {
-  applyFsrsGrade,
-  memoryRetrievability,
-  SCHEDULER_VERSION,
-  type StoredMemoryState,
-} from "./scheduler.ts";
+import { normalizeReviewFlagInput } from "./reviewFlag.ts";
 import type {
-  V2Evaluation,
-  V2Grade,
   V2LibraryResponse,
-  V2Lifecycle,
+  V2QuestionFlag,
   V2QuestionLifecycle,
   V2Question,
-  V2ReviewItem,
-  V2ReviewSessionResponse,
-  V2ReviewSummary,
 } from "./types.ts";
 import { evaluateRecall } from "./model.ts";
-import { claimV2Job } from "./jobs.ts";
+import { runLiveEvaluationJob } from "./liveReview.ts";
 import { runQuestionEmbeddingJob } from "./questionEmbeddings.ts";
-import { retryEarliestAt } from "./retryPolicy.ts";
 
-const ACTIVE_LIFECYCLES: V2Lifecycle[] = ["new", "learning", "review"];
-const ALL_LIFECYCLES: V2Lifecycle[] = [
-  "new",
-  "learning",
-  "review",
-  "flagged",
-  "paused",
-  "archived",
-  "trash",
-];
 const QUESTION_PAGE_LIMIT = 100;
-const SESSION_ITEM_INSERT_BATCH = 500;
 
 type V2Tx = Parameters<
   Parameters<ReturnType<typeof getV2Db>["transaction"]>[0]
@@ -81,15 +48,15 @@ type V2Tx = Parameters<
 export type AddQuestionResult = {
   id: string;
   status: "created" | "existing";
+  outcome:
+    | "created_active"
+    | "created_flagged"
+    | "idempotent_replay"
+    | "exact_duplicate";
   lifecycle: V2QuestionLifecycle;
+  flags: Array<Pick<V2QuestionFlag, "origin" | "reasons">>;
+  answerStandardConflict: boolean;
 };
-
-function questionLifecycle(value: string): V2QuestionLifecycle {
-  if (value === "active" || ACTIVE_LIFECYCLES.includes(value as V2Lifecycle)) {
-    return "active";
-  }
-  return value === "flagged" ? "flagged" : "archived";
-}
 
 type QuestionValidationInput = {
   prompt: string;
@@ -111,113 +78,72 @@ export const defaultV2ServiceDependencies: V2ServiceDependencies = {
   evaluateAnswer: evaluateRecall,
 };
 
+const MACHINE_REASON_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u;
+
+function normalizedValidationAssessment(
+  assessment: QuestionQualityAssessment,
+): QuestionQualityAssessment {
+  if (assessment.outcome === "pass") {
+    return { outcome: "pass", reasons: [] };
+  }
+  const reasons = [
+    ...new Set(
+      assessment.reasons.filter((reason) => MACHINE_REASON_PATTERN.test(reason)),
+    ),
+  ];
+  if (reasons.length > 0) return { outcome: assessment.outcome, reasons };
+  return {
+    outcome: assessment.outcome,
+    reasons: [
+      assessment.outcome === "fail"
+        ? "semantic_quality_failed"
+        : assessment.outcome === "inconclusive"
+          ? "semantic_validation_inconclusive"
+          : "semantic_validation_unavailable",
+    ],
+  };
+}
+
+async function validateQuestionCandidate(
+  item: NormalizedQuestionInput,
+  dependencies: V2ServiceDependencies,
+): Promise<QuestionQualityAssessment> {
+  try {
+    return normalizedValidationAssessment(
+      await dependencies.validateQuestion({
+        prompt: item.prompt,
+        referenceAnswer: item.referenceAnswer,
+        target: item.prompt,
+      }),
+    );
+  } catch {
+    return {
+      outcome: "unavailable",
+      reasons: ["semantic_validation_unavailable"],
+    };
+  }
+}
+
+async function resolveQuestionFlags(
+  tx: V2Tx,
+  userId: string,
+  questionId: string,
+  resolvedAt: Date,
+): Promise<void> {
+  await tx
+    .update(questionFlags)
+    .set({ resolvedAt })
+    .where(
+      and(
+        eq(questionFlags.userId, userId),
+        eq(questionFlags.questionId, questionId),
+        sql`${questionFlags.resolvedAt} IS NULL`,
+      ),
+    );
+}
+
 function checksum(value: string): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function storedMemory(
-  row:
-    | {
-        dueAt: Date;
-        lastReviewAt: Date | null;
-        stability: number;
-        difficulty: number;
-        elapsedDays: number;
-        scheduledDays: number;
-        reps: number;
-        lapses: number;
-        state: number;
-        learningSteps: number;
-      }
-    | null
-    | undefined,
-): StoredMemoryState | null {
-  return row
-    ? {
-        dueAt: row.dueAt,
-        lastReviewAt: row.lastReviewAt,
-        stability: row.stability,
-        difficulty: row.difficulty,
-        elapsedDays: row.elapsedDays,
-        scheduledDays: row.scheduledDays,
-        reps: row.reps,
-        lapses: row.lapses,
-        state: row.state,
-        learningSteps: row.learningSteps,
-      }
-    : null;
-}
-
-export async function getLearnerSettings(userId: string) {
-  const db = getV2Db();
-  const [created] = await db
-    .insert(learnerSettings)
-    .values({ userId })
-    .onConflictDoNothing({ target: learnerSettings.userId })
-    .returning();
-  if (created) return created;
-
-  const [existing] = await db
-    .select()
-    .from(learnerSettings)
-    .where(eq(learnerSettings.userId, userId))
-    .limit(1);
-  if (!existing) throw new Error("Could not load learner settings.");
-  return existing;
-}
-
-export async function updateLearnerSettings(input: {
-  userId: string;
-  dailyMinutes?: number;
-  desiredRetention?: number;
-  newItemsPerDay?: number;
-  timezone?: string;
-}) {
-  const db = getV2Db();
-  await getLearnerSettings(input.userId);
-  const [row] = await db
-    .update(learnerSettings)
-    .set({
-      dailyMinutes:
-        input.dailyMinutes === undefined
-          ? undefined
-          : Math.max(1, Math.min(120, Math.round(input.dailyMinutes))),
-      desiredRetention:
-        input.desiredRetention === undefined
-          ? undefined
-          : Math.max(0.7, Math.min(0.97, input.desiredRetention)),
-      newItemsPerDay:
-        input.newItemsPerDay === undefined
-          ? undefined
-          : Math.max(0, Math.min(100, Math.round(input.newItemsPerDay))),
-      timezone: input.timezone?.trim().slice(0, 100),
-      updatedAt: new Date(),
-    })
-    .where(eq(learnerSettings.userId, input.userId))
-    .returning();
-  return row;
-}
-
-type ReviewDayBounds = {
-  start: Date;
-  end: Date;
-};
-
-async function reviewDayBounds(
-  timezone: string,
-  now = defaultV2ServiceDependencies.now(),
-): Promise<ReviewDayBounds> {
-  const [row] = await getV2Client().pool
-    .query<{ day_start: Date; day_end: Date }>(
-      `SELECT
-         date_trunc('day', $2::timestamptz AT TIME ZONE $1) AT TIME ZONE $1 AS day_start,
-         (date_trunc('day', $2::timestamptz AT TIME ZONE $1) + interval '1 day')
-           AT TIME ZONE $1 AS day_end`,
-      [timezone, now],
-    )
-    .then((result) => result.rows);
-  if (!row) throw new Error("Could not determine the learner's review day.");
-  return { start: row.day_start, end: row.day_end };
 }
 
 async function findReceipt<T>(
@@ -251,6 +177,16 @@ function normalizedRequestHash(items: NormalizedQuestionInput[]): string {
   return checksum(JSON.stringify(items));
 }
 
+function idempotentReplayResult(
+  result: AddQuestionResult,
+): AddQuestionResult {
+  return {
+    ...result,
+    status: "existing",
+    outcome: "idempotent_replay",
+  };
+}
+
 export async function addQuestions(
   input: {
     userId: string;
@@ -265,17 +201,7 @@ export async function addQuestions(
   if (input.items.length === 0 || input.items.length > MAX_QUESTION_BATCH) {
     throw new Error(`Add between 1 and ${MAX_QUESTION_BATCH} questions at a time.`);
   }
-  const items = await Promise.all(
-    input.items.map(async (item) => {
-      const normalized = normalizeQuestionInput(item, { passes: true, reasons: [] });
-      const assessment = await dependencies.validateQuestion({
-        prompt: normalized.prompt,
-        referenceAnswer: normalized.referenceAnswer,
-        target: normalized.prompt,
-      });
-      return normalizeQuestionInput(item, assessment);
-    }),
-  );
+  const items = input.items.map((item) => normalizeQuestionInput(item));
   const scope = input.scope === "mcp" ? "mcp-add-questions" : "library-add-questions";
   const key = input.idempotencyKey.trim().slice(0, 200);
   if (!key) throw new Error("An idempotency key is required.");
@@ -288,12 +214,12 @@ export async function addQuestions(
   );
   if (prior) {
     return {
-      results: prior.results.map((result) => ({
-        ...result,
-        lifecycle: questionLifecycle(result.lifecycle),
-      })),
+      results: prior.results.map(idempotentReplayResult),
     };
   }
+  const assessments = await Promise.all(
+    items.map((item) => validateQuestionCandidate(item, dependencies)),
+  );
 
   return await getV2Db().transaction(async (tx) => {
     await tx.execute(
@@ -319,10 +245,7 @@ export async function addQuestions(
       }
       const response = receipt.response as { results: AddQuestionResult[] };
       return {
-        results: response.results.map((result) => ({
-          ...result,
-          lifecycle: questionLifecycle(result.lifecycle),
-        })),
+        results: response.results.map(idempotentReplayResult),
       };
     }
 
@@ -332,17 +255,9 @@ export async function addQuestions(
         id: questions.id,
         lifecycle: questions.lifecycle,
         targetKey: questions.targetKey,
-        referenceAnswer: questionVersions.referenceAnswer,
+        referenceAnswer: questions.referenceAnswer,
       })
       .from(questions)
-      .innerJoin(
-        questionVersions,
-        and(
-          eq(questionVersions.userId, questions.userId),
-          eq(questionVersions.questionId, questions.id),
-          eq(questionVersions.isCurrent, true),
-        ),
-      )
       .where(
         and(
           eq(questions.userId, input.userId),
@@ -352,13 +267,37 @@ export async function addQuestions(
     const byPromptKey = new Map<string, (typeof existing)[number]>();
     for (const candidate of existing) {
       const retained = byPromptKey.get(candidate.targetKey);
-      if (
-        !retained ||
-        (ACTIVE_LIFECYCLES.includes(candidate.lifecycle as V2Lifecycle) &&
-          !ACTIVE_LIFECYCLES.includes(retained.lifecycle as V2Lifecycle))
-      ) {
+      if (!retained || candidate.lifecycle === "active") {
         byPromptKey.set(candidate.targetKey, candidate);
       }
+    }
+    const existingFlags = existing.length > 0
+      ? await tx
+          .select({
+            questionId: questionFlags.questionId,
+            origin: questionFlags.origin,
+            reasons: questionFlags.reasons,
+          })
+          .from(questionFlags)
+          .where(
+            and(
+              eq(questionFlags.userId, input.userId),
+              inArray(
+                questionFlags.questionId,
+                existing.map((question) => question.id),
+              ),
+              sql`${questionFlags.resolvedAt} IS NULL`,
+            ),
+          )
+      : [];
+    const flagsByQuestionId = new Map<
+      string,
+      Array<Pick<V2QuestionFlag, "origin" | "reasons">>
+    >();
+    for (const flag of existingFlags) {
+      const retained = flagsByQuestionId.get(flag.questionId) ?? [];
+      retained.push({ origin: flag.origin, reasons: flag.reasons });
+      flagsByQuestionId.set(flag.questionId, retained);
     }
     const [{ questionCount }] = await tx
       .select({ questionCount: count() })
@@ -375,51 +314,64 @@ export async function addQuestions(
     const results: AddQuestionResult[] = [];
     const createdQuestionIds: string[] = [];
 
-    for (const item of items) {
+    for (const [index, item] of items.entries()) {
+      const assessment = assessments[index] ?? {
+        outcome: "unavailable" as const,
+        reasons: ["semantic_validation_unavailable"],
+      };
       const duplicate = byPromptKey.get(item.promptKey);
       if (duplicate) {
-        if (duplicate.referenceAnswer.trim() !== item.referenceAnswer) {
-          throw new Error(
-            `“${item.prompt.slice(0, 120)}” already exists with a different Answer Standard. Replace the existing Question instead.`,
-          );
-        }
         results.push({
           id: duplicate.id,
           status: "existing",
-          lifecycle: questionLifecycle(duplicate.lifecycle),
+          outcome: "exact_duplicate",
+          lifecycle: duplicate.lifecycle,
+          flags: flagsByQuestionId.get(duplicate.id) ?? [],
+          answerStandardConflict:
+            duplicate.referenceAnswer.trim() !== item.referenceAnswer,
         });
         continue;
       }
+      const flag = assessment.outcome === "pass"
+        ? null
+        : {
+            origin: "waxon_validation" as const,
+            reasons: assessment.reasons,
+          };
       const [question] = await tx
         .insert(questions)
         .values({
           userId: input.userId,
-          lifecycle: "new",
+          prompt: item.prompt,
+          referenceAnswer: item.referenceAnswer,
+          lifecycle: flag ? "flagged" : "active",
           targetKey: item.promptKey,
-          importance: item.importance,
         })
         .returning({ id: questions.id });
-      await tx.insert(questionVersions).values({
-        userId: input.userId,
-        questionId: question.id,
-        version: 1,
-        prompt: item.prompt,
-        referenceAnswer: item.referenceAnswer,
-        displayAnswer: item.referenceAnswer.slice(0, 8_000),
-      });
+      if (flag) {
+        await tx.insert(questionFlags).values({
+          userId: input.userId,
+          questionId: question.id,
+          ...flag,
+        });
+      }
       const created: AddQuestionResult = {
         id: question.id,
         status: "created",
-        lifecycle: "active",
+        outcome: flag ? "created_flagged" : "created_active",
+        lifecycle: flag ? "flagged" : "active",
+        flags: flag ? [flag] : [],
+        answerStandardConflict: false,
       };
       results.push(created);
       createdQuestionIds.push(question.id);
       byPromptKey.set(item.promptKey, {
         id: question.id,
-        lifecycle: "new",
+        lifecycle: flag ? "flagged" : "active",
         targetKey: item.promptKey,
         referenceAnswer: item.referenceAnswer,
       });
+      flagsByQuestionId.set(question.id, created.flags);
     }
 
     if (createdQuestionIds.length > 0) {
@@ -450,13 +402,15 @@ export async function createDirectQuestion(
     idempotencyKey: string;
     prompt: string;
     referenceAnswer: string;
-    importance?: number;
   },
   dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
 ): Promise<{
   questionId: string;
   lifecycle: V2QuestionLifecycle;
   status: "created" | "existing";
+  outcome: AddQuestionResult["outcome"];
+  flags: Array<Pick<V2QuestionFlag, "origin" | "reasons">>;
+  answerStandardConflict: boolean;
 }> {
   const { results } = await addQuestions({
     userId: input.userId,
@@ -468,6 +422,9 @@ export async function createDirectQuestion(
     questionId: result.id,
     lifecycle: result.lifecycle,
     status: result.status,
+    outcome: result.outcome,
+    flags: result.flags,
+    answerStandardConflict: result.answerStandardConflict,
   };
 }
 
@@ -476,7 +433,7 @@ export async function listLibrary(input: {
   search?: string;
   lifecycle?: V2QuestionLifecycle | "all";
   limit?: number;
-}, now = defaultV2ServiceDependencies.now()): Promise<V2LibraryResponse> {
+}): Promise<V2LibraryResponse> {
   const limit = Math.max(1, Math.min(QUESTION_PAGE_LIMIT, input.limit ?? 100));
   const search = input.search?.trim() ?? "";
   const lifecycle =
@@ -492,97 +449,61 @@ export async function listLibrary(input: {
     : [];
   const rows = await pool.query<{
     id: string;
-    version_id: string;
     prompt: string;
     reference_answer: string;
     lifecycle: string;
-    importance: number | string;
     due_at: Date | null;
-    stability: number | string | null;
-    difficulty: number | string | null;
-    last_review_at: Date | null;
-    elapsed_days: number | null;
-    scheduled_days: number | null;
-    reps: number | null;
-    lapses: number | null;
-    memory_state: number | null;
-    learning_steps: number | null;
     created_at: Date;
     updated_at: Date;
+    flags: V2QuestionFlag[];
   }>(
-    `SELECT q.id, qv.id AS version_id, qv.prompt, qv.reference_answer,
-            q.lifecycle::text, q.importance, ms.due_at,
-            ms.stability, ms.difficulty, ms.last_review_at, ms.elapsed_days,
-            ms.scheduled_days, ms.reps, ms.lapses, ms.state AS memory_state,
-            ms.learning_steps, q.created_at, q.updated_at
+    `SELECT q.id, q.prompt, q.reference_answer,
+            q.lifecycle::text, ms.due_at, q.created_at, q.updated_at,
+            COALESCE(
+              (SELECT jsonb_agg(
+                 jsonb_build_object(
+                   'origin', flag.origin::text,
+                   'reasons', flag.reasons,
+                   'detail', flag.detail,
+                   'createdAt', flag.created_at,
+                   'resolvedAt', flag.resolved_at
+                 ) ORDER BY flag.created_at, flag.id
+               )
+                 FROM waxon_v2.question_flags flag
+                WHERE flag.user_id = q.user_id
+                  AND flag.question_id = q.id),
+              '[]'::jsonb
+            ) AS flags
        FROM waxon_v2.questions q
-       JOIN waxon_v2.question_versions qv
-         ON qv.user_id = q.user_id AND qv.question_id = q.id AND qv.is_current = true
        LEFT JOIN waxon_v2.memory_states ms
          ON ms.user_id = q.user_id AND ms.question_id = q.id
       WHERE q.user_id = $1
         AND (
           $2::text IS NULL
-          OR ($2 = 'active' AND q.lifecycle::text IN ('new','learning','review'))
-          OR ($2 = 'flagged' AND q.lifecycle::text = 'flagged')
-          OR ($2 = 'archived' AND q.lifecycle::text IN ('paused','archived','trash'))
+          OR q.lifecycle::text = $2
         )
         AND ($3 = '' OR q.id = ANY($5::uuid[]))
-        AND q.lifecycle::text IN ('new','learning','review','flagged','paused','archived','trash')
+        AND q.lifecycle::text IN ('active','flagged','archived')
       ORDER BY CASE WHEN $3 <> '' THEN array_position($5::uuid[], q.id) END,
                q.updated_at DESC, q.id
       LIMIT $4`,
     [input.userId, lifecycle, search, limit, rankedIds],
   );
-  const settings = await getLearnerSettings(input.userId);
-  const questionsOut: V2Question[] = rows.rows.map((row) => {
-    const memory =
-      row.due_at &&
-      row.stability !== null &&
-      row.difficulty !== null &&
-      row.elapsed_days !== null &&
-      row.scheduled_days !== null &&
-      row.reps !== null &&
-      row.lapses !== null &&
-      row.memory_state !== null &&
-      row.learning_steps !== null
-        ? storedMemory({
-            dueAt: row.due_at,
-            lastReviewAt: row.last_review_at,
-            stability: Number(row.stability),
-            difficulty: Number(row.difficulty),
-            elapsedDays: row.elapsed_days,
-            scheduledDays: row.scheduled_days,
-            reps: row.reps,
-            lapses: row.lapses,
-            state: row.memory_state,
-            learningSteps: row.learning_steps,
-          })
-        : null;
-    return {
+  const questionsOut: V2Question[] = rows.rows.map((row) => ({
       id: row.id,
-      versionId: row.version_id,
       prompt: row.prompt,
       referenceAnswer: row.reference_answer,
-      lifecycle: questionLifecycle(row.lifecycle),
-      importance: Number(row.importance),
+      lifecycle: row.lifecycle as V2QuestionLifecycle,
+      flags: row.flags,
       dueAt: row.due_at?.toISOString() ?? null,
-      retrievability: memory
-          ? memoryRetrievability({
-              memory,
-              desiredRetention: settings.desiredRetention,
-              at: now,
-            })
-        : null,
       createdAt: row.created_at.toISOString(),
       updatedAt: row.updated_at.toISOString(),
-    };
-  });
+    }));
   const countRows = await pool.query<{ lifecycle: string; count: string }>(
     `SELECT lifecycle::text, count(*)::text
        FROM waxon_v2.questions
       WHERE user_id = $1
-        AND lifecycle::text IN ('new','learning','review','flagged','paused','archived','trash')
+        AND lifecycle::text IN ('active','flagged','archived')
       GROUP BY lifecycle`,
     [input.userId],
   );
@@ -592,1463 +513,11 @@ export async function listLibrary(input: {
     archived: 0,
   };
   for (const row of countRows.rows) {
-    if (ALL_LIFECYCLES.includes(row.lifecycle as V2Lifecycle)) {
-      counts[questionLifecycle(row.lifecycle)] += Number(row.count);
+    if (row.lifecycle === "active" || row.lifecycle === "flagged" || row.lifecycle === "archived") {
+      counts[row.lifecycle] += Number(row.count);
     }
   }
-  const waitingNew = Number(
-    countRows.rows.find((row) => row.lifecycle === "new")?.count ?? 0,
-  );
-  return { questions: questionsOut, counts, waitingNew };
-}
-
-async function planCandidates(
-  userId: string,
-  day: ReviewDayBounds,
-): Promise<PlanCandidate[]> {
-  const db = getV2Db();
-  const rows = await db
-    .select({
-      questionId: questions.id,
-      questionVersionId: questionVersions.id,
-      lifecycle: questions.lifecycle,
-      dueAt: memoryStates.dueAt,
-      importance: questions.importance,
-      createdAt: questions.createdAt,
-      memory: {
-        dueAt: memoryStates.dueAt,
-        lastReviewAt: memoryStates.lastReviewAt,
-        stability: memoryStates.stability,
-        difficulty: memoryStates.difficulty,
-        elapsedDays: memoryStates.elapsedDays,
-        scheduledDays: memoryStates.scheduledDays,
-        reps: memoryStates.reps,
-        lapses: memoryStates.lapses,
-        state: memoryStates.state,
-        learningSteps: memoryStates.learningSteps,
-      },
-    })
-    .from(questions)
-    .innerJoin(
-      questionVersions,
-      and(
-        eq(questionVersions.userId, questions.userId),
-        eq(questionVersions.questionId, questions.id),
-        eq(questionVersions.isCurrent, true),
-      ),
-    )
-    .leftJoin(
-      memoryStates,
-      and(
-        eq(memoryStates.userId, questions.userId),
-        eq(memoryStates.questionId, questions.id),
-      ),
-    )
-    .where(
-      and(
-        eq(questions.userId, userId),
-        inArray(questions.lifecycle, ACTIVE_LIFECYCLES),
-        sql`NOT EXISTS (
-          SELECT 1 FROM waxon_v2.answer_submissions pending
-           WHERE pending.user_id = ${questions.userId}
-             AND pending.question_id = ${questions.id}
-             AND pending.question_version_id = ${questionVersions.id}
-             AND pending.status = 'pending'
-        )`,
-        sql`NOT EXISTS (
-          SELECT 1 FROM waxon_v2.answer_submissions reviewed_today
-           WHERE reviewed_today.user_id = ${questions.userId}
-             AND reviewed_today.question_id = ${questions.id}
-             AND reviewed_today.question_version_id = ${questionVersions.id}
-             AND reviewed_today.status = 'graded'
-             AND reviewed_today.submitted_at >= ${day.start}
-             AND reviewed_today.submitted_at < ${day.end}
-        )`,
-      ),
-    )
-    .orderBy(asc(memoryStates.dueAt), asc(questions.createdAt));
-  const settings = await getLearnerSettings(userId);
-  return rows.map((row) => {
-    const memory = row.memory?.dueAt ? storedMemory(row.memory) : null;
-    return {
-      questionId: row.questionId,
-      questionVersionId: row.questionVersionId,
-      lifecycle: row.lifecycle as V2Lifecycle,
-      dueAt: row.dueAt,
-      retrievability: memory
-        ? memoryRetrievability({
-            memory,
-            desiredRetention: settings.desiredRetention,
-            at: day.end,
-          })
-        : null,
-      importance: row.importance,
-      createdAt: row.createdAt,
-    };
-  });
-}
-
-async function reviewCapacity(
-  userId: string,
-  settings: typeof learnerSettings.$inferSelect,
-  day: ReviewDayBounds,
-) {
-  const [row] = await getV2Client().pool
-    .query<{
-      at_risk: string;
-      waiting_new: string;
-      oldest_new_at: Date | null;
-    }>(
-      `SELECT
-         count(*) FILTER (
-           WHERE q.lifecycle::text IN ('learning','review')
-             AND ms.due_at < $3
-             AND NOT EXISTS (
-               SELECT 1 FROM waxon_v2.answer_submissions reviewed_today
-               WHERE reviewed_today.user_id = q.user_id
-                  AND reviewed_today.question_id = q.id
-                  AND reviewed_today.question_version_id = qv.id
-                  AND reviewed_today.status = 'graded'
-                  AND reviewed_today.submitted_at >= $2
-                  AND reviewed_today.submitted_at < $3
-             )
-         )::text AS at_risk,
-         count(*) FILTER (WHERE q.lifecycle::text = 'new')::text AS waiting_new,
-         min(q.created_at) FILTER (WHERE q.lifecycle::text = 'new') AS oldest_new_at
-       FROM waxon_v2.questions q
-       JOIN waxon_v2.question_versions qv
-         ON qv.user_id = q.user_id
-        AND qv.question_id = q.id
-        AND qv.is_current = true
-       LEFT JOIN waxon_v2.memory_states ms
-         ON ms.user_id = q.user_id AND ms.question_id = q.id
-      WHERE q.user_id = $1`,
-      [userId, day.start, day.end],
-    )
-    .then((result) => result.rows);
-  const atRiskCount = Number(row?.at_risk ?? 0);
-  const roughCapacity = Math.max(1, Math.floor((settings.dailyMinutes * 60) / 120));
-  const targetFeasible = atRiskCount <= roughCapacity;
-  const pressure = atRiskCount
-    ? Math.min(1, Math.max(0, (atRiskCount - roughCapacity) / atRiskCount))
-    : 0;
-  return {
-    targetFeasible,
-    sustainableRetention: targetFeasible
-      ? settings.desiredRetention
-      : Math.max(0.7, settings.desiredRetention - pressure * 0.2),
-    minutesNeeded: Math.max(settings.dailyMinutes, Math.ceil((atRiskCount * 120) / 60)),
-    atRiskCount,
-    waitingNew: Number(row?.waiting_new ?? 0),
-    oldestNewAt: row?.oldest_new_at?.toISOString() ?? null,
-  };
-}
-
-async function exposeNextItem(
-  userId: string,
-  sessionId: string,
-  now: Date,
-): Promise<V2ReviewItem | null> {
-  const db = getV2Db();
-  return await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-item:${userId}`}))`,
-    );
-    const fields = {
-      itemId: reviewSessionItems.id,
-      questionId: reviewSessionItems.questionId,
-      questionVersionId: reviewSessionItems.questionVersionId,
-      prompt: questionVersions.prompt,
-      position: reviewSessionItems.position,
-      kind: reviewSessionItems.kind,
-    };
-    const [exposed] = await tx
-      .select(fields)
-      .from(reviewSessionItems)
-      .innerJoin(
-        questionVersions,
-        and(
-          eq(questionVersions.userId, reviewSessionItems.userId),
-          eq(questionVersions.id, reviewSessionItems.questionVersionId),
-        ),
-      )
-      .where(
-        and(
-          eq(reviewSessionItems.userId, userId),
-          eq(reviewSessionItems.sessionId, sessionId),
-          eq(reviewSessionItems.state, "exposed"),
-        ),
-      )
-      .orderBy(asc(reviewSessionItems.position))
-      .limit(1);
-    const [queued] = exposed
-      ? []
-      : await tx
-          .select(fields)
-          .from(reviewSessionItems)
-          .innerJoin(
-            questionVersions,
-            and(
-              eq(questionVersions.userId, reviewSessionItems.userId),
-              eq(questionVersions.id, reviewSessionItems.questionVersionId),
-            ),
-          )
-          .where(
-            and(
-              eq(reviewSessionItems.userId, userId),
-              eq(reviewSessionItems.sessionId, sessionId),
-              eq(reviewSessionItems.state, "queued"),
-              lte(reviewSessionItems.earliestAt, now),
-              sql`NOT EXISTS (
-                SELECT 1 FROM waxon_v2.answer_submissions pending
-                 WHERE pending.user_id = ${reviewSessionItems.userId}
-                   AND pending.question_id = ${reviewSessionItems.questionId}
-                   AND pending.status = 'pending'
-              )`,
-            ),
-          )
-          .orderBy(asc(reviewSessionItems.position))
-          .limit(1);
-    const row = exposed ?? queued;
-    if (!row) return null;
-
-    if (!exposed) {
-      await tx
-        .update(reviewSessionItems)
-        .set({ state: "exposed", exposedAt: now })
-        .where(
-          and(
-            eq(reviewSessionItems.userId, userId),
-            eq(reviewSessionItems.id, row.itemId),
-            eq(reviewSessionItems.state, "queued"),
-          ),
-        );
-      await tx
-        .update(questions)
-        .set({ lifecycle: "learning", updatedAt: now })
-        .where(
-          and(
-            eq(questions.userId, userId),
-            eq(questions.id, row.questionId),
-            eq(questions.lifecycle, "new"),
-          ),
-        );
-      if (row.kind === "retry") {
-        await tx
-          .update(retryObligations)
-          .set({ status: "exposed", updatedAt: now })
-          .where(
-            and(
-              eq(retryObligations.userId, userId),
-              eq(retryObligations.sessionId, sessionId),
-              eq(retryObligations.questionId, row.questionId),
-              or(
-                eq(retryObligations.status, "queued"),
-                eq(retryObligations.status, "deferred"),
-              ),
-            ),
-          );
-      }
-    }
-    const [{ itemCount }] = await tx
-      .select({ itemCount: count() })
-      .from(reviewSessionItems)
-      .where(
-        and(
-          eq(reviewSessionItems.userId, userId),
-          eq(reviewSessionItems.sessionId, sessionId),
-          ne(reviewSessionItems.state, "invalidated"),
-        ),
-      );
-    const [session] = await tx
-      .select({ estimatedSeconds: reviewSessions.estimatedSeconds })
-      .from(reviewSessions)
-      .where(eq(reviewSessions.id, sessionId))
-      .limit(1);
-    return {
-      sessionId,
-      itemId: row.itemId,
-      questionId: row.questionId,
-      questionVersionId: row.questionVersionId,
-      prompt: row.prompt,
-      position: row.position,
-      total: itemCount,
-      estimatedMinutes: Math.max(1, Math.ceil((session?.estimatedSeconds ?? 60) / 60)),
-      isRetry: row.kind === "retry",
-    };
-  });
-}
-
-export async function getOrCreateReviewSession(
-  userId: string,
-  dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
-): Promise<V2ReviewSessionResponse> {
-  const db = getV2Db();
-  const now = dependencies.now();
-  const settings = await getLearnerSettings(userId);
-  const day = await reviewDayBounds(settings.timezone, now);
-  const plan = buildReviewPlan({
-    candidates: await planCandidates(userId, day),
-    desiredRetention: settings.desiredRetention,
-    scheduledBefore: day.end,
-    now,
-  });
-  let session: typeof reviewSessions.$inferSelect | undefined = (
-    await db
-    .select()
-    .from(reviewSessions)
-    .where(and(eq(reviewSessions.userId, userId), eq(reviewSessions.status, "active")))
-    .limit(1)
-  )[0];
-
-  if (!session) {
-    if (plan.length > 0) {
-      session = await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtext(${`session:${userId}`}))`,
-        );
-        const [existing] = await tx
-          .select()
-          .from(reviewSessions)
-          .where(
-            and(eq(reviewSessions.userId, userId), eq(reviewSessions.status, "active")),
-          )
-          .limit(1);
-        if (existing) return existing;
-        const [created] = await tx
-          .insert(reviewSessions)
-          .values({
-            userId,
-            timeBudgetMinutes: settings.dailyMinutes,
-            desiredRetention: settings.desiredRetention,
-            estimatedSeconds: plan.reduce((sum, item) => sum + item.estimatedSeconds, 0),
-            reservedSeconds: plan.reduce((sum, item) => sum + item.estimatedSeconds * 2, 0),
-            plannedCount: plan.length,
-          })
-          .returning();
-        const earliestAt = now;
-        for (let offset = 0; offset < plan.length; offset += SESSION_ITEM_INSERT_BATCH) {
-          await tx.insert(reviewSessionItems).values(
-            plan.slice(offset, offset + SESSION_ITEM_INSERT_BATCH).map((item) => ({
-              userId,
-              sessionId: created.id,
-              questionId: item.questionId,
-              questionVersionId: item.questionVersionId,
-              position: item.position,
-              earliestAt,
-              estimatedSeconds: item.estimatedSeconds,
-              isIntroduction: item.dueAt === null,
-            })),
-          );
-        }
-        return created;
-      });
-    }
-  }
-
-  if (session && plan.length > 0) {
-    const sessionId = session.id;
-    const synchronizedSession = await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtext(${`session:${userId}`}))`,
-      );
-      const [active] = await tx
-        .select()
-        .from(reviewSessions)
-        .where(
-          and(
-            eq(reviewSessions.userId, userId),
-            eq(reviewSessions.id, sessionId),
-            eq(reviewSessions.status, "active"),
-          ),
-        )
-        .limit(1);
-      if (!active) return null;
-      const existing = await tx
-        .select({ questionVersionId: reviewSessionItems.questionVersionId })
-        .from(reviewSessionItems)
-        .where(
-          and(
-            eq(reviewSessionItems.userId, userId),
-            eq(reviewSessionItems.sessionId, active.id),
-            eq(reviewSessionItems.kind, "base"),
-          ),
-        );
-      const existingVersions = new Set(existing.map((item) => item.questionVersionId));
-      const missing = plan.filter(
-        (item) => !existingVersions.has(item.questionVersionId),
-      );
-      if (missing.length === 0) return active;
-      const [lastPosition] = await tx
-        .select({ value: sql<number>`COALESCE(max(${reviewSessionItems.position}), -1)` })
-        .from(reviewSessionItems)
-        .where(
-          and(
-            eq(reviewSessionItems.userId, userId),
-            eq(reviewSessionItems.sessionId, active.id),
-          ),
-        );
-      const firstPosition = Number(lastPosition?.value ?? -1) + 1;
-      const earliestAt = now;
-      for (let offset = 0; offset < missing.length; offset += SESSION_ITEM_INSERT_BATCH) {
-        await tx.insert(reviewSessionItems).values(
-          missing
-            .slice(offset, offset + SESSION_ITEM_INSERT_BATCH)
-            .map((item, index) => ({
-              userId,
-              sessionId: active.id,
-              questionId: item.questionId,
-              questionVersionId: item.questionVersionId,
-              position: firstPosition + offset + index,
-              earliestAt,
-              estimatedSeconds: item.estimatedSeconds,
-              isIntroduction: item.dueAt === null,
-            })),
-        );
-      }
-      const addedSeconds = missing.reduce(
-        (sum, item) => sum + item.estimatedSeconds,
-        0,
-      );
-      const [updated] = await tx
-        .update(reviewSessions)
-        .set({
-          plannedCount: sql`${reviewSessions.plannedCount} + ${missing.length}`,
-          estimatedSeconds: sql`${reviewSessions.estimatedSeconds} + ${addedSeconds}`,
-          reservedSeconds: sql`${reviewSessions.reservedSeconds} + ${addedSeconds * 2}`,
-          updatedAt: now,
-        })
-        .where(eq(reviewSessions.id, active.id))
-        .returning();
-      return updated ?? active;
-    });
-    session = synchronizedSession ?? undefined;
-  }
-
-  let item = session ? await exposeNextItem(userId, session.id, now) : null;
-  if (session && !item) {
-    const [{ unfinished }] = await db
-      .select({ unfinished: count() })
-      .from(reviewSessionItems)
-      .where(
-        and(
-          eq(reviewSessionItems.userId, userId),
-          eq(reviewSessionItems.sessionId, session.id),
-          inArray(reviewSessionItems.state, ["queued", "exposed", "submitted"]),
-        ),
-      );
-    if (unfinished === 0) {
-      await db
-        .update(reviewSessions)
-        .set({ status: "completed", completedAt: now, updatedAt: now })
-        .where(eq(reviewSessions.id, session.id));
-      session = undefined;
-      item = null;
-    }
-  }
-
-  const summary = await getReviewSummary(userId, now);
-  const capacity = await reviewCapacity(userId, settings, day);
-  let completedCount = 0;
-  let plannedCount = 0;
-  let retryAvailableAt: string | null = null;
-  let waitingOnEvaluation = false;
-  if (session) {
-    const [{ total }] = await db
-      .select({ total: count() })
-      .from(reviewSessionItems)
-      .where(
-        and(
-          eq(reviewSessionItems.userId, userId),
-          eq(reviewSessionItems.sessionId, session.id),
-          ne(reviewSessionItems.state, "invalidated"),
-        ),
-      );
-    plannedCount = total;
-    const [{ completed }] = await db
-      .select({ completed: count() })
-      .from(reviewSessionItems)
-      .where(
-        and(
-          eq(reviewSessionItems.userId, userId),
-          eq(reviewSessionItems.sessionId, session.id),
-          eq(reviewSessionItems.state, "evaluated"),
-        ),
-      );
-    completedCount = completed;
-    const [{ pending }] = await db
-      .select({ pending: count() })
-      .from(reviewSessionItems)
-      .where(
-        and(
-          eq(reviewSessionItems.userId, userId),
-          eq(reviewSessionItems.sessionId, session.id),
-          eq(reviewSessionItems.state, "submitted"),
-        ),
-      );
-    waitingOnEvaluation = pending > 0;
-    if (!item) {
-      const [retry] = await db
-        .select({ earliestAt: reviewSessionItems.earliestAt })
-        .from(reviewSessionItems)
-        .where(
-          and(
-            eq(reviewSessionItems.userId, userId),
-            eq(reviewSessionItems.sessionId, session.id),
-            eq(reviewSessionItems.kind, "retry"),
-            eq(reviewSessionItems.state, "queued"),
-          ),
-        )
-        .orderBy(asc(reviewSessionItems.earliestAt))
-        .limit(1);
-      retryAvailableAt = retry?.earliestAt.toISOString() ?? null;
-    }
-  }
-  return {
-    session: session
-      ? {
-          id: session.id,
-          plannedCount,
-          estimatedMinutes: Math.max(1, Math.ceil(session.estimatedSeconds / 60)),
-          completedCount,
-        }
-      : null,
-    item,
-    retryAvailableAt,
-    waitingOnEvaluation,
-    blockedReason: null,
-    summary,
-    capacity,
-  };
-}
-
-export async function actOnReviewItem(input: {
-  userId: string;
-  itemId: string;
-  action: "flag" | "next";
-}, dependencies: V2ServiceDependencies = defaultV2ServiceDependencies): Promise<V2ReviewSessionResponse> {
-  const db = getV2Db();
-  const now = dependencies.now();
-  await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-item:${input.userId}`}))`,
-    );
-    if (input.action === "flag") {
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
-      );
-    }
-    const [item] = await tx
-      .select()
-      .from(reviewSessionItems)
-      .where(
-        and(
-          eq(reviewSessionItems.userId, input.userId),
-          eq(reviewSessionItems.id, input.itemId),
-          eq(reviewSessionItems.state, "exposed"),
-          sql`EXISTS (
-            SELECT 1 FROM waxon_v2.review_sessions active_session
-             WHERE active_session.user_id = ${input.userId}
-               AND active_session.id = ${reviewSessionItems.sessionId}
-               AND active_session.status = 'active'
-          )`,
-        ),
-      )
-      .limit(1);
-    if (!item) throw new Error("Review item is no longer current.");
-
-    if (input.action === "next") {
-      const [maxPosition] = await tx
-        .select({
-          value: sql<number>`COALESCE(max(${reviewSessionItems.position}), -1)`,
-        })
-        .from(reviewSessionItems)
-        .where(
-          and(
-            eq(reviewSessionItems.userId, input.userId),
-            eq(reviewSessionItems.sessionId, item.sessionId),
-          ),
-        );
-      await tx
-        .update(reviewSessionItems)
-        .set({
-          state: "queued",
-          position: Number(maxPosition?.value ?? -1) + 1,
-          exposedAt: null,
-        })
-        .where(
-          and(
-            eq(reviewSessionItems.userId, input.userId),
-            eq(reviewSessionItems.id, item.id),
-            eq(reviewSessionItems.state, "exposed"),
-          ),
-        );
-      if (item.kind === "retry") {
-        await tx
-          .update(retryObligations)
-          .set({ status: "queued", updatedAt: now })
-          .where(
-            and(
-              eq(retryObligations.userId, input.userId),
-              eq(retryObligations.sessionId, item.sessionId),
-              eq(retryObligations.questionId, item.questionId),
-              eq(retryObligations.status, "exposed"),
-            ),
-          );
-      }
-      return;
-    }
-
-    const [question] = await tx
-      .select({ lifecycle: questions.lifecycle })
-      .from(questions)
-      .where(
-        and(
-          eq(questions.userId, input.userId),
-          eq(questions.id, item.questionId),
-        ),
-      )
-      .limit(1);
-    if (
-      !question ||
-      !ACTIVE_LIFECYCLES.includes(question.lifecycle as V2Lifecycle)
-    ) {
-      throw new Error("Question is no longer available in Review.");
-    }
-    const priorLifecycle: V2Lifecycle = item.isIntroduction
-      ? "new"
-      : (question.lifecycle as V2Lifecycle);
-    await tx
-      .update(questions)
-      .set({
-        lifecycle: "flagged",
-        priorLifecycle,
-        suspensionReason: "Flagged during Review.",
-        deletedAt: null,
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(questions.userId, input.userId),
-          eq(questions.id, item.questionId),
-        ),
-      );
-    await tx
-      .update(retryObligations)
-      .set({
-        status: "waived",
-        reason: "Learner flagged the question for later review.",
-        updatedAt: now,
-      })
-      .where(
-        and(
-          eq(retryObligations.userId, input.userId),
-          eq(retryObligations.questionId, item.questionId),
-          inArray(retryObligations.status, ["queued", "deferred", "exposed"]),
-        ),
-      );
-    await tx
-      .update(reviewSessionItems)
-      .set({ state: "invalidated" })
-      .where(
-        and(
-          eq(reviewSessionItems.userId, input.userId),
-          eq(reviewSessionItems.questionId, item.questionId),
-          inArray(reviewSessionItems.state, ["queued", "exposed"]),
-        ),
-      );
-  });
-  return await getOrCreateReviewSession(input.userId, dependencies);
-}
-
-export async function getReviewSummary(
-  userId: string,
-  now = defaultV2ServiceDependencies.now(),
-): Promise<V2ReviewSummary> {
-  const settings = await getLearnerSettings(userId);
-  const day = await reviewDayBounds(settings.timezone, now);
-  const [active] = await getV2Client().pool
-    .query<{ due_count: string }>(
-      `SELECT count(item.id) FILTER (
-                WHERE item.state::text IN ('queued','exposed','submitted')
-              )::text AS due_count
-         FROM waxon_v2.review_sessions session
-         LEFT JOIN waxon_v2.review_session_items item
-           ON item.user_id = session.user_id AND item.session_id = session.id
-        WHERE session.user_id = $1
-          AND session.status = 'active'
-        GROUP BY session.id
-        LIMIT 1`,
-      [userId],
-    )
-    .then((result) => result.rows);
-  const queueRemaining = active
-    ? Number(active.due_count)
-    : buildReviewPlan({
-        candidates: await planCandidates(userId, day),
-        desiredRetention: settings.desiredRetention,
-        scheduledBefore: day.end,
-      }).length;
-  const [row] = await getV2Client().pool
-    .query<{ next_due: Date | null }>(
-      `SELECT min(candidate.effective_due) FILTER (
-                WHERE candidate.effective_due > $4
-              ) AS next_due
-         FROM (
-           SELECT CASE
-                    WHEN EXISTS (
-                      SELECT 1 FROM waxon_v2.answer_submissions reviewed_today
-                       WHERE reviewed_today.user_id = q.user_id
-                         AND reviewed_today.question_id = q.id
-                         AND reviewed_today.question_version_id = qv.id
-                         AND reviewed_today.status = 'graded'
-                         AND reviewed_today.submitted_at >= $2
-                         AND reviewed_today.submitted_at < $3
-                    ) THEN GREATEST(ms.due_at, $3)
-                    ELSE ms.due_at
-                  END AS effective_due
-             FROM waxon_v2.questions q
-             JOIN waxon_v2.question_versions qv
-               ON qv.user_id = q.user_id
-              AND qv.question_id = q.id
-              AND qv.is_current = true
-             JOIN waxon_v2.memory_states ms
-               ON ms.user_id = q.user_id AND ms.question_id = q.id
-            WHERE q.user_id = $1
-              AND q.lifecycle::text IN ('learning','review')
-              AND NOT EXISTS (
-                SELECT 1 FROM waxon_v2.answer_submissions pending
-                 WHERE pending.user_id = q.user_id
-                   AND pending.question_id = q.id
-                   AND pending.question_version_id = qv.id
-                   AND pending.status = 'pending'
-              )
-         ) candidate`,
-      [userId, day.start, day.end, now],
-    )
-    .then((result) => result.rows);
-  return {
-    queueRemaining,
-    nextScheduledDue: row?.next_due?.getTime() ?? null,
-  };
-}
-
-async function createRetryIfNeeded(
-  tx: V2Tx,
-  input: {
-    userId: string;
-    submissionId: string;
-    grade: V2Grade;
-    item: typeof reviewSessionItems.$inferSelect;
-  },
-  now: Date,
-): Promise<void> {
-  if (input.item.kind === "retry") {
-    await tx
-      .update(retryObligations)
-      .set({ status: "completed", updatedAt: now })
-      .where(
-        and(
-          eq(retryObligations.userId, input.userId),
-          eq(retryObligations.sessionId, input.item.sessionId),
-          eq(retryObligations.questionId, input.item.questionId),
-          eq(retryObligations.status, "exposed"),
-        ),
-      );
-    return;
-  }
-  const [obligation] = await tx
-    .select()
-    .from(retryObligations)
-    .where(
-      and(
-        eq(retryObligations.userId, input.userId),
-        eq(retryObligations.firstSubmissionId, input.submissionId),
-      ),
-    )
-    .limit(1);
-
-  if (input.grade !== "again") {
-    if (obligation && ["queued", "deferred", "exposed"].includes(obligation.status)) {
-      await tx
-        .update(retryObligations)
-        .set({
-          status: "cancelled",
-          reason: "The effective first grade no longer requires a retry.",
-          updatedAt: now,
-        })
-        .where(eq(retryObligations.id, obligation.id));
-      await tx
-        .update(reviewSessionItems)
-        .set({ state: "invalidated" })
-        .where(
-          and(
-            eq(reviewSessionItems.userId, input.userId),
-            eq(reviewSessionItems.sessionId, input.item.sessionId),
-            eq(reviewSessionItems.questionId, input.item.questionId),
-            eq(reviewSessionItems.kind, "retry"),
-            inArray(reviewSessionItems.state, ["queued", "exposed"]),
-          ),
-        );
-    }
-    return;
-  }
-  if (obligation && !["cancelled", "deferred", "queued"].includes(obligation.status)) {
-    return;
-  }
-  const [differentAfter] = await tx
-    .select({ id: reviewSessionItems.id })
-    .from(reviewSessionItems)
-    .where(
-      and(
-        eq(reviewSessionItems.userId, input.userId),
-        eq(reviewSessionItems.sessionId, input.item.sessionId),
-        ne(reviewSessionItems.questionId, input.item.questionId),
-        sql`${reviewSessionItems.position} > ${input.item.position}`,
-        ne(reviewSessionItems.state, "invalidated"),
-      ),
-    )
-    .limit(1);
-  const earliestAt = retryEarliestAt({
-    hasDifferentQuestionAfter: Boolean(differentAfter),
-    now,
-  });
-  if (obligation) {
-    await tx
-      .update(retryObligations)
-      .set({ status: "queued", earliestAt, reason: null, updatedAt: now })
-      .where(eq(retryObligations.id, obligation.id));
-  } else {
-    await tx.insert(retryObligations).values({
-      userId: input.userId,
-      firstSubmissionId: input.submissionId,
-      questionId: input.item.questionId,
-      questionVersionId: input.item.questionVersionId,
-      sessionId: input.item.sessionId,
-      earliestAt,
-    });
-  }
-  const [retryItem] = await tx
-    .select({ id: reviewSessionItems.id, state: reviewSessionItems.state })
-    .from(reviewSessionItems)
-    .where(
-      and(
-        eq(reviewSessionItems.userId, input.userId),
-        eq(reviewSessionItems.sessionId, input.item.sessionId),
-        eq(reviewSessionItems.questionId, input.item.questionId),
-        eq(reviewSessionItems.kind, "retry"),
-      ),
-    )
-    .limit(1);
-  if (retryItem?.state === "invalidated") {
-    await tx
-      .update(reviewSessionItems)
-      .set({ state: "queued", earliestAt })
-      .where(eq(reviewSessionItems.id, retryItem.id));
-  } else if (!retryItem) {
-    const [maxPosition] = await tx
-      .select({ value: sql<number>`COALESCE(max(${reviewSessionItems.position}), -1)` })
-      .from(reviewSessionItems)
-      .where(
-        and(
-          eq(reviewSessionItems.userId, input.userId),
-          eq(reviewSessionItems.sessionId, input.item.sessionId),
-        ),
-      );
-    await tx.insert(reviewSessionItems).values({
-      userId: input.userId,
-      sessionId: input.item.sessionId,
-      questionId: input.item.questionId,
-      questionVersionId: input.item.questionVersionId,
-      kind: "retry",
-      position: Number(maxPosition?.value ?? -1) + 1,
-      earliestAt,
-      estimatedSeconds: input.item.estimatedSeconds,
-    });
-  }
-}
-
-async function applyGradeInTransaction(
-  tx: V2Tx,
-  input: {
-    userId: string;
-    submissionId: string;
-    grade: V2Grade;
-    origin: "deterministic" | "model" | "self" | "correction";
-    evaluationId?: string | null;
-  },
-  now: Date,
-): Promise<void> {
-  const [submission] = await tx
-    .select()
-    .from(answerSubmissions)
-    .where(
-      and(
-        eq(answerSubmissions.userId, input.userId),
-        eq(answerSubmissions.id, input.submissionId),
-      ),
-    )
-    .limit(1);
-  if (!submission) throw new Error("Submission not found.");
-  const [item] = await tx
-    .select()
-    .from(reviewSessionItems)
-    .where(
-      and(
-        eq(reviewSessionItems.userId, input.userId),
-        eq(reviewSessionItems.id, submission.sessionItemId),
-      ),
-    )
-    .limit(1);
-  if (!item) throw new Error("Review item not found.");
-  const [settings] = await tx
-    .select({ desiredRetention: learnerSettings.desiredRetention })
-    .from(learnerSettings)
-    .where(eq(learnerSettings.userId, input.userId))
-    .limit(1);
-  const [memory] = await tx
-    .select()
-    .from(memoryStates)
-    .where(
-      and(
-        eq(memoryStates.userId, input.userId),
-        eq(memoryStates.questionId, submission.questionId),
-      ),
-    )
-    .limit(1);
-  const next = applyFsrsGrade({
-    memory: storedMemory(memory),
-    grade: input.grade,
-    desiredRetention: settings?.desiredRetention ?? 0.9,
-    now: submission.submittedAt,
-  });
-  await tx.insert(gradeEvents).values({
-    userId: input.userId,
-    submissionId: input.submissionId,
-    value: input.grade,
-    origin: input.origin,
-    evaluationId: input.evaluationId ?? null,
-    createdAt: now,
-  });
-  await tx
-    .insert(memoryStates)
-    .values({
-      userId: input.userId,
-      questionId: submission.questionId,
-      dueAt: next.dueAt,
-      lastReviewAt: next.lastReviewAt,
-      stability: next.stability,
-      difficulty: next.difficulty,
-      elapsedDays: next.elapsedDays,
-      scheduledDays: next.scheduledDays,
-      reps: next.reps,
-      lapses: next.lapses,
-      state: next.state,
-      learningSteps: next.learningSteps,
-      schedulerVersion: SCHEDULER_VERSION,
-    })
-    .onConflictDoUpdate({
-      target: [memoryStates.userId, memoryStates.questionId],
-      set: {
-        dueAt: next.dueAt,
-        lastReviewAt: next.lastReviewAt,
-        stability: next.stability,
-        difficulty: next.difficulty,
-        elapsedDays: next.elapsedDays,
-        scheduledDays: next.scheduledDays,
-        reps: next.reps,
-        lapses: next.lapses,
-        state: next.state,
-        learningSteps: next.learningSteps,
-        schedulerVersion: SCHEDULER_VERSION,
-        updatedAt: now,
-      },
-    });
-  await tx
-    .update(answerSubmissions)
-    .set({ status: "graded" })
-    .where(eq(answerSubmissions.id, submission.id));
-  await tx
-    .update(reviewSessionItems)
-    .set({ state: "evaluated" })
-    .where(eq(reviewSessionItems.id, item.id));
-  await tx
-    .update(questions)
-    .set({ lifecycle: "review", updatedAt: now })
-    .where(and(eq(questions.userId, input.userId), eq(questions.id, submission.questionId)));
-  if (item.kind === "base" && input.grade !== "again") {
-    await tx
-      .update(reviewSessions)
-      .set({
-        reservedSeconds: sql`GREATEST(0, ${reviewSessions.reservedSeconds} - ${item.estimatedSeconds})`,
-        updatedAt: now,
-      })
-      .where(eq(reviewSessions.id, item.sessionId));
-  }
-  await createRetryIfNeeded(tx, {
-    userId: input.userId,
-    submissionId: input.submissionId,
-    grade: input.grade,
-    item,
-  }, now);
-}
-
-async function rebuildQuestionMemoryInTransaction(
-  tx: V2Tx,
-  input: { userId: string; questionId: string },
-  now: Date,
-): Promise<void> {
-  const [settings] = await tx
-    .select({ desiredRetention: learnerSettings.desiredRetention })
-    .from(learnerSettings)
-    .where(eq(learnerSettings.userId, input.userId))
-    .limit(1);
-  const rows = await tx
-    .select({
-      submissionId: answerSubmissions.id,
-      submittedAt: answerSubmissions.submittedAt,
-      eventCreatedAt: gradeEvents.createdAt,
-      value: gradeEvents.value,
-    })
-    .from(answerSubmissions)
-    .innerJoin(
-      gradeEvents,
-      and(
-        eq(gradeEvents.userId, answerSubmissions.userId),
-        eq(gradeEvents.submissionId, answerSubmissions.id),
-      ),
-    )
-    .where(
-      and(
-        eq(answerSubmissions.userId, input.userId),
-        eq(answerSubmissions.questionId, input.questionId),
-        eq(answerSubmissions.status, "graded"),
-      ),
-    )
-    .orderBy(asc(answerSubmissions.submittedAt), asc(gradeEvents.createdAt), asc(gradeEvents.id));
-  const latestBySubmission = new Map<string, (typeof rows)[number]>();
-  for (const row of rows) latestBySubmission.set(row.submissionId, row);
-  const effective = [...latestBySubmission.values()].sort(
-    (left, right) =>
-      left.submittedAt.getTime() - right.submittedAt.getTime() ||
-      left.eventCreatedAt.getTime() - right.eventCreatedAt.getTime(),
-  );
-  let memory: StoredMemoryState | null = null;
-  let priorReviewAt = 0;
-  for (const row of effective) {
-    const reviewAt = new Date(Math.max(row.submittedAt.getTime(), priorReviewAt + 1));
-    memory = applyFsrsGrade({
-      memory,
-      grade: row.value,
-      desiredRetention: settings?.desiredRetention ?? 0.9,
-      now: reviewAt,
-    });
-    priorReviewAt = reviewAt.getTime();
-  }
-  if (!memory) {
-    await tx
-      .delete(memoryStates)
-      .where(
-        and(
-          eq(memoryStates.userId, input.userId),
-          eq(memoryStates.questionId, input.questionId),
-        ),
-      );
-    return;
-  }
-  await tx
-    .insert(memoryStates)
-    .values({
-      userId: input.userId,
-      questionId: input.questionId,
-      dueAt: memory.dueAt,
-      lastReviewAt: memory.lastReviewAt,
-      stability: memory.stability,
-      difficulty: memory.difficulty,
-      elapsedDays: memory.elapsedDays,
-      scheduledDays: memory.scheduledDays,
-      reps: memory.reps,
-      lapses: memory.lapses,
-      state: memory.state,
-      learningSteps: memory.learningSteps,
-      schedulerVersion: SCHEDULER_VERSION,
-    })
-    .onConflictDoUpdate({
-      target: [memoryStates.userId, memoryStates.questionId],
-      set: {
-        dueAt: memory.dueAt,
-        lastReviewAt: memory.lastReviewAt,
-        stability: memory.stability,
-        difficulty: memory.difficulty,
-        elapsedDays: memory.elapsedDays,
-        scheduledDays: memory.scheduledDays,
-        reps: memory.reps,
-        lapses: memory.lapses,
-        state: memory.state,
-        learningSteps: memory.learningSteps,
-        schedulerVersion: SCHEDULER_VERSION,
-        updatedAt: now,
-      },
-    });
-}
-
-export async function submitReviewAnswer(
-  input: {
-    userId: string;
-    itemId: string;
-    answer: string;
-  },
-  dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
-): Promise<V2Evaluation> {
-  const now = dependencies.now();
-  const submissionId = await getV2Db().transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-item:${input.userId}`}))`,
-    );
-    const [item] = await tx
-      .select({
-        id: reviewSessionItems.id,
-        questionId: reviewSessionItems.questionId,
-        questionVersionId: reviewSessionItems.questionVersionId,
-        state: reviewSessionItems.state,
-      })
-      .from(reviewSessionItems)
-      .innerJoin(
-        questionVersions,
-        and(
-          eq(questionVersions.userId, reviewSessionItems.userId),
-          eq(questionVersions.id, reviewSessionItems.questionVersionId),
-        ),
-      )
-      .where(
-        and(
-          eq(reviewSessionItems.userId, input.userId),
-          eq(reviewSessionItems.id, input.itemId),
-        ),
-      )
-      .limit(1);
-    if (!item || item.state !== "exposed") {
-      const [existing] = await tx
-        .select({ id: answerSubmissions.id })
-        .from(answerSubmissions)
-        .where(
-          and(
-            eq(answerSubmissions.userId, input.userId),
-            eq(answerSubmissions.sessionItemId, input.itemId),
-          ),
-        )
-        .limit(1);
-      if (existing) return existing.id;
-      throw new Error("This Review item is no longer answerable.");
-    }
-    const [submission] = await tx
-      .insert(answerSubmissions)
-      .values({
-        userId: input.userId,
-        questionId: item.questionId,
-        questionVersionId: item.questionVersionId,
-        sessionItemId: item.id,
-        answer: input.answer.trim(),
-        submittedAt: now,
-      })
-      .returning({ id: answerSubmissions.id });
-    await tx
-      .update(reviewSessionItems)
-      .set({ state: "submitted", submittedAt: now })
-      .where(eq(reviewSessionItems.id, item.id));
-
-    const [evaluation] = await tx
-      .insert(evaluations)
-      .values({ userId: input.userId, submissionId: submission.id, evaluator: "model" })
-      .returning({ id: evaluations.id });
-    await tx.insert(jobs).values({
-      userId: input.userId,
-      type: "evaluate_submission",
-      idempotencyKey: submission.id,
-      priority: 0,
-      payload: { submissionId: submission.id, evaluationId: evaluation.id },
-    });
-    return submission.id;
-  });
-  return await getEvaluationForSubmission(input.userId, submissionId);
-}
-
-export async function getEvaluationForSubmission(
-  userId: string,
-  submissionId: string,
-): Promise<V2Evaluation> {
-  const db = getV2Db();
-  const [row] = await db
-    .select()
-    .from(evaluations)
-    .where(and(eq(evaluations.userId, userId), eq(evaluations.submissionId, submissionId)))
-    .orderBy(desc(evaluations.createdAt))
-    .limit(1);
-  if (!row) throw new Error("Evaluation not found.");
-  const [effectiveGrade] = await db
-    .select({ value: gradeEvents.value })
-    .from(gradeEvents)
-    .where(and(eq(gradeEvents.userId, userId), eq(gradeEvents.submissionId, submissionId)))
-    .orderBy(desc(gradeEvents.createdAt), desc(gradeEvents.id))
-    .limit(1);
-  const grade = effectiveGrade?.value ?? row.proposedGrade;
-  const status =
-    row.status === "complete" || effectiveGrade
-      ? "complete"
-      : row.status === "failed"
-        ? "failed"
-        : "pending";
-  let nextDueAt: string | null = null;
-  if (status === "complete" && grade) {
-    const [schedule] = await db
-      .select({ dueAt: memoryStates.dueAt })
-      .from(answerSubmissions)
-      .leftJoin(
-        memoryStates,
-        and(
-          eq(memoryStates.userId, answerSubmissions.userId),
-          eq(memoryStates.questionId, answerSubmissions.questionId),
-        ),
-      )
-      .where(
-        and(
-          eq(answerSubmissions.userId, userId),
-          eq(answerSubmissions.id, submissionId),
-        ),
-      )
-      .limit(1);
-    nextDueAt = schedule?.dueAt?.toISOString() ?? null;
-  }
-  return {
-    submissionId,
-    evaluationId: row.id,
-    status,
-    grade,
-    nextDueAt,
-    feedback: row.feedback,
-    expectedAnswer: row.expectedAnswer,
-    coveredPoints: row.coveredPoints,
-    missingPoints: row.missingPoints,
-    demonstratedGap: row.demonstratedGap,
-    confidence: row.confidence,
-    canSelfGrade: true,
-  };
-}
-
-export async function runEvaluationJob(
-  jobId: string,
-  dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
-): Promise<void> {
-  const db = getV2Db();
-  const now = dependencies.now();
-  const job = await claimV2Job(jobId, "evaluate_submission", now);
-  if (!job) return;
-  const submissionId = typeof job.payload.submissionId === "string" ? job.payload.submissionId : "";
-  const evaluationId = typeof job.payload.evaluationId === "string" ? job.payload.evaluationId : "";
-  const [row] = await db
-    .select({
-      submissionStatus: answerSubmissions.status,
-      answer: answerSubmissions.answer,
-      prompt: questionVersions.prompt,
-      referenceAnswer: questionVersions.referenceAnswer,
-    })
-    .from(answerSubmissions)
-    .innerJoin(
-      questionVersions,
-      and(
-        eq(questionVersions.userId, answerSubmissions.userId),
-        eq(questionVersions.id, answerSubmissions.questionVersionId),
-      ),
-    )
-    .where(and(eq(answerSubmissions.userId, job.userId), eq(answerSubmissions.id, submissionId)))
-    .limit(1);
-  if (!row || row.submissionStatus !== "pending") {
-    await db.update(jobs).set({ status: "cancelled", updatedAt: now }).where(eq(jobs.id, jobId));
-    return;
-  }
-  try {
-    const result = await dependencies.evaluateAnswer({
-      userId: job.userId,
-      prompt: row.prompt,
-      referenceAnswer: row.referenceAnswer,
-      answer: row.answer,
-    });
-    if (result.confidence < 0.55) {
-      await db
-        .update(evaluations)
-        .set({
-          status: "failed",
-          feedback: "The evaluator was uncertain. Please self-grade.",
-          expectedAnswer: row.referenceAnswer,
-          confidence: result.confidence,
-          error: "Low confidence",
-          completedAt: now,
-        })
-        .where(eq(evaluations.id, evaluationId));
-    } else {
-      await db.transaction(async (tx) => {
-        const [submission] = await tx
-          .select({ status: answerSubmissions.status })
-          .from(answerSubmissions)
-          .where(eq(answerSubmissions.id, submissionId))
-          .limit(1);
-        if (!submission || submission.status !== "pending") {
-          await tx
-            .update(evaluations)
-            .set({ status: "superseded", completedAt: now })
-            .where(eq(evaluations.id, evaluationId));
-          return;
-        }
-        await tx
-          .update(evaluations)
-          .set({
-            status: "complete",
-            proposedGrade: result.grade,
-            feedback: result.feedback,
-            expectedAnswer: result.expectedAnswer,
-            coveredPoints: result.coveredPoints,
-            missingPoints: result.missingPoints,
-            demonstratedGap: result.demonstratedGap,
-            confidence: result.confidence,
-            completedAt: now,
-          })
-          .where(eq(evaluations.id, evaluationId));
-        await applyGradeInTransaction(tx, {
-          userId: job.userId,
-          submissionId,
-          grade: result.grade,
-          origin: "model",
-          evaluationId,
-        }, now);
-      });
-    }
-    await db
-      .update(jobs)
-      .set({
-        status: "succeeded",
-        progress: 100,
-        lockedUntil: null,
-        result: { submissionId, evaluationId },
-        updatedAt: now,
-      })
-      .where(eq(jobs.id, job.id));
-  } catch (error) {
-    const attempts = job.attempts;
-    await db
-      .update(jobs)
-      .set({
-        status: attempts >= 3 ? "failed" : "pending",
-        runAfter: new Date(now.getTime() + attempts * 30_000),
-        lockedUntil: null,
-        error: error instanceof Error ? error.message.slice(0, 2_000) : "Unknown error",
-        updatedAt: now,
-      })
-      .where(eq(jobs.id, job.id));
-    if (attempts >= 3) {
-      await db
-        .update(evaluations)
-        .set({
-          status: "failed",
-          feedback: "Evaluation failed. Please self-grade.",
-          expectedAnswer: row.referenceAnswer,
-          error: error instanceof Error ? error.message.slice(0, 2_000) : "Unknown error",
-          completedAt: now,
-        })
-        .where(eq(evaluations.id, evaluationId));
-    }
-    throw error;
-  }
-}
-
-export async function runEvaluationForSubmission(
-  userId: string,
-  submissionId: string,
-  dependencies: V2ServiceDependencies = defaultV2ServiceDependencies,
-): Promise<V2Evaluation> {
-  const [job] = await getV2Db()
-    .select({ id: jobs.id })
-    .from(jobs)
-    .where(
-      and(
-        eq(jobs.userId, userId),
-        eq(jobs.type, "evaluate_submission"),
-        eq(jobs.idempotencyKey, submissionId),
-      ),
-    )
-    .limit(1);
-  if (!job) throw new Error("Evaluation job not found.");
-  await runEvaluationJob(job.id, dependencies);
-  return getEvaluationForSubmission(userId, submissionId);
-}
-
-export async function applyLearnerGrade(input: {
-  userId: string;
-  submissionId: string;
-  grade: V2Grade;
-}, dependencies: V2ServiceDependencies = defaultV2ServiceDependencies): Promise<V2Evaluation> {
-  const db = getV2Db();
-  const now = dependencies.now();
-  const [submission] = await db
-    .select()
-    .from(answerSubmissions)
-    .where(
-      and(
-        eq(answerSubmissions.userId, input.userId),
-        eq(answerSubmissions.id, input.submissionId),
-      ),
-    )
-    .limit(1);
-  if (!submission) throw new Error("Submission not found.");
-  await db.transaction(async (tx) => {
-    if (submission.status === "pending") {
-      await applyGradeInTransaction(tx, {
-        userId: input.userId,
-        submissionId: input.submissionId,
-        grade: input.grade,
-        origin: "self",
-      }, now);
-      await tx
-        .update(evaluations)
-        .set({ status: "superseded", completedAt: now })
-        .where(
-          and(
-            eq(evaluations.userId, input.userId),
-            eq(evaluations.submissionId, input.submissionId),
-            eq(evaluations.status, "pending"),
-          ),
-        );
-      return;
-    }
-    const [item] = await tx
-      .select()
-      .from(reviewSessionItems)
-      .where(
-        and(
-          eq(reviewSessionItems.userId, input.userId),
-          eq(reviewSessionItems.id, submission.sessionItemId),
-        ),
-      )
-      .limit(1);
-    if (!item) throw new Error("Review item not found.");
-    await tx.insert(gradeEvents).values({
-      userId: input.userId,
-      submissionId: input.submissionId,
-      value: input.grade,
-      origin: "correction",
-      createdAt: now,
-    });
-    await rebuildQuestionMemoryInTransaction(tx, {
-      userId: input.userId,
-      questionId: submission.questionId,
-    }, now);
-    await createRetryIfNeeded(tx, {
-      userId: input.userId,
-      submissionId: input.submissionId,
-      grade: input.grade,
-      item,
-    }, now);
-  });
-  return await getEvaluationForSubmission(input.userId, input.submissionId);
+  return { questions: questionsOut, counts };
 }
 
 export async function getQuestionLearningEvidence(input: {
@@ -2124,7 +593,7 @@ export async function mutateQuestionLifecycle(input: {
     if (!question) throw new Error("Question not found.");
     if (
       input.action === "restore" &&
-      !ACTIVE_LIFECYCLES.includes(question.lifecycle as V2Lifecycle)
+      question.lifecycle !== "active"
     ) {
       const [duplicate] = await tx
         .select({ id: questions.id })
@@ -2134,7 +603,7 @@ export async function mutateQuestionLifecycle(input: {
             eq(questions.userId, input.userId),
             eq(questions.targetKey, question.targetKey),
             ne(questions.id, question.id),
-            inArray(questions.lifecycle, ACTIVE_LIFECYCLES),
+            eq(questions.lifecycle, "active"),
           ),
         )
         .limit(1);
@@ -2142,73 +611,83 @@ export async function mutateQuestionLifecycle(input: {
         throw new Error("Another Active Question already uses this prompt.");
       }
     }
-    let restoredLifecycle: V2Lifecycle = "new";
-    if (input.action === "restore") {
-      const currentLifecycle = question.lifecycle as V2Lifecycle;
-      const priorLifecycle = question.priorLifecycle as V2Lifecycle | null;
-      if (ACTIVE_LIFECYCLES.includes(currentLifecycle)) {
-        restoredLifecycle = currentLifecycle;
-      } else if (priorLifecycle && ACTIVE_LIFECYCLES.includes(priorLifecycle)) {
-        restoredLifecycle = priorLifecycle;
-      } else {
-        const [memory] = await tx
-          .select({ questionId: memoryStates.questionId })
-          .from(memoryStates)
-          .where(
-            and(
-              eq(memoryStates.userId, input.userId),
-              eq(memoryStates.questionId, input.questionId),
-            ),
-          )
-          .limit(1);
-        restoredLifecycle = memory ? "review" : "new";
-      }
-    }
-    const next: V2Lifecycle =
-      input.action === "archive" ? "archived" : restoredLifecycle;
+    const next: V2QuestionLifecycle =
+      input.action === "archive" ? "archived" : "active";
     await tx
       .update(questions)
       .set({
         lifecycle: next,
-        priorLifecycle:
-          input.action === "restore"
-            ? null
-            : ALL_LIFECYCLES.includes(question.lifecycle as V2Lifecycle)
-              ? (question.lifecycle as V2Lifecycle)
-              : null,
-        suspensionReason: null,
-        deletedAt: null,
         updatedAt: now,
       })
       .where(
         and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)),
       );
-    if (input.action === "archive") {
-      await tx
-        .update(retryObligations)
-        .set({
-          status: "waived",
-          reason: "Learner archived the Question.",
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(retryObligations.userId, input.userId),
-            eq(retryObligations.questionId, input.questionId),
-            inArray(retryObligations.status, ["queued", "deferred", "exposed"]),
-          ),
-        );
-      await tx
-        .update(reviewSessionItems)
-        .set({ state: "invalidated" })
-        .where(
-          and(
-            eq(reviewSessionItems.userId, input.userId),
-            eq(reviewSessionItems.questionId, input.questionId),
-            inArray(reviewSessionItems.state, ["queued", "exposed"]),
-          ),
-        );
+    if (question.lifecycle === "flagged") {
+      await resolveQuestionFlags(tx, input.userId, input.questionId, now);
     }
+  });
+}
+
+export async function flagQuestionInBank(input: {
+  userId: string;
+  questionId: string;
+  reasons?: unknown;
+  detail?: unknown;
+}, dependencies: Pick<V2ServiceDependencies, "now"> = defaultV2ServiceDependencies): Promise<{
+  questionId: string;
+  lifecycle: "flagged";
+  flag: V2QuestionFlag;
+}> {
+  const questionId = input.questionId.trim();
+  if (!questionId) throw new Error("A Question is required.");
+  const normalized = normalizeReviewFlagInput(input);
+  const now = dependencies.now();
+
+  return getV2Db().transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
+    );
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${input.userId}`}))`,
+    );
+    const [question] = await tx
+      .select({ lifecycle: questions.lifecycle })
+      .from(questions)
+      .where(
+        and(eq(questions.userId, input.userId), eq(questions.id, questionId)),
+      )
+      .limit(1);
+    if (!question) throw new Error("Question not found.");
+    if (question.lifecycle !== "active") {
+      throw new Error("This Question is no longer Active.");
+    }
+
+    await tx
+      .update(questions)
+      .set({ lifecycle: "flagged", updatedAt: now })
+      .where(
+        and(eq(questions.userId, input.userId), eq(questions.id, questionId)),
+      );
+    await tx.insert(questionFlags).values({
+      userId: input.userId,
+      questionId,
+      origin: "learner",
+      reasons: normalized.reasons,
+      detail: normalized.detail,
+      createdAt: now,
+    });
+
+    return {
+      questionId,
+      lifecycle: "flagged" as const,
+      flag: {
+        origin: "learner" as const,
+        reasons: normalized.reasons,
+        detail: normalized.detail,
+        createdAt: now.toISOString(),
+        resolvedAt: null,
+      },
+    };
   });
 }
 
@@ -2225,6 +704,13 @@ export async function replaceQuestion(input: {
 }> {
   const now = dependencies.now();
   const normalized = normalizeQuestionInput(input);
+  const assessment = await validateQuestionCandidate(normalized, dependencies);
+  const validationFlag = assessment.outcome === "pass"
+    ? null
+    : {
+        origin: "waxon_validation" as const,
+        reasons: assessment.reasons,
+      };
   return await getV2Db().transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
@@ -2234,19 +720,10 @@ export async function replaceQuestion(input: {
         questionId: questions.id,
         lifecycle: questions.lifecycle,
         targetKey: questions.targetKey,
-        importance: questions.importance,
-        prompt: questionVersions.prompt,
-        referenceAnswer: questionVersions.referenceAnswer,
+        prompt: questions.prompt,
+        referenceAnswer: questions.referenceAnswer,
       })
       .from(questions)
-      .innerJoin(
-        questionVersions,
-        and(
-          eq(questionVersions.userId, questions.userId),
-          eq(questionVersions.questionId, questions.id),
-          eq(questionVersions.isCurrent, true),
-        ),
-      )
       .where(
         and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)),
       )
@@ -2259,7 +736,7 @@ export async function replaceQuestion(input: {
       return {
         questionId: current.questionId,
         archivedQuestionId: null,
-        lifecycle: questionLifecycle(current.lifecycle),
+        lifecycle: current.lifecycle,
         status: "unchanged" as const,
       };
     }
@@ -2272,7 +749,7 @@ export async function replaceQuestion(input: {
           eq(questions.targetKey, normalized.promptKey),
           ne(questions.id, input.questionId),
           normalized.promptKey === current.targetKey
-            ? sql`${questions.lifecycle} NOT IN ('paused', 'archived', 'trash')`
+            ? ne(questions.lifecycle, "archived")
             : undefined,
         ),
       )
@@ -2282,67 +759,43 @@ export async function replaceQuestion(input: {
       .update(questions)
       .set({
         lifecycle: "archived",
-        priorLifecycle: current.lifecycle,
-        suspensionReason: null,
-        deletedAt: null,
         updatedAt: now,
       })
       .where(
         and(eq(questions.userId, input.userId), eq(questions.id, input.questionId)),
       );
+    await resolveQuestionFlags(tx, input.userId, input.questionId, now);
     const [replacement] = await tx
       .insert(questions)
       .values({
         userId: input.userId,
-        lifecycle: "new",
+        prompt: normalized.prompt,
+        referenceAnswer: normalized.referenceAnswer,
+        lifecycle: validationFlag ? "flagged" : "active",
         targetKey: normalized.promptKey,
-        importance: current.importance,
         createdAt: now,
         updatedAt: now,
       })
       .returning({ id: questions.id });
-    const [replacementVersion] = await tx
-      .insert(questionVersions)
-      .values({
+    if (validationFlag) {
+      await tx.insert(questionFlags).values({
         userId: input.userId,
         questionId: replacement.id,
-        version: 1,
-        prompt: normalized.prompt,
-        referenceAnswer: normalized.referenceAnswer,
-        displayAnswer: normalized.referenceAnswer.slice(0, 8_000),
-      })
-      .returning({ id: questionVersions.id });
-    await tx
-      .update(reviewSessionItems)
-      .set({ state: "invalidated" })
-      .where(
-        and(
-          eq(reviewSessionItems.userId, input.userId),
-          eq(reviewSessionItems.questionId, input.questionId),
-          inArray(reviewSessionItems.state, ["queued", "exposed"]),
-        ),
-      );
-    await tx
-      .update(retryObligations)
-      .set({ status: "waived", reason: "Question replaced.", updatedAt: now })
-      .where(
-        and(
-          eq(retryObligations.userId, input.userId),
-          eq(retryObligations.questionId, input.questionId),
-          inArray(retryObligations.status, ["queued", "deferred", "exposed"]),
-        ),
-      );
+        ...validationFlag,
+        createdAt: now,
+      });
+    }
     await tx.insert(jobs).values({
       userId: input.userId,
       type: "embed_question_batch",
-      idempotencyKey: `question-search-v1:${replacement.id}:${replacementVersion.id}`,
+      idempotencyKey: `question-search-v1:${replacement.id}`,
       priority: 2,
       payload: { questionIds: [replacement.id] },
     });
     return {
       questionId: replacement.id,
       archivedQuestionId: current.questionId,
-      lifecycle: "active" as const,
+      lifecycle: validationFlag ? "flagged" as const : "active" as const,
       status: "replaced" as const,
     };
   });
@@ -2370,7 +823,7 @@ export async function runPendingJobs(input: {
   for (const job of pending) {
     try {
       if (job.type === "evaluate_submission") {
-        await runEvaluationJob(job.id);
+        await runLiveEvaluationJob(job.id);
       } else if (job.type === "embed_question_batch") {
         await runQuestionEmbeddingJob(job.id);
       }

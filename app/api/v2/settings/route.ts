@@ -4,8 +4,8 @@ import { getCurrentUser } from "@/app/lib/auth";
 import { isRecord, v2Error } from "@/app/lib/v2/http";
 import {
   getLearnerSettings,
-  updateLearnerSettings,
-} from "@/app/lib/v2/service";
+  updateLearnerTimezone,
+} from "@/app/lib/v2/settings";
 
 export async function GET() {
   try {
@@ -26,25 +26,13 @@ export async function PATCH(request: Request) {
     if (!isRecord(parsed.value)) {
       throw new Error("Settings are required.");
     }
+    if (typeof parsed.value.timezone !== "string") {
+      throw new Error("An IANA timezone is required.");
+    }
     return NextResponse.json(
-      await updateLearnerSettings({
+      await updateLearnerTimezone({
         userId: user.id,
-        dailyMinutes:
-          typeof parsed.value.dailyMinutes === "number"
-            ? parsed.value.dailyMinutes
-            : undefined,
-        desiredRetention:
-          typeof parsed.value.desiredRetention === "number"
-            ? parsed.value.desiredRetention
-            : undefined,
-        newItemsPerDay:
-          typeof parsed.value.newItemsPerDay === "number"
-            ? parsed.value.newItemsPerDay
-            : undefined,
-        timezone:
-          typeof parsed.value.timezone === "string"
-            ? parsed.value.timezone
-            : undefined,
+        timezone: parsed.value.timezone,
       }),
     );
   } catch (error) {

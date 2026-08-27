@@ -11,7 +11,7 @@ import {
 export const QUESTION_SEARCH_EMBEDDING_MODEL =
   DEFAULT_QUESTION_SEARCH_EMBEDDING_MODEL;
 export const QUESTION_SEARCH_EMBEDDING_DIMENSIONS = 512;
-export const QUESTION_SEARCH_SOURCE_VERSION = 1;
+export const QUESTION_SEARCH_EMBEDDING_VERSION = 1;
 export const QUESTION_SEARCH_RRF_K = 60;
 export const QUESTION_SEARCH_TRIGRAM_THRESHOLD = 0.3;
 
@@ -56,18 +56,18 @@ export function resolveQuestionSearchConfig(
   };
 }
 
-export function normalizeQuestionSearchSource(prompt: string): string {
+export function normalizeQuestionSearchPrompt(prompt: string): string {
   return prompt.normalize("NFKC").replace(/\s+/gu, " ").trim();
 }
 
 export function questionSearchEmbeddingInput(prompt: string): string {
-  return `Question:\n${normalizeQuestionSearchSource(prompt)}`;
+  return `Question:\n${normalizeQuestionSearchPrompt(prompt)}`;
 }
 
-export function questionSearchSourceHash(prompt: string): string {
+export function questionSearchPromptHash(prompt: string): string {
   return createHash("sha256")
     .update(
-      `${QUESTION_SEARCH_SOURCE_VERSION}\n${questionSearchEmbeddingInput(prompt)}`,
+      `${QUESTION_SEARCH_EMBEDDING_VERSION}\n${questionSearchEmbeddingInput(prompt)}`,
     )
     .digest("hex");
 }

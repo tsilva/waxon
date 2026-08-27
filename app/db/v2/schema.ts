@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  bigserial,
   boolean,
   check,
+  date,
   doublePrecision,
   foreignKey,
   halfvec,
@@ -29,28 +31,14 @@ const updatedAt = () =>
     .notNull()
     .defaultNow();
 
-export const dataMigrationMarkers = waxonV2.table("data_migration_markers", {
-  name: text("name").primaryKey(),
-  appliedAt: timestamp("applied_at", { withTimezone: true, mode: "date" })
-    .notNull()
-    .defaultNow(),
-});
-
 export const questionLifecycle = waxonV2.enum("question_lifecycle", [
-  "new",
-  "learning",
-  "review",
+  "active",
   "flagged",
-  "paused",
   "archived",
-  "trash",
 ]);
-// Transitional storage only. Remove this enum and column after the generic
-// evaluation release is serving; production migrations run before deployment.
-export const legacyEvaluationKindEnum = waxonV2.enum("answer_mode", [
-  "exact",
-  "semantic",
-  "rubric",
+export const questionFlagOrigin = waxonV2.enum("question_flag_origin", [
+  "waxon_validation",
+  "learner",
 ]);
 export const grade = waxonV2.enum("grade", [
   "again",
@@ -75,34 +63,6 @@ export const evaluationStatus = waxonV2.enum("evaluation_status", [
   "complete",
   "failed",
   "superseded",
-]);
-export const sessionStatus = waxonV2.enum("session_status", [
-  "active",
-  "completed",
-  "abandoned",
-]);
-export const sessionKind = waxonV2.enum("session_kind", [
-  "primary",
-  "supplemental",
-]);
-export const sessionItemKind = waxonV2.enum("session_item_kind", [
-  "base",
-  "retry",
-]);
-export const sessionItemState = waxonV2.enum("session_item_state", [
-  "queued",
-  "exposed",
-  "submitted",
-  "evaluated",
-  "invalidated",
-]);
-export const retryStatus = waxonV2.enum("retry_status", [
-  "queued",
-  "deferred",
-  "cancelled",
-  "waived",
-  "exposed",
-  "completed",
 ]);
 export const jobStatus = waxonV2.enum("job_status", [
   "pending",
@@ -132,10 +92,7 @@ export const learnerSettings = waxonV2.table("learner_settings", {
   userId: text("user_id")
     .primaryKey()
     .references(() => users.id, { onDelete: "cascade" }),
-  dailyMinutes: integer("daily_minutes").notNull().default(10),
-  desiredRetention: doublePrecision("desired_retention").notNull().default(0.9),
-  newItemsPerDay: integer("new_items_per_day").notNull().default(5),
-  timezone: text("timezone").notNull().default("UTC"),
+  timezone: text("timezone"),
   autoAcceptHighConfidence: boolean("auto_accept_high_confidence")
     .notNull()
     .default(true),
@@ -194,14 +151,13 @@ export const questions = waxonV2.table(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    lifecycle: questionLifecycle("lifecycle").notNull().default("new"),
-    priorLifecycle: questionLifecycle("prior_lifecycle"),
-    suspensionReason: text("suspension_reason"),
+    prompt: text("prompt").notNull(),
+    referenceAnswer: text("reference_answer").notNull(),
+    lifecycle: questionLifecycle("lifecycle").notNull().default("active"),
     targetKey: text("target_key").notNull(),
-    importance: doublePrecision("importance").notNull().default(1),
+    creationOrder: bigserial("creation_order", { mode: "number" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
-    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
   },
   (table) => [
     unique("questions_user_id_id_unique").on(table.userId, table.id),
@@ -209,55 +165,47 @@ export const questions = waxonV2.table(
     index("questions_user_target_idx").on(table.userId, table.targetKey),
     uniqueIndex("questions_active_target_unique")
       .on(table.userId, table.targetKey)
-      .where(
-        sql`${table.lifecycle} IN ('new', 'learning', 'review')`,
-      ),
-  ],
-);
-
-export const questionVersions = waxonV2.table(
-  "question_versions",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id").notNull(),
-    questionId: uuid("question_id").notNull(),
-    version: integer("version").notNull(),
-    isCurrent: boolean("is_current").notNull().default(true),
-    prompt: text("prompt").notNull(),
-    referenceAnswer: text("reference_answer").notNull(),
-    displayAnswer: text("display_answer").notNull(),
-    legacyEvaluationKind: legacyEvaluationKindEnum("answer_mode")
-      .notNull()
-      .default("semantic"),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    unique("question_versions_user_id_id_unique").on(table.userId, table.id),
-    unique("question_versions_question_version_unique").on(
-      table.userId,
-      table.questionId,
-      table.version,
-    ),
-    uniqueIndex("question_versions_current_unique")
-      .on(table.userId, table.questionId)
-      .where(sql`${table.isCurrent} = true`),
-    foreignKey({
-      name: "question_versions_question_fk",
-      columns: [table.userId, table.questionId],
-      foreignColumns: [questions.userId, questions.id],
-    }).onDelete("cascade"),
-    index("question_versions_current_search_idx")
-      .using(
+      .where(sql`${table.lifecycle} = 'active'`),
+    index("questions_search_idx").using(
       "gin",
       sql`(
         setweight(to_tsvector('simple', coalesce(${table.prompt}, '')), 'A') ||
         setweight(to_tsvector('simple', coalesce(${table.referenceAnswer}, '')), 'B')
       )`,
-      )
-      .where(sql`${table.isCurrent} = true`),
-    index("question_versions_current_prompt_trgm_idx")
-      .using("gist", sql`${table.prompt} gist_trgm_ops`)
-      .where(sql`${table.isCurrent} = true`),
+    ),
+    index("questions_prompt_trgm_idx").using(
+      "gist",
+      sql`${table.prompt} gist_trgm_ops`,
+    ),
+  ],
+);
+
+export const questionFlags = waxonV2.table(
+  "question_flags",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").notNull(),
+    questionId: uuid("question_id").notNull(),
+    origin: questionFlagOrigin("origin").notNull(),
+    reasons: jsonb("reasons").$type<string[]>().notNull().default([]),
+    detail: text("detail"),
+    createdAt: createdAt(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true, mode: "date" }),
+  },
+  (table) => [
+    foreignKey({
+      name: "question_flags_question_fk",
+      columns: [table.userId, table.questionId],
+      foreignColumns: [questions.userId, questions.id],
+    }).onDelete("cascade"),
+    index("question_flags_question_created_idx").on(
+      table.userId,
+      table.questionId,
+      table.createdAt,
+    ),
+    index("question_flags_unresolved_idx")
+      .on(table.userId, table.questionId)
+      .where(sql`${table.resolvedAt} IS NULL`),
   ],
 );
 
@@ -266,10 +214,9 @@ export const questionSearchEmbeddings = waxonV2.table(
   {
     userId: text("user_id").notNull(),
     questionId: uuid("question_id").notNull(),
-    questionVersionId: uuid("question_version_id").notNull(),
     model: text("model").notNull(),
-    sourceVersion: integer("source_version").notNull(),
-    sourceHash: text("source_hash").notNull(),
+    embeddingVersion: integer("embedding_version").notNull(),
+    promptHash: text("prompt_hash").notNull(),
     embedding: halfvec("embedding", { dimensions: 512 }).notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -281,7 +228,7 @@ export const questionSearchEmbeddings = waxonV2.table(
         table.userId,
         table.questionId,
         table.model,
-        table.sourceVersion,
+        table.embeddingVersion,
       ],
     }),
     foreignKey({
@@ -289,96 +236,10 @@ export const questionSearchEmbeddings = waxonV2.table(
       columns: [table.userId, table.questionId],
       foreignColumns: [questions.userId, questions.id],
     }).onDelete("cascade"),
-    foreignKey({
-      name: "question_search_embeddings_version_fk",
-      columns: [table.userId, table.questionVersionId],
-      foreignColumns: [questionVersions.userId, questionVersions.id],
-    }).onDelete("cascade"),
     index("question_search_embeddings_lookup_idx").on(
       table.userId,
       table.model,
-      table.sourceVersion,
-    ),
-  ],
-);
-
-export const reviewSessions = waxonV2.table(
-  "review_sessions",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    kind: sessionKind("kind").notNull().default("primary"),
-    status: sessionStatus("status").notNull().default("active"),
-    timeBudgetMinutes: integer("time_budget_minutes").notNull(),
-    desiredRetention: doublePrecision("desired_retention").notNull(),
-    estimatedSeconds: integer("estimated_seconds").notNull().default(0),
-    reservedSeconds: integer("reserved_seconds").notNull().default(0),
-    plannedCount: integer("planned_count").notNull().default(0),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-    completedAt: timestamp("completed_at", {
-      withTimezone: true,
-      mode: "date",
-    }),
-  },
-  (table) => [
-    unique("review_sessions_user_id_id_unique").on(table.userId, table.id),
-    uniqueIndex("review_sessions_one_active_per_user")
-      .on(table.userId)
-      .where(sql`${table.status} = 'active'`),
-  ],
-);
-
-export const reviewSessionItems = waxonV2.table(
-  "review_session_items",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id").notNull(),
-    sessionId: uuid("session_id").notNull(),
-    questionId: uuid("question_id").notNull(),
-    questionVersionId: uuid("question_version_id").notNull(),
-    kind: sessionItemKind("kind").notNull().default("base"),
-    position: integer("position").notNull(),
-    state: sessionItemState("state").notNull().default("queued"),
-    earliestAt: timestamp("earliest_at", {
-      withTimezone: true,
-      mode: "date",
-    }).notNull(),
-    exposedAt: timestamp("exposed_at", { withTimezone: true, mode: "date" }),
-    submittedAt: timestamp("submitted_at", { withTimezone: true, mode: "date" }),
-    estimatedSeconds: integer("estimated_seconds").notNull().default(60),
-    isIntroduction: boolean("is_introduction").notNull().default(false),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    unique("review_session_items_user_id_id_unique").on(table.userId, table.id),
-    unique("review_session_items_position_unique").on(
-      table.userId,
-      table.sessionId,
-      table.position,
-    ),
-    foreignKey({
-      name: "review_session_items_session_fk",
-      columns: [table.userId, table.sessionId],
-      foreignColumns: [reviewSessions.userId, reviewSessions.id],
-    }).onDelete("cascade"),
-    foreignKey({
-      name: "review_session_items_question_fk",
-      columns: [table.userId, table.questionId],
-      foreignColumns: [questions.userId, questions.id],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "review_session_items_version_fk",
-      columns: [table.userId, table.questionVersionId],
-      foreignColumns: [questionVersions.userId, questionVersions.id],
-    }).onDelete("restrict"),
-    index("review_session_items_next_idx").on(
-      table.userId,
-      table.sessionId,
-      table.state,
-      table.position,
+      table.embeddingVersion,
     ),
   ],
 );
@@ -389,8 +250,6 @@ export const answerSubmissions = waxonV2.table(
     id: uuid("id").defaultRandom().primaryKey(),
     userId: text("user_id").notNull(),
     questionId: uuid("question_id").notNull(),
-    questionVersionId: uuid("question_version_id").notNull(),
-    sessionItemId: uuid("session_item_id").notNull(),
     answer: text("answer").notNull(),
     status: submissionStatus("status").notNull().default("pending"),
     submittedAt: timestamp("submitted_at", {
@@ -401,21 +260,15 @@ export const answerSubmissions = waxonV2.table(
   },
   (table) => [
     unique("answer_submissions_user_id_id_unique").on(table.userId, table.id),
-    unique("answer_submissions_item_unique").on(table.userId, table.sessionItemId),
+    unique("answer_submissions_user_id_id_question_id_unique").on(
+      table.userId,
+      table.id,
+      table.questionId,
+    ),
     foreignKey({
       name: "answer_submissions_question_fk",
       columns: [table.userId, table.questionId],
       foreignColumns: [questions.userId, questions.id],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "answer_submissions_version_fk",
-      columns: [table.userId, table.questionVersionId],
-      foreignColumns: [questionVersions.userId, questionVersions.id],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "answer_submissions_item_fk",
-      columns: [table.userId, table.sessionItemId],
-      foreignColumns: [reviewSessionItems.userId, reviewSessionItems.id],
     }).onDelete("restrict"),
     index("answer_submissions_pending_question_idx").on(
       table.userId,
@@ -430,6 +283,7 @@ export const evaluations = waxonV2.table(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     userId: text("user_id").notNull(),
+    questionId: uuid("question_id").notNull(),
     submissionId: uuid("submission_id").notNull(),
     status: evaluationStatus("status").notNull().default("pending"),
     evaluator: text("evaluator").notNull(),
@@ -450,9 +304,18 @@ export const evaluations = waxonV2.table(
   (table) => [
     unique("evaluations_user_id_id_unique").on(table.userId, table.id),
     foreignKey({
-      name: "evaluations_submission_fk",
-      columns: [table.userId, table.submissionId],
-      foreignColumns: [answerSubmissions.userId, answerSubmissions.id],
+      name: "evaluations_question_fk",
+      columns: [table.userId, table.questionId],
+      foreignColumns: [questions.userId, questions.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "evaluations_submission_question_fk",
+      columns: [table.userId, table.submissionId, table.questionId],
+      foreignColumns: [
+        answerSubmissions.userId,
+        answerSubmissions.id,
+        answerSubmissions.questionId,
+      ],
     }).onDelete("cascade"),
     index("evaluations_submission_idx").on(table.userId, table.submissionId),
   ],
@@ -463,6 +326,7 @@ export const gradeEvents = waxonV2.table(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     userId: text("user_id").notNull(),
+    questionId: uuid("question_id").notNull(),
     submissionId: uuid("submission_id").notNull(),
     value: grade("grade").notNull(),
     origin: gradeOrigin("origin").notNull(),
@@ -472,9 +336,18 @@ export const gradeEvents = waxonV2.table(
   (table) => [
     unique("grade_events_user_id_id_unique").on(table.userId, table.id),
     foreignKey({
-      name: "grade_events_submission_fk",
-      columns: [table.userId, table.submissionId],
-      foreignColumns: [answerSubmissions.userId, answerSubmissions.id],
+      name: "grade_events_question_fk",
+      columns: [table.userId, table.questionId],
+      foreignColumns: [questions.userId, questions.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "grade_events_submission_question_fk",
+      columns: [table.userId, table.submissionId, table.questionId],
+      foreignColumns: [
+        answerSubmissions.userId,
+        answerSubmissions.id,
+        answerSubmissions.questionId,
+      ],
     }).onDelete("cascade"),
     index("grade_events_submission_created_idx").on(
       table.userId,
@@ -490,6 +363,7 @@ export const memoryStates = waxonV2.table(
     userId: text("user_id").notNull(),
     questionId: uuid("question_id").notNull(),
     dueAt: timestamp("due_at", { withTimezone: true, mode: "date" }).notNull(),
+    dueOn: date("due_on", { mode: "string" }).notNull(),
     lastReviewAt: timestamp("last_review_at", {
       withTimezone: true,
       mode: "date",
@@ -515,48 +389,7 @@ export const memoryStates = waxonV2.table(
       columns: [table.userId, table.questionId],
       foreignColumns: [questions.userId, questions.id],
     }).onDelete("cascade"),
-    index("memory_states_due_idx").on(table.userId, table.dueAt),
-  ],
-);
-
-export const retryObligations = waxonV2.table(
-  "retry_obligations",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    userId: text("user_id").notNull(),
-    firstSubmissionId: uuid("first_submission_id").notNull(),
-    questionId: uuid("question_id").notNull(),
-    questionVersionId: uuid("question_version_id").notNull(),
-    sessionId: uuid("session_id").notNull(),
-    status: retryStatus("status").notNull().default("queued"),
-    earliestAt: timestamp("earliest_at", {
-      withTimezone: true,
-      mode: "date",
-    }).notNull(),
-    reason: text("reason"),
-    createdAt: createdAt(),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    unique("retry_obligations_submission_unique").on(
-      table.userId,
-      table.firstSubmissionId,
-    ),
-    foreignKey({
-      name: "retry_obligations_submission_fk",
-      columns: [table.userId, table.firstSubmissionId],
-      foreignColumns: [answerSubmissions.userId, answerSubmissions.id],
-    }).onDelete("cascade"),
-    foreignKey({
-      name: "retry_obligations_question_fk",
-      columns: [table.userId, table.questionId],
-      foreignColumns: [questions.userId, questions.id],
-    }).onDelete("restrict"),
-    foreignKey({
-      name: "retry_obligations_session_fk",
-      columns: [table.userId, table.sessionId],
-      foreignColumns: [reviewSessions.userId, reviewSessions.id],
-    }).onDelete("cascade"),
+    index("memory_states_due_idx").on(table.userId, table.dueOn),
   ],
 );
 
@@ -617,27 +450,6 @@ export const mutationReceipts = waxonV2.table(
     primaryKey({
       name: "mutation_receipts_pk",
       columns: [table.userId, table.scope, table.key],
-    }),
-  ],
-);
-
-export const usageCounters = waxonV2.table(
-  "usage_counters",
-  {
-    userId: text("user_id").notNull(),
-    dimension: text("dimension").notNull(),
-    windowStart: timestamp("window_start", {
-      withTimezone: true,
-      mode: "date",
-    }).notNull(),
-    used: bigint("used", { mode: "number" }).notNull().default(0),
-    reserved: bigint("reserved", { mode: "number" }).notNull().default(0),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    primaryKey({
-      name: "usage_counters_pk",
-      columns: [table.userId, table.dimension, table.windowStart],
     }),
   ],
 );

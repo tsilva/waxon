@@ -13,7 +13,7 @@ const staticViewAttributes = {
 
 const readerTabs = [
   ["Review", "/review"],
-  ["Library", "/library"],
+  ["Question Bank", "/library"],
 ] as const;
 
 export function AppStaticLoadingView({
@@ -79,10 +79,6 @@ function ReviewRouteLoadingStage() {
     >
       <section className="question-area">
         <div className="question-copy">
-          <div className="review-question-actions review-question-actions-placeholder">
-            <span />
-            <span />
-          </div>
           <h2 className="question-title">Loading next question...</h2>
         </div>
       </section>

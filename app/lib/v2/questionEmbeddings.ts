@@ -4,12 +4,11 @@ import { getV2Db } from "../../db/v2/client.ts";
 import {
   jobs,
   questionSearchEmbeddings,
-  questionVersions,
   questions,
 } from "../../db/v2/schema.ts";
 import {
-  QUESTION_SEARCH_SOURCE_VERSION,
-  questionSearchSourceHash,
+  QUESTION_SEARCH_EMBEDDING_VERSION,
+  questionSearchPromptHash,
   resolveQuestionSearchConfig,
 } from "../../../shared/question-search.mts";
 import { claimV2Job } from "./jobs.ts";
@@ -47,18 +46,9 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
     const current = await db
       .select({
         questionId: questions.id,
-        questionVersionId: questionVersions.id,
-        prompt: questionVersions.prompt,
+        prompt: questions.prompt,
       })
       .from(questions)
-      .innerJoin(
-        questionVersions,
-        and(
-          eq(questionVersions.userId, questions.userId),
-          eq(questionVersions.questionId, questions.id),
-          eq(questionVersions.isCurrent, true),
-        ),
-      )
       .where(
         and(
           eq(questions.userId, job.userId),
@@ -69,8 +59,7 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
     const existing = await db
       .select({
         questionId: questionSearchEmbeddings.questionId,
-        questionVersionId: questionSearchEmbeddings.questionVersionId,
-        sourceHash: questionSearchEmbeddings.sourceHash,
+        promptHash: questionSearchEmbeddings.promptHash,
       })
       .from(questionSearchEmbeddings)
       .where(
@@ -78,8 +67,8 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
           eq(questionSearchEmbeddings.userId, job.userId),
           eq(questionSearchEmbeddings.model, model),
           eq(
-            questionSearchEmbeddings.sourceVersion,
-            QUESTION_SEARCH_SOURCE_VERSION,
+            questionSearchEmbeddings.embeddingVersion,
+            QUESTION_SEARCH_EMBEDDING_VERSION,
           ),
           inArray(questionSearchEmbeddings.questionId, questionIds),
         ),
@@ -91,8 +80,7 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
       const prior = existingByQuestion.get(row.questionId);
       return (
         !prior ||
-        prior.questionVersionId !== row.questionVersionId ||
-        prior.sourceHash !== questionSearchSourceHash(row.prompt)
+        prior.promptHash !== questionSearchPromptHash(row.prompt)
       );
     });
     if (missing.length > 0) {
@@ -106,10 +94,9 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
           missing.map((row, index) => ({
             userId: job.userId,
             questionId: row.questionId,
-            questionVersionId: row.questionVersionId,
             model: embedded.model,
-            sourceVersion: QUESTION_SEARCH_SOURCE_VERSION,
-            sourceHash: questionSearchSourceHash(row.prompt),
+            embeddingVersion: QUESTION_SEARCH_EMBEDDING_VERSION,
+            promptHash: questionSearchPromptHash(row.prompt),
             embedding: embedded.embeddings[index] ?? [],
           })),
         )
@@ -118,11 +105,10 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
             questionSearchEmbeddings.userId,
             questionSearchEmbeddings.questionId,
             questionSearchEmbeddings.model,
-            questionSearchEmbeddings.sourceVersion,
+            questionSearchEmbeddings.embeddingVersion,
           ],
           set: {
-            questionVersionId: sql`excluded.question_version_id`,
-            sourceHash: sql`excluded.source_hash`,
+            promptHash: sql`excluded.prompt_hash`,
             embedding: sql`excluded.embedding`,
             updatedAt: new Date(),
           },
