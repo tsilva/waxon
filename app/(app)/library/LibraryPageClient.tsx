@@ -370,15 +370,6 @@ export default function LibraryPageClient() {
               ))}
             </nav>
           </div>
-          {filter === "flagged" ? (
-            <section className="lean-attention-inbox" aria-label="Flagged Question attention inbox">
-              <Flag />
-              <div>
-                <strong>Attention inbox</strong>
-                <p>Flagged Questions needing a decision.</p>
-              </div>
-            </section>
-          ) : null}
           {message ? <p className="question-bank-message" role="status">{message}</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
           <div className="lean-question-list">

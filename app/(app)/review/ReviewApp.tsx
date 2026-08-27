@@ -12,6 +12,7 @@ import { AnswerComposer } from "@/app/AnswerComposer";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { useToolbarState } from "@/app/ToolbarState";
+import { reviewIntervalLabel } from "@/app/lib/reviewIntervalLabel";
 import { ReviewFlagDialog } from "./ReviewFlagDialog";
 import type {
   V2Grade,
@@ -87,7 +88,8 @@ function FeedbackRow({
     evaluation.status === "failed" || !evaluation.grade
       ? "?"
       : GRADE_DISPLAY[evaluation.grade].value;
-  const dueLabel = scheduledDate(evaluation.nextDueOn);
+  const dueDateLabel = scheduledDate(evaluation.nextDueOn);
+  const dueIntervalLabel = reviewIntervalLabel(evaluation.nextDueOn);
 
   useEffect(() => {
     if (
@@ -256,13 +258,13 @@ function FeedbackRow({
               <ChevronDown className="previous-collapse-icon" aria-hidden="true" />
             </button>
           </span>
-          {dueLabel && evaluation.nextDueOn ? (
+          {dueDateLabel && dueIntervalLabel && evaluation.nextDueOn ? (
             <time
-              aria-label={`Next review scheduled for ${dueLabel}`}
+              aria-label={`Next review on ${dueDateLabel}`}
               className="previous-schedule-label"
               dateTime={evaluation.nextDueOn}
             >
-              Scheduled {dueLabel}
+              {dueIntervalLabel}
             </time>
           ) : null}
         </span>
