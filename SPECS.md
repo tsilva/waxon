@@ -16,7 +16,7 @@ Waxon is a multi-user question bank and adaptive recall-practice system. Learner
 - Waxon must support questions about any topic without topic-specific behavior.
 - A question must be an immutable prompt and answer standard testing one recall target.
 - An answer standard may contain prose or explicit criteria but must not select a separate evaluation mode.
-- Editing a question must create a new active question with reset mastery and archive the original question with its immutable learning evidence.
+- Editing a question must create a new question with reset mastery and archive the original question with its immutable learning evidence; the replacement's quality determines whether it starts Active or Flagged.
 - Active, Flagged, and Archived must be the only question lifecycle states.
 - Learners must be able to add, find, replace, flag, archive, restore, and unflag questions.
 - Archived questions must remain out of Review until restored, and restoration without replacement must preserve their learning evidence.
