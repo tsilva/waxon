@@ -28,6 +28,7 @@ export function ReviewFlagDialog({
   onClose,
   onSubmitted,
   onSubmit,
+  surface = "review",
 }: {
   onClose: () => void;
   onSubmitted: () => void;
@@ -35,6 +36,7 @@ export function ReviewFlagDialog({
     reasons: ReviewFlagReason[];
     detail: string;
   }) => Promise<void>;
+  surface?: "review" | "question-bank";
 }) {
   const [selectedReasons, setSelectedReasons] = useState<ReviewFlagReason[]>([]);
   const [detail, setDetail] = useState("");
@@ -154,7 +156,11 @@ export function ReviewFlagDialog({
       >
         <div className="v2-dialog-heading">
           <div>
-            <span className="v2-kicker">Review attention</span>
+            <span className="v2-kicker">
+              {surface === "question-bank"
+                ? "Question bank attention"
+                : "Review attention"}
+            </span>
             <h2 id="review-flag-title">Flag this Question</h2>
           </div>
           <button
