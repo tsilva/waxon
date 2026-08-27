@@ -5,6 +5,7 @@ import {
   BROWSER_SMOKE_QUESTION_BANK_QUESTION_PROMPT,
   BROWSER_SMOKE_QUESTIONS,
   BROWSER_SMOKE_TIMEZONE_QUESTION,
+  authorizeBrowserAcceptanceEvaluation,
   isBrowserSmokeQuestion,
   shouldUseBrowserAcceptanceEvaluator,
 } from "../app/lib/browserSmokeSupport.ts";
@@ -62,7 +63,7 @@ test("browser acceptance mode selects a dedicated local Learner", () => {
   }
 });
 
-test("deterministic evaluation requires server acceptance support and its dedicated Learner", () => {
+test("request-time evaluation authorization requires every server safety condition", () => {
   const prior = {
     evaluator: process.env.WAXON_BROWSER_SMOKE_EVALUATOR,
     nodeEnv: process.env.NODE_ENV,
@@ -76,7 +77,7 @@ test("deterministic evaluation requires server acceptance support and its dedica
     delete process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT;
 
     assert.equal(
-      shouldUseBrowserAcceptanceEvaluator({
+      authorizeBrowserAcceptanceEvaluation({
         learnerId: browserAcceptanceTestLearner.id,
         prompt: BROWSER_SMOKE_QUESTIONS[0].prompt,
       }),
@@ -85,17 +86,18 @@ test("deterministic evaluation requires server acceptance support and its dedica
     );
 
     delete process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER;
+    Reflect.set(process.env, "NODE_ENV", "development");
     process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT = "1";
 
     assert.equal(
-      shouldUseBrowserAcceptanceEvaluator({
+      authorizeBrowserAcceptanceEvaluation({
         learnerId: browserAcceptanceTestLearner.id,
         prompt: BROWSER_SMOKE_QUESTIONS[0].prompt,
       }),
       true,
     );
     assert.equal(
-      shouldUseBrowserAcceptanceEvaluator({
+      authorizeBrowserAcceptanceEvaluation({
         learnerId: "another-learner",
         prompt: BROWSER_SMOKE_QUESTIONS[0].prompt,
       }),
@@ -105,7 +107,7 @@ test("deterministic evaluation requires server acceptance support and its dedica
 
     Reflect.set(process.env, "NODE_ENV", "production");
     assert.equal(
-      shouldUseBrowserAcceptanceEvaluator({
+      authorizeBrowserAcceptanceEvaluation({
         learnerId: browserAcceptanceTestLearner.id,
         prompt: BROWSER_SMOKE_QUESTIONS[0].prompt,
       }),
@@ -113,15 +115,35 @@ test("deterministic evaluation requires server acceptance support and its dedica
       "production must use the normal evaluator",
     );
 
-    Reflect.set(process.env, "NODE_ENV", "development");
+    process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT = "1";
+    assert.equal(
+      authorizeBrowserAcceptanceEvaluation({
+        learnerId: browserAcceptanceTestLearner.id,
+        prompt: "An unnamed acceptance Question",
+      }),
+      false,
+      "an unnamed Prompt must not receive an authorization marker",
+    );
+
     delete process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT;
     assert.equal(
-      shouldUseBrowserAcceptanceEvaluator({
+      authorizeBrowserAcceptanceEvaluation({
         learnerId: browserAcceptanceTestLearner.id,
         prompt: BROWSER_SMOKE_QUESTIONS[0].prompt,
       }),
       false,
       "development without server acceptance support must use the normal evaluator",
+    );
+
+    process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT = "1";
+    delete process.env.WAXON_BROWSER_SMOKE_EVALUATOR;
+    assert.equal(
+      authorizeBrowserAcceptanceEvaluation({
+        learnerId: browserAcceptanceTestLearner.id,
+        prompt: BROWSER_SMOKE_QUESTIONS[0].prompt,
+      }),
+      false,
+      "development without the evaluator flag must use the normal evaluator",
     );
   } finally {
     for (const [key, value] of Object.entries({
@@ -136,7 +158,42 @@ test("deterministic evaluation requires server acceptance support and its dedica
   }
 });
 
-test("server acceptance support evaluates the dedicated Learner without a public flag or model key", async () => {
+test("job-time evaluation requires the persisted marker and revalidates Learner and Prompt", () => {
+  assert.equal(
+    shouldUseBrowserAcceptanceEvaluator({
+      authorized: true,
+      learnerId: browserAcceptanceTestLearner.id,
+      prompt: BROWSER_SMOKE_QUESTION_BANK_QUESTION_PROMPT,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldUseBrowserAcceptanceEvaluator({
+      authorized: false,
+      learnerId: browserAcceptanceTestLearner.id,
+      prompt: BROWSER_SMOKE_QUESTION_BANK_QUESTION_PROMPT,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldUseBrowserAcceptanceEvaluator({
+      authorized: true,
+      learnerId: "another-learner",
+      prompt: BROWSER_SMOKE_QUESTION_BANK_QUESTION_PROMPT,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldUseBrowserAcceptanceEvaluator({
+      authorized: true,
+      learnerId: browserAcceptanceTestLearner.id,
+      prompt: "An unnamed acceptance Question",
+    }),
+    false,
+  );
+});
+
+test("an authorized job evaluates without request environment or a model key", async () => {
   const prior = {
     evaluator: process.env.WAXON_BROWSER_SMOKE_EVALUATOR,
     nodeEnv: process.env.NODE_ENV,
@@ -146,9 +203,9 @@ test("server acceptance support evaluates the dedicated Learner without a public
   };
   const priorFetch = globalThis.fetch;
   try {
-    Reflect.set(process.env, "NODE_ENV", "development");
-    process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT = "1";
-    process.env.WAXON_BROWSER_SMOKE_EVALUATOR = "1";
+    Reflect.set(process.env, "NODE_ENV", "production");
+    delete process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT;
+    delete process.env.WAXON_BROWSER_SMOKE_EVALUATOR;
     delete process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER;
     delete process.env.OPENROUTER_API_KEY;
     globalThis.fetch = async () => {
@@ -160,6 +217,7 @@ test("server acceptance support evaluates the dedicated Learner without a public
       prompt: BROWSER_SMOKE_QUESTION_BANK_QUESTION_PROMPT,
       referenceAnswer: "A fixture Answer Standard",
       answer: BROWSER_SMOKE_QUESTIONS[0].referenceAnswer,
+      browserAcceptanceEvaluationAuthorized: true,
     });
 
     assert.equal(result.grade, "good");
@@ -228,6 +286,7 @@ test("production and other Learners reach the normal evaluator for acceptance fi
       prompt: BROWSER_SMOKE_QUESTIONS[0].prompt,
       referenceAnswer: "A fixture Answer Standard",
       answer: BROWSER_SMOKE_QUESTIONS[0].referenceAnswer,
+      browserAcceptanceEvaluationAuthorized: true,
     });
     assert.equal(otherLearnerResult.feedback, "Normal evaluator response");
 

@@ -14,7 +14,7 @@
 
 The coordinator is running the issue-scoped suite in the connected native `iab`; the implementation worker did not substitute another browser. Cases remain pending here until the coordinator supplies the completed visible evidence values for the final evidence commit.
 
-The native attempt on `892fd84e7e97e3f462844228b069f8727186a6eb` is superseded and provides no final acceptance evidence. Case 2 remained pending because its background evaluation selected the normal model path and failed without an API key even though the exact acceptance Learner and named Prompt were stored. The repaired candidate instead gates deterministic evaluation on development, server-side acceptance support, the dedicated evaluator flag, the dedicated Learner ID, and a named Prompt; the coordinator will reset and restart all nine cases from the beginning.
+The native attempts on `892fd84e7e97e3f462844228b069f8727186a6eb` and `bd60112447e7570908e22824271fbcf3a2af7d8f` are superseded and provide no final acceptance evidence. In both attempts, Case 2 remained pending because its background evaluation selected the normal model path and failed without an API key even though the exact acceptance Learner and named Prompt were stored. The repaired candidate now authorizes the deterministic evaluator in the development request that submits the Answer, persists that narrow authorization in the evaluation job, and revalidates the dedicated Learner and named Prompt when a production-like Workflow consumer executes the job. The coordinator will reset and restart all nine cases from the beginning.
 
 | Case | Result | Visible assertions |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ The native attempt on `892fd84e7e97e3f462844228b069f8727186a6eb` is superseded a
 | 8. Desktop/narrow responsive and obsolete-control sweep | pending | pending native `iab` run |
 | 9. Console and evidence review | pending | pending native `iab` run |
 
-Console findings: not inspected by this worker because native `iab` was unavailable. The suite requires the coordinator to report all messages and treats unexpected application, hydration, request, or accessibility errors as failures.
+Console findings: not inspected by this worker; the coordinator owns the connected native `iab` run. The suite requires the coordinator to report all messages and treats unexpected application, hydration, request, or accessibility errors as failures.
 
 Screenshots: none captured by this worker. The suite requires these successful-state paths plus a screenshot for every failure or ambiguity:
 
@@ -43,9 +43,9 @@ Screenshots: none captured by this worker. The suite requires these successful-s
 | Command/check | Outcome |
 | --- | --- |
 | `pnpm db:reset -- --confirm-clean-break` with both DB URLs set to the disposable database | passed; clean baseline installed |
-| `pnpm test` with `APPLICATION_CONTRACT_TEST_DATABASE_URL`, `QUESTION_SEARCH_TEST_DATABASE_URL`, and both runtime DB URLs set to the disposable database | passed: 84 tests, 0 failed, 0 skipped |
+| `pnpm test` with `APPLICATION_CONTRACT_TEST_DATABASE_URL`, `QUESTION_SEARCH_TEST_DATABASE_URL`, and both runtime DB URLs set to the disposable database | passed: 86 tests, 0 failed, 0 skipped |
 | repeated browser fixture seed contract | passed: new identities, reset mastery, queue eligibility restored, Archived-predecessor/current-Flagged mixes converge, prior Learning Evidence preserved, unrelated Learner unchanged, unexpected Active Question rejected without mutation |
-| deterministic acceptance evaluator and resolved-answer layout contracts | passed: the evaluator requires development + server acceptance support + its dedicated evaluator flag + the dedicated Learner; the public identity flag alone cannot enable it; production and another Learner call the mocked normal evaluator; metadata remains in the main content grid and cannot cover Answer Grade controls |
+| deterministic acceptance evaluator and resolved-answer layout contracts | passed: an authorized development submission traverses the application boundary, persisted DB job, and production-like Workflow consumer without a model call; authorization is omitted for production-time submissions, other Learners, and unnamed Prompts; job consumption revalidates the persisted marker, Learner, and Prompt; metadata remains in the main content grid and cannot cover Answer Grade controls |
 | exact catalog contract | passed: 13 accepted tables; only Active/Flagged/Archived lifecycle values; obsolete objects absent |
 | `pnpm typecheck` | passed |
 | `pnpm lint` | passed |

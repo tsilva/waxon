@@ -104,6 +104,7 @@ export async function evaluateRecall(input: {
   prompt: string;
   referenceAnswer: string;
   answer: string;
+  browserAcceptanceEvaluationAuthorized?: boolean;
 }): Promise<{
   grade: V2Grade;
   feedback: string;
@@ -115,6 +116,7 @@ export async function evaluateRecall(input: {
 }> {
   if (
     shouldUseBrowserAcceptanceEvaluator({
+      authorized: input.browserAcceptanceEvaluationAuthorized === true,
       learnerId: input.userId,
       prompt: input.prompt,
     })

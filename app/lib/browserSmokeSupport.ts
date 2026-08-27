@@ -62,15 +62,37 @@ export function isBrowserSmokeQuestion(prompt: string): boolean {
   );
 }
 
-export function shouldUseBrowserAcceptanceEvaluator(input: {
+type BrowserAcceptanceEvaluationIdentity = {
   learnerId: string;
   prompt: string;
-}): boolean {
+};
+
+function matchesBrowserAcceptanceEvaluation(
+  input: BrowserAcceptanceEvaluationIdentity,
+): boolean {
+  return (
+    input.learnerId === browserAcceptanceTestLearner.id &&
+    isBrowserSmokeQuestion(input.prompt)
+  );
+}
+
+export function authorizeBrowserAcceptanceEvaluation(
+  input: BrowserAcceptanceEvaluationIdentity,
+): boolean {
   return (
     process.env.NODE_ENV === "development" &&
     process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT === "1" &&
     process.env.WAXON_BROWSER_SMOKE_EVALUATOR === "1" &&
-    input.learnerId === browserAcceptanceTestLearner.id &&
-    isBrowserSmokeQuestion(input.prompt)
+    matchesBrowserAcceptanceEvaluation(input)
+  );
+}
+
+export function shouldUseBrowserAcceptanceEvaluator(
+  input: BrowserAcceptanceEvaluationIdentity & {
+    authorized: boolean;
+  },
+): boolean {
+  return (
+    input.authorized === true && matchesBrowserAcceptanceEvaluation(input)
   );
 }
