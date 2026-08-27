@@ -13,6 +13,7 @@ import {
   readLatexMathGroup,
   renderLatexCommandText,
   renderLatexMathbbText,
+  renderLatexMathcalText,
 } from "@/app/lib/latexMath";
 
 type InlineMarkdownOptions = {
@@ -40,6 +41,14 @@ type MarkdownBlockOptions = Required<
     "codeBlockClassName" | "enableCodeBlocks" | "enableHeadings" | "enableMath" | "headingClassName"
   >
 >;
+
+function repairEmphasizedInlineMathDelimiters(text: string): string {
+  return text.replace(
+    /(\*{1,3})\$\1(\*{1,3})([^$\n]+)\$\2/gu,
+    (_match, _delimiterEmphasis, _expressionEmphasis, expression: string) =>
+      `$${expression}$`,
+  );
+}
 
 function findClosingDelimiter(
   source: string,
@@ -144,6 +153,20 @@ function renderMathNodes(expression: string): ReactNode[] {
           </span>,
         );
         index = blackboard.nextIndex;
+        continue;
+      }
+    }
+
+    if (expression.startsWith("\\mathcal", index)) {
+      const calligraphic = readLatexMathGroup(expression, index + "\\mathcal".length);
+
+      if (calligraphic) {
+        nodes.push(
+          <span className="math-calligraphic" key={`mathcal-${index}`}>
+            {renderLatexMathcalText(decodeLatexText(calligraphic.content))}
+          </span>,
+        );
+        index = calligraphic.nextIndex;
         continue;
       }
     }
@@ -343,7 +366,10 @@ export function MarkdownInline({
   enableMath = false,
   text,
 }: MarkdownInlineProps) {
-  const lines = text.split("\n");
+  const normalizedText = enableMath
+    ? repairEmphasizedInlineMathDelimiters(text)
+    : text;
+  const lines = normalizedText.split("\n");
 
   return (
     <Element className={className}>
@@ -562,7 +588,10 @@ export function MarkdownContent({
   headingClassName = "markdown-heading",
   text,
 }: MarkdownContentProps) {
-  const blocks = text.trim().split(/\n{2,}/);
+  const normalizedText = enableMath
+    ? repairEmphasizedInlineMathDelimiters(text)
+    : text;
+  const blocks = normalizedText.trim().split(/\n{2,}/);
   const options: MarkdownBlockOptions = {
     codeBlockClassName,
     enableCodeBlocks,

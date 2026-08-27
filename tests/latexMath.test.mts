@@ -10,6 +10,7 @@ import {
   readLatexMathGroup,
   renderLatexCommandText,
   renderLatexMathbbText,
+  renderLatexMathcalText,
 } from "../app/lib/latexMath.ts";
 
 test("renderLatexCommandText hides transparent TeX delimiter commands", () => {
@@ -20,8 +21,10 @@ test("renderLatexCommandText hides transparent TeX delimiter commands", () => {
 test("renderLatexCommandText maps supported math symbols and keeps unknown operators readable", () => {
   assert.equal(renderLatexCommandText("approx"), "≈");
   assert.equal(renderLatexCommandText("sum"), "∑");
+  assert.equal(renderLatexCommandText("tau"), "τ");
   assert.equal(renderLatexCommandText("pi"), "π");
   assert.equal(renderLatexCommandText("mid"), "∣");
+  assert.equal(renderLatexCommandText("parallel"), "∥");
   assert.equal(renderLatexCommandText("ln"), "ln");
   assert.equal(renderLatexCommandText("exp"), "exp");
   assert.equal(renderLatexCommandText("div"), "÷");
@@ -51,6 +54,11 @@ test("readLatexMathAtom keeps TeX commands intact for scripts and accents", () =
 test("renderLatexMathbbText renders blackboard-bold number sets", () => {
   assert.equal(renderLatexMathbbText("R"), "ℝ");
   assert.equal(renderLatexMathbbText("CNQZ"), "ℂℕℚℤ");
+});
+
+test("renderLatexMathcalText renders calligraphic Latin letters", () => {
+  assert.equal(renderLatexMathcalText("X"), "𝒳");
+  assert.equal(renderLatexMathcalText("ABCxyz"), "𝒜ℬ𝒞𝓍𝓎𝓏");
 });
 
 test("renderLatexCommandText treats TeX spacing commands as spacing", () => {

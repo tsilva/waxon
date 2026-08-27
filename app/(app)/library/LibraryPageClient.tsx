@@ -22,6 +22,10 @@ import type {
   V2Question,
 } from "@/app/lib/v2/types";
 import { REVIEW_FLAG_REASON_LABELS } from "@/app/lib/v2/reviewFlag";
+import {
+  LIBRARY_ARCHIVE_FADE_MS,
+  removeArchivedQuestionFromView,
+} from "@/app/lib/libraryArchiveTransition";
 
 const EMPTY_DATA: V2LibraryResponse = {
   questions: [],
@@ -250,18 +254,23 @@ function McpDialog({ onClose }: { onClose: () => void }) {
 
 function QuestionRow({
   question,
+  isRemoving,
   onEdit,
   onFlag,
   onAction,
 }: {
   question: V2Question;
+  isRemoving: boolean;
   onEdit: () => void;
   onFlag: () => void;
   onAction: (action: "archive" | "restore") => void;
 }) {
   const unresolvedFlags = question.flags.filter((flag) => !flag.resolvedAt);
   return (
-    <article className="lean-question-row">
+    <article
+      aria-busy={isRemoving ? true : undefined}
+      className={`lean-question-row${isRemoving ? " lean-question-row-removing" : ""}`}
+    >
       <div className="lean-question-copy">
         <div className="lean-question-meta">
           <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle[0]?.toUpperCase()}{question.lifecycle.slice(1)}</span>
@@ -299,10 +308,10 @@ function QuestionRow({
         </details>
       </div>
       <div className="lean-question-actions">
-        <button aria-label="Replace question" onClick={onEdit} title={question.lifecycle === "flagged" ? "Replace with a new Question" : "Replace"} type="button"><Pencil /></button>
-        {question.lifecycle === "active" ? <button aria-label="Flag question" onClick={onFlag} title="Flag" type="button"><Flag /></button> : null}
-        {question.lifecycle !== "archived" ? <button aria-label="Archive question" onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
-        {question.lifecycle !== "active" ? <button aria-label="Restore question" onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
+        <button aria-label="Replace question" disabled={isRemoving} onClick={onEdit} title={question.lifecycle === "flagged" ? "Replace with a new Question" : "Replace"} type="button"><Pencil /></button>
+        {question.lifecycle === "active" ? <button aria-label="Flag question" disabled={isRemoving} onClick={onFlag} title="Flag" type="button"><Flag /></button> : null}
+        {question.lifecycle !== "archived" ? <button aria-label="Archive question" disabled={isRemoving} onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
+        {question.lifecycle !== "active" ? <button aria-label="Restore question" disabled={isRemoving} onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
       </div>
     </article>
   );
@@ -318,6 +327,10 @@ export default function LibraryPageClient() {
   const [editing, setEditing] = useState<V2Question | null | undefined>(undefined);
   const [flagging, setFlagging] = useState<V2Question | null>(null);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const [removingQuestionIds, setRemovingQuestionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [archiveAnnouncement, setArchiveAnnouncement] = useState(0);
 
   const load = useCallback(async () => {
     const params = new URLSearchParams();
@@ -339,12 +352,52 @@ export default function LibraryPageClient() {
 
   async function questionAction(questionId: string, action: "archive" | "restore") {
     setError(null);
+
+    if (action === "archive") {
+      const scrollLeft = window.scrollX;
+      const scrollTop = window.scrollY;
+      const fadeDuration =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? 0
+          : LIBRARY_ARCHIVE_FADE_MS;
+
+      setRemovingQuestionIds((current) => new Set(current).add(questionId));
+
+      try {
+        await Promise.all([
+          jsonRequest("/api/v2/library", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ questionId, action }),
+          }),
+          new Promise((resolve) => window.setTimeout(resolve, fadeDuration)),
+        ]);
+        setData((current) => removeArchivedQuestionFromView(current, questionId));
+        setArchiveAnnouncement((current) => current + 1);
+        setRemovingQuestionIds((current) => {
+          const next = new Set(current);
+          next.delete(questionId);
+          return next;
+        });
+        window.requestAnimationFrame(() => window.scrollTo(scrollLeft, scrollTop));
+      } catch (caught) {
+        setRemovingQuestionIds((current) => {
+          const next = new Set(current);
+          next.delete(questionId);
+          return next;
+        });
+        throw caught;
+      }
+      return;
+    }
+
     await jsonRequest("/api/v2/library", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ questionId, action }),
     });
-    setMessage(action === "restore" ? "Question restored." : "Question archived.");
+    setMessage("Question restored.");
     await load();
   }
 
@@ -375,6 +428,7 @@ export default function LibraryPageClient() {
           <div className="lean-question-list">
             {loading ? <div className="question-bank-empty"><LoaderCircle className="v2-spin" /><p>Loading questions…</p></div> : data.questions.length > 0 ? data.questions.map((question) => (
               <QuestionRow
+                isRemoving={removingQuestionIds.has(question.id)}
                 key={question.id}
                 onAction={(action) => void questionAction(question.id, action).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not update question."))}
                 onEdit={() => setEditing(question)}
@@ -383,6 +437,11 @@ export default function LibraryPageClient() {
               />
             )) : <div className="question-bank-empty"><h2>{search ? "No matching questions" : filter === "flagged" ? "No Questions need attention" : filter === "archived" ? "No Archived Questions" : "Your Library is empty"}</h2><p>{search ? "Try a different phrase or filter." : filter === "flagged" ? "Nothing is waiting for attention." : filter === "archived" ? "Nothing is out of circulation." : "Add one clear Prompt and its Answer Standard."}</p>{!search && (filter === "all" || filter === "active") ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
           </div>
+          {archiveAnnouncement > 0 ? (
+            <p className="sr-only" key={archiveAnnouncement} role="status">
+              Question archived.
+            </p>
+          ) : null}
         </div>
       </section>
       {editing !== undefined ? <QuestionDialog question={editing} onClose={() => setEditing(undefined)} onSaved={async (nextMessage) => { setMessage(nextMessage); await load(); }} /> : null}
