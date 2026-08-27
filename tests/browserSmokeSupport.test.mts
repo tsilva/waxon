@@ -62,16 +62,30 @@ test("browser acceptance mode selects a dedicated local Learner", () => {
   }
 });
 
-test("deterministic evaluation requires development acceptance mode and its dedicated Learner", () => {
+test("deterministic evaluation requires server acceptance support and its dedicated Learner", () => {
   const prior = {
-    acceptance: process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER,
     evaluator: process.env.WAXON_BROWSER_SMOKE_EVALUATOR,
     nodeEnv: process.env.NODE_ENV,
+    publicIdentity: process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER,
+    support: process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT,
   };
   try {
     Reflect.set(process.env, "NODE_ENV", "development");
-    process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER = "1";
     process.env.WAXON_BROWSER_SMOKE_EVALUATOR = "1";
+    process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER = "1";
+    delete process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT;
+
+    assert.equal(
+      shouldUseBrowserAcceptanceEvaluator({
+        learnerId: browserAcceptanceTestLearner.id,
+        prompt: BROWSER_SMOKE_QUESTIONS[0].prompt,
+      }),
+      false,
+      "the public identity flag must not enable server evaluation support",
+    );
+
+    delete process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER;
+    process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT = "1";
 
     assert.equal(
       shouldUseBrowserAcceptanceEvaluator({
@@ -100,20 +114,21 @@ test("deterministic evaluation requires development acceptance mode and its dedi
     );
 
     Reflect.set(process.env, "NODE_ENV", "development");
-    delete process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER;
+    delete process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT;
     assert.equal(
       shouldUseBrowserAcceptanceEvaluator({
         learnerId: browserAcceptanceTestLearner.id,
         prompt: BROWSER_SMOKE_QUESTIONS[0].prompt,
       }),
       false,
-      "development without acceptance mode must use the normal evaluator",
+      "development without server acceptance support must use the normal evaluator",
     );
   } finally {
     for (const [key, value] of Object.entries({
-      NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER: prior.acceptance,
       WAXON_BROWSER_SMOKE_EVALUATOR: prior.evaluator,
       NODE_ENV: prior.nodeEnv,
+      NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER: prior.publicIdentity,
+      WAXON_ENABLE_BROWSER_SMOKE_SUPPORT: prior.support,
     })) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
@@ -121,19 +136,62 @@ test("deterministic evaluation requires development acceptance mode and its dedi
   }
 });
 
+test("server acceptance support evaluates the dedicated Learner without a public flag or model key", async () => {
+  const prior = {
+    evaluator: process.env.WAXON_BROWSER_SMOKE_EVALUATOR,
+    nodeEnv: process.env.NODE_ENV,
+    openRouterKey: process.env.OPENROUTER_API_KEY,
+    publicIdentity: process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER,
+    support: process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT,
+  };
+  const priorFetch = globalThis.fetch;
+  try {
+    Reflect.set(process.env, "NODE_ENV", "development");
+    process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT = "1";
+    process.env.WAXON_BROWSER_SMOKE_EVALUATOR = "1";
+    delete process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER;
+    delete process.env.OPENROUTER_API_KEY;
+    globalThis.fetch = async () => {
+      throw new Error("The normal evaluator must not be called.");
+    };
+    const { evaluateRecall } = await import("../app/lib/v2/model.ts");
+    const result = await evaluateRecall({
+      userId: browserAcceptanceTestLearner.id,
+      prompt: BROWSER_SMOKE_QUESTION_BANK_QUESTION_PROMPT,
+      referenceAnswer: "A fixture Answer Standard",
+      answer: BROWSER_SMOKE_QUESTIONS[0].referenceAnswer,
+    });
+
+    assert.equal(result.grade, "good");
+    assert.equal(result.feedback, "The smoke-test answer matched.");
+  } finally {
+    globalThis.fetch = priorFetch;
+    for (const [key, value] of Object.entries({
+      WAXON_BROWSER_SMOKE_EVALUATOR: prior.evaluator,
+      NODE_ENV: prior.nodeEnv,
+      OPENROUTER_API_KEY: prior.openRouterKey,
+      NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER: prior.publicIdentity,
+      WAXON_ENABLE_BROWSER_SMOKE_SUPPORT: prior.support,
+    })) {
+      if (value === undefined) Reflect.deleteProperty(process.env, key);
+      else Reflect.set(process.env, key, value);
+    }
+  }
+});
+
 test("production and other Learners reach the normal evaluator for acceptance fixture Prompts", async () => {
   const prior = {
-    acceptance: process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER,
     databaseUrl: process.env.DATABASE_URL,
     evaluator: process.env.WAXON_BROWSER_SMOKE_EVALUATOR,
     nodeEnv: process.env.NODE_ENV,
     openRouterKey: process.env.OPENROUTER_API_KEY,
+    support: process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT,
   };
   const priorFetch = globalThis.fetch;
   const normalEvaluatorLearners: string[] = [];
   try {
-    process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER = "1";
     process.env.WAXON_BROWSER_SMOKE_EVALUATOR = "1";
+    process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT = "1";
     process.env.OPENROUTER_API_KEY = "test-only-key";
     delete process.env.DATABASE_URL;
     globalThis.fetch = async (_input, init) => {
@@ -188,11 +246,11 @@ test("production and other Learners reach the normal evaluator for acceptance fi
   } finally {
     globalThis.fetch = priorFetch;
     for (const [key, value] of Object.entries({
-      NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER: prior.acceptance,
       DATABASE_URL: prior.databaseUrl,
       WAXON_BROWSER_SMOKE_EVALUATOR: prior.evaluator,
       NODE_ENV: prior.nodeEnv,
       OPENROUTER_API_KEY: prior.openRouterKey,
+      WAXON_ENABLE_BROWSER_SMOKE_SUPPORT: prior.support,
     })) {
       if (value === undefined) Reflect.deleteProperty(process.env, key);
       else Reflect.set(process.env, key, value);

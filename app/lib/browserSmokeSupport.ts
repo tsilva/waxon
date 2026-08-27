@@ -1,6 +1,5 @@
 import {
   browserAcceptanceTestLearner,
-  isBrowserAcceptanceLearnerEnabled,
 } from "@/app/lib/localTestAuth";
 
 export const BROWSER_SMOKE_CORRECT_TOKEN = "browser-smoke-correct-token";
@@ -69,8 +68,8 @@ export function shouldUseBrowserAcceptanceEvaluator(input: {
 }): boolean {
   return (
     process.env.NODE_ENV === "development" &&
+    process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT === "1" &&
     process.env.WAXON_BROWSER_SMOKE_EVALUATOR === "1" &&
-    isBrowserAcceptanceLearnerEnabled() &&
     input.learnerId === browserAcceptanceTestLearner.id &&
     isBrowserSmokeQuestion(input.prompt)
   );
