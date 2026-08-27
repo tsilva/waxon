@@ -12,6 +12,7 @@ import {
   REVIEW_FLAG_REASONS,
 } from "../app/lib/v2/reviewFlag.ts";
 import { applyFsrsGrade } from "../app/lib/v2/scheduler.ts";
+import { v2Error } from "../app/lib/v2/http.ts";
 
 const now = new Date("2026-07-25T10:00:00.000Z");
 
@@ -183,4 +184,14 @@ test("Review Flag input accepts empty data and normalizes known multi-select rea
     () => normalizeReviewFlagInput({ reasons: ["unknown_reason"] }),
     /recognized Flag Reason/u,
   );
+});
+
+test("a stale Question Bank Flag lifecycle is an HTTP conflict", async () => {
+  const response = v2Error(new Error("This Question is no longer Active."));
+
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    ok: false,
+    error: "This Question is no longer Active.",
+  });
 });

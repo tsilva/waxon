@@ -647,6 +647,9 @@ export async function flagQuestionInBank(input: {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
     );
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${input.userId}`}))`,
+    );
     const [question] = await tx
       .select({ lifecycle: questions.lifecycle })
       .from(questions)
@@ -656,7 +659,7 @@ export async function flagQuestionInBank(input: {
       .limit(1);
     if (!question) throw new Error("Question not found.");
     if (question.lifecycle !== "active") {
-      throw new Error("Only an Active Question can be Flagged.");
+      throw new Error("This Question is no longer Active.");
     }
 
     await tx

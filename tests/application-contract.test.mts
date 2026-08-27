@@ -847,6 +847,14 @@ test(
               resolvedAt: null,
             },
           });
+          await assert.rejects(
+            learner.direct.questionBank.flag({
+              questionId: practicedQuestionId,
+              reasons: [],
+              detail: "",
+            }),
+            /no longer Active/u,
+          );
           assert.equal(
             (await learner.direct.review.open()).question?.questionId,
             queueHeadQuestionId,
@@ -919,6 +927,117 @@ test(
             ]),
           );
           evaluation.setGrade("good");
+        },
+      );
+
+      await suite.test(
+        "Question Bank Flagging serializes ahead of a concurrent Review answer",
+        async () => {
+          const { getV2Client } = await import("../app/db/v2/client.ts");
+          const { pool } = getV2Client();
+          const learner = await provisionLearner(
+            "Serialized Question Bank flag learner",
+          );
+          const added = await learner.direct.questionBank.add({
+            idempotencyKey: "serialized-question-bank-flag-question",
+            items: [
+              {
+                prompt: "Which mutation wins when bank Flagging queues first?",
+                referenceAnswer:
+                  "The Flag commits before a concurrent Review answer can be accepted.",
+              },
+            ],
+          });
+          const questionId = added.results[0]?.id ?? "";
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            questionId,
+          );
+          const evidenceBefore = await learner.direct.questionBank.evidence(
+            questionId,
+          );
+
+          async function waitForAdvisoryWaiters(expected: number) {
+            for (let attempt = 0; attempt < 200; attempt += 1) {
+              const result = await pool.query<{ count: number }>(
+                `SELECT count(*)::integer AS count
+                   FROM pg_stat_activity
+                  WHERE datname = current_database()
+                    AND wait_event = 'advisory'`,
+              );
+              if ((result.rows[0]?.count ?? 0) >= expected) return;
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+            throw new Error(
+              `Timed out waiting for ${expected} advisory-lock waiters.`,
+            );
+          }
+
+          const blocker = await pool.connect();
+          let transactionOpen = false;
+          let flagging:
+            | ReturnType<typeof learner.direct.questionBank.flag>
+            | undefined;
+          let answering:
+            | ReturnType<typeof learner.direct.review.submitAnswer>
+            | undefined;
+          try {
+            await blocker.query("BEGIN");
+            transactionOpen = true;
+            await blocker.query(
+              "SELECT pg_advisory_xact_lock(hashtext($1))",
+              [`review-queue:${learner.id}`],
+            );
+
+            flagging = learner.direct.questionBank.flag({
+              questionId,
+              reasons: ["prompt_unclear"],
+              detail: "Flagging queued before the Review answer.",
+            });
+            await Promise.race([
+              waitForAdvisoryWaiters(1),
+              flagging.then(() => {
+                throw new Error(
+                  "Question Bank Flagging did not serialize on the Review Queue.",
+                );
+              }),
+            ]);
+
+            answering = learner.direct.review.submitAnswer({
+              questionId,
+              answer: "This answer must lose the serialized race.",
+              idempotencyKey: "serialized-question-bank-flag-answer",
+            });
+            const answerRejected = assert.rejects(
+              answering,
+              /no longer available in Review/u,
+            );
+            await waitForAdvisoryWaiters(2);
+            await blocker.query("COMMIT");
+            transactionOpen = false;
+
+            const [flagged] = await Promise.all([flagging, answerRejected]);
+            assert.equal(flagged.questionId, questionId);
+            assert.equal(flagged.lifecycle, "flagged");
+          } finally {
+            if (transactionOpen) await blocker.query("ROLLBACK");
+            const pendingOperations: Promise<unknown>[] = [];
+            if (flagging) pendingOperations.push(flagging);
+            if (answering) pendingOperations.push(answering);
+            await Promise.allSettled(pendingOperations);
+            blocker.release();
+          }
+
+          assert.deepEqual(
+            await learner.direct.questionBank.evidence(questionId),
+            evidenceBefore,
+          );
+          assert.deepEqual(
+            (
+              await learner.direct.questionBank.list({ lifecycle: "flagged" })
+            ).questions.map((question) => question.id),
+            [questionId],
+          );
         },
       );
 

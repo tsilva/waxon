@@ -15,7 +15,7 @@ import {
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
-import { ReviewFlagDialog } from "@/app/(app)/review/ReviewFlagDialog";
+import { QuestionBankFlagDialog } from "@/app/(app)/library/QuestionBankFlagDialog";
 import type {
   V2LibraryResponse,
   V2QuestionLifecycle,
@@ -386,9 +386,14 @@ export default function LibraryPageClient() {
         </div>
       </section>
       {editing !== undefined ? <QuestionDialog question={editing} onClose={() => setEditing(undefined)} onSaved={async (nextMessage) => { setMessage(nextMessage); await load(); }} /> : null}
-      {flagging ? <ReviewFlagDialog
+      {flagging ? <QuestionBankFlagDialog
         onClose={() => setFlagging(null)}
-        onSubmit={async ({ reasons, detail }) => {
+        onCommitted={() => {
+          setMessage("Question moved to Flagged for attention.");
+          document.getElementById("library-panel")?.focus();
+        }}
+        onFlag={async ({ reasons, detail }) => {
+          setError(null);
           await jsonRequest("/api/v2/library", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
@@ -399,13 +404,9 @@ export default function LibraryPageClient() {
               detail,
             }),
           });
-          await load();
         }}
-        onSubmitted={() => {
-          setMessage("Question moved to Flagged for attention.");
-          document.getElementById("library-panel")?.focus();
-        }}
-        surface="question-bank"
+        onRefresh={load}
+        onRefreshError={setError}
       /> : null}
       {mcpOpen ? <McpDialog onClose={() => setMcpOpen(false)} /> : null}
     </main>
