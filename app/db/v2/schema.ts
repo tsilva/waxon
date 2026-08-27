@@ -31,13 +31,6 @@ const updatedAt = () =>
     .notNull()
     .defaultNow();
 
-export const dataMigrationMarkers = waxonV2.table("data_migration_markers", {
-  name: text("name").primaryKey(),
-  appliedAt: timestamp("applied_at", { withTimezone: true, mode: "date" })
-    .notNull()
-    .defaultNow(),
-});
-
 export const questionLifecycle = waxonV2.enum("question_lifecycle", [
   "active",
   "flagged",
@@ -222,8 +215,8 @@ export const questionSearchEmbeddings = waxonV2.table(
     userId: text("user_id").notNull(),
     questionId: uuid("question_id").notNull(),
     model: text("model").notNull(),
-    sourceVersion: integer("source_version").notNull(),
-    sourceHash: text("source_hash").notNull(),
+    embeddingVersion: integer("embedding_version").notNull(),
+    promptHash: text("prompt_hash").notNull(),
     embedding: halfvec("embedding", { dimensions: 512 }).notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -235,7 +228,7 @@ export const questionSearchEmbeddings = waxonV2.table(
         table.userId,
         table.questionId,
         table.model,
-        table.sourceVersion,
+        table.embeddingVersion,
       ],
     }),
     foreignKey({
@@ -246,7 +239,7 @@ export const questionSearchEmbeddings = waxonV2.table(
     index("question_search_embeddings_lookup_idx").on(
       table.userId,
       table.model,
-      table.sourceVersion,
+      table.embeddingVersion,
     ),
   ],
 );
@@ -457,27 +450,6 @@ export const mutationReceipts = waxonV2.table(
     primaryKey({
       name: "mutation_receipts_pk",
       columns: [table.userId, table.scope, table.key],
-    }),
-  ],
-);
-
-export const usageCounters = waxonV2.table(
-  "usage_counters",
-  {
-    userId: text("user_id").notNull(),
-    dimension: text("dimension").notNull(),
-    windowStart: timestamp("window_start", {
-      withTimezone: true,
-      mode: "date",
-    }).notNull(),
-    used: bigint("used", { mode: "number" }).notNull().default(0),
-    reserved: bigint("reserved", { mode: "number" }).notNull().default(0),
-    updatedAt: updatedAt(),
-  },
-  (table) => [
-    primaryKey({
-      name: "usage_counters_pk",
-      columns: [table.userId, table.dimension, table.windowStart],
     }),
   ],
 );

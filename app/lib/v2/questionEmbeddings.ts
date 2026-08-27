@@ -7,8 +7,8 @@ import {
   questions,
 } from "../../db/v2/schema.ts";
 import {
-  QUESTION_SEARCH_SOURCE_VERSION,
-  questionSearchSourceHash,
+  QUESTION_SEARCH_EMBEDDING_VERSION,
+  questionSearchPromptHash,
   resolveQuestionSearchConfig,
 } from "../../../shared/question-search.mts";
 import { claimV2Job } from "./jobs.ts";
@@ -59,7 +59,7 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
     const existing = await db
       .select({
         questionId: questionSearchEmbeddings.questionId,
-        sourceHash: questionSearchEmbeddings.sourceHash,
+        promptHash: questionSearchEmbeddings.promptHash,
       })
       .from(questionSearchEmbeddings)
       .where(
@@ -67,8 +67,8 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
           eq(questionSearchEmbeddings.userId, job.userId),
           eq(questionSearchEmbeddings.model, model),
           eq(
-            questionSearchEmbeddings.sourceVersion,
-            QUESTION_SEARCH_SOURCE_VERSION,
+            questionSearchEmbeddings.embeddingVersion,
+            QUESTION_SEARCH_EMBEDDING_VERSION,
           ),
           inArray(questionSearchEmbeddings.questionId, questionIds),
         ),
@@ -80,7 +80,7 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
       const prior = existingByQuestion.get(row.questionId);
       return (
         !prior ||
-        prior.sourceHash !== questionSearchSourceHash(row.prompt)
+        prior.promptHash !== questionSearchPromptHash(row.prompt)
       );
     });
     if (missing.length > 0) {
@@ -95,8 +95,8 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
             userId: job.userId,
             questionId: row.questionId,
             model: embedded.model,
-            sourceVersion: QUESTION_SEARCH_SOURCE_VERSION,
-            sourceHash: questionSearchSourceHash(row.prompt),
+            embeddingVersion: QUESTION_SEARCH_EMBEDDING_VERSION,
+            promptHash: questionSearchPromptHash(row.prompt),
             embedding: embedded.embeddings[index] ?? [],
           })),
         )
@@ -105,10 +105,10 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
             questionSearchEmbeddings.userId,
             questionSearchEmbeddings.questionId,
             questionSearchEmbeddings.model,
-            questionSearchEmbeddings.sourceVersion,
+            questionSearchEmbeddings.embeddingVersion,
           ],
           set: {
-            sourceHash: sql`excluded.source_hash`,
+            promptHash: sql`excluded.prompt_hash`,
             embedding: sql`excluded.embedding`,
             updatedAt: new Date(),
           },

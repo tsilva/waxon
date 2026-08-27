@@ -13,7 +13,7 @@ const staticViewAttributes = {
 
 const readerTabs = [
   ["Review", "/review"],
-  ["Library", "/library"],
+  ["Question Bank", "/library"],
 ] as const;
 
 export function AppStaticLoadingView({

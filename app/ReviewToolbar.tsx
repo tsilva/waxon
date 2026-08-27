@@ -129,7 +129,7 @@ export function ReviewToolbar({
             aria-selected={activeTab === "library"}
             onClick={handleTabClick("library")}
           >
-            Library
+            Question Bank
           </Link>
           {canViewAdmin ? (
             <Link

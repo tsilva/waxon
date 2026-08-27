@@ -194,8 +194,8 @@ test("Review Flag dialog traps Tab during async empty submission and focuses the
   await act(async () => {
     save.resolve();
     await save.promise;
-    await frame();
   });
+  await act(frame);
   assert.equal(document.querySelector('[role="dialog"]'), null);
   assert.equal(document.activeElement?.textContent, "Queue clear");
   await act(async () => root.unmount());
@@ -250,7 +250,7 @@ test("Review Flag dialog toggles reasons, reports errors, dismisses, and restore
   )?.set;
   assert.ok(setTextareaValue);
   await act(async () => {
-    setTextareaValue.call(detail, "The expected answer conflicts with the source.");
+    setTextareaValue.call(detail, "The expected answer conflicts with the stored standard.");
     detail.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   });
 
@@ -265,7 +265,7 @@ test("Review Flag dialog toggles reasons, reports errors, dismisses, and restore
   assert.deepEqual(submissions, [
     {
       reasons: ["prompt_unclear", "answer_standard_incorrect"],
-      detail: "The expected answer conflicts with the source.",
+      detail: "The expected answer conflicts with the stored standard.",
     },
   ]);
   assert.equal(document.querySelector('[role="alert"]')?.textContent, "Flag could not be saved.");
@@ -282,8 +282,8 @@ test("Review Flag dialog toggles reasons, reports errors, dismisses, and restore
   assert.equal(document.activeElement, opener);
 });
 
-test("Review Flag modal has a narrow responsive contract and Library renders learner detail", async () => {
-  const [styles, library] = await Promise.all([
+test("Review Flag modal has a narrow responsive contract and Question Bank renders learner detail", async () => {
+  const [styles, questionBank] = await Promise.all([
     readFile(appStylesPath, "utf8"),
     readFile(libraryPath, "utf8"),
   ]);
@@ -311,6 +311,6 @@ test("Review Flag modal has a narrow responsive contract and Library renders lea
     "minmax(0, 1fr)",
   );
   style.remove();
-  assert.equal(library.includes("flag.detail"), true);
-  assert.equal(library.includes("lean-flag-detail"), true);
+  assert.equal(questionBank.includes("flag.detail"), true);
+  assert.equal(questionBank.includes("question-bank-flag-detail"), true);
 });
