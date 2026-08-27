@@ -158,7 +158,7 @@ export function ReviewFlagDialog({
           <div>
             <span className="v2-kicker">
               {surface === "question-bank"
-                ? "Question bank attention"
+                ? "Library attention"
                 : "Review attention"}
             </span>
             <h2 id="review-flag-title">Flag this Question</h2>
@@ -213,7 +213,12 @@ export function ReviewFlagDialog({
             </p>
           ) : null}
           <div className="v2-dialog-actions">
-            <button disabled={saving} onClick={close} type="button">
+            <button
+              className="v2-button-secondary"
+              disabled={saving}
+              onClick={close}
+              type="button"
+            >
               Cancel
             </button>
             <button

@@ -119,7 +119,7 @@ export async function PATCH(request: Request) {
         await startEmbeddingJobsBestEffort(user.id);
       }
     } else {
-      throw new Error("This Question Bank action is not allowed.");
+      throw new Error("This Library action is not allowed.");
     }
     return NextResponse.json({ ok: true, ...replacement });
   } catch (error) {

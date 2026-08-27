@@ -4,11 +4,11 @@
   **Build knowledge. Keep it.**
 </div>
 
-Waxon is a multi-user question bank with adaptive Review. Learners add standalone Questions, answer from memory in their own words, and let Answer Grade history schedule each Question near the point where recall is likely to fade. Authorized MCP Clients can add and search Questions in one Learner's private Question Bank.
+Waxon is a multi-user library with adaptive Review. Learners add standalone Questions, answer from memory in their own words, and let Answer Grade history schedule each Question near the point where recall is likely to fade. Authorized MCP Clients can add and search Questions in one Learner's private Library.
 
 ## Product loop
 
-- **Question Bank** adds, searches, replaces, flags, archives, restores, and unflags Questions.
+- **Library** adds, searches, replaces, flags, archives, restores, and unflags Questions.
 - **Review** derives a live due-first queue, evaluates free-text recall, accepts Answer Grade corrections, and updates per-Question scheduling state.
 - **MCP** exposes the same isolated question service through `search_questions`, pre-add `check_questions`, and transactional `add_questions` tools.
 - **Admin** retains model traces, latency, token use, and cost for operators.
@@ -56,9 +56,9 @@ WAXON_QUESTION_SEARCH_MODE=lexical
 
 ## Authentication and MCP
 
-Production browser authentication uses Clerk and all bank and learning records are user-owned. Local development uses the configured TCLV/Tiago test identity unless `NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1` is set.
+Production browser authentication uses Clerk and all Library and learning records are user-owned. Local development uses the configured TCLV/Tiago test identity unless `NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1` is set.
 
-In Question Bank, open **Agent access**, create a personal token, and copy it immediately. Waxon stores only its SHA-256 hash. Configure the remote Streamable HTTP endpoint as:
+In the Library, open **Agent access**, create a personal token, and copy it immediately. Waxon stores only its SHA-256 hash. Configure the remote Streamable HTTP endpoint as:
 
 ```text
 https://<your-waxon-host>/api/mcp
@@ -79,7 +79,7 @@ pnpm db:migrate       # create or verify the clean database baseline
 pnpm db:reset -- --confirm-clean-break  # discard Waxon data and recreate the baseline
 pnpm db:studio        # open Drizzle Studio
 pnpm question-search:evaluate  # inspect/score the 120-case retrieval fixture
-pnpm question-search:benchmark -- --user-id=<id>  # measure a learner bank
+pnpm question-search:benchmark -- --user-id=<id>  # measure a learner's Library
 ```
 
 The complete clean-break product suite lives in [`tests/browser-use-clean-break-journey.md`](./tests/browser-use-clean-break-journey.md). It uses the native Codex Desktop in-app Browser, a disposable clean database baseline, and development-only deterministic fixtures; it never calls a live model.
@@ -101,8 +101,8 @@ VERCEL_ENV=preview DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL_UNPOOLED="$
 - Schema declarations live in `app/db/v2/schema.ts`; the clean baseline lives in `drizzle-v2/`.
 - Questions are immutable; Learner Answers, evaluations, and Answer Grade events remain immutable Learning Evidence, while scheduling state is derived from effective grades.
 - Every Learner Answer follows the same free-text evaluation workflow.
-- MCP batches share Question Bank validation, duplicate detection, limits, idempotency receipts, transactions, and user isolation.
-- Question Bank uses weighted full-text plus trigram relevance. MCP can add one compact prompt embedding and RRF, with a visible lexical fallback and no server-side LLM reranker.
+- MCP batches share Library validation, duplicate detection, limits, idempotency receipts, transactions, and user isolation.
+- Library uses weighted full-text plus trigram relevance. MCP can add one compact prompt embedding and RRF, with a visible lexical fallback and no server-side LLM reranker.
 - JavaScript dependency hardening is configured in `pnpm-workspace.yaml` and `.npmrc`.
 
 ## License

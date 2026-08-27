@@ -216,7 +216,7 @@ test(
             items: [
               {
                 prompt:
-                  "What boundary keeps a Learner's Question Bank private?",
+                  "What boundary keeps a Learner's Library private?",
                 referenceAnswer:
                   "The application contract scopes every operation to one Learner.",
               },
@@ -488,7 +488,7 @@ test(
           const input = {
             prompt: "Why are concurrent Authorized MCP Client adds duplicate-safe?",
             referenceAnswer:
-              "The learner Question Bank serializes canonical Prompt identity decisions.",
+              "The learner Library serializes canonical Prompt identity decisions.",
           };
           const [first, second] = await Promise.all([
             learner.authorizedMcpClient.questionBank.add({
@@ -773,14 +773,14 @@ test(
       );
 
       await suite.test(
-        "Question Bank Flagging accepts empty and detailed Learner reasons for any Active Question",
+        "Library Flagging accepts empty and detailed Learner reasons for any Active Question",
         async () => {
           clock.set("2030-08-20T10:00:00.000Z");
           semanticValidation.setOutcome("pass");
           evaluation.setGrade("again");
-          const learner = await provisionLearner("Question Bank flag learner");
+          const learner = await provisionLearner("Library flag learner");
           const otherLearner = await provisionLearner(
-            "Question Bank flag isolation learner",
+            "Library flag isolation learner",
           );
           const practiced = await learner.direct.questionBank.add({
             idempotencyKey: "question-bank-flag-practiced",
@@ -788,7 +788,7 @@ test(
               {
                 prompt: "Which Active Question can be Flagged outside Review?",
                 referenceAnswer:
-                  "Any retained Active Question in the Learner's Question Bank.",
+                  "Any retained Active Question in the Learner's Library.",
               },
             ],
           });
@@ -796,7 +796,7 @@ test(
           const practicedOpen = await learner.direct.review.open();
           const practicedAnswer = await learner.direct.review.submitAnswer({
             questionId: practicedOpen.question?.questionId ?? "",
-            answer: "Any retained Active Question in my Question Bank.",
+            answer: "Any retained Active Question in my Library.",
             idempotencyKey: "question-bank-flag-practiced-answer",
           });
           await learner.direct.review.evaluatePending(
@@ -931,18 +931,18 @@ test(
       );
 
       await suite.test(
-        "Question Bank Flagging serializes ahead of a concurrent Review answer",
+        "Library Flagging serializes ahead of a concurrent Review answer",
         async () => {
           const { getV2Client } = await import("../app/db/v2/client.ts");
           const { pool } = getV2Client();
           const learner = await provisionLearner(
-            "Serialized Question Bank flag learner",
+            "Serialized Library flag learner",
           );
           const added = await learner.direct.questionBank.add({
             idempotencyKey: "serialized-question-bank-flag-question",
             items: [
               {
-                prompt: "Which mutation wins when bank Flagging queues first?",
+                prompt: "Which mutation wins when Library Flagging queues first?",
                 referenceAnswer:
                   "The Flag commits before a concurrent Review answer can be accepted.",
               },
@@ -998,7 +998,7 @@ test(
               waitForAdvisoryWaiters(1),
               flagging.then(() => {
                 throw new Error(
-                  "Question Bank Flagging did not serialize on the Review Queue.",
+                  "Library Flagging did not serialize on the Review Queue.",
                 );
               }),
             ]);
@@ -1228,7 +1228,7 @@ test(
       );
 
       await suite.test(
-        "Question Bank add returns a retained conflict without duplicating identity",
+        "Library add returns a retained conflict without duplicating identity",
         async () => {
           const learner = await provisionLearner(
             "Transactional contract learner",
@@ -2223,7 +2223,7 @@ test(
       );
 
       await suite.test(
-        "Question Bank add, search, archive, and restore use canonical lifecycle states",
+        "Library add, search, archive, and restore use canonical lifecycle states",
         async () => {
           const learner = await provisionLearner("Lifecycle contract learner");
           const added = await learner.direct.questionBank.add({
@@ -2233,7 +2233,7 @@ test(
                 prompt:
                   "How are exact normalized-Prompt duplicates retained?",
                 referenceAnswer:
-                  "As one Question Bank entry across every lifecycle state.",
+                  "As one Library entry across every lifecycle state.",
               },
             ],
           });
@@ -2248,7 +2248,7 @@ test(
                 prompt:
                   "  HOW ARE EXACT NORMALIZED-PROMPT DUPLICATES RETAINED?  ",
                 referenceAnswer:
-                  "As one Question Bank entry across every lifecycle state.",
+                  "As one Library entry across every lifecycle state.",
               },
             ],
           });
@@ -3088,7 +3088,7 @@ test(
                 {
                   prompt: "Which Active Question blocks fixture seeding?",
                   referenceAnswer:
-                    "Any non-fixture Active Question in the target bank.",
+                    "Any non-fixture Active Question in the target Library.",
                 },
               ],
             });

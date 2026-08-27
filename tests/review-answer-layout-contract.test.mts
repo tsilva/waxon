@@ -7,6 +7,10 @@ const styles = await readFile(
   new URL("../app/(app)/app-globals.css", import.meta.url),
   "utf8",
 );
+const reviewApp = await readFile(
+  new URL("../app/(app)/review/ReviewApp.tsx", import.meta.url),
+  "utf8",
+);
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>");
 const style = dom.window.document.createElement("style");
 style.textContent = styles;
@@ -25,4 +29,12 @@ test("resolved-answer metadata stays in flow and cannot cover Answer Grade contr
   assert.equal(metadata.style.getPropertyValue("position"), "static");
   assert.equal(metadata.style.getPropertyValue("grid-column"), "1 / -1");
   assert.equal(metadata.style.getPropertyValue("width"), "100%");
+});
+
+test("previous answers start collapsed but a newly completed evaluation opens", () => {
+  assert.match(reviewApp, /const \[open, setOpen\] = useState\(false\);/u);
+  assert.match(
+    reviewApp,
+    /previousEvaluationStatus\.current === "pending"\s*&&\s*evaluation\.status !== "pending"/u,
+  );
 });

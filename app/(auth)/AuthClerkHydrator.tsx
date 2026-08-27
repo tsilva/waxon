@@ -38,7 +38,7 @@ const copyByMode = {
   "sign-up": {
     kicker: "Start practicing",
     title: "Create a waxon account",
-    body: "Build a question bank and a durable review schedule.",
+    body: "Build a library and a durable review schedule.",
     action: "Continue to sign up",
     loading: "Loading sign up",
   },

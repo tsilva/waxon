@@ -186,7 +186,7 @@ test("Review Flag input accepts empty data and normalizes known multi-select rea
   );
 });
 
-test("a stale Question Bank Flag lifecycle is an HTTP conflict", async () => {
+test("a stale Library Flag lifecycle is an HTTP conflict", async () => {
   const response = v2Error(new Error("This Question is no longer Active."));
 
   assert.equal(response.status, 409);

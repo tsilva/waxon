@@ -79,7 +79,8 @@ function FeedbackRow({
 }) {
   const evaluation = turn.evaluation;
   const isPending = evaluation.status === "pending";
-  const [open, setOpen] = useState(!isPending);
+  const [open, setOpen] = useState(false);
+  const previousEvaluationStatus = useRef(evaluation.status);
   const [savingGrade, setSavingGrade] = useState<V2Grade | null>(null);
   const grade = gradeLabel(evaluation.grade);
   const scoreLabel =
@@ -89,7 +90,13 @@ function FeedbackRow({
   const dueLabel = scheduledDate(evaluation.nextDueOn);
 
   useEffect(() => {
-    if (evaluation.status !== "pending") setOpen(true);
+    if (
+      previousEvaluationStatus.current === "pending" &&
+      evaluation.status !== "pending"
+    ) {
+      setOpen(true);
+    }
+    previousEvaluationStatus.current = evaluation.status;
   }, [evaluation.status]);
 
   async function applyGrade(nextGrade: V2Grade) {
@@ -348,7 +355,13 @@ function TimezoneSettings({
             </datalist>
             {error ? <p className="v2-error" role="alert">{error}</p> : null}
             <div className="v2-dialog-actions">
-              <button onClick={onClose} type="button">Cancel</button>
+              <button
+                className="v2-button-secondary"
+                onClick={onClose}
+                type="button"
+              >
+                Cancel
+              </button>
               <button className="v2-button-primary" type="submit">
                 Save timezone
               </button>
@@ -536,7 +549,7 @@ export default function ReviewApp() {
                     ? "Your answer is saved while the evaluator finishes."
                     : nextScheduled
                       ? `The next scheduled Review is ${nextScheduled}.`
-                      : "Add an Active Question to your Question Bank whenever you learn something worth keeping."}
+                      : "Add an Active Question to your Library whenever you learn something worth keeping."}
                 </p>
               </div>
             )}
