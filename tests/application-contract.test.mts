@@ -2499,6 +2499,173 @@ test(
           );
         },
       );
+
+      await suite.test(
+        "repeated browser fixture seeding resets mastery without touching another Learner",
+        async () => {
+          const learner = await provisionLearner("Browser fixture learner");
+          const unrelatedLearner = await provisionLearner(
+            "Browser fixture unrelated learner",
+          );
+          const unrelatedQuestion =
+            await unrelatedLearner.direct.questionBank.add({
+              idempotencyKey: "browser-fixture-unrelated-question",
+              items: [
+                {
+                  prompt: "Which Question must fixture seeding never alter?",
+                  referenceAnswer:
+                    "A Question owned by an unrelated Learner.",
+                },
+              ],
+            });
+          const unrelatedQuestionId =
+            unrelatedQuestion.results[0]?.id ?? "";
+          const unrelatedOpen = await unrelatedLearner.direct.review.open();
+          const unrelatedSubmission =
+            await unrelatedLearner.direct.review.submitAnswer({
+              questionId: unrelatedOpen.question?.questionId ?? "",
+              answer: "The unrelated Learner's Question.",
+              idempotencyKey: "browser-fixture-unrelated-answer",
+            });
+          await unrelatedLearner.direct.review.evaluatePending(
+            unrelatedSubmission.submissionId,
+          );
+
+          async function unrelatedSnapshot() {
+            return {
+              library: await unrelatedLearner.direct.questionBank.list(),
+              evidence:
+                await unrelatedLearner.direct.questionBank.evidence(
+                  unrelatedQuestionId,
+                ),
+              review: await unrelatedLearner.direct.review.open(),
+            };
+          }
+
+          const unrelatedBefore = await unrelatedSnapshot();
+          const {
+            BrowserSmokeSeedConflict,
+            seedBrowserSmokeJourney,
+          } = await import("../app/lib/browserSmokeFixture.ts");
+          const { BROWSER_SMOKE_ISOLATION_USER } = await import(
+            "../app/lib/browserSmokeSupport.ts"
+          );
+          const { getV2Client } = await import("../app/db/v2/client.ts");
+          const { pool } = getV2Client();
+
+          try {
+            const firstSeed = await seedBrowserSmokeJourney(learner.id);
+            assert.equal(firstSeed.questions.length, 6);
+            assert.equal(
+              firstSeed.questions.every(
+                (question) =>
+                  question.status === "created" &&
+                  question.outcome === "created_active" &&
+                  question.lifecycle === "active",
+              ),
+              true,
+            );
+            const firstIds = firstSeed.questions.map((question) => question.id);
+            const firstOpen = await learner.direct.review.open();
+            assert.equal(firstOpen.summary.queueRemaining, 6);
+            assert.equal(firstOpen.question?.questionId, firstIds[0]);
+
+            const firstSubmission = await learner.direct.review.submitAnswer({
+              questionId: firstOpen.question?.questionId ?? "",
+              answer: "The first deterministic fixture answer.",
+              idempotencyKey: "browser-fixture-first-answer",
+            });
+            await learner.direct.review.evaluatePending(
+              firstSubmission.submissionId,
+            );
+            const firstEvidence =
+              await learner.direct.questionBank.evidence(firstIds[0] ?? "");
+            assert.deepEqual(firstEvidence, {
+              learnerAnswers: 1,
+              evaluations: 1,
+              gradeEvents: 1,
+              dueAt: "2030-08-23T10:00:00.000Z",
+            });
+
+            const secondSeed = await seedBrowserSmokeJourney(learner.id);
+            const secondIds = secondSeed.questions.map(
+              (question) => question.id,
+            );
+            assert.equal(secondSeed.questions.length, 6);
+            assert.equal(
+              secondSeed.questions.every(
+                (question) =>
+                  question.status === "created" &&
+                  question.outcome === "created_active" &&
+                  question.lifecycle === "active",
+              ),
+              true,
+            );
+            assert.equal(
+              secondIds.every((id, index) => id !== firstIds[index]),
+              true,
+            );
+            assert.deepEqual(
+              await learner.direct.questionBank.evidence(secondIds[0] ?? ""),
+              {
+                learnerAnswers: 0,
+                evaluations: 0,
+                gradeEvents: 0,
+                dueAt: null,
+              },
+            );
+            assert.deepEqual(
+              await learner.direct.questionBank.evidence(firstIds[0] ?? ""),
+              firstEvidence,
+            );
+            const reopened = await learner.direct.review.open();
+            assert.equal(reopened.summary.queueRemaining, 6);
+            assert.equal(reopened.question?.questionId, secondIds[0]);
+            const reseededLibrary =
+              await learner.direct.questionBank.list();
+            assert.deepEqual(reseededLibrary.counts, {
+              active: 6,
+              flagged: 0,
+              archived: 6,
+            });
+
+            assert.deepEqual(await unrelatedSnapshot(), unrelatedBefore);
+
+            await learner.direct.questionBank.add({
+              idempotencyKey: "browser-fixture-unexpected-active",
+              items: [
+                {
+                  prompt: "Which Active Question blocks fixture seeding?",
+                  referenceAnswer:
+                    "Any non-fixture Active Question in the target bank.",
+                },
+              ],
+            });
+            const targetBeforeConflict =
+              await learner.direct.questionBank.list();
+            await assert.rejects(
+              seedBrowserSmokeJourney(learner.id),
+              (error: unknown) =>
+                error instanceof BrowserSmokeSeedConflict &&
+                error.activeQuestions.some(
+                  (question) =>
+                    question.prompt ===
+                    "Which Active Question blocks fixture seeding?",
+                ),
+            );
+            assert.deepEqual(
+              await learner.direct.questionBank.list(),
+              targetBeforeConflict,
+            );
+            assert.deepEqual(await unrelatedSnapshot(), unrelatedBefore);
+          } finally {
+            await pool.query(
+              `DELETE FROM waxon_v2.users WHERE id = $1`,
+              [BROWSER_SMOKE_ISOLATION_USER.id],
+            );
+          }
+        },
+      );
     });
   },
 );

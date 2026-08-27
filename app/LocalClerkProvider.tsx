@@ -2,13 +2,14 @@
 
 import { ClerkProvider } from "@clerk/nextjs";
 import { useMemo, type ComponentType, type ReactNode } from "react";
-import { localTestUser } from "@/app/lib/localTestAuth";
+import { getLocalTestUser } from "@/app/lib/localTestAuth";
 
+const localTestUser = getLocalTestUser();
 const localClerkUser = {
   id: localTestUser.id,
   imageUrl: localTestUser.avatarUrl,
   fullName: localTestUser.displayName,
-  username: "eng.tiago.silva",
+  username: localTestUser.id,
   primaryEmailAddress: {
     emailAddress: localTestUser.email,
   },

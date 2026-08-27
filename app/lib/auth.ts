@@ -4,7 +4,10 @@ import { eq } from "drizzle-orm";
 import { getV2Db } from "@/app/db/v2/client";
 import { learnerSettings, users } from "@/app/db/v2/schema";
 import { appUserIdForClerkUser } from "@/app/lib/clerkIdentity";
-import { isLocalTestAuthEnabled, localTestUser } from "@/app/lib/localTestAuth";
+import {
+  getLocalTestUser,
+  isLocalTestAuthEnabled,
+} from "@/app/lib/localTestAuth";
 import type { UserProfile } from "@/app/lib/userProfile";
 
 export type AuthenticatedUser = UserProfile;
@@ -48,6 +51,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
   const db = getV2Db();
 
   if (isLocalTestAuthEnabled()) {
+    const localTestUser = getLocalTestUser();
     const now = new Date();
     const [existingLocalUser] = await db
       .select({

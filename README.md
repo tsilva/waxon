@@ -4,7 +4,7 @@
   **Build knowledge. Keep it.**
 </div>
 
-Waxon is a multi-user question bank with adaptive daily Review. Learners add standalone questions, answer from memory in their own words, and let FSRS schedule the questions most at risk of being forgotten. Authorized agents can add and search questions through MCP.
+Waxon is a multi-user question bank with adaptive Review. Learners add standalone Questions, answer from memory in their own words, and let Answer Grade history schedule each Question near the point where recall is likely to fade. Authorized MCP Clients can add and search Questions in one Learner's private Question Bank.
 
 ## Product loop
 
@@ -82,7 +82,19 @@ pnpm question-search:evaluate  # inspect/score the 120-case retrieval fixture
 pnpm question-search:benchmark -- --user-id=<id>  # measure a learner bank
 ```
 
-The repeatable local product suite lives in [`docs/browser-use-smoke.md`](./docs/browser-use-smoke.md) and uses the native Codex in-app Browser plus a development-only deterministic evaluator.
+The complete clean-break product suite lives in [`tests/browser-use-clean-break-journey.md`](./tests/browser-use-clean-break-journey.md). It uses the native Codex Desktop in-app Browser, a disposable clean database baseline, and development-only deterministic fixtures; it never calls a live model.
+
+For a clean acceptance baseline, point both database variables at the same disposable pgvector/Postgres database and run:
+
+```bash
+DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL_UNPOOLED="$ISSUE20_DATABASE_URL" pnpm db:reset -- --confirm-clean-break
+APPLICATION_CONTRACT_TEST_DATABASE_URL="$ISSUE20_DATABASE_URL" QUESTION_SEARCH_TEST_DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL_UNPOOLED="$ISSUE20_DATABASE_URL" pnpm test
+DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL_UNPOOLED="$ISSUE20_DATABASE_URL" pnpm db:generate
+git diff --exit-code -- drizzle-v2
+VERCEL_ENV=preview DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL_UNPOOLED="$ISSUE20_DATABASE_URL" pnpm build
+```
+
+`ISSUE20_DATABASE_URL` must never identify production. The exact clean catalog is asserted by the database-backed tests; `db:generate` followed by the scoped diff check proves the Drizzle declaration and baseline have not drifted.
 
 ## Implementation notes
 
