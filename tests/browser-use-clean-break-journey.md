@@ -246,11 +246,11 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 13. Scope the row by `replacementId` and the Replacement Answer Standard, activate `Restore question`, and require `Question restored.`. Through the Library GET diagnostic require that same identity is Active with reset evidence still intact through the test-support GET, then open `/review` and require it is immediately current.
 14. Return to `/library` and archive `replacementId` once more so no suite-created Active Question remains before Review fixture seeding. Require both immutable identities are Archived and `originalId` still reports the same Learning Evidence and `originalDueAt`.
 
-### 3. Validation Flagging and the Flagged attention inbox
+### 3. Validation Flagging and the Flagged workflow
 
 1. Clear search and activate `Add question`. Add the exact Validation-Flagged Prompt and Answer Standard.
 2. Require `Question saved to Flagged for attention.` and no Active lifecycle result for that Prompt.
-3. Select the `Flagged` filter. Require the visible region `Flagged Question attention inbox`, `Attention inbox`, the exact Prompt, lifecycle `Flagged`, origin `Waxon validation`, and reason `Not self-contained`.
+3. Select the `Flagged` filter. Require the exact Prompt, lifecycle `Flagged`, origin `Waxon validation`, and reason `Not self-contained`.
 4. Require Archive, restore, and replace actions on the Flagged Question. Leave it Flagged.
 
 ### 3A. Library learner Flagging at desktop and 390 px

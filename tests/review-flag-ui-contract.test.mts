@@ -128,6 +128,8 @@ test("Library exposes the shared Flag dialog only for Active Questions", async (
   assert.equal(source.includes('action: "flag"'), true);
   assert.equal(source.includes("reasons"), true);
   assert.equal(source.includes("detail"), true);
+  assert.equal(source.includes("lean-attention-inbox"), false);
+  assert.equal(source.includes("Attention inbox"), false);
 });
 
 test("Library reports a committed Flag separately from a failed refresh", async () => {
@@ -459,4 +461,70 @@ test("Review Flag modal has a narrow responsive contract and Library renders lea
   assert.equal(questionBank.includes("<summary>Flag details</summary>"), true);
   assert.equal(questionBank.includes("flag.detail"), true);
   assert.equal(questionBank.includes("question-bank-flag-detail"), true);
+});
+
+test("Review question scroller reserves room for the Flag interaction ring", async () => {
+  const styles = await readFile(appStylesPath, "utf8");
+  const style = document.createElement("style");
+  style.textContent = styles;
+  document.head.append(style);
+
+  const rules = Array.from(style.sheet?.cssRules ?? []);
+  const questionAreaRule = rules.find(
+    (rule) => "selectorText" in rule && rule.selectorText === ".question-area",
+  ) as CSSStyleRule | undefined;
+  const flagStateRule = rules.find(
+    (rule) =>
+      "selectorText" in rule &&
+      (rule as CSSStyleRule).selectorText.replace(/\s+/gu, " ") ===
+        ".review-flag-trigger:hover, .review-flag-trigger:focus-visible",
+  ) as CSSStyleRule | undefined;
+
+  assert.ok(questionAreaRule);
+  assert.ok(flagStateRule);
+
+  const outlineWidth = Number.parseFloat(
+    flagStateRule.style.getPropertyValue("outline"),
+  );
+  const outlineOffset = Number.parseFloat(
+    flagStateRule.style.getPropertyValue("outline-offset"),
+  );
+  const inlinePadding = Number.parseFloat(
+    questionAreaRule.style.getPropertyValue("padding-inline") || "0",
+  );
+
+  assert.ok(
+    inlinePadding >= outlineWidth + outlineOffset,
+    `Expected at least ${outlineWidth + outlineOffset}px inline clearance, received ${inlinePadding}px.`,
+  );
+  style.remove();
+});
+
+test("Library programmatic focus target suppresses the browser default outline", async () => {
+  const [librarySource, styles] = await Promise.all([
+    readFile(libraryPath, "utf8"),
+    readFile(appStylesPath, "utf8"),
+  ]);
+  assert.equal(
+    librarySource.includes(
+      'className="question-bank-stage" id="library-panel" tabIndex={-1}',
+    ),
+    true,
+  );
+  assert.equal(
+    librarySource.includes('document.getElementById("library-panel")?.focus()'),
+    true,
+  );
+
+  const style = document.createElement("style");
+  style.textContent = styles;
+  document.head.append(style);
+  const stageRule = Array.from(style.sheet?.cssRules ?? []).find(
+    (rule) =>
+      "selectorText" in rule && rule.selectorText === ".question-bank-stage",
+  ) as CSSStyleRule | undefined;
+
+  assert.ok(stageRule);
+  assert.equal(stageRule.style.getPropertyValue("outline"), "0");
+  style.remove();
 });
