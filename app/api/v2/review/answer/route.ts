@@ -27,18 +27,27 @@ export async function POST(request: Request) {
     if (!isRecord(parsed.value)) {
       throw new Error("An answer payload is required.");
     }
-    const itemId =
-      typeof parsed.value.itemId === "string" ? parsed.value.itemId : "";
+    const questionId =
+      typeof parsed.value.questionId === "string"
+        ? parsed.value.questionId
+        : "";
     const answer =
       typeof parsed.value.answer === "string"
         ? parsed.value.answer.slice(0, 65_536)
         : "";
-    if (!itemId || !answer.trim()) {
-      throw new Error("A Review item and free-text answer are required.");
+    const idempotencyKey =
+      typeof parsed.value.idempotencyKey === "string"
+        ? parsed.value.idempotencyKey.slice(0, 200)
+        : "";
+    if (!questionId || !answer.trim() || !idempotencyKey) {
+      throw new Error(
+        "A Review Question, free-text answer, and idempotency key are required.",
+      );
     }
     const evaluation = await application.review.submitAnswer({
-      itemId,
+      questionId,
       answer,
+      idempotencyKey,
     });
     if (evaluation.status === "pending") {
       await startBackgroundJobs(user.id, 4);

@@ -1,0 +1,28 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+import { JSDOM } from "jsdom";
+
+const styles = await readFile(
+  new URL("../app/(app)/app-globals.css", import.meta.url),
+  "utf8",
+);
+const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>");
+const style = dom.window.document.createElement("style");
+style.textContent = styles;
+dom.window.document.head.append(style);
+
+function styleRule(selector: string): CSSStyleRule | undefined {
+  return Array.from(style.sheet?.cssRules ?? []).find(
+    (rule): rule is CSSStyleRule =>
+      "selectorText" in rule && rule.selectorText === selector,
+  );
+}
+
+test("resolved-answer metadata stays in flow and cannot cover Answer Grade controls", () => {
+  const metadata = styleRule(".previous-row-meta");
+  assert.ok(metadata);
+  assert.equal(metadata.style.getPropertyValue("position"), "static");
+  assert.equal(metadata.style.getPropertyValue("grid-column"), "1 / -1");
+  assert.equal(metadata.style.getPropertyValue("width"), "100%");
+});

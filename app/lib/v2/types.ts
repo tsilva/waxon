@@ -1,24 +1,23 @@
 export type V2Grade = "again" | "hard" | "good" | "easy";
-export type V2Lifecycle =
-  | "new"
-  | "learning"
-  | "review"
-  | "flagged"
-  | "paused"
-  | "archived"
-  | "trash";
-
 export type V2QuestionLifecycle = "active" | "flagged" | "archived";
+
+export type V2QuestionFlagOrigin = "waxon_validation" | "learner";
+
+export type V2QuestionFlag = {
+  origin: V2QuestionFlagOrigin;
+  reasons: string[];
+  detail: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+};
 
 export type V2Question = {
   id: string;
-  versionId: string;
   prompt: string;
   referenceAnswer: string;
   lifecycle: V2QuestionLifecycle;
-  importance: number;
+  flags: V2QuestionFlag[];
   dueAt: string | null;
-  retrievability: number | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -26,41 +25,33 @@ export type V2Question = {
 export type V2LibraryResponse = {
   questions: V2Question[];
   counts: Record<V2QuestionLifecycle, number>;
-  waitingNew: number;
 };
 
-export type V2ReviewItem = {
-  sessionId: string;
-  itemId: string;
+export type V2ReviewQuestion = {
   questionId: string;
-  questionVersionId: string;
   prompt: string;
-  position: number;
   total: number;
-  estimatedMinutes: number;
-  isRetry: boolean;
+  scheduledFor: string | null;
 };
 
-export type V2ReviewSessionResponse = {
-  session: {
-    id: string;
-    plannedCount: number;
-    estimatedMinutes: number;
-    completedCount: number;
-  } | null;
-  item: V2ReviewItem | null;
-  retryAvailableAt: string | null;
+export type V2ReviewAnswer = {
+  prompt: string;
+  answer: string;
+  submittedAt: string;
+  evaluation: V2Evaluation;
+};
+
+export type V2ReviewQueueResponse = {
+  question: V2ReviewQuestion | null;
+  recentAnswers: V2ReviewAnswer[];
   waitingOnEvaluation: boolean;
-  blockedReason: string | null;
+  timezone: string | null;
+  localDay: string;
   summary: V2ReviewSummary;
-  capacity: {
-    targetFeasible: boolean;
-    sustainableRetention: number;
-    minutesNeeded: number;
-    atRiskCount: number;
-    waitingNew: number;
-    oldestNewAt: string | null;
-  };
+};
+
+export type V2LearnerSettings = {
+  timezone: string | null;
 };
 
 export type V2Evaluation = {
@@ -68,7 +59,7 @@ export type V2Evaluation = {
   evaluationId: string | null;
   status: "pending" | "complete" | "failed";
   grade: V2Grade | null;
-  nextDueAt: string | null;
+  nextDueOn: string | null;
   feedback: string | null;
   expectedAnswer: string | null;
   coveredPoints: string[];
@@ -76,9 +67,10 @@ export type V2Evaluation = {
   demonstratedGap: string | null;
   confidence: number | null;
   canSelfGrade: boolean;
+  canCorrectGrade: boolean;
 };
 
 export type V2ReviewSummary = {
   queueRemaining: number;
-  nextScheduledDue: number | null;
+  nextScheduledOn: string | null;
 };

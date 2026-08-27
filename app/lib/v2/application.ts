@@ -1,21 +1,28 @@
 import { checkQuestions } from "./questionSearch.ts";
 import {
-  actOnReviewItem,
   addQuestions,
-  applyLearnerGrade,
   createDirectQuestion,
   defaultV2ServiceDependencies,
+  flagQuestionInBank,
   getQuestionLearningEvidence,
-  getEvaluationForSubmission,
-  getOrCreateReviewSession,
-  getReviewSummary,
   listLibrary,
   mutateQuestionLifecycle,
   replaceQuestion,
-  runEvaluationForSubmission,
-  submitReviewAnswer,
   type V2ServiceDependencies,
 } from "./service.ts";
+import {
+  applyLiveLearnerGrade,
+  flagCurrentReviewQuestion,
+  getLiveEvaluation,
+  getLiveReviewQueue,
+  getLiveReviewSummary,
+  runLiveEvaluationForSubmission,
+  submitLiveReviewAnswer,
+} from "./liveReview.ts";
+import {
+  getLearnerSettings,
+  updateLearnerTimezone,
+} from "./settings.ts";
 
 export type WaxonApplicationDependencies = {
   clock?: { now(): Date };
@@ -46,7 +53,7 @@ export function createWaxonApplication(
       list(
         input: Omit<Parameters<typeof listLibrary>[0], "userId"> = {},
       ) {
-        return listLibrary({ ...input, userId }, serviceDependencies.now());
+        return listLibrary({ ...input, userId });
       },
       check(
         input: Omit<Parameters<typeof checkQuestions>[0], "userId">,
@@ -78,6 +85,14 @@ export function createWaxonApplication(
           ) {
             return replaceQuestion({ ...input, userId }, serviceDependencies);
           },
+          flag(
+            input: Omit<Parameters<typeof flagQuestionInBank>[0], "userId">,
+          ) {
+            return flagQuestionInBank(
+              { ...input, userId },
+              serviceDependencies,
+            );
+          },
           archive(questionId: string) {
             return mutateQuestionLifecycle(
               { userId, questionId, action: "archive" },
@@ -96,44 +111,55 @@ export function createWaxonApplication(
         },
         review: {
           open() {
-            return getOrCreateReviewSession(userId, serviceDependencies);
-          },
-          act(
-            input: Omit<Parameters<typeof actOnReviewItem>[0], "userId">,
-          ) {
-            return actOnReviewItem(
-              { ...input, userId },
-              serviceDependencies,
-            );
+            return getLiveReviewQueue(userId, serviceDependencies);
           },
           summary() {
-            return getReviewSummary(userId, serviceDependencies.now());
+            return getLiveReviewSummary(userId, serviceDependencies.now());
           },
           submitAnswer(
-            input: Omit<Parameters<typeof submitReviewAnswer>[0], "userId">,
+            input: Omit<Parameters<typeof submitLiveReviewAnswer>[0], "userId">,
           ) {
-            return submitReviewAnswer(
+            return submitLiveReviewAnswer(
               { ...input, userId },
               serviceDependencies,
             );
           },
           getEvaluation(submissionId: string) {
-            return getEvaluationForSubmission(userId, submissionId);
+            return getLiveEvaluation(userId, submissionId);
           },
           evaluatePending(submissionId: string) {
-            return runEvaluationForSubmission(
+            return runLiveEvaluationForSubmission(
               userId,
               submissionId,
               serviceDependencies,
             );
           },
           grade(
-            input: Omit<Parameters<typeof applyLearnerGrade>[0], "userId">,
+            input: Omit<Parameters<typeof applyLiveLearnerGrade>[0], "userId">,
           ) {
-            return applyLearnerGrade(
+            return applyLiveLearnerGrade(
               { ...input, userId },
               serviceDependencies,
             );
+          },
+          flag(
+            input: Omit<
+              Parameters<typeof flagCurrentReviewQuestion>[0],
+              "userId"
+            >,
+          ) {
+            return flagCurrentReviewQuestion(
+              { ...input, userId },
+              serviceDependencies,
+            );
+          },
+        },
+        settings: {
+          get() {
+            return getLearnerSettings(userId);
+          },
+          updateTimezone(timezone: string) {
+            return updateLearnerTimezone({ userId, timezone });
           },
         },
       };
