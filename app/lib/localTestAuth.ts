@@ -7,20 +7,20 @@ export const localTestUser = {
   avatarUrl: null,
 } as const;
 
-export const browserAcceptanceTestUser = {
+export const browserAcceptanceTestLearner = {
   id: "issue-20-native-browser-learner",
   displayName: "Issue 20 browser learner",
   email: "issue-20-browser@waxon.invalid",
   avatarUrl: null,
 } as const;
 
-export function isBrowserAcceptanceTestUserEnabled(): boolean {
+export function isBrowserAcceptanceLearnerEnabled(): boolean {
   return process.env.NEXT_PUBLIC_WAXON_BROWSER_ACCEPTANCE_USER === "1";
 }
 
-export function getLocalTestUser() {
-  return isBrowserAcceptanceTestUserEnabled()
-    ? browserAcceptanceTestUser
+export function getLocalTestLearner() {
+  return isBrowserAcceptanceLearnerEnabled()
+    ? browserAcceptanceTestLearner
     : localTestUser;
 }
 

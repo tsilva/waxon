@@ -5,7 +5,7 @@ This is the source of truth for the final native-browser acceptance run for GitH
 ## Result policy
 
 - Record every numbered case as `pass`, `fail`, or `skipped`. A skipped required case does not satisfy #20.
-- Use visible UI interaction for learner behavior. Page-context requests are allowed only when a step explicitly names one of these localhost diagnostics: read-only `GET /api/v2/library`, read-only `GET /api/v2/review/queue`, read-only `GET /api/test-support/browser-smoke`, fixture-seeding `POST /api/test-support/browser-smoke`, or the `/api/mcp` transport calls that have no browser UI. Do not mutate Library, Review, settings, or credentials through direct requests; perform those actions visibly.
+- Use visible UI interaction for every Learner mutation, including Question Bank actions, Learner settings, and MCP credential creation/revocation. The IAB page-evaluation runtime has no `fetch`, so the runner may use Node-side `fetch` only through the guarded helper below and only to these absolute tested-origin diagnostics: read-only `GET <tested-origin>/api/v2/library`, read-only `GET <tested-origin>/api/v2/review/queue`, read-only `GET <tested-origin>/api/test-support/browser-smoke`, fixture-seeding `POST <tested-origin>/api/test-support/browser-smoke`, and Streamable HTTP `POST <tested-origin>/api/mcp`. No other method/endpoint pair is allowed. Diagnostic requests supplement rather than replace visible assertions.
 - Take a fresh DOM snapshot before changing locator strategy. Wait for named visible content, not `networkidle`.
 - Capture desktop and narrow screenshots under `/private/tmp` with `issue-20-clean-break` in each filename. Capture every failure or ambiguous state.
 - Record the exact printed dev URL, visible assertions, console warnings/errors, commands, screenshot paths, failures, and remaining risks in `docs/issue-20-clean-break-evidence.md`.
@@ -15,7 +15,7 @@ This is the source of truth for the final native-browser acceptance run for GitH
 1. Use a disposable fresh pgvector/Postgres database. Never use or reset production data or secrets.
 2. The browser must use the dedicated acceptance identity: `Issue 20 browser learner`, `issue-20-browser@waxon.invalid`. If Tiago's personal identity appears, stop without creating/revoking an MCP credential or changing any Question.
 3. The fixture endpoint is enabled only in development with local test auth and the dedicated acceptance-identity flag. It mutates only the named Local Day boundary Question, five local Review fixtures, and one known synthetic second-Learner fixture. It refuses to seed while an unrelated Active Question remains.
-4. The safety grant covers only the exact Library, validation, Review, MCP, and isolation fixtures named in this file plus the dedicated acceptance Learner's MCP credential. Archive and restore only the named suite Questions. Do not alter any other Learner or data.
+4. The safety grant covers only the exact Question Bank, validation, Review, MCP, and isolation fixtures named in this file plus the dedicated acceptance Learner's MCP credential. Archive and restore only the named suite Questions. Do not alter any other Learner or data.
 5. Reuse a suitable existing server. Do not kill or restart any existing server. If none exists, start exactly one server with `--port auto` and retain its printed URL:
 
 ```bash
@@ -42,10 +42,10 @@ pnpm db:reset -- --confirm-clean-break
 
 Use these exact values so the visible and API assertions remain deterministic.
 
-Library Question:
+Question Bank Question:
 
 ```text
-Prompt: Issue 20 Library journey: what makes a Question replacement immutable?
+Prompt: Issue 20 Question Bank journey: what makes a Question replacement immutable?
 Original Answer Standard: The original Question keeps its Learning Evidence. Acceptance token: browser-smoke-correct-token.
 Replacement Answer Standard: Replacement creates a new Active Question with reset mastery while the original is Archived.
 ```
@@ -92,9 +92,49 @@ The known second-Learner probe is:
 Issue 20 isolation probe: which Question belongs only to the other Learner?
 ```
 
-## MCP Streamable HTTP helper
+## Guarded runner-side diagnostic transport and MCP helper
 
-Keep the token and optional MCP session ID only in the Browser runner's in-memory variables. Do not write either to storage, a file, console output, screenshots, or the evidence report. Use same-origin page-context `fetch` with `POST /api/mcp`, `Authorization: Bearer …`, `Content-Type: application/json`, and `Accept: application/json, text/event-stream` on every request. Parse either a JSON response or server-sent `data:` lines.
+Set `testedOrigin` to the exact printed local dev origin, including its automatic port. The guard below rejects non-loopback origins, cross-origin resolution, unlisted paths, and unlisted methods. Use it for every suite diagnostic because IAB evaluation cannot fetch. Learner-facing Question Bank mutations, settings changes, and credential creation/revocation still happen visibly in IAB.
+
+Keep the MCP token and optional session ID only in runner-side process memory. Transfer the one-time token directly from the visible IAB result into the in-memory `mcpToken` variable; never include it in a command line, log call, console output, storage, file, screenshot, or evidence report. Every MCP request uses the absolute tested-origin `/api/mcp` URL with `Authorization: Bearer …`, `Content-Type: application/json`, and `Accept: application/json, text/event-stream`. Parse either a JSON response or server-sent `data:` lines.
+
+```js
+// Set this once from the exact printed dev URL; do not infer a port.
+const testedOrigin = "http://localhost:<auto-port>";
+const issue20Origin = new URL(testedOrigin);
+if (
+  issue20Origin.protocol !== "http:" ||
+  !["localhost", "127.0.0.1", "[::1]"].includes(issue20Origin.hostname)
+) {
+  throw new Error("Issue 20 diagnostics require the printed loopback origin.");
+}
+
+const issue20DiagnosticPolicy = new Map([
+  ["/api/v2/library", new Set(["GET"])],
+  ["/api/v2/review/queue", new Set(["GET"])],
+  ["/api/test-support/browser-smoke", new Set(["GET", "POST"])],
+  ["/api/mcp", new Set(["POST"])],
+]);
+
+const issue20DiagnosticEndpoints = Object.freeze({
+  questionBank: new URL("/api/v2/library", issue20Origin).href,
+  reviewQueue: new URL("/api/v2/review/queue", issue20Origin).href,
+  fixture: new URL("/api/test-support/browser-smoke", issue20Origin).href,
+  mcp: new URL("/api/mcp", issue20Origin).href,
+});
+
+async function issue20DiagnosticRequest(absoluteUrl, init = {}) {
+  const url = new URL(absoluteUrl);
+  const method = String(init.method ?? "GET").toUpperCase();
+  if (url.origin !== issue20Origin.origin) {
+    throw new Error(`Cross-origin diagnostic rejected: ${url.origin}`);
+  }
+  if (!issue20DiagnosticPolicy.get(url.pathname)?.has(method)) {
+    throw new Error(`Diagnostic request rejected: ${method} ${url.pathname}`);
+  }
+  return fetch(url.href, { ...init, method });
+}
+```
 
 Initialize before calling tools. Capture the optional `mcp-session-id` response header and send it on every later request when present. Then send the initialized notification. The current service may operate statelessly and omit the session header; that is valid, but the initialize and notification exchange is still required by this suite.
 
@@ -109,7 +149,7 @@ function issue20McpHeaders(token, sessionId) {
 }
 
 async function issue20McpRequest(token, sessionId, payload) {
-  const response = await fetch("/api/mcp", {
+  const response = await issue20DiagnosticRequest(issue20DiagnosticEndpoints.mcp, {
     method: "POST",
     headers: issue20McpHeaders(token, sessionId),
     body: JSON.stringify(payload),
@@ -181,19 +221,19 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 
 ### 2. Add, search, immutable replace, Archive, and restore
 
-1. Activate `Add question`, enter the exact Library Prompt and Original Answer Standard, and submit `Add to bank`.
+1. Activate `Add question`, enter the exact Question Bank Prompt and Original Answer Standard, and submit `Add to bank`.
 2. Require the visible status `Active Question added to your bank.`, an `Active` lifecycle badge, and the exact Prompt. Search for `replacement immutable` and require exactly the suite Question.
-3. Through same-origin `GET /api/v2/library?search=replacement%20immutable`, record the Active Question ID as `originalId`; do not treat this request as a replacement for the visible search assertion.
-4. Open `/review` for the first time and require the exact Library Prompt is current. Open `Local Day settings`, require the IANA timezone equals `Intl.DateTimeFormat().resolvedOptions().timeZone`, and close settings; this is the automatic-detection assertion. Answer with the stable Correct token and wait for evaluation. Require grade `Good`, visible Answer Standard and Demonstrated Gap, and a future `Scheduled` Local Day.
-5. Return to `/library`, search for `replacement immutable`, and require the original remains Active with a visible future due date. Through `GET /api/test-support/browser-smoke`, record the original's exact `dueAt` as `originalDueAt` and require its evidence is `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`.
+3. Through runner-side `issue20DiagnosticRequest(issue20DiagnosticEndpoints.questionBank + "?search=replacement%20immutable")`, record the Active Question ID as `originalId`; do not treat this request as a replacement for the visible search assertion.
+4. Open `/review` for the first time and require the exact Question Bank Prompt is current. Open `Local Day settings`, require the IANA timezone equals `Intl.DateTimeFormat().resolvedOptions().timeZone`, and close settings; this is the automatic-detection assertion. Answer with the stable Correct token and wait for evaluation. Require grade `Good`, visible Answer Standard and Demonstrated Gap, and a future `Scheduled` Local Day.
+5. Return to `/library`, search for `replacement immutable`, and require the original remains Active with a visible future due date. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.fixture)`, record the original's exact `dueAt` as `originalDueAt` and require its evidence is `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`.
 6. Activate `Replace question`. Require a modal named `Replace question` and the visible warning that replacement creates a new Active Question with reset mastery and archives the original with its Learning Evidence intact.
 7. Keep the Prompt unchanged, replace only the Answer Standard with the exact Replacement Answer Standard, and submit `Replace question`.
-8. Require the visible status `Active replacement added. The original Question was archived.`. Through the Library GET, record `replacementId` and require exactly one Active replacement and one Archived original with the same Prompt, different IDs, `originalId` on the Archived result, the two unchanged Answer Standards on their respective identities, `dueAt: null` on the replacement, and `dueAt: originalDueAt` on the original.
-9. Through `GET /api/test-support/browser-smoke`, require `originalId` remains Archived with evidence `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`, while `replacementId` is Active with reset evidence `{ learnerAnswers: 0, evaluations: 0, gradeEvents: 0, dueAt: null }`.
+8. Require the visible status `Active replacement added. The original Question was archived.`. Through the Question Bank GET diagnostic, record `replacementId` and require exactly one Active replacement and one Archived original with the same Prompt, different IDs, `originalId` on the Archived result, the two unchanged Answer Standards on their respective identities, `dueAt: null` on the replacement, and `dueAt: originalDueAt` on the original.
+9. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.fixture)`, require `originalId` remains Archived with evidence `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`, while `replacementId` is Active with reset evidence `{ learnerAnswers: 0, evaluations: 0, gradeEvents: 0, dueAt: null }`.
 10. Open `/review`. Require `replacementId`'s exact Prompt is immediately current even though the reviewed original was scheduled in the future; this visibly proves the new immutable identity reset mastery and entered the live queue.
 11. Return to `/library`, search for `replacement immutable`, select `Active`, scope the action to `replacementId`, and activate `Archive question`. Require `Question archived.` and no Active result for the Prompt.
 12. Select `Archived`. Now—and only now—require exactly two Archived identities with the same Prompt; expand both Answer Standards and visibly distinguish the preserved original from its replacement.
-13. Scope the row by `replacementId` and the Replacement Answer Standard, activate `Restore question`, and require `Question restored.`. Through the Library GET require that same identity is Active with reset evidence still intact through the test-support GET, then open `/review` and require it is immediately current.
+13. Scope the row by `replacementId` and the Replacement Answer Standard, activate `Restore question`, and require `Question restored.`. Through the Question Bank GET diagnostic require that same identity is Active with reset evidence still intact through the test-support GET, then open `/review` and require it is immediately current.
 14. Return to `/library` and archive `replacementId` once more so no suite-created Active Question remains before Review fixture seeding. Require both immutable identities are Archived and `originalId` still reports the same Learning Evidence and `originalDueAt`.
 
 ### 3. Validation Flagging and the Flagged attention inbox
@@ -205,12 +245,12 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 
 ### 4. Seed and prove the deterministic live Review Queue and Local Day
 
-1. From the `/library` page, issue same-origin `POST /api/test-support/browser-smoke` with no body. Require HTTP `200`, `ok: true`, six Question results, six distinct IDs, every result `status: created`, `outcome: created_active`, and `lifecycle: active`. Retain `timezoneBoundaryPrompt`, the five-item `fixturePrompts`, and `isolationProbe` in Browser-runner memory.
+1. While `/library` remains visible, call runner-side `issue20DiagnosticRequest(issue20DiagnosticEndpoints.fixture, { method: "POST" })` with no body. Require HTTP `200`, `ok: true`, six Question results, six distinct IDs, every result `status: created`, `outcome: created_active`, and `lifecycle: active`. Retain `timezoneBoundaryPrompt`, the five-item `fixturePrompts`, and `isolationProbe` in runner memory.
 2. Open `/review`. On its settled fixture load, require `timezoneBoundaryPrompt` visibly first and a queue count of six. This proves every new Active fixture entered immediately and equal unanswered Questions follow stable creation order.
 3. Open `Local Day settings`. Read the IANA timezone and require it still equals the automatically detected `Intl.DateTimeFormat().resolvedOptions().timeZone` from case 2, proving persistence.
-4. Set the timezone to `Pacific/Kiritimati`, save, and reopen settings to require persistence. Through same-origin `GET /api/v2/review/queue`, retain the returned `localDay` as `eastDay`; require the boundary Prompt remains visibly current.
+4. Set the timezone to `Pacific/Kiritimati`, save, and reopen settings to require persistence. Through runner-side `issue20DiagnosticRequest(issue20DiagnosticEndpoints.reviewQueue)`, retain the returned `localDay` as `eastDay`; require the boundary Prompt remains visibly current.
 5. Answer the boundary Question with the stable Incorrect answer and wait for `Again`. Require queue count six and `fixturePrompts[0]` current, proving the boundary Question moved to the end of the same Local Day.
-6. Set the timezone to `Pacific/Pago_Pago` and save. Through the queue GET retain `westDay`; require `westDay < eastDay`, the visible queue count drops to five, and `fixturePrompts[0]` remains current. The only membership change is the boundary Question whose `Again` due date is now a future Local Day.
+6. Set the timezone to `Pacific/Pago_Pago` and save. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.reviewQueue)` retain `westDay`; require `westDay < eastDay`, the visible queue count drops to five, and `fixturePrompts[0]` remains current. The only membership change is the boundary Question whose `Again` due date is now a future Local Day.
 7. Reload `/review`; require the queue remains five with no resume, recovery, rollover, daily-plan, or session prompt.
 8. Set the timezone back to `Pacific/Kiritimati`. Require the visible queue count returns to six without a session action, proving the boundary Question re-enters from live Local Day derivation.
 9. Set the timezone to `Pacific/Pago_Pago` once more. Require the visible queue returns to five and the setting persists after reopening. Leave this timezone selected so the boundary Question does not interfere with the five-Question grade and Flag journey.

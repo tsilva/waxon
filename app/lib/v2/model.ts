@@ -9,7 +9,7 @@ import {
 import { extractJsonObject } from "../../../shared/json-object.mts";
 import {
   BROWSER_SMOKE_CORRECT_TOKEN,
-  isBrowserSmokeQuestion,
+  shouldUseBrowserAcceptanceEvaluator,
 } from "../browserSmokeSupport.ts";
 import { beginLlmTrace, finishLlmTrace } from "../llmTraceStore.ts";
 import type { V2Grade } from "./types.ts";
@@ -114,8 +114,10 @@ export async function evaluateRecall(input: {
   confidence: number;
 }> {
   if (
-    process.env.WAXON_BROWSER_SMOKE_EVALUATOR === "1" &&
-    isBrowserSmokeQuestion(input.prompt)
+    shouldUseBrowserAcceptanceEvaluator({
+      learnerId: input.userId,
+      prompt: input.prompt,
+    })
   ) {
     const correct = input.answer.includes(BROWSER_SMOKE_CORRECT_TOKEN);
     return {

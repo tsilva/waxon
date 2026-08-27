@@ -2547,7 +2547,7 @@ test(
             BrowserSmokeSeedConflict,
             seedBrowserSmokeJourney,
           } = await import("../app/lib/browserSmokeFixture.ts");
-          const { BROWSER_SMOKE_ISOLATION_USER } = await import(
+          const { BROWSER_SMOKE_ISOLATION_LEARNER } = await import(
             "../app/lib/browserSmokeSupport.ts"
           );
           const { getV2Client } = await import("../app/db/v2/client.ts");
@@ -2718,7 +2718,7 @@ test(
           } finally {
             await pool.query(
               `DELETE FROM waxon_v2.users WHERE id = $1`,
-              [BROWSER_SMOKE_ISOLATION_USER.id],
+              [BROWSER_SMOKE_ISOLATION_LEARNER.id],
             );
           }
         },

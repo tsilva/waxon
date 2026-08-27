@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
 import {
-  BROWSER_SMOKE_LIBRARY_QUESTION_PROMPT,
+  BROWSER_SMOKE_QUESTION_BANK_QUESTION_PROMPT,
   BROWSER_SMOKE_QUESTIONS,
   BROWSER_SMOKE_TIMEZONE_QUESTION,
 } from "@/app/lib/browserSmokeSupport";
@@ -10,7 +10,7 @@ import {
   seedBrowserSmokeJourney,
 } from "@/app/lib/browserSmokeFixture";
 import {
-  isBrowserAcceptanceTestUserEnabled,
+  isBrowserAcceptanceLearnerEnabled,
   isLocalTestAuthEnabled,
 } from "@/app/lib/localTestAuth";
 import {
@@ -22,7 +22,7 @@ function isEnabled(): boolean {
   return (
     process.env.NODE_ENV === "development" &&
     isLocalTestAuthEnabled() &&
-    isBrowserAcceptanceTestUserEnabled() &&
+    isBrowserAcceptanceLearnerEnabled() &&
     process.env.WAXON_ENABLE_BROWSER_SMOKE_SUPPORT === "1"
   );
 }
@@ -36,11 +36,11 @@ function disabledResponse() {
 
 export async function POST() {
   if (!isEnabled()) return disabledResponse();
-  const user = await getCurrentUser();
+  const learner = await getCurrentUser();
   try {
     return NextResponse.json({
       ok: true,
-      ...(await seedBrowserSmokeJourney(user.id)),
+      ...(await seedBrowserSmokeJourney(learner.id)),
     });
   } catch (error) {
     if (!(error instanceof BrowserSmokeSeedConflict)) throw error;
@@ -57,16 +57,16 @@ export async function POST() {
 
 export async function GET() {
   if (!isEnabled()) return disabledResponse();
-  const user = await getCurrentUser();
+  const learner = await getCurrentUser();
   const prompts = new Set<string>(
     [
-      BROWSER_SMOKE_LIBRARY_QUESTION_PROMPT,
+      BROWSER_SMOKE_QUESTION_BANK_QUESTION_PROMPT,
       BROWSER_SMOKE_TIMEZONE_QUESTION.prompt,
       ...BROWSER_SMOKE_QUESTIONS.map((item) => item.prompt),
     ],
   );
-  const library = await listLibrary({ userId: user.id, limit: 100 });
-  const namedQuestions = library.questions.filter((item) =>
+  const questionBank = await listLibrary({ userId: learner.id, limit: 100 });
+  const namedQuestions = questionBank.questions.filter((item) =>
     prompts.has(item.prompt),
   );
   return NextResponse.json({
@@ -75,7 +75,7 @@ export async function GET() {
       namedQuestions.map(async (item) => ({
         ...item,
         evidence: await getQuestionLearningEvidence({
-          userId: user.id,
+          userId: learner.id,
           questionId: item.id,
         }),
       })),

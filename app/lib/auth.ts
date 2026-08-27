@@ -5,7 +5,7 @@ import { getV2Db } from "@/app/db/v2/client";
 import { learnerSettings, users } from "@/app/db/v2/schema";
 import { appUserIdForClerkUser } from "@/app/lib/clerkIdentity";
 import {
-  getLocalTestUser,
+  getLocalTestLearner,
   isLocalTestAuthEnabled,
 } from "@/app/lib/localTestAuth";
 import type { UserProfile } from "@/app/lib/userProfile";
@@ -51,7 +51,7 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
   const db = getV2Db();
 
   if (isLocalTestAuthEnabled()) {
-    const localTestUser = getLocalTestUser();
+    const localTestLearner = getLocalTestLearner();
     const now = new Date();
     const [existingLocalUser] = await db
       .select({
@@ -61,13 +61,13 @@ export async function getCurrentUser(): Promise<AuthenticatedUser> {
         avatarUrl: users.avatarUrl,
       })
       .from(users)
-      .where(eq(users.email, localTestUser.email))
+      .where(eq(users.email, localTestLearner.email))
       .limit(1);
 
-    const localUserId = existingLocalUser?.id ?? localTestUser.id;
+    const localUserId = existingLocalUser?.id ?? localTestLearner.id;
     const localUserDisplayName =
-      existingLocalUser?.displayName ?? localTestUser.displayName;
-    const localUserEmail = existingLocalUser?.email ?? localTestUser.email;
+      existingLocalUser?.displayName ?? localTestLearner.displayName;
+    const localUserEmail = existingLocalUser?.email ?? localTestLearner.email;
 
     setTraceIdentity({
       userId: localUserId,

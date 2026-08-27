@@ -4,7 +4,7 @@ import { getV2Db } from "@/app/db/v2/client";
 import { learnerSettings, questions, users } from "@/app/db/v2/schema";
 import {
   BROWSER_SMOKE_ISOLATION_QUESTION,
-  BROWSER_SMOKE_ISOLATION_USER,
+  BROWSER_SMOKE_ISOLATION_LEARNER,
   BROWSER_SMOKE_QUESTIONS,
   BROWSER_SMOKE_TIMEZONE_QUESTION,
 } from "@/app/lib/browserSmokeSupport";
@@ -142,24 +142,24 @@ export async function seedBrowserSmokeJourney(userId: string) {
   await getV2Db()
     .insert(users)
     .values({
-      ...BROWSER_SMOKE_ISOLATION_USER,
+      ...BROWSER_SMOKE_ISOLATION_LEARNER,
       createdAt: now,
       updatedAt: now,
     })
     .onConflictDoUpdate({
       target: users.id,
       set: {
-        displayName: BROWSER_SMOKE_ISOLATION_USER.displayName,
-        email: BROWSER_SMOKE_ISOLATION_USER.email,
+        displayName: BROWSER_SMOKE_ISOLATION_LEARNER.displayName,
+        email: BROWSER_SMOKE_ISOLATION_LEARNER.email,
         updatedAt: now,
       },
     });
   await getV2Db()
     .insert(learnerSettings)
-    .values({ userId: BROWSER_SMOKE_ISOLATION_USER.id })
+    .values({ userId: BROWSER_SMOKE_ISOLATION_LEARNER.id })
     .onConflictDoNothing({ target: learnerSettings.userId });
   await addQuestions({
-    userId: BROWSER_SMOKE_ISOLATION_USER.id,
+    userId: BROWSER_SMOKE_ISOLATION_LEARNER.id,
     idempotencyKey: `browser-smoke-isolation-${runId}`,
     items: [BROWSER_SMOKE_ISOLATION_QUESTION],
   });

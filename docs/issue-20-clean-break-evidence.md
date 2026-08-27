@@ -8,10 +8,11 @@
 - Disposable database: local `pgvector/pgvector:pg16`; no production data or secrets used
 - Prepared local URL: `http://localhost:65221`
 - Native Browser owner: coordinator with the connected Codex Desktop `iab`
+- Diagnostic transport: runner-side Node `fetch` to the suite's guarded absolute `http://localhost:65221` endpoints because IAB evaluation has no `fetch`; Learner mutations remain visible and the MCP token remains only in process memory
 
 ## Native visible acceptance
 
-The implementation worker had no attached `iab` pane and did not substitute another browser. The coordinator must run the full issue-scoped suite against the final candidate and replace the pending cells below before merge approval.
+The coordinator is running the issue-scoped suite in the connected native `iab`; the implementation worker did not substitute another browser. Cases remain pending here until the coordinator supplies the completed visible evidence values for the final evidence commit.
 
 | Case | Result | Visible assertions |
 | --- | --- | --- |
@@ -40,15 +41,16 @@ Screenshots: none captured by this worker. The suite requires these successful-s
 | Command/check | Outcome |
 | --- | --- |
 | `pnpm db:reset -- --confirm-clean-break` with both DB URLs set to the disposable database | passed; clean baseline installed |
-| `pnpm test` with `APPLICATION_CONTRACT_TEST_DATABASE_URL`, `QUESTION_SEARCH_TEST_DATABASE_URL`, and both runtime DB URLs set to the disposable database | passed: 80 tests, 0 failed, 0 skipped |
+| `pnpm test` with `APPLICATION_CONTRACT_TEST_DATABASE_URL`, `QUESTION_SEARCH_TEST_DATABASE_URL`, and both runtime DB URLs set to the disposable database | passed: 83 tests, 0 failed, 0 skipped |
 | repeated browser fixture seed contract | passed: new identities, reset mastery, queue eligibility restored, Archived-predecessor/current-Flagged mixes converge, prior Learning Evidence preserved, unrelated Learner unchanged, unexpected Active Question rejected without mutation |
+| deterministic acceptance evaluator and resolved-answer layout contracts | passed: the evaluator requires development + acceptance mode + the dedicated Learner; production and another Learner call the mocked normal evaluator; metadata remains in the main content grid and cannot cover Answer Grade controls |
 | exact catalog contract | passed: 13 accepted tables; only Active/Flagged/Archived lifecycle values; obsolete objects absent |
 | `pnpm typecheck` | passed |
 | `pnpm lint` | passed |
 | `pnpm security:check` | passed: registry-only dependency sources; no known vulnerabilities |
 | `pnpm db:generate` then `git diff --exit-code -- drizzle-v2` | passed: `No schema changes, nothing to migrate` |
 | `VERCEL_ENV=preview pnpm build` against the disposable database | passed in a self-contained temporary mirror while the required dev server remained running; migrations applied and all 23 routes built |
-| local `/api/mcp` Streamable HTTP diagnostic at `http://localhost:65221` | passed: initialize/notification, stable `candidateId` check payload, ID-free add payload, canonical Active/Flagged creation, idempotent replay, exact duplicate detection, revocation, and revoked call 401; token was not logged |
+| local `/api/mcp` Streamable HTTP diagnostic at `http://localhost:65221` | passed before the native run: runner-side Node transport used the absolute tested-origin endpoint for initialize/notification, stable `candidateId` check payload, ID-free add payload, canonical Active/Flagged creation, idempotent replay, exact duplicate detection, revocation, and revoked call 401; token was not logged or persisted |
 
 The first temporary build mirror attempt failed before application compilation because Turbopack rejects a `node_modules` symlink outside the project root. Repeating the same candidate build with a real hard-linked dependency tree passed. This was build-isolation tooling, not an application failure.
 
