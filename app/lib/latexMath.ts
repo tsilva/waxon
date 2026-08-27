@@ -23,7 +23,9 @@ const mathSymbolMap: Record<string, string> = {
   neq: "≠",
   ne: "≠",
   mid: "∣",
+  parallel: "∥",
   sum: "∑",
+  tau: "τ",
   times: "×",
   theta: "θ",
   ldots: "…",
@@ -195,6 +197,36 @@ export function renderLatexMathbbText(value: string): string {
 
     if (codePoint >= 0x30 && codePoint <= 0x39) {
       return String.fromCodePoint(0x1d7d8 + codePoint - 0x30);
+    }
+
+    return character;
+  }).join("");
+}
+
+const calligraphicUppercase = [
+  "𝒜", "ℬ", "𝒞", "𝒟", "ℰ", "ℱ", "𝒢", "ℋ", "ℐ", "𝒥", "𝒦", "ℒ", "ℳ",
+  "𝒩", "𝒪", "𝒫", "𝒬", "ℛ", "𝒮", "𝒯", "𝒰", "𝒱", "𝒲", "𝒳", "𝒴", "𝒵",
+];
+
+const calligraphicLowercase = [
+  "𝒶", "𝒷", "𝒸", "𝒹", "ℯ", "𝒻", "ℊ", "𝒽", "𝒾", "𝒿", "𝓀", "𝓁", "𝓂",
+  "𝓃", "ℴ", "𝓅", "𝓆", "𝓇", "𝓈", "𝓉", "𝓊", "𝓋", "𝓌", "𝓍", "𝓎", "𝓏",
+];
+
+export function renderLatexMathcalText(value: string): string {
+  return Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0);
+
+    if (codePoint === undefined) {
+      return character;
+    }
+
+    if (codePoint >= 0x41 && codePoint <= 0x5a) {
+      return calligraphicUppercase[codePoint - 0x41] ?? character;
+    }
+
+    if (codePoint >= 0x61 && codePoint <= 0x7a) {
+      return calligraphicLowercase[codePoint - 0x61] ?? character;
     }
 
     return character;

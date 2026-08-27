@@ -173,6 +173,12 @@
   gap: 28px;
   padding: 24px 2px;
   border-bottom: 1px solid var(--line);
+  transition: opacity 180ms ease;
+}
+
+.lean-question-row-removing {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .lean-question-copy {
@@ -324,6 +330,16 @@
 .lean-question-actions button.is-danger:hover,
 .lean-question-actions button.is-danger:focus-visible {
   color: #9a463d;
+}
+
+.lean-question-actions button:disabled {
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lean-question-row {
+    transition: none;
+  }
 }
 
 .question-bank-empty {
@@ -2396,7 +2412,7 @@ textarea {
   font-style: italic;
   line-height: 1;
   vertical-align: -0.04em;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .math-expression.display {
@@ -2414,6 +2430,7 @@ textarea {
 
 .math-literal,
 .math-blackboard,
+.math-calligraphic,
 .math-operator,
 .math-text {
   font-style: normal;
