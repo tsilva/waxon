@@ -1,55 +1,45 @@
 #!/usr/bin/env node
 
-import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import pg from "pg";
+import { replaceWithCleanBaseline } from "./lib/clean-break.mjs";
 import { loadLocalEnvFiles, requireEnv } from "./lib/runtime.mjs";
-
-const { Pool } = pg;
 
 loadLocalEnvFiles();
 
-if (process.argv[2] !== "--confirm-purge-v2") {
+if (!process.argv.slice(2).includes("--confirm-clean-break")) {
   console.error(
-    "Refusing to purge. Run `pnpm db:reset -- --confirm-purge-v2` to drop only the waxon_v2 schema.",
+    "Refusing to discard the database. Run `pnpm db:reset -- --confirm-clean-break` to replace Waxon data and migration metadata with the clean baseline.",
   );
   process.exit(2);
 }
 
 const connectionString = requireEnv("DATABASE_URL_UNPOOLED", "DATABASE_URL");
-const pool = new Pool({ connectionString });
 const journal = JSON.parse(
   await readFile(
     new URL("../drizzle-v2/meta/_journal.json", import.meta.url),
     "utf8",
   ),
 );
-const migrationTimestamps = journal.entries.map((entry) => String(entry.when));
+const [entry] = journal.entries ?? [];
 
-try {
-  await pool.query("BEGIN");
-  await pool.query('DROP SCHEMA IF EXISTS "waxon_v2" CASCADE');
-  const migrationTable = await pool.query(
-    "SELECT to_regclass('drizzle.__drizzle_migrations') AS name",
+if (
+  journal.entries?.length !== 1 ||
+  entry?.idx !== 0 ||
+  entry?.tag !== "0000_clean_baseline" ||
+  entry?.breakpoints !== true
+) {
+  throw new Error(
+    "The destructive clean break requires exactly the verified 0000_clean_baseline migration",
   );
-  if (migrationTable.rows[0]?.name) {
-    await pool.query(
-      'DELETE FROM drizzle.__drizzle_migrations WHERE created_at = ANY($1::bigint[])',
-      [migrationTimestamps],
-    );
-  }
-  await pool.query("COMMIT");
-} catch (error) {
-  await pool.query("ROLLBACK").catch(() => undefined);
-  throw error;
-} finally {
-  await pool.end();
 }
 
-const migration = spawnSync("pnpm", ["db:migrate"], {
-  cwd: process.cwd(),
-  env: process.env,
-  stdio: "inherit",
-});
+const baselineSql = await readFile(
+  new URL(`../drizzle-v2/${entry.tag}.sql`, import.meta.url),
+  "utf8",
+);
 
-process.exit(migration.status ?? 1);
+await replaceWithCleanBaseline({
+  connectionString,
+  baselineSql,
+  migrationTimestamp: entry.when,
+});

@@ -139,10 +139,10 @@ test(
         ],
       });
       assert.equal(batch.results[1]?.advisory, "exact_duplicate");
-      assert.equal(batch.results[1]?.matches[0]?.source, "batch");
+      assert.equal(batch.results[1]?.matches[0]?.origin, "batch");
       assert.equal(batch.results[1]?.matches[0]?.candidateId, "first");
       assert.equal(batch.results[2]?.advisory, "review_similar");
-      assert.equal(batch.results[2]?.matches[0]?.source, "batch");
+      assert.equal(batch.results[2]?.matches[0]?.origin, "batch");
       assert.equal(batch.results[2]?.matches[0]?.candidateId, "first");
 
       const embeddingJobId = randomUUID();

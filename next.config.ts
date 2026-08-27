@@ -18,20 +18,6 @@ const nextConfig: NextConfig = {
 
     return config;
   },
-  async redirects() {
-    return [
-      {
-        source: "/queue",
-        destination: "/library",
-        permanent: false,
-      },
-      {
-        source: "/tags",
-        destination: "/library",
-        permanent: false,
-      },
-    ];
-  },
   async headers() {
     return [
       {

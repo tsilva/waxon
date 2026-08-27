@@ -534,7 +534,7 @@ test(
             limitPerItem: 5,
           });
           const bankMatches = searched.results[0]?.matches.filter(
-            (match) => match.source === "bank",
+            (match) => match.origin === "bank",
           ).map(toMcpRankedQuestion);
           assert.deepEqual(
             bankMatches?.map((match) => ({
@@ -2392,8 +2392,8 @@ test(
         async () => {
           const learnerA = await provisionLearner("Replacement learner A");
           const learnerB = await provisionLearner("Replacement learner B");
-          const source = await learnerA.direct.questionBank.add({
-            idempotencyKey: "replacement-source",
+          const original = await learnerA.direct.questionBank.add({
+            idempotencyKey: "replacement-original",
             items: [
               {
                 prompt: "Which Question remains after replacement rollback?",
@@ -2410,11 +2410,11 @@ test(
               },
             ],
           });
-          const sourceId = source.results[0]?.id ?? "";
+          const originalId = original.results[0]?.id ?? "";
 
           await assert.rejects(
             learnerB.direct.questionBank.replace({
-              questionId: sourceId,
+              questionId: originalId,
               prompt: "Why must a cross-Learner replacement fail?",
               referenceAnswer: "Learner ownership prevents it.",
             }),
@@ -2422,7 +2422,7 @@ test(
           );
           await assert.rejects(
             learnerA.direct.questionBank.replace({
-              questionId: sourceId,
+              questionId: originalId,
               prompt: "  WHICH PROMPT BLOCKS DUPLICATE REPLACEMENT?  ",
               referenceAnswer: "A conflicting Answer Standard.",
             }),
@@ -2430,12 +2430,12 @@ test(
           );
 
           const unchanged = await learnerA.direct.questionBank.replace({
-            questionId: sourceId,
+            questionId: originalId,
             prompt: "  WHICH QUESTION remains after replacement rollback?  ",
             referenceAnswer: "  The original Active Question.  ",
           });
           assert.deepEqual(unchanged, {
-            questionId: sourceId,
+            questionId: originalId,
             archivedQuestionId: null,
             lifecycle: "active",
             status: "unchanged",
@@ -2464,7 +2464,7 @@ test(
           try {
             await assert.rejects(
               learnerA.direct.questionBank.replace({
-                questionId: sourceId,
+                questionId: originalId,
                 prompt: failedPrompt,
                 referenceAnswer:
                   "The transaction restores the original Active Question.",
@@ -2487,7 +2487,7 @@ test(
           const questions = (await learnerA.direct.questionBank.list())
             .questions;
           assert.equal(questions.length, 2);
-          const retained = questions.find((question) => question.id === sourceId);
+          const retained = questions.find((question) => question.id === originalId);
           assert.equal(retained?.lifecycle, "active");
           assert.equal(
             retained?.prompt,

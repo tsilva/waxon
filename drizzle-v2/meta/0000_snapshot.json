@@ -1,5 +1,5 @@
 {
-  "id": "9111f63e-c3d8-46d7-9439-355b6f508b39",
+  "id": "daf842a6-63f4-43a5-9701-87da085bc505",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -23,18 +23,6 @@
         },
         "question_id": {
           "name": "question_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_version_id": {
-          "name": "question_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_item_id": {
-          "name": "session_item_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -112,38 +100,6 @@
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
-        },
-        "answer_submissions_version_fk": {
-          "name": "answer_submissions_version_fk",
-          "tableFrom": "answer_submissions",
-          "tableTo": "question_versions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_version_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "answer_submissions_item_fk": {
-          "name": "answer_submissions_item_fk",
-          "tableFrom": "answer_submissions",
-          "tableTo": "review_session_items",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "session_item_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -156,306 +112,13 @@
             "id"
           ]
         },
-        "answer_submissions_item_unique": {
-          "name": "answer_submissions_item_unique",
+        "answer_submissions_user_id_id_question_id_unique": {
+          "name": "answer_submissions_user_id_id_question_id_unique",
           "nullsNotDistinct": false,
           "columns": [
             "user_id",
-            "session_item_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.concept_aliases": {
-      "name": "concept_aliases",
-      "schema": "waxon_v2",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "concept_id": {
-          "name": "concept_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "alias": {
-          "name": "alias",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "concept_aliases_concept_fk": {
-          "name": "concept_aliases_concept_fk",
-          "tableFrom": "concept_aliases",
-          "tableTo": "concepts",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "concept_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "concept_aliases_pk": {
-          "name": "concept_aliases_pk",
-          "columns": [
-            "user_id",
-            "alias"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.concepts": {
-      "name": "concepts",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "slug": {
-          "name": "slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "broader_concept_id": {
-          "name": "broader_concept_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "concepts_user_name_idx": {
-          "name": "concepts_user_name_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "name",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "concepts_user_id_users_id_fk": {
-          "name": "concepts_user_id_users_id_fk",
-          "tableFrom": "concepts",
-          "tableTo": "users",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "concepts_user_id_id_unique": {
-          "name": "concepts_user_id_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "id"
-          ]
-        },
-        "concepts_user_slug_unique": {
-          "name": "concepts_user_slug_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "slug"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.coverage_targets": {
-      "name": "coverage_targets",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_id": {
-          "name": "source_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "target_type": {
-          "name": "target_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "statement": {
-          "name": "statement",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "coverage_status",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'unresolved'"
-        },
-        "ignore_reason": {
-          "name": "ignore_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "coverage_targets_source_status_idx": {
-          "name": "coverage_targets_source_status_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "source_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "coverage_targets_source_fk": {
-          "name": "coverage_targets_source_fk",
-          "tableFrom": "coverage_targets",
-          "tableTo": "sources",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "source_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "coverage_targets_user_id_id_unique": {
-          "name": "coverage_targets_user_id_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "id"
+            "id",
+            "question_id"
           ]
         }
       },
@@ -477,6 +140,12 @@
         "user_id": {
           "name": "user_id",
           "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -589,18 +258,36 @@
         }
       },
       "foreignKeys": {
-        "evaluations_submission_fk": {
-          "name": "evaluations_submission_fk",
+        "evaluations_question_fk": {
+          "name": "evaluations_question_fk",
+          "tableFrom": "evaluations",
+          "tableTo": "questions",
+          "schemaTo": "waxon_v2",
+          "columnsFrom": [
+            "user_id",
+            "question_id"
+          ],
+          "columnsTo": [
+            "user_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "evaluations_submission_question_fk": {
+          "name": "evaluations_submission_question_fk",
           "tableFrom": "evaluations",
           "tableTo": "answer_submissions",
           "schemaTo": "waxon_v2",
           "columnsFrom": [
             "user_id",
-            "submission_id"
+            "submission_id",
+            "question_id"
           ],
           "columnsTo": [
             "user_id",
-            "id"
+            "id",
+            "question_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -621,123 +308,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "waxon_v2.evidence_spans": {
-      "name": "evidence_spans",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_version_id": {
-          "name": "source_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "section": {
-          "name": "section",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "start_offset": {
-          "name": "start_offset",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "end_offset": {
-          "name": "end_offset",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quote": {
-          "name": "quote",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "evidence_spans_source_idx": {
-          "name": "evidence_spans_source_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "source_version_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "evidence_spans_source_version_fk": {
-          "name": "evidence_spans_source_version_fk",
-          "tableFrom": "evidence_spans",
-          "tableTo": "source_versions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "source_version_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "evidence_spans_user_id_id_unique": {
-          "name": "evidence_spans_user_id_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "evidence_spans_offsets_valid": {
-          "name": "evidence_spans_offsets_valid",
-          "value": "\"waxon_v2\".\"evidence_spans\".\"start_offset\" >= 0 AND \"waxon_v2\".\"evidence_spans\".\"end_offset\" >= \"waxon_v2\".\"evidence_spans\".\"start_offset\""
-        }
-      },
-      "isRLSEnabled": false
-    },
     "waxon_v2.grade_events": {
       "name": "grade_events",
       "schema": "waxon_v2",
@@ -752,6 +322,12 @@
         "user_id": {
           "name": "user_id",
           "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -819,18 +395,36 @@
         }
       },
       "foreignKeys": {
-        "grade_events_submission_fk": {
-          "name": "grade_events_submission_fk",
+        "grade_events_question_fk": {
+          "name": "grade_events_question_fk",
+          "tableFrom": "grade_events",
+          "tableTo": "questions",
+          "schemaTo": "waxon_v2",
+          "columnsFrom": [
+            "user_id",
+            "question_id"
+          ],
+          "columnsTo": [
+            "user_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "grade_events_submission_question_fk": {
+          "name": "grade_events_submission_question_fk",
           "tableFrom": "grade_events",
           "tableTo": "answer_submissions",
           "schemaTo": "waxon_v2",
           "columnsFrom": [
             "user_id",
-            "submission_id"
+            "submission_id",
+            "question_id"
           ],
           "columnsTo": [
             "user_id",
-            "id"
+            "id",
+            "question_id"
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
@@ -1033,40 +627,18 @@
           "primaryKey": true,
           "notNull": true
         },
-        "daily_minutes": {
-          "name": "daily_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 10
-        },
-        "desired_retention": {
-          "name": "desired_retention",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0.9
-        },
-        "new_items_per_day": {
-          "name": "new_items_per_day",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 5
-        },
         "timezone": {
           "name": "timezone",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'UTC'"
+          "notNull": false
         },
         "auto_accept_high_confidence": {
           "name": "auto_accept_high_confidence",
           "type": "boolean",
           "primaryKey": false,
           "notNull": true,
-          "default": false
+          "default": true
         },
         "created_at": {
           "name": "created_at",
@@ -1106,6 +678,167 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "waxon_v2.llm_trace_interactions": {
+      "name": "llm_trace_interactions",
+      "schema": "waxon_v2",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "calls": {
+          "name": "calls",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "v2_llm_trace_interactions_started_at_idx": {
+          "name": "v2_llm_trace_interactions_started_at_idx",
+          "columns": [
+            {
+              "expression": "started_at",
+              "isExpression": false,
+              "asc": false,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "waxon_v2.mcp_credentials": {
+      "name": "mcp_credentials",
+      "schema": "waxon_v2",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_prefix": {
+          "name": "token_prefix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "last_used_at": {
+          "name": "last_used_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "mcp_credentials_active_token_idx": {
+          "name": "mcp_credentials_active_token_idx",
+          "columns": [
+            {
+              "expression": "token_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"waxon_v2\".\"mcp_credentials\".\"revoked_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "mcp_credentials_user_id_users_id_fk": {
+          "name": "mcp_credentials_user_id_users_id_fk",
+          "tableFrom": "mcp_credentials",
+          "tableTo": "users",
+          "schemaTo": "waxon_v2",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "mcp_credentials_token_hash_unique": {
+          "name": "mcp_credentials_token_hash_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "token_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "waxon_v2.memory_states": {
       "name": "memory_states",
       "schema": "waxon_v2",
@@ -1125,6 +858,12 @@
         "due_at": {
           "name": "due_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "due_on": {
+          "name": "due_on",
+          "type": "date",
           "primaryKey": false,
           "notNull": true
         },
@@ -1216,7 +955,7 @@
               "nulls": "last"
             },
             {
-              "expression": "due_at",
+              "expression": "due_on",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1334,326 +1073,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "waxon_v2.question_concepts": {
-      "name": "question_concepts",
-      "schema": "waxon_v2",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_id": {
-          "name": "question_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "concept_id": {
-          "name": "concept_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "question_concepts_question_fk": {
-          "name": "question_concepts_question_fk",
-          "tableFrom": "question_concepts",
-          "tableTo": "questions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "question_concepts_concept_fk": {
-          "name": "question_concepts_concept_fk",
-          "tableFrom": "question_concepts",
-          "tableTo": "concepts",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "concept_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "question_concepts_pk": {
-          "name": "question_concepts_pk",
-          "columns": [
-            "user_id",
-            "question_id",
-            "concept_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.question_embeddings": {
-      "name": "question_embeddings",
-      "schema": "waxon_v2",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_version_id": {
-          "name": "question_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "embedding": {
-          "name": "embedding",
-          "type": "vector(3072)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "question_embeddings_version_fk": {
-          "name": "question_embeddings_version_fk",
-          "tableFrom": "question_embeddings",
-          "tableTo": "question_versions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_version_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "question_embeddings_pk": {
-          "name": "question_embeddings_pk",
-          "columns": [
-            "user_id",
-            "question_version_id",
-            "model"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.question_evidence": {
-      "name": "question_evidence",
-      "schema": "waxon_v2",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_version_id": {
-          "name": "question_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "evidence_span_id": {
-          "name": "evidence_span_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "requirement": {
-          "name": "requirement",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "question_evidence_version_fk": {
-          "name": "question_evidence_version_fk",
-          "tableFrom": "question_evidence",
-          "tableTo": "question_versions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_version_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "question_evidence_span_fk": {
-          "name": "question_evidence_span_fk",
-          "tableFrom": "question_evidence",
-          "tableTo": "evidence_spans",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "evidence_span_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "question_evidence_pk": {
-          "name": "question_evidence_pk",
-          "columns": [
-            "user_id",
-            "question_version_id",
-            "evidence_span_id",
-            "requirement"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.question_relations": {
-      "name": "question_relations",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "from_question_id": {
-          "name": "from_question_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "to_question_id": {
-          "name": "to_question_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "relation": {
-          "name": "relation",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "question_relations_from_fk": {
-          "name": "question_relations_from_fk",
-          "tableFrom": "question_relations",
-          "tableTo": "questions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "from_question_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "question_relations_to_fk": {
-          "name": "question_relations_to_fk",
-          "tableFrom": "question_relations",
-          "tableTo": "questions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "to_question_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "question_relations_unique": {
-          "name": "question_relations_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "from_question_id",
-            "to_question_id",
-            "relation"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.question_versions": {
-      "name": "question_versions",
+    "waxon_v2.question_flags": {
+      "name": "question_flags",
       "schema": "waxon_v2",
       "columns": {
         "id": {
@@ -1675,77 +1096,25 @@
           "primaryKey": false,
           "notNull": true
         },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "is_current": {
-          "name": "is_current",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "prompt": {
-          "name": "prompt",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reference_answer": {
-          "name": "reference_answer",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "display_answer": {
-          "name": "display_answer",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "answer_mode": {
-          "name": "answer_mode",
-          "type": "answer_mode",
+        "origin": {
+          "name": "origin",
+          "type": "question_flag_origin",
           "typeSchema": "waxon_v2",
           "primaryKey": false,
           "notNull": true
         },
-        "target_text": {
-          "name": "target_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quality_decision": {
-          "name": "quality_decision",
-          "type": "quality_decision",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "quality_reasons": {
-          "name": "quality_reasons",
+        "reasons": {
+          "name": "reasons",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
           "default": "'[]'::jsonb"
         },
-        "duplicate_of_question_id": {
-          "name": "duplicate_of_question_id",
-          "type": "uuid",
+        "detail": {
+          "name": "detail",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "learner_attested": {
-          "name": "learner_attested",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "created_at": {
           "name": "created_at",
@@ -1753,11 +1122,44 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
-        "question_versions_current_unique": {
-          "name": "question_versions_current_unique",
+        "question_flags_question_created_idx": {
+          "name": "question_flags_question_created_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "question_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "question_flags_unresolved_idx": {
+          "name": "question_flags_unresolved_idx",
           "columns": [
             {
               "expression": "user_id",
@@ -1772,32 +1174,17 @@
               "nulls": "last"
             }
           ],
-          "isUnique": true,
-          "where": "\"waxon_v2\".\"question_versions\".\"is_current\" = true",
+          "isUnique": false,
+          "where": "\"waxon_v2\".\"question_flags\".\"resolved_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
-          "with": {}
-        },
-        "question_versions_prompt_search_idx": {
-          "name": "question_versions_prompt_search_idx",
-          "columns": [
-            {
-              "expression": "to_tsvector('simple', \"prompt\")",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "gin",
           "with": {}
         }
       },
       "foreignKeys": {
-        "question_versions_question_fk": {
-          "name": "question_versions_question_fk",
-          "tableFrom": "question_versions",
+        "question_flags_question_fk": {
+          "name": "question_flags_question_fk",
+          "tableFrom": "question_flags",
           "tableTo": "questions",
           "schemaTo": "waxon_v2",
           "columnsFrom": [
@@ -1813,25 +1200,125 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "question_versions_user_id_id_unique": {
-          "name": "question_versions_user_id_id_unique",
-          "nullsNotDistinct": false,
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "waxon_v2.question_search_embeddings": {
+      "name": "question_search_embeddings",
+      "schema": "waxon_v2",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_id": {
+          "name": "question_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding_version": {
+          "name": "embedding_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prompt_hash": {
+          "name": "prompt_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "halfvec(512)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "question_search_embeddings_lookup_idx": {
+          "name": "question_search_embeddings_lookup_idx",
           "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "model",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "embedding_version",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "question_search_embeddings_question_fk": {
+          "name": "question_search_embeddings_question_fk",
+          "tableFrom": "question_search_embeddings",
+          "tableTo": "questions",
+          "schemaTo": "waxon_v2",
+          "columnsFrom": [
+            "user_id",
+            "question_id"
+          ],
+          "columnsTo": [
             "user_id",
             "id"
-          ]
-        },
-        "question_versions_question_version_unique": {
-          "name": "question_versions_question_version_unique",
-          "nullsNotDistinct": false,
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "question_search_embeddings_pk": {
+          "name": "question_search_embeddings_pk",
           "columns": [
             "user_id",
             "question_id",
-            "version"
+            "model",
+            "embedding_version"
           ]
         }
       },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -1853,26 +1340,25 @@
           "primaryKey": false,
           "notNull": true
         },
+        "prompt": {
+          "name": "prompt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reference_answer": {
+          "name": "reference_answer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "lifecycle": {
           "name": "lifecycle",
           "type": "question_lifecycle",
           "typeSchema": "waxon_v2",
           "primaryKey": false,
           "notNull": true,
-          "default": "'draft'"
-        },
-        "prior_lifecycle": {
-          "name": "prior_lifecycle",
-          "type": "question_lifecycle",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "suspension_reason": {
-          "name": "suspension_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
+          "default": "'active'"
         },
         "target_key": {
           "name": "target_key",
@@ -1880,12 +1366,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "importance": {
-          "name": "importance",
-          "type": "double precision",
+        "creation_order": {
+          "name": "creation_order",
+          "type": "bigserial",
           "primaryKey": false,
-          "notNull": true,
-          "default": 1
+          "notNull": true
         },
         "created_at": {
           "name": "created_at",
@@ -1900,12 +1385,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "deleted_at": {
-          "name": "deleted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -1920,6 +1399,27 @@
             },
             {
               "expression": "lifecycle",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "questions_user_target_idx": {
+          "name": "questions_user_target_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "target_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1947,9 +1447,39 @@
             }
           ],
           "isUnique": true,
-          "where": "\"waxon_v2\".\"questions\".\"lifecycle\" IN ('new', 'learning', 'review')",
+          "where": "\"waxon_v2\".\"questions\".\"lifecycle\" = 'active'",
           "concurrently": false,
           "method": "btree",
+          "with": {}
+        },
+        "questions_search_idx": {
+          "name": "questions_search_idx",
+          "columns": [
+            {
+              "expression": "(\n        setweight(to_tsvector('simple', coalesce(\"prompt\", '')), 'A') ||\n        setweight(to_tsvector('simple', coalesce(\"reference_answer\", '')), 'B')\n      )",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "questions_prompt_trgm_idx": {
+          "name": "questions_prompt_trgm_idx",
+          "columns": [
+            {
+              "expression": "\"prompt\" gist_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gist",
           "with": {}
         }
       },
@@ -1980,1035 +1510,6 @@
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.retry_obligations": {
-      "name": "retry_obligations",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "first_submission_id": {
-          "name": "first_submission_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_id": {
-          "name": "question_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_version_id": {
-          "name": "question_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "retry_status",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "earliest_at": {
-          "name": "earliest_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "retry_obligations_submission_fk": {
-          "name": "retry_obligations_submission_fk",
-          "tableFrom": "retry_obligations",
-          "tableTo": "answer_submissions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "first_submission_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "retry_obligations_question_fk": {
-          "name": "retry_obligations_question_fk",
-          "tableFrom": "retry_obligations",
-          "tableTo": "questions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "retry_obligations_session_fk": {
-          "name": "retry_obligations_session_fk",
-          "tableFrom": "retry_obligations",
-          "tableTo": "review_sessions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "session_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "retry_obligations_submission_unique": {
-          "name": "retry_obligations_submission_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "first_submission_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.review_session_items": {
-      "name": "review_session_items",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "session_id": {
-          "name": "session_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_id": {
-          "name": "question_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_version_id": {
-          "name": "question_version_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "session_item_kind",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'base'"
-        },
-        "position": {
-          "name": "position",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "state": {
-          "name": "state",
-          "type": "session_item_state",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "earliest_at": {
-          "name": "earliest_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "exposed_at": {
-          "name": "exposed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "submitted_at": {
-          "name": "submitted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "review_session_items_next_idx": {
-          "name": "review_session_items_next_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "session_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "state",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "position",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "review_session_items_session_fk": {
-          "name": "review_session_items_session_fk",
-          "tableFrom": "review_session_items",
-          "tableTo": "review_sessions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "session_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "review_session_items_question_fk": {
-          "name": "review_session_items_question_fk",
-          "tableFrom": "review_session_items",
-          "tableTo": "questions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "review_session_items_version_fk": {
-          "name": "review_session_items_version_fk",
-          "tableFrom": "review_session_items",
-          "tableTo": "question_versions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_version_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "review_session_items_user_id_id_unique": {
-          "name": "review_session_items_user_id_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "id"
-          ]
-        },
-        "review_session_items_position_unique": {
-          "name": "review_session_items_position_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "session_id",
-            "position"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.review_sessions": {
-      "name": "review_sessions",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "session_kind",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'primary'"
-        },
-        "status": {
-          "name": "status",
-          "type": "session_status",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'active'"
-        },
-        "time_budget_minutes": {
-          "name": "time_budget_minutes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "desired_retention": {
-          "name": "desired_retention",
-          "type": "double precision",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "estimated_seconds": {
-          "name": "estimated_seconds",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "planned_count": {
-          "name": "planned_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {
-        "review_sessions_one_active_per_user": {
-          "name": "review_sessions_one_active_per_user",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"waxon_v2\".\"review_sessions\".\"status\" = 'active'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "review_sessions_user_id_users_id_fk": {
-          "name": "review_sessions_user_id_users_id_fk",
-          "tableFrom": "review_sessions",
-          "tableTo": "users",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "review_sessions_user_id_id_unique": {
-          "name": "review_sessions_user_id_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.saved_views": {
-      "name": "saved_views",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "query": {
-          "name": "query",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "saved_views_user_id_users_id_fk": {
-          "name": "saved_views_user_id_users_id_fk",
-          "tableFrom": "saved_views",
-          "tableTo": "users",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "saved_views_user_name_unique": {
-          "name": "saved_views_user_name_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "name"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.source_versions": {
-      "name": "source_versions",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_id": {
-          "name": "source_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version": {
-          "name": "version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "body_text": {
-          "name": "body_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "checksum": {
-          "name": "checksum",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "source_versions_source_fk": {
-          "name": "source_versions_source_fk",
-          "tableFrom": "source_versions",
-          "tableTo": "sources",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "source_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "source_versions_user_id_id_unique": {
-          "name": "source_versions_user_id_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "id"
-          ]
-        },
-        "source_versions_source_version_unique": {
-          "name": "source_versions_source_version_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "source_id",
-            "version"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.sources": {
-      "name": "sources",
-      "schema": "waxon_v2",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "kind": {
-          "name": "kind",
-          "type": "source_kind",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "source_status",
-          "typeSchema": "waxon_v2",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'captured'"
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "original_url": {
-          "name": "original_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "object_url": {
-          "name": "object_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "mime_type": {
-          "name": "mime_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "byte_size": {
-          "name": "byte_size",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "checksum": {
-          "name": "checksum",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "raw_text": {
-          "name": "raw_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "processing_progress": {
-          "name": "processing_progress",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "error": {
-          "name": "error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "disabled_at": {
-          "name": "disabled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "erased_at": {
-          "name": "erased_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "sources_user_created_idx": {
-          "name": "sources_user_created_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "sources_user_status_idx": {
-          "name": "sources_user_status_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "sources_user_id_users_id_fk": {
-          "name": "sources_user_id_users_id_fk",
-          "tableFrom": "sources",
-          "tableTo": "users",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "sources_user_id_id_unique": {
-          "name": "sources_user_id_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "user_id",
-            "id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.target_evidence": {
-      "name": "target_evidence",
-      "schema": "waxon_v2",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "target_id": {
-          "name": "target_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "evidence_span_id": {
-          "name": "evidence_span_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "target_evidence_target_fk": {
-          "name": "target_evidence_target_fk",
-          "tableFrom": "target_evidence",
-          "tableTo": "coverage_targets",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "target_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "target_evidence_span_fk": {
-          "name": "target_evidence_span_fk",
-          "tableFrom": "target_evidence",
-          "tableTo": "evidence_spans",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "evidence_span_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "target_evidence_pk": {
-          "name": "target_evidence_pk",
-          "columns": [
-            "user_id",
-            "target_id",
-            "evidence_span_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.target_questions": {
-      "name": "target_questions",
-      "schema": "waxon_v2",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "target_id": {
-          "name": "target_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_id": {
-          "name": "question_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "target_questions_target_fk": {
-          "name": "target_questions_target_fk",
-          "tableFrom": "target_questions",
-          "tableTo": "coverage_targets",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "target_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "target_questions_question_fk": {
-          "name": "target_questions_question_fk",
-          "tableFrom": "target_questions",
-          "tableTo": "questions",
-          "schemaTo": "waxon_v2",
-          "columnsFrom": [
-            "user_id",
-            "question_id"
-          ],
-          "columnsTo": [
-            "user_id",
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "target_questions_pk": {
-          "name": "target_questions_pk",
-          "columns": [
-            "user_id",
-            "target_id",
-            "question_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "waxon_v2.usage_counters": {
-      "name": "usage_counters",
-      "schema": "waxon_v2",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "dimension": {
-          "name": "dimension",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "window_start": {
-          "name": "window_start",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "used": {
-          "name": "used",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "reserved": {
-          "name": "reserved",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "usage_counters_pk": {
-          "name": "usage_counters_pk",
-          "columns": [
-            "user_id",
-            "dimension",
-            "window_start"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -3087,26 +1588,6 @@
     }
   },
   "enums": {
-    "waxon_v2.answer_mode": {
-      "name": "answer_mode",
-      "schema": "waxon_v2",
-      "values": [
-        "exact",
-        "semantic",
-        "rubric"
-      ]
-    },
-    "waxon_v2.coverage_status": {
-      "name": "coverage_status",
-      "schema": "waxon_v2",
-      "values": [
-        "covered",
-        "weak",
-        "missing",
-        "ignored",
-        "unresolved"
-      ]
-    },
     "waxon_v2.evaluation_status": {
       "name": "evaluation_status",
       "schema": "waxon_v2",
@@ -3149,103 +1630,21 @@
         "cancelled"
       ]
     },
-    "waxon_v2.quality_decision": {
-      "name": "quality_decision",
+    "waxon_v2.question_flag_origin": {
+      "name": "question_flag_origin",
       "schema": "waxon_v2",
       "values": [
-        "pending",
-        "distinct",
-        "duplicate",
-        "uncertain",
-        "rejected"
+        "waxon_validation",
+        "learner"
       ]
     },
     "waxon_v2.question_lifecycle": {
       "name": "question_lifecycle",
       "schema": "waxon_v2",
       "values": [
-        "draft",
-        "new",
-        "learning",
-        "review",
-        "paused",
-        "archived",
-        "suspended",
-        "trash",
-        "superseded"
-      ]
-    },
-    "waxon_v2.retry_status": {
-      "name": "retry_status",
-      "schema": "waxon_v2",
-      "values": [
-        "queued",
-        "deferred",
-        "waived",
-        "exposed",
-        "completed"
-      ]
-    },
-    "waxon_v2.session_item_kind": {
-      "name": "session_item_kind",
-      "schema": "waxon_v2",
-      "values": [
-        "base",
-        "retry"
-      ]
-    },
-    "waxon_v2.session_item_state": {
-      "name": "session_item_state",
-      "schema": "waxon_v2",
-      "values": [
-        "queued",
-        "exposed",
-        "submitted",
-        "evaluated",
-        "invalidated"
-      ]
-    },
-    "waxon_v2.session_kind": {
-      "name": "session_kind",
-      "schema": "waxon_v2",
-      "values": [
-        "primary",
-        "supplemental"
-      ]
-    },
-    "waxon_v2.session_status": {
-      "name": "session_status",
-      "schema": "waxon_v2",
-      "values": [
         "active",
-        "completed",
-        "abandoned"
-      ]
-    },
-    "waxon_v2.source_kind": {
-      "name": "source_kind",
-      "schema": "waxon_v2",
-      "values": [
-        "direct",
-        "paste",
-        "url",
-        "pdf",
-        "text",
-        "topic"
-      ]
-    },
-    "waxon_v2.source_status": {
-      "name": "source_status",
-      "schema": "waxon_v2",
-      "values": [
-        "captured",
-        "processing",
-        "ready",
-        "failed",
-        "rejected_limit",
-        "disabled",
-        "erasing",
-        "erased"
+        "flagged",
+        "archived"
       ]
     },
     "waxon_v2.submission_status": {
