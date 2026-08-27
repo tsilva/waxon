@@ -5,7 +5,7 @@ This is the source of truth for the final native-browser acceptance run for GitH
 ## Result policy
 
 - Record every numbered case as `pass`, `fail`, or `skipped`. A skipped required case does not satisfy #20.
-- Use visible UI interaction for learner behavior. Page-context requests are allowed only for the fixture seed, identity capture, and the MCP service calls that have no browser UI.
+- Use visible UI interaction for learner behavior. Page-context requests are allowed only when a step explicitly names one of these localhost diagnostics: read-only `GET /api/v2/library`, read-only `GET /api/v2/review/queue`, read-only `GET /api/test-support/browser-smoke`, fixture-seeding `POST /api/test-support/browser-smoke`, or the `/api/mcp` transport calls that have no browser UI. Do not mutate Library, Review, settings, or credentials through direct requests; perform those actions visibly.
 - Take a fresh DOM snapshot before changing locator strategy. Wait for named visible content, not `networkidle`.
 - Capture desktop and narrow screenshots under `/private/tmp` with `issue-20-clean-break` in each filename. Capture every failure or ambiguous state.
 - Record the exact printed dev URL, visible assertions, console warnings/errors, commands, screenshot paths, failures, and remaining risks in `docs/issue-20-clean-break-evidence.md`.
@@ -46,7 +46,7 @@ Library Question:
 
 ```text
 Prompt: Issue 20 Library journey: what makes a Question replacement immutable?
-Original Answer Standard: The original Question keeps its Learning Evidence.
+Original Answer Standard: The original Question keeps its Learning Evidence. Acceptance token: browser-smoke-correct-token.
 Replacement Answer Standard: Replacement creates a new Active Question with reset mastery while the original is Archived.
 ```
 
@@ -64,20 +64,27 @@ Correct: browser-smoke-correct-token
 Incorrect: This answer deliberately omits the required token.
 ```
 
-MCP candidates:
+MCP check candidates and add payload:
 
-```json
-[
+```js
+const mcpCheckItems = [
   {
+    candidateId: "issue-20-mcp-active",
     "prompt": "Issue 20 MCP journey: what proves canonical add semantics?",
     "referenceAnswer": "The same isolated Question application service."
   },
   {
+    candidateId: "issue-20-mcp-flagged",
     "prompt": "Which fact was mentioned above?",
     "referenceAnswer": "The fact belongs to a missing external context."
   }
-]
+];
+const mcpAddItems = mcpCheckItems.map(
+  ({ candidateId: _candidateId, ...item }) => item,
+);
 ```
+
+Use `mcpCheckItems` only with `check_questions`. Use `mcpAddItems`, which deliberately strips `candidateId`, with every `add_questions` creation, replay, and duplicate call.
 
 The known second-Learner probe is:
 
@@ -177,13 +184,17 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 1. Activate `Add question`, enter the exact Library Prompt and Original Answer Standard, and submit `Add to bank`.
 2. Require the visible status `Active Question added to your bank.`, an `Active` lifecycle badge, and the exact Prompt. Search for `replacement immutable` and require exactly the suite Question.
 3. Through same-origin `GET /api/v2/library?search=replacement%20immutable`, record the Active Question ID as `originalId`; do not treat this request as a replacement for the visible search assertion.
-4. Activate `Replace question`. Require a modal named `Replace question` and the visible warning that replacement creates a new Active Question with reset mastery and archives the original with its Learning Evidence intact.
-5. Keep the Prompt unchanged, replace only the Answer Standard with the exact Replacement Answer Standard, and submit `Replace question`.
-6. Require the visible status `Active replacement added. The original Question was archived.`. Through the same-origin Library GET, require one Active and one Archived result with the same Prompt, different IDs, `originalId` on the Archived result, the original Answer Standard unchanged, and the replacement Answer Standard on the new Active result.
-7. Select the `Archived` filter. Require only lifecycle badges `Archived`; expand both Answer Standards and visibly distinguish the immutable original from its replacement.
-8. Select `Active`, scope the action to the replacement row, and activate `Archive question`. Require `Question archived.` and no Active result for the Prompt.
-9. Select `Archived`, scope the row by the Replacement Answer Standard, activate `Restore question`, and require `Question restored.` with that same Question ID Active through the Library GET.
-10. Archive the restored replacement once more so no suite-created Active Question remains before Review fixture seeding. The two immutable identities must remain Archived.
+4. Open `/review` for the first time and require the exact Library Prompt is current. Open `Local Day settings`, require the IANA timezone equals `Intl.DateTimeFormat().resolvedOptions().timeZone`, and close settings; this is the automatic-detection assertion. Answer with the stable Correct token and wait for evaluation. Require grade `Good`, visible Answer Standard and Demonstrated Gap, and a future `Scheduled` Local Day.
+5. Return to `/library`, search for `replacement immutable`, and require the original remains Active with a visible future due date. Through `GET /api/test-support/browser-smoke`, record the original's exact `dueAt` as `originalDueAt` and require its evidence is `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`.
+6. Activate `Replace question`. Require a modal named `Replace question` and the visible warning that replacement creates a new Active Question with reset mastery and archives the original with its Learning Evidence intact.
+7. Keep the Prompt unchanged, replace only the Answer Standard with the exact Replacement Answer Standard, and submit `Replace question`.
+8. Require the visible status `Active replacement added. The original Question was archived.`. Through the Library GET, record `replacementId` and require exactly one Active replacement and one Archived original with the same Prompt, different IDs, `originalId` on the Archived result, the two unchanged Answer Standards on their respective identities, `dueAt: null` on the replacement, and `dueAt: originalDueAt` on the original.
+9. Through `GET /api/test-support/browser-smoke`, require `originalId` remains Archived with evidence `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`, while `replacementId` is Active with reset evidence `{ learnerAnswers: 0, evaluations: 0, gradeEvents: 0, dueAt: null }`.
+10. Open `/review`. Require `replacementId`'s exact Prompt is immediately current even though the reviewed original was scheduled in the future; this visibly proves the new immutable identity reset mastery and entered the live queue.
+11. Return to `/library`, search for `replacement immutable`, select `Active`, scope the action to `replacementId`, and activate `Archive question`. Require `Question archived.` and no Active result for the Prompt.
+12. Select `Archived`. Now—and only now—require exactly two Archived identities with the same Prompt; expand both Answer Standards and visibly distinguish the preserved original from its replacement.
+13. Scope the row by `replacementId` and the Replacement Answer Standard, activate `Restore question`, and require `Question restored.`. Through the Library GET require that same identity is Active with reset evidence still intact through the test-support GET, then open `/review` and require it is immediately current.
+14. Return to `/library` and archive `replacementId` once more so no suite-created Active Question remains before Review fixture seeding. Require both immutable identities are Archived and `originalId` still reports the same Learning Evidence and `originalDueAt`.
 
 ### 3. Validation Flagging and the Flagged attention inbox
 
@@ -195,8 +206,8 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 ### 4. Seed and prove the deterministic live Review Queue and Local Day
 
 1. From the `/library` page, issue same-origin `POST /api/test-support/browser-smoke` with no body. Require HTTP `200`, `ok: true`, six Question results, six distinct IDs, every result `status: created`, `outcome: created_active`, and `lifecycle: active`. Retain `timezoneBoundaryPrompt`, the five-item `fixturePrompts`, and `isolationProbe` in Browser-runner memory.
-2. Open `/review`. On its first settled load, require `timezoneBoundaryPrompt` visibly first and a queue count of six. This proves every new Active fixture entered immediately and equal unanswered Questions follow stable creation order.
-3. Open `Local Day settings`. Read the IANA timezone and require it equals `Intl.DateTimeFormat().resolvedOptions().timeZone`, proving automatic detection was persisted.
+2. Open `/review`. On its settled fixture load, require `timezoneBoundaryPrompt` visibly first and a queue count of six. This proves every new Active fixture entered immediately and equal unanswered Questions follow stable creation order.
+3. Open `Local Day settings`. Read the IANA timezone and require it still equals the automatically detected `Intl.DateTimeFormat().resolvedOptions().timeZone` from case 2, proving persistence.
 4. Set the timezone to `Pacific/Kiritimati`, save, and reopen settings to require persistence. Through same-origin `GET /api/v2/review/queue`, retain the returned `localDay` as `eastDay`; require the boundary Prompt remains visibly current.
 5. Answer the boundary Question with the stable Incorrect answer and wait for `Again`. Require queue count six and `fixturePrompts[0]` current, proving the boundary Question moved to the end of the same Local Day.
 6. Set the timezone to `Pacific/Pago_Pago` and save. Through the queue GET retain `westDay`; require `westDay < eastDay`, the visible queue count drops to five, and `fixturePrompts[0]` remains current. The only membership change is the boundary Question whose `Again` due date is now a future Local Day.
@@ -218,9 +229,9 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 ### 6. Review Flag modal: detailed and empty keyboard submissions
 
 1. Require `fixturePrompts[3]` is current and Review exposes exactly one Question Bank management action: `Flag current Question`.
-2. Focus the Flag action and press `Enter`. Require a modal dialog named `Flag Question`, `aria-modal=true`, initial focus on the first reason badge, multiple clickable reason badges, an optional detail field, and an enabled submit action with all fields empty.
+2. Focus the Flag action and press `Enter`. Require a modal dialog named `Flag this Question`, `aria-modal=true`, initial focus on the first reason badge, multiple clickable reason badges, an optional detail field, and an enabled submit action named `Flag Question` with all fields empty.
 3. Press `Escape`; require the modal closes and focus returns to `Flag current Question`. Reopen it by keyboard.
-4. Select `Prompt is unclear` and `Answer standard is incorrect` using keyboard input, enter `The stored explanation conflicts with the Prompt.`, and submit by keyboard.
+4. Select `Prompt is unclear` and `Answer standard is wrong` using keyboard input, enter `The stored explanation conflicts with the Prompt.`, and submit by keyboard.
 5. Require the modal closes, `fixturePrompts[3]` is removed immediately, `fixturePrompts[4]` becomes current, the queue count decreases, and focus moves to `Your answer`.
 6. Change to a 390 × 844 viewport, reload, wait for `fixturePrompts[4]`, and open its Flag modal. Require the full dialog fits within the viewport, can scroll if necessary, and reason badges form one column.
 7. Without selecting a badge or entering detail, use `Tab`/`Shift+Tab` to prove focus remains trapped in the modal, reach `Flag Question`, and submit with `Enter`.
@@ -233,13 +244,13 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 
 1. At desktop size, open `/library`, activate `Agent access`, and require the endpoint `<tested-origin>/api/mcp` and explanation that the token can search this bank and add validated Questions.
 2. Activate `Create token`. Require the one-time copy warning and a visible token beginning `waxon_mcp_`. Capture it only into the Browser runner's in-memory `mcpToken` variable, then close the dialog.
-3. Initialize one Streamable HTTP `mcpClient` with the helper, then call `check_questions` with the two exact MCP candidates and `limitPerItem: 5`. Require both candidates are `no_close_match` or advisory-only non-exact results before add; no match may have `exactPrompt: true`.
-4. Call `add_questions` with idempotency key `issue-20-native-mcp-add-v1` and the two candidates. Require:
+3. Initialize one Streamable HTTP `mcpClient` with the helper, then call `check_questions` with `items: mcpCheckItems` and `limitPerItem: 5`. Require each result echoes its stable `candidateId`; both candidates are `no_close_match` or advisory-only non-exact results before add, and no match may have `exactPrompt: true`.
+4. Call `add_questions` with idempotency key `issue-20-native-mcp-add-v1` and `items: mcpAddItems`; require the transmitted add items contain no `candidateId` property. Require:
    - candidate 1: `status: created`, `outcome: created_active`, `lifecycle: active`, no Flags;
    - candidate 2: `status: created`, `outcome: created_flagged`, `lifecycle: flagged`, a `waxon_validation` Flag containing `not_self_contained`.
-5. Repeat the identical call with the identical idempotency key. Require the same two Question IDs, `status: existing`, and `outcome: idempotent_replay` for both.
-6. Call the identical candidates with idempotency key `issue-20-native-mcp-duplicate-v1`. Require the same IDs, `status: existing`, `outcome: exact_duplicate`, and `answerStandardConflict: false` for both.
-7. Call `check_questions` again. Require `advisory: exact_duplicate` for both and exact bank matches containing the full stored Answer Standard and lifecycle (`active` and `flagged`).
+5. Repeat the identical `mcpAddItems` call with the identical idempotency key. Require the same two Question IDs, `status: existing`, and `outcome: idempotent_replay` for both.
+6. Call `add_questions` with the same `mcpAddItems` and idempotency key `issue-20-native-mcp-duplicate-v1`. Require the same IDs, `status: existing`, `outcome: exact_duplicate`, and `answerStandardConflict: false` for both.
+7. Call `check_questions` again with `items: mcpCheckItems`. Require both stable `candidateId` values are echoed, `advisory: exact_duplicate` for both, and exact bank matches containing the full stored Answer Standard and lifecycle (`active` and `flagged`).
 8. Call `search_questions` for each exact MCP Prompt. Require the matching stored Question ID, full Answer Standard, and lifecycle. Search visibly in Question Bank as well and require the Active and validation-Flagged results appear under their correct filters.
 9. Call `search_questions` with no query and limit 50, then with the exact `isolationProbe`. Require neither response contains the known second-Learner Prompt or Question. This is the Authorized MCP Client isolation assertion.
 10. Open `Agent access`, require the active-token state, activate `Revoke token`, and require the create-token state returns.

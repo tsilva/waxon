@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/app/lib/auth";
 import {
+  BROWSER_SMOKE_LIBRARY_QUESTION_PROMPT,
   BROWSER_SMOKE_QUESTIONS,
   BROWSER_SMOKE_TIMEZONE_QUESTION,
 } from "@/app/lib/browserSmokeSupport";
@@ -12,7 +13,10 @@ import {
   isBrowserAcceptanceTestUserEnabled,
   isLocalTestAuthEnabled,
 } from "@/app/lib/localTestAuth";
-import { listLibrary } from "@/app/lib/v2/service";
+import {
+  getQuestionLearningEvidence,
+  listLibrary,
+} from "@/app/lib/v2/service";
 
 function isEnabled(): boolean {
   return (
@@ -55,17 +59,26 @@ export async function GET() {
   if (!isEnabled()) return disabledResponse();
   const user = await getCurrentUser();
   const prompts = new Set<string>(
-    [BROWSER_SMOKE_TIMEZONE_QUESTION, ...BROWSER_SMOKE_QUESTIONS].map(
-      (item) => item.prompt,
-    ),
+    [
+      BROWSER_SMOKE_LIBRARY_QUESTION_PROMPT,
+      BROWSER_SMOKE_TIMEZONE_QUESTION.prompt,
+      ...BROWSER_SMOKE_QUESTIONS.map((item) => item.prompt),
+    ],
   );
   const library = await listLibrary({ userId: user.id, limit: 100 });
+  const namedQuestions = library.questions.filter((item) =>
+    prompts.has(item.prompt),
+  );
   return NextResponse.json({
     ok: true,
-    questions: library.questions.filter(
-      (item) =>
-        prompts.has(item.prompt) &&
-        item.lifecycle === "active",
+    questions: await Promise.all(
+      namedQuestions.map(async (item) => ({
+        ...item,
+        evidence: await getQuestionLearningEvidence({
+          userId: user.id,
+          questionId: item.id,
+        }),
+      })),
     ),
   });
 }

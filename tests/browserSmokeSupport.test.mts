@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   BROWSER_SMOKE_ISOLATION_QUESTION,
+  BROWSER_SMOKE_LIBRARY_QUESTION_PROMPT,
   BROWSER_SMOKE_QUESTIONS,
   BROWSER_SMOKE_TIMEZONE_QUESTION,
   isBrowserSmokeQuestion,
@@ -12,8 +13,12 @@ import {
   localTestUser,
 } from "../app/lib/localTestAuth.ts";
 
-test("browser smoke grading is limited to the Local Day and five Review fixture Questions", () => {
+test("browser acceptance grading is limited to the named Library and Review fixture Questions", () => {
   assert.equal(BROWSER_SMOKE_QUESTIONS.length, 5);
+  assert.equal(
+    isBrowserSmokeQuestion(BROWSER_SMOKE_LIBRARY_QUESTION_PROMPT),
+    true,
+  );
   assert.equal(
     isBrowserSmokeQuestion(BROWSER_SMOKE_TIMEZONE_QUESTION.prompt),
     true,

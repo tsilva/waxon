@@ -2629,6 +2629,63 @@ test(
               archived: 6,
             });
 
+            await learner.direct.review.flag({
+              questionId: secondIds[0] ?? "",
+              reasons: ["answer_standard_incorrect"],
+              detail:
+                "The current fixture is Flagged while its predecessor is Archived.",
+            });
+            assert.deepEqual(
+              (await learner.direct.questionBank.list()).counts,
+              {
+                active: 5,
+                flagged: 1,
+                archived: 6,
+              },
+            );
+
+            const thirdSeed = await seedBrowserSmokeJourney(learner.id);
+            const thirdIds = thirdSeed.questions.map((question) => question.id);
+            assert.equal(thirdSeed.questions.length, 6);
+            assert.equal(
+              thirdSeed.questions.every(
+                (question) =>
+                  question.status === "created" &&
+                  question.outcome === "created_active" &&
+                  question.lifecycle === "active",
+              ),
+              true,
+            );
+            assert.equal(
+              thirdIds.every((id, index) => id !== secondIds[index]),
+              true,
+            );
+            assert.deepEqual(
+              await learner.direct.questionBank.evidence(thirdIds[0] ?? ""),
+              {
+                learnerAnswers: 0,
+                evaluations: 0,
+                gradeEvents: 0,
+                dueAt: null,
+              },
+            );
+            assert.deepEqual(
+              await learner.direct.questionBank.evidence(firstIds[0] ?? ""),
+              firstEvidence,
+            );
+            assert.deepEqual(
+              (await learner.direct.questionBank.list()).counts,
+              {
+                active: 6,
+                flagged: 0,
+                archived: 12,
+              },
+            );
+            assert.equal(
+              (await learner.direct.review.open()).question?.questionId,
+              thirdIds[0],
+            );
+
             assert.deepEqual(await unrelatedSnapshot(), unrelatedBefore);
 
             await learner.direct.questionBank.add({

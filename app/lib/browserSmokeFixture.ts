@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { getV2Db } from "@/app/db/v2/client";
 import { learnerSettings, questions, users } from "@/app/db/v2/schema";
 import {
@@ -55,6 +55,7 @@ export async function seedBrowserSmokeJourney(userId: string) {
   const runId = randomUUID();
   const existing = await getV2Db()
     .select({
+      creationOrder: questions.creationOrder,
       id: questions.id,
       lifecycle: questions.lifecycle,
       targetKey: questions.targetKey,
@@ -65,13 +66,17 @@ export async function seedBrowserSmokeJourney(userId: string) {
         eq(questions.userId, userId),
         inArray(questions.targetKey, promptKeys),
       ),
-    );
-  const existingByTarget = new Map<string, (typeof existing)[number]>();
+    )
+    .orderBy(asc(questions.creationOrder), asc(questions.id));
+  const existingByTarget = new Map<
+    string,
+    Array<(typeof existing)[number]>
+  >();
   for (const candidate of existing) {
-    const retained = existingByTarget.get(candidate.targetKey);
-    if (!retained || candidate.lifecycle === "active") {
-      existingByTarget.set(candidate.targetKey, candidate);
-    }
+    existingByTarget.set(candidate.targetKey, [
+      ...(existingByTarget.get(candidate.targetKey) ?? []),
+      candidate,
+    ]);
   }
 
   const results: AddQuestionResult[] = [];
@@ -81,8 +86,22 @@ export async function seedBrowserSmokeJourney(userId: string) {
       referenceAnswer: `${item.referenceAnswer}\nFixture run: ${runId}`,
     };
     const targetKey = questionPromptKey(item.prompt);
-    const prior = existingByTarget.get(targetKey);
+    const candidates = existingByTarget.get(targetKey) ?? [];
+    const prior =
+      candidates.find((candidate) => candidate.lifecycle === "active") ??
+      candidates.findLast((candidate) => candidate.lifecycle === "flagged") ??
+      candidates.at(-1);
     if (prior) {
+      for (const candidate of candidates) {
+        if (candidate.id === prior.id || candidate.lifecycle === "archived") {
+          continue;
+        }
+        await mutateQuestionLifecycle({
+          userId,
+          questionId: candidate.id,
+          action: "archive",
+        });
+      }
       const replacement = await replaceQuestion({
         userId,
         questionId: prior.id,

@@ -1,5 +1,8 @@
 export const BROWSER_SMOKE_CORRECT_TOKEN = "browser-smoke-correct-token";
 
+export const BROWSER_SMOKE_LIBRARY_QUESTION_PROMPT =
+  "Issue 20 Library journey: what makes a Question replacement immutable?";
+
 export const BROWSER_SMOKE_TIMEZONE_QUESTION = {
   prompt:
     "Issue 20 Local Day boundary: which token proves timezone queue recomputation?",
@@ -48,6 +51,7 @@ export const BROWSER_SMOKE_ISOLATION_QUESTION = {
 
 export function isBrowserSmokeQuestion(prompt: string): boolean {
   return (
+    prompt === BROWSER_SMOKE_LIBRARY_QUESTION_PROMPT ||
     prompt === BROWSER_SMOKE_TIMEZONE_QUESTION.prompt ||
     BROWSER_SMOKE_QUESTIONS.some((fixture) => fixture.prompt === prompt)
   );

@@ -26,7 +26,7 @@ jobs:
       QUESTION_SEARCH_TEST_DATABASE_URL: postgresql://waxon:waxon@127.0.0.1:5432/waxon
     services:
       postgres:
-        image: pgvector/pgvector:pg16
+        image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
         env:
           POSTGRES_DB: waxon
           POSTGRES_PASSWORD: waxon

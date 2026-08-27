@@ -41,20 +41,20 @@ Screenshots: none captured by this worker. The suite requires these successful-s
 | --- | --- |
 | `pnpm db:reset -- --confirm-clean-break` with both DB URLs set to the disposable database | passed; clean baseline installed |
 | `pnpm test` with `APPLICATION_CONTRACT_TEST_DATABASE_URL`, `QUESTION_SEARCH_TEST_DATABASE_URL`, and both runtime DB URLs set to the disposable database | passed: 80 tests, 0 failed, 0 skipped |
-| repeated browser fixture seed contract | passed: new identities, reset mastery, queue eligibility restored, prior Learning Evidence preserved, unrelated Learner unchanged, unexpected Active Question rejected without mutation |
+| repeated browser fixture seed contract | passed: new identities, reset mastery, queue eligibility restored, Archived-predecessor/current-Flagged mixes converge, prior Learning Evidence preserved, unrelated Learner unchanged, unexpected Active Question rejected without mutation |
 | exact catalog contract | passed: 13 accepted tables; only Active/Flagged/Archived lifecycle values; obsolete objects absent |
 | `pnpm typecheck` | passed |
 | `pnpm lint` | passed |
 | `pnpm security:check` | passed: registry-only dependency sources; no known vulnerabilities |
 | `pnpm db:generate` then `git diff --exit-code -- drizzle-v2` | passed: `No schema changes, nothing to migrate` |
 | `VERCEL_ENV=preview pnpm build` against the disposable database | passed in a self-contained temporary mirror while the required dev server remained running; migrations applied and all 23 routes built |
-| local `/api/mcp` Streamable HTTP diagnostic at `http://localhost:65221` | passed: credential 200, initialize 200 with protocol `2025-03-26`, stateless session header absent, initialized notification 202, tools/list 200 with all three canonical tools, revoke 200, revoked call 401 plain-text `Unauthorized` |
+| local `/api/mcp` Streamable HTTP diagnostic at `http://localhost:65221` | passed: initialize/notification, stable `candidateId` check payload, ID-free add payload, canonical Active/Flagged creation, idempotent replay, exact duplicate detection, revocation, and revoked call 401; token was not logged |
 
 The first temporary build mirror attempt failed before application compilation because Turbopack rejects a `node_modules` symlink outside the project root. Repeating the same candidate build with a real hard-linked dependency tree passed. This was build-isolation tooling, not an application failure.
 
 ## CI evidence
 
-The CI workflow now provisions a healthy pgvector/Postgres service, installs the clean baseline, supplies all DB test variables, runs the full suite without expected DB skips, verifies schema-generation drift, and builds with `VERCEL_ENV=preview`. This removes the former CI path where application/catalog/search DB suites could skip.
+The CI workflow now provisions a digest-pinned pgvector/Postgres service, installs the clean baseline, supplies all DB test variables, runs the full suite without expected DB skips, verifies schema-generation drift, and builds with `VERCEL_ENV=preview`. This removes the former CI path where application/catalog/search DB suites could skip.
 
 ## Hosted-preview distinction
 
