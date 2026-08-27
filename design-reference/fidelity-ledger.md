@@ -13,6 +13,7 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - Review detects and persists the learner's IANA timezone, exposes it through a compact Local Day settings dialog, and refreshes queue membership after an edit.
 - The Local Day dialog uses the standard icon-first close control and keeps the timezone field self-explanatory without feature-description copy.
 - Resolved Review feedback uses numeric score badges, exposes the Answer Standard and Demonstrated Gap, shows the next scheduled Local Day, and keeps the existing four-grade control available for append-only Evaluation Correction; evaluator failures use the same control for self-grading.
+- Resolved-answer timestamp and schedule metadata remain in the main content flow below the answer details, so all four Answer Grade controls retain unobstructed hit targets without disabling the detail toggle.
 - The approved reference’s typography, warm paper palette, subdued borders, header geometry, focused composer, and desktop/mobile rhythm remain authoritative. Its sample question and due count are not fixed requirements.
 
 ## Verification status
@@ -24,3 +25,4 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - A fresh native in-app Browser comparison is required before replacing the approved composite. Verify desktop and 390 px layouts, keyboard focus, reduced motion, 200% zoom, long prompts, formulas, dialogs, and populated/empty bank states.
 - Issue #13 independent native in-app Browser acceptance passed at desktop and 390 × 844: validation-created Flagged Questions showed their attention inbox, Waxon origin and reason labels, stayed out of Review, completed restore/replace/archive paths, and remained horizontally contained with accessible actions. No console errors appeared; one unrelated pre-existing Next smooth-scroll warning remained.
 - The approved reference remains authoritative for shared shell, typography, spacing, color, and interaction treatment; the current Question Bank contract determines its controls and states.
+- Issue #20 native acceptance passed at desktop and 390 x 844. The Question Bank, Review, grade controls, and Flag modal remained contained; the Easy-control overlap was removed; native Tab/Shift+Tab wrapping, Enter/Space badge activation, Escape dismissal, and trigger-focus restoration passed; only Next's unrelated development smooth-scroll advisory appeared.

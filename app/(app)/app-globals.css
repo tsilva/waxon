@@ -2179,7 +2179,6 @@ textarea {
   font-size: 17px;
   font-weight: 560;
   line-height: 1.35;
-  padding-right: 128px;
 }
 
 .previous-question-feedback {
@@ -2226,17 +2225,16 @@ textarea {
 }
 
 .previous-row-meta {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  position: static;
+  grid-column: 1 / -1;
   display: flex;
   align-items: flex-end;
   flex-direction: column;
   gap: 6px;
-  justify-content: flex-start;
-  min-height: 58px;
+  justify-content: flex-end;
+  min-height: 24px;
   text-align: right;
+  width: 100%;
 }
 
 .previous-time-control {
