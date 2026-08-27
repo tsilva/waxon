@@ -41,10 +41,6 @@ Use the five canonical triage labels defined in `docs/agents/triage-labels.md`.
 
 This is a single-context repository using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
 
-## Issue Threading
-
-Before any fix or behavior-changing edit in this repo, especially behavior regressions, product-flow issues, auth/deploy/UI bugs, or user-reported breakage, use the project-level skill in [.codex/skills/waxon-issue-threading/SKILL.md](.codex/skills/waxon-issue-threading/SKILL.md).
-
 ## Questions
 
 When creating, cleaning up, deduplicating, or generating knowledge-base questions and probing questions, use the shared question-quality reference in [reference/question-quality.md](reference/question-quality.md).
