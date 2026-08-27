@@ -309,7 +309,7 @@ export async function addQuestions(
         .filter((key) => !byPromptKey.has(key)),
     ).size;
     if (questionCount + uniqueNewCount > 100_000) {
-      throw new Error("Your question-bank limit is full.");
+      throw new Error("Your Library limit is full.");
     }
     const results: AddQuestionResult[] = [];
     const createdQuestionIds: string[] = [];

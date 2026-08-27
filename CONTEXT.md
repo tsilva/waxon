@@ -5,16 +5,16 @@ Waxon models the questions a learner wants to remember and the evidence used to 
 ## People and ownership
 
 **Learner**:
-An authenticated person who owns exactly one private Question Bank.
+An authenticated person who owns exactly one private Library.
 _Avoid_: User, account, student
 
 **Authorized MCP Client**:
-A revocably authorized agent that may search and add Questions in exactly one Learner's Question Bank.
+A revocably authorized agent that may search and add Questions in exactly one Learner's Library.
 _Avoid_: Agent user, shared learner
 
-**Question Bank**:
-The private collection of Questions owned by one Learner. A Question Bank is neither shared nor transferred between Learners.
-_Avoid_: Library, deck, collection
+**Library**:
+The private collection of Questions owned by one Learner. A Library is neither shared nor transferred between Learners.
+_Avoid_: Deck, collection
 
 ## Questions
 
@@ -35,7 +35,7 @@ A Question that passed quality assessment and participates in Review. Every stru
 _Avoid_: New question, live card
 
 **Flagged Question**:
-A Question withheld from Review because the Learner or Waxon identified something that needs attention. It remains in the Question Bank until the Learner restores, replaces, or archives it and may have zero or more Flag Reasons.
+A Question withheld from Review because the Learner or Waxon identified something that needs attention. It remains in the Library until the Learner restores, replaces, or archives it and may have zero or more Flag Reasons.
 _Avoid_: Paused question, deferred question
 
 **Flag Reason**:

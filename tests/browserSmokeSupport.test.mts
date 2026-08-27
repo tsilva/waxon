@@ -33,7 +33,7 @@ test("acceptance evaluator authorization does not depend on the hot-reloaded aut
   assert.doesNotMatch(identitySource, /^\s*import\s/mu);
 });
 
-test("browser acceptance grading is limited to the named Question Bank and Review fixture Questions", () => {
+test("browser acceptance grading is limited to the named Library and Review fixture Questions", () => {
   assert.equal(BROWSER_SMOKE_QUESTIONS.length, 5);
   assert.equal(
     isBrowserSmokeQuestion(BROWSER_SMOKE_QUESTION_BANK_QUESTION_PROMPT),

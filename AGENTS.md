@@ -4,7 +4,7 @@
 
 Do not change this section unless the user explicitly asks to update the project goal.
 
-This project is an app for building and retaining knowledge through adaptive question-and-answer practice. Users create or generate a question bank, answer from memory in their own words, and rely on Review to decide what to practice and when.
+This project is an app for building and retaining knowledge through adaptive question-and-answer practice. Users create or generate a library, answer from memory in their own words, and rely on Review to decide what to practice and when.
 
 Every question is stored and resurfaced later based on the user's past performance. Once a user answers a question correctly, the app should help make that knowledge durable: if the user returns daily and completes their exercises, the system should schedule reviews near the point where mastery is likely to fade. This lets users maintain a large body of knowledge through short sessions focused on the questions most at risk of being forgotten.
 

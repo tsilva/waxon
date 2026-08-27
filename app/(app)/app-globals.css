@@ -7,7 +7,7 @@
   white-space: nowrap;
 }
 
-/* Question Bank: one quiet bank for adding and maintaining review questions. */
+/* Library: one quiet collection for adding and maintaining review questions. */
 .question-bank-shell {
   min-height: min(920px, calc(100vh - 32px));
 }
@@ -222,7 +222,11 @@
 .lean-flag-evidence {
   display: grid;
   gap: 8px;
-  margin: -1px 0 14px;
+  margin: 0;
+}
+
+.lean-question-copy .lean-flag-details {
+  margin: -1px 0 10px;
 }
 
 .lean-flag-evidence > div,
@@ -498,38 +502,60 @@ textarea {
   }
 }
 
-.v2-button-primary {
+.v2-button-primary,
+.v2-button-secondary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 42px;
-  padding: 0 16px;
-  border-radius: 13px;
+  min-height: 40px;
+  padding: 0 15px;
+  border: 1px solid transparent;
+  border-radius: 7px;
   font-family: var(--font-ui);
-  font-size: 14px;
-  font-weight: 780;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
   cursor: pointer;
 }
 
 .v2-button-primary {
-  background: var(--ink);
+  border-color: var(--accent);
+  background: var(--accent);
   color: #fffdf8;
-  box-shadow: 0 8px 20px rgb(74 61 52 / 12%);
+  box-shadow: 0 8px 20px rgb(166 124 82 / 14%);
 }
 
 .v2-button-primary:hover,
 .v2-button-primary:focus-visible {
-  background: #4c443f;
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
   outline: 3px solid rgb(166 124 82 / 18%);
+  outline-offset: 2px;
 }
 
-.v2-button-primary svg {
+.v2-button-secondary {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+}
+
+.v2-button-secondary:hover,
+.v2-button-secondary:focus-visible {
+  border-color: rgb(166 124 82 / 42%);
+  background: #fff;
+  outline: 3px solid rgb(166 124 82 / 12%);
+  outline-offset: 2px;
+}
+
+.v2-button-primary svg,
+.v2-button-secondary svg {
   width: 17px;
   height: 17px;
 }
 
-.v2-button-primary:disabled {
+.v2-button-primary:disabled,
+.v2-button-secondary:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -1240,6 +1266,10 @@ textarea {
 .review-flag-detail {
   color: var(--ink-soft);
   font: 650 12px/1.35 var(--font-ui);
+}
+
+.review-flag-form legend {
+  margin-bottom: 12px;
 }
 
 .review-flag-reasons {

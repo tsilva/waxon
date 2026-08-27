@@ -113,10 +113,10 @@ function QuestionDialog({
         );
         await onSaved(
           result.status === "existing"
-            ? "That question was already in your bank."
+            ? "That question was already in your Library."
             : result.lifecycle === "flagged"
               ? "Question saved to Flagged for attention."
-              : "Active Question added to your bank.",
+              : "Active Question added to your Library.",
         );
       }
       onClose();
@@ -138,7 +138,7 @@ function QuestionDialog({
       >
         <div className="v2-dialog-heading">
           <div>
-            <span className="v2-kicker">Question bank</span>
+            <span className="v2-kicker">Library</span>
             <h2 id="question-dialog-title">{question ? "Replace question" : "Add a question"}</h2>
           </div>
           <button className="v2-icon-button" onClick={onClose} type="button">×</button>
@@ -161,10 +161,16 @@ function QuestionDialog({
           {question ? <p className="lean-edit-warning">Replacing creates a new Question with reset mastery and archives this Question with its Learning Evidence intact. Quality assessment determines whether the replacement is Active or Flagged.</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
           <div className="v2-dialog-actions">
-            <button onClick={onClose} type="button">Cancel</button>
+            <button
+              className="v2-button-secondary"
+              onClick={onClose}
+              type="button"
+            >
+              Cancel
+            </button>
             <button className="v2-button-primary" disabled={saving} type="submit">
               {saving ? <LoaderCircle className="v2-spin" /> : null}
-              {question ? "Replace question" : "Add to bank"}
+              {question ? "Replace question" : "Add to Library"}
             </button>
           </div>
         </form>
@@ -219,7 +225,7 @@ function McpDialog({ onClose }: { onClose: () => void }) {
           <div><span className="v2-kicker">Agent access</span><h2 id="mcp-dialog-title">Add questions through MCP</h2></div>
           <button className="v2-icon-button" onClick={onClose} type="button">×</button>
         </div>
-        <p>Connect an agent to <code>{typeof window === "undefined" ? "/api/mcp" : `${window.location.origin}/api/mcp`}</code> with a bearer token. It can search this bank and add validated questions.</p>
+        <p>Connect an agent to <code>{typeof window === "undefined" ? "/api/mcp" : `${window.location.origin}/api/mcp`}</code> with a bearer token. It can search this Library and add validated questions.</p>
         {token ? (
           <div className="lean-token-reveal">
             <strong>Copy this token now. It will not be shown again.</strong>
@@ -263,26 +269,29 @@ function QuestionRow({
         </div>
         <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
         {question.lifecycle === "flagged" && unresolvedFlags.length > 0 ? (
-          <div className="lean-flag-evidence" aria-label="Flag reasons">
-            {unresolvedFlags.map((flag, flagIndex) => (
-              <div key={`${flag.origin}-${flag.createdAt}-${flagIndex}`}>
-                <span className="lean-flag-origin">
-                  <Flag />
-                  {flag.origin === "waxon_validation" ? "Waxon validation" : "Learner flag"}
-                </span>
-                {flag.reasons.length > 0 ? (
-                  <span className="lean-flag-reasons">
-                    {flag.reasons.map((reason) => (
-                      <span key={reason}>{flagReasonLabel(reason)}</span>
-                    ))}
+          <details className="lean-flag-details">
+            <summary>Flag details</summary>
+            <div className="lean-flag-evidence" aria-label="Flag reasons">
+              {unresolvedFlags.map((flag, flagIndex) => (
+                <div key={`${flag.origin}-${flag.createdAt}-${flagIndex}`}>
+                  <span className="lean-flag-origin">
+                    <Flag />
+                    {flag.origin === "waxon_validation" ? "Waxon validation" : "Learner flag"}
                   </span>
-                ) : null}
-                {flag.detail ? (
-                  <p className="question-bank-flag-detail">{flag.detail}</p>
-                ) : null}
-              </div>
-            ))}
-          </div>
+                  {flag.reasons.length > 0 ? (
+                    <span className="lean-flag-reasons">
+                      {flag.reasons.map((reason) => (
+                        <span key={reason}>{flagReasonLabel(reason)}</span>
+                      ))}
+                    </span>
+                  ) : null}
+                  {flag.detail ? (
+                    <p className="question-bank-flag-detail">{flag.detail}</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </details>
         ) : null}
         <details>
           <summary>Answer standard</summary>
@@ -321,7 +330,7 @@ export default function LibraryPageClient() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setLoading(true);
-      load().catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load Question Bank.")).finally(() => setLoading(false));
+      load().catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load Library.")).finally(() => setLoading(false));
     }, search ? 180 : 0);
     return () => window.clearTimeout(timer);
   }, [load, search]);
@@ -345,7 +354,7 @@ export default function LibraryPageClient() {
         <ReviewToolbar />
         <div className="question-bank-stage" id="library-panel" tabIndex={-1}>
           <header className="question-bank-heading">
-            <div><span className="v2-kicker">Question bank</span><h1>{total} questions</h1><p>Add what is worth remembering. Review handles the rest.</p></div>
+            <div><span className="v2-kicker">Library</span><h1>{total} questions</h1><p>Add what is worth remembering. Review handles the rest.</p></div>
             <div>
               <button className="lean-secondary-button" onClick={() => setMcpOpen(true)} type="button"><KeyRound /> Agent access</button>
               <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add question</button>
@@ -381,7 +390,7 @@ export default function LibraryPageClient() {
                 onFlag={() => setFlagging(question)}
                 question={question}
               />
-            )) : <div className="question-bank-empty"><h2>{search ? "No matching questions" : filter === "flagged" ? "No Questions need attention" : filter === "archived" ? "No Archived Questions" : "Your bank is empty"}</h2><p>{search ? "Try a different phrase or filter." : filter === "flagged" ? "Nothing is waiting for attention." : filter === "archived" ? "Nothing is out of circulation." : "Add one clear Prompt and its Answer Standard."}</p>{!search && (filter === "all" || filter === "active") ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
+            )) : <div className="question-bank-empty"><h2>{search ? "No matching questions" : filter === "flagged" ? "No Questions need attention" : filter === "archived" ? "No Archived Questions" : "Your Library is empty"}</h2><p>{search ? "Try a different phrase or filter." : filter === "flagged" ? "Nothing is waiting for attention." : filter === "archived" ? "Nothing is out of circulation." : "Add one clear Prompt and its Answer Standard."}</p>{!search && (filter === "all" || filter === "active") ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
           </div>
         </div>
       </section>

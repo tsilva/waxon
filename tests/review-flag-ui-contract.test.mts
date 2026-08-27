@@ -101,7 +101,7 @@ async function frame() {
   await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
 }
 
-test("Review exposes one Flag action and no other Question Bank management action", async () => {
+test("Review exposes one Flag action and no other Library management action", async () => {
   const source = await readFile(reviewAppPath, "utf8");
 
   assert.equal(source.match(/aria-label="Flag current Question"/gu)?.length, 1);
@@ -114,7 +114,7 @@ test("Review exposes one Flag action and no other Question Bank management actio
   }
 });
 
-test("Question Bank exposes the shared Flag dialog only for Active Questions", async () => {
+test("Library exposes the shared Flag dialog only for Active Questions", async () => {
   const [source, dialogSource] = await Promise.all([
     readFile(libraryPath, "utf8"),
     readFile(questionBankFlagDialogPath, "utf8"),
@@ -130,7 +130,7 @@ test("Question Bank exposes the shared Flag dialog only for Active Questions", a
   assert.equal(source.includes("detail"), true);
 });
 
-test("Question Bank reports a committed Flag separately from a failed refresh", async () => {
+test("Library reports a committed Flag separately from a failed refresh", async () => {
   document.body.innerHTML = '<div id="root"></div>';
   const container = document.querySelector<HTMLDivElement>("#root");
   assert.ok(container);
@@ -147,7 +147,7 @@ test("Question Bank reports a committed Flag separately from a failed refresh", 
       React.createElement(
         "div",
         { ref: bankRef, tabIndex: -1 },
-        "Question Bank",
+        "Library",
       ),
       open
         ? React.createElement(QuestionBankFlagDialog, {
@@ -196,10 +196,10 @@ test("Question Bank reports a committed Flag separately from a failed refresh", 
     "refresh-error",
   ]);
   assert.deepEqual(refreshErrors, [
-    "Question was Flagged, but the Question Bank could not be refreshed. Reload to see the latest state.",
+    "Question was Flagged, but the Library could not be refreshed. Reload to see the latest state.",
   ]);
   assert.equal(document.querySelector('[role="dialog"]'), null);
-  assert.equal(document.activeElement?.textContent, "Question Bank");
+  assert.equal(document.activeElement?.textContent, "Library");
   await act(async () => root.unmount());
 });
 
@@ -255,6 +255,9 @@ test("Review Flag dialog traps Tab during async empty submission and focuses the
   const submit = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
     (button) => button.textContent?.includes("Flag Question"),
   );
+  const cancel = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
+    (button) => button.textContent === "Cancel",
+  );
   const close = document.querySelector<HTMLButtonElement>(
     'button[aria-label="Close Flag dialog"]',
   );
@@ -263,7 +266,10 @@ test("Review Flag dialog traps Tab during async empty submission and focuses the
   assert.equal(dialog.getAttribute("aria-modal"), "true");
   assert.equal(document.activeElement, firstReason);
   assert.ok(submit);
+  assert.ok(cancel);
   assert.ok(close);
+  assert.equal(submit.classList.contains("v2-button-primary"), true);
+  assert.equal(cancel.classList.contains("v2-button-secondary"), true);
 
   const secondReason = document.querySelectorAll<HTMLButtonElement>(
     ".review-flag-reasons button",
@@ -407,7 +413,7 @@ test("Review Flag dialog toggles reasons, reports errors, dismisses, and restore
   assert.equal(document.activeElement, opener);
 });
 
-test("Review Flag modal has a narrow responsive contract and Question Bank renders learner detail", async () => {
+test("Review Flag modal has a narrow responsive contract and Library renders learner detail", async () => {
   const [styles, questionBank] = await Promise.all([
     readFile(appStylesPath, "utf8"),
     readFile(libraryPath, "utf8"),
@@ -426,6 +432,12 @@ test("Review Flag modal has a narrow responsive contract and Question Bank rende
   const reasonsRule = narrowRules.find(
     (rule) => "selectorText" in rule && rule.selectorText === ".review-flag-reasons",
   ) as CSSStyleRule | undefined;
+  const legendRule = Array.from(style.sheet?.cssRules ?? []).find(
+    (rule) =>
+      "selectorText" in rule &&
+      rule.selectorText === ".review-flag-form legend",
+  ) as CSSStyleRule | undefined;
+  assert.equal(legendRule?.style.getPropertyValue("margin-bottom"), "12px");
   assert.equal(
     dialogRule?.style.getPropertyValue("max-height"),
     "calc(100svh - 20px)",
@@ -436,6 +448,15 @@ test("Review Flag modal has a narrow responsive contract and Question Bank rende
     "minmax(0, 1fr)",
   );
   style.remove();
+  assert.equal(
+    questionBank.includes('<details className="lean-flag-details">'),
+    true,
+  );
+  assert.equal(
+    questionBank.includes('<details className="lean-flag-details" open>'),
+    false,
+  );
+  assert.equal(questionBank.includes("<summary>Flag details</summary>"), true);
   assert.equal(questionBank.includes("flag.detail"), true);
   assert.equal(questionBank.includes("question-bank-flag-detail"), true);
 });

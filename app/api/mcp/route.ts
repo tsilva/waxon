@@ -80,7 +80,7 @@ const handler = createMcpHandler(
       {
         title: "Search Waxon questions",
         description:
-          "Find questions in the authenticated learner's bank using relevance-ranked text and, when enabled, semantic retrieval. Omit query to list recent questions. Use check_questions before adding questions.",
+          "Find questions in the authenticated learner's Library using relevance-ranked text and, when enabled, semantic retrieval. Omit query to list recent questions. Use check_questions before adding questions.",
         inputSchema: z.object({
           query: z.string().max(500).optional(),
           limit: z.number().int().min(1).max(50).default(20),
@@ -194,7 +194,7 @@ const handler = createMcpHandler(
       {
         title: "Add Waxon questions",
         description:
-          "Atomically add up to 50 standalone questions to the authenticated learner's bank. Results distinguish Active creation, validation Flagging, idempotent replay, and exact duplicate retention. A duplicate with answerStandardConflict=true retains the existing Question identity and should be inspected or replaced deliberately. Call check_questions first and compare any review_similar matches by recall target; similarity never blocks add.",
+          "Atomically add up to 50 standalone questions to the authenticated learner's Library. Results distinguish Active creation, validation Flagging, idempotent replay, and exact duplicate retention. A duplicate with answerStandardConflict=true retains the existing Question identity and should be inspected or replaced deliberately. Call check_questions first and compare any review_similar matches by recall target; similarity never blocks add.",
         inputSchema: z.object({
           idempotencyKey: z.string().trim().min(1).max(200),
           items: z

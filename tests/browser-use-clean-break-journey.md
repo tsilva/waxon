@@ -1,11 +1,11 @@
 # Issue 20 clean-break learner journey
 
-This is the source of truth for the final native-browser acceptance run for GitHub issue #20 and the Question Bank Flagging extension in issue #32. Run every case with the project-level `run-browser-use-suite` skill and the native Codex Desktop in-app Browser (`iab`). Do not substitute standalone Playwright, another browser, Computer Use, or API-only evidence.
+This is the source of truth for the final native-browser acceptance run for GitHub issue #20 and the Library Flagging extension in issue #32. Run every case with the project-level `run-browser-use-suite` skill and the native Codex Desktop in-app Browser (`iab`). Do not substitute standalone Playwright, another browser, Computer Use, or API-only evidence.
 
 ## Result policy
 
 - Record every numbered case as `pass`, `fail`, or `skipped`. A skipped required case does not satisfy #20.
-- Use visible UI interaction for every Learner mutation, including Question Bank actions, Learner settings, and MCP credential creation/revocation. The IAB page-evaluation runtime has no `fetch`, so the runner may use Node-side `fetch` only through the guarded helper below and only to these absolute tested-origin diagnostics: read-only `GET <tested-origin>/api/v2/library`, read-only `GET <tested-origin>/api/v2/review/queue`, read-only `GET <tested-origin>/api/test-support/browser-smoke`, fixture-seeding `POST <tested-origin>/api/test-support/browser-smoke`, and Streamable HTTP `POST <tested-origin>/api/mcp`. No other method/endpoint pair is allowed. Diagnostic requests supplement rather than replace visible assertions.
+- Use visible UI interaction for every Learner mutation, including Library actions, Learner settings, and MCP credential creation/revocation. The IAB page-evaluation runtime has no `fetch`, so the runner may use Node-side `fetch` only through the guarded helper below and only to these absolute tested-origin diagnostics: read-only `GET <tested-origin>/api/v2/library`, read-only `GET <tested-origin>/api/v2/review/queue`, read-only `GET <tested-origin>/api/test-support/browser-smoke`, fixture-seeding `POST <tested-origin>/api/test-support/browser-smoke`, and Streamable HTTP `POST <tested-origin>/api/mcp`. No other method/endpoint pair is allowed. Diagnostic requests supplement rather than replace visible assertions.
 - Take a fresh DOM snapshot before changing locator strategy. Wait for named visible content, not `networkidle`.
 - Capture desktop and narrow screenshots under `/private/tmp` with `issue-20-clean-break` in each filename. Capture every failure or ambiguous state.
 - Record the exact printed dev URL, visible assertions, console warnings/errors, commands, screenshot paths, failures, and remaining risks in `docs/issue-20-clean-break-evidence.md`.
@@ -15,7 +15,7 @@ This is the source of truth for the final native-browser acceptance run for GitH
 1. Use a disposable fresh pgvector/Postgres database. Never use or reset production data or secrets.
 2. The browser must use the dedicated acceptance identity: `Issue 20 browser learner`, `issue-20-browser@waxon.invalid`. If Tiago's personal identity appears, stop without creating/revoking an MCP credential or changing any Question.
 3. The fixture endpoint is enabled only in development with local test auth and the dedicated acceptance-identity flag. It mutates only the named Local Day boundary Question, five local Review fixtures, and one known synthetic second-Learner fixture. It refuses to seed while an unrelated Active Question remains.
-4. The safety grant covers only the exact Question Bank, validation, Review, MCP, and isolation fixtures named in this file plus the dedicated acceptance Learner's MCP credential. Archive and restore only the named suite Questions. Do not alter any other Learner or data.
+4. The safety grant covers only the exact Library, validation, Review, MCP, and isolation fixtures named in this file plus the dedicated acceptance Learner's MCP credential. Archive and restore only the named suite Questions. Do not alter any other Learner or data.
 5. Reuse a suitable existing server. Do not kill or restart any existing server. If none exists, start exactly one server with `--port auto` and retain its printed URL:
 
 ```bash
@@ -42,10 +42,10 @@ pnpm db:reset -- --confirm-clean-break
 
 Use these exact values so the visible and API assertions remain deterministic.
 
-Question Bank Question:
+Library Question:
 
 ```text
-Prompt: Issue 20 Question Bank journey: what makes a Question replacement immutable?
+Prompt: Issue 20 Library journey: what makes a Question replacement immutable?
 Original Answer Standard: The original Question keeps its Learning Evidence. Acceptance token: browser-smoke-correct-token.
 Replacement Answer Standard: Replacement creates a new Active Question with reset mastery while the original is Archived.
 ```
@@ -57,12 +57,12 @@ Prompt: What does the content provided above mean?
 Answer Standard: It describes the accepted clean-break learner journey.
 ```
 
-Question Bank learner-Flag Questions:
+Library learner-Flag Questions:
 
 ```text
-Detailed Prompt: Issue 32 Question Bank Flagging: which Active Question gets detailed attention?
+Detailed Prompt: Issue 32 Library Flagging: which Active Question gets detailed attention?
 Detailed Answer Standard: The non-current Active Question receives Learner reasons and detail.
-Empty Prompt: Issue 32 Question Bank Flagging: which Active Question allows an empty Flag?
+Empty Prompt: Issue 32 Library Flagging: which Active Question allows an empty Flag?
 Empty Answer Standard: Any retained Active Question may be Flagged without reasons or detail.
 Detailed Flag detail: This retained Question needs attention outside Review.
 ```
@@ -104,7 +104,7 @@ Issue 20 isolation probe: which Question belongs only to the other Learner?
 
 ## Guarded runner-side diagnostic transport and MCP helper
 
-Set `testedOrigin` to the exact printed local dev origin, including its automatic port. The guard below rejects non-loopback origins, cross-origin resolution, unlisted paths, and unlisted methods. Use it for every suite diagnostic because IAB evaluation cannot fetch. Learner-facing Question Bank mutations, settings changes, and credential creation/revocation still happen visibly in IAB.
+Set `testedOrigin` to the exact printed local dev origin, including its automatic port. The guard below rejects non-loopback origins, cross-origin resolution, unlisted paths, and unlisted methods. Use it for every suite diagnostic because IAB evaluation cannot fetch. Learner-facing Library mutations, settings changes, and credential creation/revocation still happen visibly in IAB.
 
 Keep the MCP token and optional session ID only in runner-side process memory. Transfer the one-time token directly from the visible IAB result into the in-memory `mcpToken` variable; never include it in a command line, log call, console output, storage, file, screenshot, or evidence report. Every MCP request uses the absolute tested-origin `/api/mcp` URL with `Authorization: Bearer …`, `Content-Type: application/json`, and `Accept: application/json, text/event-stream`. Parse either a JSON response or server-sent `data:` lines.
 
@@ -218,32 +218,32 @@ async function issue20McpCall(client, id, name, args) {
 }
 ```
 
-Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successful tool calls require HTTP `200`, no JSON-RPC error, and use `envelope.result.structuredContent` for the assertions below. Use monotonically increasing request IDs. After revocation, reuse the same client state and require `401` before any MCP envelope or bank data is returned.
+Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successful tool calls require HTTP `200`, no JSON-RPC error, and use `envelope.result.structuredContent` for the assertions below. Use monotonically increasing request IDs. After revocation, reuse the same client state and require `401` before any MCP envelope or Library data is returned.
 
 ## Acceptance journey
 
-### 1. Identity, private Question Bank, and initial legacy-control absence
+### 1. Identity, private Library, and initial legacy-control absence
 
 1. Open the printed URL at `/library` in `iab` at a desktop viewport of at least 1280 × 800.
-2. Require the visible isolated identity `Issue 20 browser learner` and `issue-20-browser@waxon.invalid`, the `Question Bank` tab, the `Review` tab, and the empty-bank state. If the bank is not empty on the freshly reset disposable database, stop and report the mismatch.
+2. Require the visible isolated identity `Issue 20 browser learner` and `issue-20-browser@waxon.invalid`, the `Library` tab, the `Review` tab, and the empty-Library state. If the Library is not empty on the freshly reset disposable database, stop and report the mismatch.
 3. Inspect visible controls and accessible names. Require no control named or containing `Pause`, `Trash`, `capacity`, `retention`, `source`, `generation`, `concept`, `provenance`, `coverage`, or `document` (case-insensitive). Also require no daily-minutes, item-limit, importance, uncertainty, or answer-mode control.
 4. Capture `/private/tmp/issue-20-clean-break-library-desktop.png`.
 
 ### 2. Add, search, immutable replace, Archive, and restore
 
-1. Activate `Add question`, enter the exact Question Bank Prompt and Original Answer Standard, and submit `Add to bank`.
-2. Require the visible status `Active Question added to your bank.`, an `Active` lifecycle badge, and the exact Prompt. Search for `replacement immutable` and require exactly the suite Question.
+1. Activate `Add question`, enter the exact Library Prompt and Original Answer Standard, and submit `Add to Library`.
+2. Require the visible status `Active Question added to your Library.`, an `Active` lifecycle badge, and the exact Prompt. Search for `replacement immutable` and require exactly the suite Question.
 3. Through runner-side `issue20DiagnosticRequest(issue20DiagnosticEndpoints.questionBank + "?search=replacement%20immutable")`, record the Active Question ID as `originalId`; do not treat this request as a replacement for the visible search assertion.
-4. Open `/review` for the first time and require the exact Question Bank Prompt is current. Open `Local Day settings`, require the IANA timezone equals `Intl.DateTimeFormat().resolvedOptions().timeZone`, and close settings; this is the automatic-detection assertion. Answer with the stable Correct token and wait for evaluation. Require grade `Good`, visible Answer Standard and Demonstrated Gap, and a future `Scheduled` Local Day.
+4. Open `/review` for the first time and require the exact Library Prompt is current. Open `Local Day settings`, require the IANA timezone equals `Intl.DateTimeFormat().resolvedOptions().timeZone`, and close settings; this is the automatic-detection assertion. Answer with the stable Correct token and wait for evaluation. Require grade `Good`, visible Answer Standard and Demonstrated Gap, and a future `Scheduled` Local Day.
 5. Return to `/library`, search for `replacement immutable`, and require the original remains Active with a visible future due date. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.fixture)`, record the original's exact `dueAt` as `originalDueAt` and require its evidence is `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`.
 6. Activate `Replace question`. Require a modal named `Replace question` and the visible warning that replacement creates a new Question with reset mastery, archives the original with its Learning Evidence intact, and uses quality assessment to determine whether the replacement is Active or Flagged.
 7. Keep the Prompt unchanged, replace only the Answer Standard with the exact Replacement Answer Standard, and submit `Replace question`.
-8. Require the visible status `Active replacement added. The original Question was archived.`. Through the Question Bank GET diagnostic, record `replacementId` and require exactly one Active replacement and one Archived original with the same Prompt, different IDs, `originalId` on the Archived result, the two unchanged Answer Standards on their respective identities, `dueAt: null` on the replacement, and `dueAt: originalDueAt` on the original.
+8. Require the visible status `Active replacement added. The original Question was archived.`. Through the Library GET diagnostic, record `replacementId` and require exactly one Active replacement and one Archived original with the same Prompt, different IDs, `originalId` on the Archived result, the two unchanged Answer Standards on their respective identities, `dueAt: null` on the replacement, and `dueAt: originalDueAt` on the original.
 9. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.fixture)`, require `originalId` remains Archived with evidence `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`, while `replacementId` is Active with reset evidence `{ learnerAnswers: 0, evaluations: 0, gradeEvents: 0, dueAt: null }`.
 10. Open `/review`. Require `replacementId`'s exact Prompt is immediately current even though the reviewed original was scheduled in the future; this visibly proves the new immutable identity reset mastery and entered the live queue.
 11. Return to `/library`, search for `replacement immutable`, select `Active`, scope the action to `replacementId`, and activate `Archive question`. Require `Question archived.` and no Active result for the Prompt.
 12. Select `Archived`. Now—and only now—require exactly two Archived identities with the same Prompt; expand both Answer Standards and visibly distinguish the preserved original from its replacement.
-13. Scope the row by `replacementId` and the Replacement Answer Standard, activate `Restore question`, and require `Question restored.`. Through the Question Bank GET diagnostic require that same identity is Active with reset evidence still intact through the test-support GET, then open `/review` and require it is immediately current.
+13. Scope the row by `replacementId` and the Replacement Answer Standard, activate `Restore question`, and require `Question restored.`. Through the Library GET diagnostic require that same identity is Active with reset evidence still intact through the test-support GET, then open `/review` and require it is immediately current.
 14. Return to `/library` and archive `replacementId` once more so no suite-created Active Question remains before Review fixture seeding. Require both immutable identities are Archived and `originalId` still reports the same Learning Evidence and `originalDueAt`.
 
 ### 3. Validation Flagging and the Flagged attention inbox
@@ -253,12 +253,12 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 3. Select the `Flagged` filter. Require the visible region `Flagged Question attention inbox`, `Attention inbox`, the exact Prompt, lifecycle `Flagged`, origin `Waxon validation`, and reason `Not self-contained`.
 4. Require Archive, restore, and replace actions on the Flagged Question. Leave it Flagged.
 
-### 3A. Question Bank learner Flagging at desktop and 390 px
+### 3A. Library learner Flagging at desktop and 390 px
 
 1. At a desktop viewport of at least 1280 × 800, clear search and select `Active`. Add the exact Detailed Prompt and Answer Standard, then add the exact Empty Prompt and Answer Standard through the visible `Add question` flow. Require both rows have lifecycle `Active` and each exposes `Flag question`, `Replace question`, and `Archive question`.
 2. Open `/review` and retain the exact current Prompt. Return to `/library`, select `Active`, and scope the other row by its exact Prompt. This row is not the current Review Question; activate its `Flag question` control.
-3. Require a modal named `Flag this Question` with kicker `Question bank attention`, multiple optional reason badges, the optional detail field, and enabled `Flag Question` submission. Select `Prompt is unclear` and `Answer standard is wrong`, enter the exact Detailed Flag detail, and submit visibly.
-4. Require status `Question moved to Flagged for attention.`, the same Question identity is absent from `Active`, and the other issue #32 Question remains Active. Select `Flagged`; require the newly Flagged row shows origin `Learner flag`, both selected reason badges, and the exact detail. Through the read-only Question Bank diagnostic, require the same ID changed from Active to Flagged rather than creating another identity.
+3. Require a modal named `Flag this Question` with kicker `Library attention`, multiple optional reason badges, the optional detail field, and enabled `Flag Question` submission. Select `Prompt is unclear` and `Answer standard is wrong`, enter the exact Detailed Flag detail, and submit visibly.
+4. Require status `Question moved to Flagged for attention.`, the same Question identity is absent from `Active`, and the other issue #32 Question remains Active. Select `Flagged`; require the newly Flagged row shows origin `Learner flag`, both selected reason badges, and the exact detail. Through the read-only Library diagnostic, require the same ID changed from Active to Flagged rather than creating another identity.
 5. Change to a 390 × 844 viewport. Require the Flagged inbox, detailed learner Flag, action controls, and exact detail remain contained with no horizontal clipping or overlap. Capture `/private/tmp/issue-20-clean-break-question-bank-flag-narrow.png`.
 6. Select `Active`, scope the remaining issue #32 row by its exact Prompt, and activate `Flag question`. Require the full modal fits the narrow viewport, can scroll if necessary, and its reason badges form one column. Submit `Flag Question` without selecting any reason or entering detail.
 7. Require the empty submission succeeds with status `Question moved to Flagged for attention.`, no issue #32 row remains Active, and the Flagged inbox shows the same second identity with origin `Learner flag` and no reason badge or detail. Open `/review` and require neither issue #32 Prompt is present and no due work from these two Questions remains.
@@ -289,7 +289,7 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 
 ### 6. Review Flag modal: detailed and empty keyboard submissions
 
-1. Require `fixturePrompts[3]` is current and Review exposes exactly one Question Bank management action: `Flag current Question`.
+1. Require `fixturePrompts[3]` is current and Review exposes exactly one Library management action: `Flag current Question`.
 2. Focus the Flag action and press `Enter`. Require a modal dialog named `Flag this Question`, `aria-modal=true`, initial focus on the first reason badge, multiple clickable reason badges, an optional detail field, and an enabled submit action named `Flag Question` with all fields empty.
 3. Press `Escape`; require the modal closes and focus returns to `Flag current Question`. Reopen it by keyboard.
 4. Select `Prompt is unclear` and `Answer standard is wrong` using keyboard input, enter `The stored explanation conflicts with the Prompt.`, and submit by keyboard.
@@ -298,12 +298,12 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 7. Without selecting a badge or entering detail, use `Tab`/`Shift+Tab` to prove focus remains trapped in the modal, reach `Flag Question`, and submit with `Enter`.
 8. Require the empty submission succeeds, the modal closes, `fixturePrompts[4]` is immediately absent, `fixturePrompts[0]` returns immediately as the only remaining queued Question, and focus moves to `Your answer`.
 9. Submit the Correct token for `fixturePrompts[0]`. Require `Good`, a future Local Day, and the visible resting state `Your queue is clear.`.
-10. In Question Bank's `Flagged` inbox, require both learner-origin Flag records: one with the two selected reasons and exact detail, and one with no reason badges/detail. The earlier Waxon-validation Flag must remain distinct.
+10. In Library's `Flagged` inbox, require both learner-origin Flag records: one with the two selected reasons and exact detail, and one with no reason badges/detail. The earlier Waxon-validation Flag must remain distinct.
 11. Capture `/private/tmp/issue-20-clean-break-review-flag-narrow.png` before returning to desktop size.
 
 ### 7. Authorized MCP Client credential and canonical semantics
 
-1. At desktop size, open `/library`, activate `Agent access`, and require the endpoint `<tested-origin>/api/mcp` and explanation that the token can search this bank and add validated Questions.
+1. At desktop size, open `/library`, activate `Agent access`, and require the endpoint `<tested-origin>/api/mcp` and explanation that the token can search this Library and add validated Questions.
 2. Activate `Create token`. Require the one-time copy warning and a visible token beginning `waxon_mcp_`. Capture it only into the Browser runner's in-memory `mcpToken` variable, then close the dialog.
 3. Initialize one Streamable HTTP `mcpClient` with the helper, then call `check_questions` with `items: mcpCheckItems` and `limitPerItem: 5`. Require each result echoes its stable `candidateId`; both candidates are `no_close_match` or advisory-only non-exact results before add, and no match may have `exactPrompt: true`.
 4. Call `add_questions` with idempotency key `issue-20-native-mcp-add-v1` and `items: mcpAddItems`; require the transmitted add items contain no `candidateId` property. Require:
@@ -311,17 +311,17 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
    - candidate 2: `status: created`, `outcome: created_flagged`, `lifecycle: flagged`, a `waxon_validation` Flag containing `not_self_contained`.
 5. Repeat the identical `mcpAddItems` call with the identical idempotency key. Require the same two Question IDs, `status: existing`, and `outcome: idempotent_replay` for both.
 6. Call `add_questions` with the same `mcpAddItems` and idempotency key `issue-20-native-mcp-duplicate-v1`. Require the same IDs, `status: existing`, `outcome: exact_duplicate`, and `answerStandardConflict: false` for both.
-7. Call `check_questions` again with `items: mcpCheckItems`. Require both stable `candidateId` values are echoed, `advisory: exact_duplicate` for both, and exact bank matches containing the full stored Answer Standard and lifecycle (`active` and `flagged`).
-8. Call `search_questions` for each exact MCP Prompt. Require the matching stored Question ID, full Answer Standard, and lifecycle. Search visibly in Question Bank as well and require the Active and validation-Flagged results appear under their correct filters.
+7. Call `check_questions` again with `items: mcpCheckItems`. Require both stable `candidateId` values are echoed, `advisory: exact_duplicate` for both, and exact Library matches containing the full stored Answer Standard and lifecycle (`active` and `flagged`).
+8. Call `search_questions` for each exact MCP Prompt. Require the matching stored Question ID, full Answer Standard, and lifecycle. Search visibly in Library as well and require the Active and validation-Flagged results appear under their correct filters.
 9. Call `search_questions` with no query and limit 50, then with the exact `isolationProbe`. Require neither response contains the known second-Learner Prompt or Question. This is the Authorized MCP Client isolation assertion.
 10. Open `Agent access`, require the active-token state, activate `Revoke token`, and require the create-token state returns.
-11. Repeat one harmless `search_questions` call with the revoked in-memory token. Require HTTP `401` and no bank data.
+11. Repeat one harmless `search_questions` call with the revoked in-memory token. Require HTTP `401` and no Library data.
 
 ### 8. Desktop/narrow responsive and obsolete-control sweep
 
-1. At desktop size, inspect Question Bank and Review accessible controls. At 390 × 844, reload and inspect both routes again after visible content settles.
+1. At desktop size, inspect Library and Review accessible controls. At 390 × 844, reload and inspect both routes again after visible content settles.
 2. Require navigation, search, lifecycle filters, Question actions, Local Day settings, answer composer, feedback, and Flag dialogs remain contained without horizontal clipping or overlapping actionable controls.
-3. On both routes and both viewports, require no visible control/accessibility name containing `Pause`, `Trash`, `capacity`, `retention`, `source`, `generation`, `concept`, `provenance`, `coverage`, or `document` (case-insensitive). Also require no daily-minutes, item-limit, importance, uncertainty, answer-mode, skip, session, retry, or Question Bank action other than Flag in Review.
+3. On both routes and both viewports, require no visible control/accessibility name containing `Pause`, `Trash`, `capacity`, `retention`, `source`, `generation`, `concept`, `provenance`, `coverage`, or `document` (case-insensitive). Also require no daily-minutes, item-limit, importance, uncertainty, answer-mode, skip, session, retry, or Library action other than Flag in Review.
 4. Capture `/private/tmp/issue-20-clean-break-library-narrow.png`, `/private/tmp/issue-20-clean-break-review-desktop.png`, and `/private/tmp/issue-20-clean-break-review-narrow.png`.
 
 ### 9. Console and final report

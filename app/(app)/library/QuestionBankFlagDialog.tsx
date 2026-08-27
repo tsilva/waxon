@@ -4,7 +4,7 @@ import { ReviewFlagDialog } from "@/app/(app)/review/ReviewFlagDialog";
 import type { ReviewFlagReason } from "@/app/lib/v2/reviewFlag";
 
 const REFRESH_ERROR =
-  "Question was Flagged, but the Question Bank could not be refreshed. Reload to see the latest state.";
+  "Question was Flagged, but the Library could not be refreshed. Reload to see the latest state.";
 
 export function QuestionBankFlagDialog({
   onClose,
