@@ -107,6 +107,18 @@ test("Review exposes one Flag action and no other Question Bank management actio
   }
 });
 
+test("Question Bank exposes the shared Flag dialog only for Active Questions", async () => {
+  const source = await readFile(libraryPath, "utf8");
+
+  assert.equal(source.includes('aria-label="Flag question"'), true);
+  assert.equal(source.includes('question.lifecycle === "active"'), true);
+  assert.equal(source.includes('<ReviewFlagDialog'), true);
+  assert.equal(source.includes('surface="question-bank"'), true);
+  assert.equal(source.includes('action: "flag"'), true);
+  assert.equal(source.includes("reasons"), true);
+  assert.equal(source.includes("detail"), true);
+});
+
 test("Review Flag dialog traps Tab during async empty submission and focuses the resting state", async () => {
   document.body.innerHTML = '<div id="root"></div>';
   const container = document.querySelector<HTMLDivElement>("#root");

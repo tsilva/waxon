@@ -15,6 +15,7 @@ import {
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
+import { ReviewFlagDialog } from "@/app/(app)/review/ReviewFlagDialog";
 import type {
   V2LibraryResponse,
   V2QuestionLifecycle,
@@ -91,7 +92,9 @@ function QuestionDialog({
         await onSaved(
           result.status === "unchanged"
             ? "No replacement was needed because the Question is unchanged."
-            : "Active replacement added. The original Question was archived.",
+            : result.lifecycle === "flagged"
+              ? "Replacement saved to Flagged for attention. The original Question was archived."
+              : "Active replacement added. The original Question was archived.",
         );
       } else {
         const result = await jsonRequest<{
@@ -155,7 +158,7 @@ function QuestionDialog({
               rows={7}
             />
           </label>
-          {question ? <p className="lean-edit-warning">Replacing creates a new Active Question with reset mastery and archives this Question with its Learning Evidence intact.</p> : null}
+          {question ? <p className="lean-edit-warning">Replacing creates a new Question with reset mastery and archives this Question with its Learning Evidence intact. Quality assessment determines whether the replacement is Active or Flagged.</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
           <div className="v2-dialog-actions">
             <button onClick={onClose} type="button">Cancel</button>
@@ -242,10 +245,12 @@ function McpDialog({ onClose }: { onClose: () => void }) {
 function QuestionRow({
   question,
   onEdit,
+  onFlag,
   onAction,
 }: {
   question: V2Question;
   onEdit: () => void;
+  onFlag: () => void;
   onAction: (action: "archive" | "restore") => void;
 }) {
   const unresolvedFlags = question.flags.filter((flag) => !flag.resolvedAt);
@@ -285,7 +290,8 @@ function QuestionRow({
         </details>
       </div>
       <div className="lean-question-actions">
-        <button aria-label="Replace question" onClick={onEdit} title={question.lifecycle === "flagged" ? "Replace with new Active Question" : "Replace"} type="button"><Pencil /></button>
+        <button aria-label="Replace question" onClick={onEdit} title={question.lifecycle === "flagged" ? "Replace with a new Question" : "Replace"} type="button"><Pencil /></button>
+        {question.lifecycle === "active" ? <button aria-label="Flag question" onClick={onFlag} title="Flag" type="button"><Flag /></button> : null}
         {question.lifecycle !== "archived" ? <button aria-label="Archive question" onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
         {question.lifecycle !== "active" ? <button aria-label="Restore question" onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
       </div>
@@ -301,6 +307,7 @@ export default function LibraryPageClient() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState<V2Question | null | undefined>(undefined);
+  const [flagging, setFlagging] = useState<V2Question | null>(null);
   const [mcpOpen, setMcpOpen] = useState(false);
 
   const load = useCallback(async () => {
@@ -336,7 +343,7 @@ export default function LibraryPageClient() {
     <main className="page">
       <section className="review-shell question-bank-shell">
         <ReviewToolbar />
-        <div className="question-bank-stage" id="library-panel">
+        <div className="question-bank-stage" id="library-panel" tabIndex={-1}>
           <header className="question-bank-heading">
             <div><span className="v2-kicker">Question bank</span><h1>{total} questions</h1><p>Add what is worth remembering. Review handles the rest.</p></div>
             <div>
@@ -371,6 +378,7 @@ export default function LibraryPageClient() {
                 key={question.id}
                 onAction={(action) => void questionAction(question.id, action).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not update question."))}
                 onEdit={() => setEditing(question)}
+                onFlag={() => setFlagging(question)}
                 question={question}
               />
             )) : <div className="question-bank-empty"><h2>{search ? "No matching questions" : filter === "flagged" ? "No Questions need attention" : filter === "archived" ? "No Archived Questions" : "Your bank is empty"}</h2><p>{search ? "Try a different phrase or filter." : filter === "flagged" ? "Nothing is waiting for attention." : filter === "archived" ? "Nothing is out of circulation." : "Add one clear Prompt and its Answer Standard."}</p>{!search && (filter === "all" || filter === "active") ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
@@ -378,6 +386,27 @@ export default function LibraryPageClient() {
         </div>
       </section>
       {editing !== undefined ? <QuestionDialog question={editing} onClose={() => setEditing(undefined)} onSaved={async (nextMessage) => { setMessage(nextMessage); await load(); }} /> : null}
+      {flagging ? <ReviewFlagDialog
+        onClose={() => setFlagging(null)}
+        onSubmit={async ({ reasons, detail }) => {
+          await jsonRequest("/api/v2/library", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "flag",
+              questionId: flagging.id,
+              reasons,
+              detail,
+            }),
+          });
+          await load();
+        }}
+        onSubmitted={() => {
+          setMessage("Question moved to Flagged for attention.");
+          document.getElementById("library-panel")?.focus();
+        }}
+        surface="question-bank"
+      /> : null}
       {mcpOpen ? <McpDialog onClose={() => setMcpOpen(false)} /> : null}
     </main>
   );

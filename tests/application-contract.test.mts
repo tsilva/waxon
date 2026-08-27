@@ -713,7 +713,7 @@ test(
           ]);
 
           await learner.direct.questionBank.restore(restoreId ?? "");
-          semanticValidation.setOutcome("unavailable");
+          semanticValidation.setOutcome("pass");
           const replacement = await learner.direct.questionBank.replace({
             questionId: replaceId ?? "",
             prompt: "What makes a resolved replacement a new Question?",
@@ -769,6 +769,156 @@ test(
             true,
           );
           semanticValidation.setOutcome("pass");
+        },
+      );
+
+      await suite.test(
+        "Question Bank Flagging accepts empty and detailed Learner reasons for any Active Question",
+        async () => {
+          clock.set("2030-08-20T10:00:00.000Z");
+          semanticValidation.setOutcome("pass");
+          evaluation.setGrade("again");
+          const learner = await provisionLearner("Question Bank flag learner");
+          const otherLearner = await provisionLearner(
+            "Question Bank flag isolation learner",
+          );
+          const practiced = await learner.direct.questionBank.add({
+            idempotencyKey: "question-bank-flag-practiced",
+            items: [
+              {
+                prompt: "Which Active Question can be Flagged outside Review?",
+                referenceAnswer:
+                  "Any retained Active Question in the Learner's Question Bank.",
+              },
+            ],
+          });
+          const practicedQuestionId = practiced.results[0]?.id ?? "";
+          const practicedOpen = await learner.direct.review.open();
+          const practicedAnswer = await learner.direct.review.submitAnswer({
+            questionId: practicedOpen.question?.questionId ?? "",
+            answer: "Any retained Active Question in my Question Bank.",
+            idempotencyKey: "question-bank-flag-practiced-answer",
+          });
+          await learner.direct.review.evaluatePending(
+            practicedAnswer.submissionId,
+          );
+          const evidenceBefore = await learner.direct.questionBank.evidence(
+            practicedQuestionId,
+          );
+
+          const queueHead = await learner.direct.questionBank.add({
+            idempotencyKey: "question-bank-flag-current",
+            items: [
+              {
+                prompt: "What identifies a detailed Learner Flag?",
+                referenceAnswer:
+                  "Its selected reasons and optional free-text detail.",
+              },
+            ],
+          });
+          const queueHeadQuestionId = queueHead.results[0]?.id ?? "";
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            queueHeadQuestionId,
+          );
+
+          await assert.rejects(
+            otherLearner.direct.questionBank.flag({
+              questionId: practicedQuestionId,
+              reasons: ["prompt_unclear"],
+              detail: "A cross-Learner attempt must not create a Flag.",
+            }),
+            /Question not found/u,
+          );
+
+          const emptyFlag = await learner.direct.questionBank.flag({
+            questionId: practicedQuestionId,
+            reasons: [],
+            detail: "",
+          });
+          assert.deepEqual(emptyFlag, {
+            questionId: practicedQuestionId,
+            lifecycle: "flagged",
+            flag: {
+              origin: "learner",
+              reasons: [],
+              detail: null,
+              createdAt: clock.now().toISOString(),
+              resolvedAt: null,
+            },
+          });
+          assert.equal(
+            (await learner.direct.review.open()).question?.questionId,
+            queueHeadQuestionId,
+          );
+          assert.deepEqual(
+            await learner.direct.questionBank.evidence(practicedQuestionId),
+            evidenceBefore,
+          );
+
+          await learner.direct.questionBank.flag({
+            questionId: queueHeadQuestionId,
+            reasons: ["prompt_unclear", "answer_standard_incorrect"],
+            detail: "  The prompt and stored standard need attention.  ",
+          });
+          assert.equal((await learner.direct.review.open()).question, null);
+
+          const flagged = await learner.direct.questionBank.list({
+            lifecycle: "flagged",
+          });
+          assert.equal(flagged.counts.flagged, 2);
+          assert.deepEqual(
+            new Map(
+              flagged.questions.map((question) => [
+                question.id,
+                {
+                  lifecycle: question.lifecycle,
+                  flags: question.flags.map(
+                    ({ origin, reasons, detail, resolvedAt }) => ({
+                      origin,
+                      reasons,
+                      detail,
+                      resolvedAt,
+                    }),
+                  ),
+                },
+              ]),
+            ),
+            new Map([
+              [
+                practicedQuestionId,
+                {
+                  lifecycle: "flagged",
+                  flags: [
+                    {
+                      origin: "learner",
+                      reasons: [],
+                      detail: null,
+                      resolvedAt: null,
+                    },
+                  ],
+                },
+              ],
+              [
+                queueHeadQuestionId,
+                {
+                  lifecycle: "flagged",
+                  flags: [
+                    {
+                      origin: "learner",
+                      reasons: [
+                        "prompt_unclear",
+                        "answer_standard_incorrect",
+                      ],
+                      detail: "The prompt and stored standard need attention.",
+                      resolvedAt: null,
+                    },
+                  ],
+                },
+              ],
+            ]),
+          );
+          evaluation.setGrade("good");
         },
       );
 
@@ -2172,6 +2322,116 @@ test(
       );
 
       await suite.test(
+        "replacement applies canonical semantic quality outcomes and quarantines every non-pass",
+        async () => {
+          clock.set("2030-08-20T10:00:00.000Z");
+          const expectations = [
+            { outcome: "fail", reason: "not_atomic" },
+            {
+              outcome: "inconclusive",
+              reason: "semantic_validation_inconclusive",
+            },
+            {
+              outcome: "unavailable",
+              reason: "semantic_validation_unavailable",
+            },
+          ] as const;
+
+          for (const { outcome, reason } of expectations) {
+            semanticValidation.setOutcome("pass");
+            const learner = await provisionLearner(
+              `Replacement ${outcome} learner`,
+            );
+            const original = await learner.direct.questionBank.add({
+              idempotencyKey: `replacement-${outcome}-original`,
+              items: [
+                {
+                  prompt: `What evidence precedes a ${outcome} replacement?`,
+                  referenceAnswer:
+                    "The predecessor's immutable Learning Evidence.",
+                },
+              ],
+            });
+            const originalQuestionId = original.results[0]?.id ?? "";
+            const opened = await learner.direct.review.open();
+            const answer = await learner.direct.review.submitAnswer({
+              questionId: opened.question?.questionId ?? "",
+              answer: "The predecessor's immutable Learning Evidence.",
+              idempotencyKey: `replacement-${outcome}-answer`,
+            });
+            await learner.direct.review.evaluatePending(answer.submissionId);
+            const evidenceBefore = await learner.direct.questionBank.evidence(
+              originalQuestionId,
+            );
+
+            semanticValidation.setOutcome(outcome);
+            const replacement = await learner.direct.questionBank.replace({
+              questionId: originalQuestionId,
+              prompt: `Which ${outcome} replacement must stay out of Review?`,
+              referenceAnswer:
+                "A structurally valid replacement that did not pass semantic quality assessment.",
+            });
+            assert.equal(replacement.lifecycle, "flagged");
+            assert.notEqual(replacement.questionId, originalQuestionId);
+            assert.equal(replacement.archivedQuestionId, originalQuestionId);
+            assert.equal((await learner.direct.review.open()).question, null);
+
+            const questions = (await learner.direct.questionBank.list())
+              .questions;
+            const predecessor = questions.find(
+              (question) => question.id === originalQuestionId,
+            );
+            const candidate = questions.find(
+              (question) => question.id === replacement.questionId,
+            );
+            assert.equal(predecessor?.lifecycle, "archived");
+            assert.deepEqual(
+              candidate && {
+                lifecycle: candidate.lifecycle,
+                dueAt: candidate.dueAt,
+                flags: candidate.flags.map(
+                  ({ origin, reasons, detail, resolvedAt }) => ({
+                    origin,
+                    reasons,
+                    detail,
+                    resolvedAt,
+                  }),
+                ),
+              },
+              {
+                lifecycle: "flagged",
+                dueAt: null,
+                flags: [
+                  {
+                    origin: "waxon_validation",
+                    reasons: [reason],
+                    detail: null,
+                    resolvedAt: null,
+                  },
+                ],
+              },
+            );
+            assert.deepEqual(
+              await learner.direct.questionBank.evidence(originalQuestionId),
+              evidenceBefore,
+            );
+            assert.deepEqual(
+              await learner.direct.questionBank.evidence(
+                replacement.questionId,
+              ),
+              {
+                learnerAnswers: 0,
+                evaluations: 0,
+                gradeEvents: 0,
+                dueAt: null,
+              },
+            );
+          }
+          semanticValidation.setOutcome("pass");
+        },
+      );
+
+      await suite.test(
         "repeated same-Prompt replacement archives each predecessor and preserves its Learning Evidence",
         async () => {
           clock.set("2030-08-20T10:00:00.000Z");
@@ -2411,6 +2671,21 @@ test(
             ],
           });
           const originalId = original.results[0]?.id ?? "";
+
+          const beforeStructuralRejection =
+            (await learnerA.direct.questionBank.list()).questions;
+          await assert.rejects(
+            learnerA.direct.questionBank.replace({
+              questionId: originalId,
+              prompt: "   ",
+              referenceAnswer: "A replacement that must never be stored.",
+            }),
+            /Add a question prompt/u,
+          );
+          assert.deepEqual(
+            (await learnerA.direct.questionBank.list()).questions,
+            beforeStructuralRejection,
+          );
 
           await assert.rejects(
             learnerB.direct.questionBank.replace({

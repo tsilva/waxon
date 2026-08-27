@@ -99,6 +99,13 @@ export async function PATCH(request: Request) {
       await application.questionBank.archive(questionId);
     } else if (parsed.value.action === "restore") {
       await application.questionBank.restore(questionId);
+    } else if (parsed.value.action === "flag") {
+      const flagged = await application.questionBank.flag({
+        questionId,
+        reasons: parsed.value.reasons,
+        detail: parsed.value.detail,
+      });
+      return NextResponse.json({ ok: true, ...flagged });
     } else if (parsed.value.action === "replace") {
       replacement = await application.questionBank.replace({
         questionId,
