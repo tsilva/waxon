@@ -3,6 +3,7 @@ import {
   addQuestions,
   createDirectQuestion,
   defaultV2ServiceDependencies,
+  flagQuestionInBank,
   getQuestionLearningEvidence,
   listLibrary,
   mutateQuestionLifecycle,
@@ -83,6 +84,14 @@ export function createWaxonApplication(
             input: Omit<Parameters<typeof replaceQuestion>[0], "userId">,
           ) {
             return replaceQuestion({ ...input, userId }, serviceDependencies);
+          },
+          flag(
+            input: Omit<Parameters<typeof flagQuestionInBank>[0], "userId">,
+          ) {
+            return flagQuestionInBank(
+              { ...input, userId },
+              serviceDependencies,
+            );
           },
           archive(questionId: string) {
             return mutateQuestionLifecycle(

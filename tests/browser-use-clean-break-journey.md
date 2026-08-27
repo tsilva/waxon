@@ -1,6 +1,6 @@
 # Issue 20 clean-break learner journey
 
-This is the source of truth for the final native-browser acceptance run for GitHub issue #20. Run every case with the project-level `run-browser-use-suite` skill and the native Codex Desktop in-app Browser (`iab`). Do not substitute standalone Playwright, another browser, Computer Use, or API-only evidence.
+This is the source of truth for the final native-browser acceptance run for GitHub issue #20 and the Question Bank Flagging extension in issue #32. Run every case with the project-level `run-browser-use-suite` skill and the native Codex Desktop in-app Browser (`iab`). Do not substitute standalone Playwright, another browser, Computer Use, or API-only evidence.
 
 ## Result policy
 
@@ -55,6 +55,16 @@ Validation-Flagged Question:
 ```text
 Prompt: What does the content provided above mean?
 Answer Standard: It describes the accepted clean-break learner journey.
+```
+
+Question Bank learner-Flag Questions:
+
+```text
+Detailed Prompt: Issue 32 Question Bank Flagging: which Active Question gets detailed attention?
+Detailed Answer Standard: The non-current Active Question receives Learner reasons and detail.
+Empty Prompt: Issue 32 Question Bank Flagging: which Active Question allows an empty Flag?
+Empty Answer Standard: Any retained Active Question may be Flagged without reasons or detail.
+Detailed Flag detail: This retained Question needs attention outside Review.
 ```
 
 Deterministic Review answer:
@@ -226,7 +236,7 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 3. Through runner-side `issue20DiagnosticRequest(issue20DiagnosticEndpoints.questionBank + "?search=replacement%20immutable")`, record the Active Question ID as `originalId`; do not treat this request as a replacement for the visible search assertion.
 4. Open `/review` for the first time and require the exact Question Bank Prompt is current. Open `Local Day settings`, require the IANA timezone equals `Intl.DateTimeFormat().resolvedOptions().timeZone`, and close settings; this is the automatic-detection assertion. Answer with the stable Correct token and wait for evaluation. Require grade `Good`, visible Answer Standard and Demonstrated Gap, and a future `Scheduled` Local Day.
 5. Return to `/library`, search for `replacement immutable`, and require the original remains Active with a visible future due date. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.fixture)`, record the original's exact `dueAt` as `originalDueAt` and require its evidence is `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`.
-6. Activate `Replace question`. Require a modal named `Replace question` and the visible warning that replacement creates a new Active Question with reset mastery and archives the original with its Learning Evidence intact.
+6. Activate `Replace question`. Require a modal named `Replace question` and the visible warning that replacement creates a new Question with reset mastery, archives the original with its Learning Evidence intact, and uses quality assessment to determine whether the replacement is Active or Flagged.
 7. Keep the Prompt unchanged, replace only the Answer Standard with the exact Replacement Answer Standard, and submit `Replace question`.
 8. Require the visible status `Active replacement added. The original Question was archived.`. Through the Question Bank GET diagnostic, record `replacementId` and require exactly one Active replacement and one Archived original with the same Prompt, different IDs, `originalId` on the Archived result, the two unchanged Answer Standards on their respective identities, `dueAt: null` on the replacement, and `dueAt: originalDueAt` on the original.
 9. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.fixture)`, require `originalId` remains Archived with evidence `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`, while `replacementId` is Active with reset evidence `{ learnerAnswers: 0, evaluations: 0, gradeEvents: 0, dueAt: null }`.
@@ -242,6 +252,17 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 2. Require `Question saved to Flagged for attention.` and no Active lifecycle result for that Prompt.
 3. Select the `Flagged` filter. Require the visible region `Flagged Question attention inbox`, `Attention inbox`, the exact Prompt, lifecycle `Flagged`, origin `Waxon validation`, and reason `Not self-contained`.
 4. Require Archive, restore, and replace actions on the Flagged Question. Leave it Flagged.
+
+### 3A. Question Bank learner Flagging at desktop and 390 px
+
+1. At a desktop viewport of at least 1280 × 800, clear search and select `Active`. Add the exact Detailed Prompt and Answer Standard, then add the exact Empty Prompt and Answer Standard through the visible `Add question` flow. Require both rows have lifecycle `Active` and each exposes `Flag question`, `Replace question`, and `Archive question`.
+2. Open `/review` and retain the exact current Prompt. Return to `/library`, select `Active`, and scope the other row by its exact Prompt. This row is not the current Review Question; activate its `Flag question` control.
+3. Require a modal named `Flag this Question` with kicker `Question bank attention`, multiple optional reason badges, the optional detail field, and enabled `Flag Question` submission. Select `Prompt is unclear` and `Answer standard is wrong`, enter the exact Detailed Flag detail, and submit visibly.
+4. Require status `Question moved to Flagged for attention.`, the same Question identity is absent from `Active`, and the other issue #32 Question remains Active. Select `Flagged`; require the newly Flagged row shows origin `Learner flag`, both selected reason badges, and the exact detail. Through the read-only Question Bank diagnostic, require the same ID changed from Active to Flagged rather than creating another identity.
+5. Change to a 390 × 844 viewport. Require the Flagged inbox, detailed learner Flag, action controls, and exact detail remain contained with no horizontal clipping or overlap. Capture `/private/tmp/issue-20-clean-break-question-bank-flag-narrow.png`.
+6. Select `Active`, scope the remaining issue #32 row by its exact Prompt, and activate `Flag question`. Require the full modal fits the narrow viewport, can scroll if necessary, and its reason badges form one column. Submit `Flag Question` without selecting any reason or entering detail.
+7. Require the empty submission succeeds with status `Question moved to Flagged for attention.`, no issue #32 row remains Active, and the Flagged inbox shows the same second identity with origin `Learner flag` and no reason badge or detail. Open `/review` and require neither issue #32 Prompt is present and no due work from these two Questions remains.
+8. Return to `/library`, restore the desktop viewport, select `Flagged`, and require both issue #32 learner Flags remain visible with their distinct empty/detailed evidence. Capture `/private/tmp/issue-20-clean-break-question-bank-flag-desktop.png`. Leave both Questions Flagged so fixture seeding has no unrelated Active Question.
 
 ### 4. Seed and prove the deterministic live Review Queue and Local Day
 

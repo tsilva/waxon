@@ -28,6 +28,7 @@ import {
   type QuestionQualityAssessment,
 } from "./questionQuality.ts";
 import { rankQuestionIdsLexically } from "./questionSearch.ts";
+import { normalizeReviewFlagInput } from "./reviewFlag.ts";
 import type {
   V2LibraryResponse,
   V2QuestionFlag,
@@ -627,6 +628,66 @@ export async function mutateQuestionLifecycle(input: {
   });
 }
 
+export async function flagQuestionInBank(input: {
+  userId: string;
+  questionId: string;
+  reasons?: unknown;
+  detail?: unknown;
+}, dependencies: Pick<V2ServiceDependencies, "now"> = defaultV2ServiceDependencies): Promise<{
+  questionId: string;
+  lifecycle: "flagged";
+  flag: V2QuestionFlag;
+}> {
+  const questionId = input.questionId.trim();
+  if (!questionId) throw new Error("A Question is required.");
+  const normalized = normalizeReviewFlagInput(input);
+  const now = dependencies.now();
+
+  return getV2Db().transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
+    );
+    const [question] = await tx
+      .select({ lifecycle: questions.lifecycle })
+      .from(questions)
+      .where(
+        and(eq(questions.userId, input.userId), eq(questions.id, questionId)),
+      )
+      .limit(1);
+    if (!question) throw new Error("Question not found.");
+    if (question.lifecycle !== "active") {
+      throw new Error("Only an Active Question can be Flagged.");
+    }
+
+    await tx
+      .update(questions)
+      .set({ lifecycle: "flagged", updatedAt: now })
+      .where(
+        and(eq(questions.userId, input.userId), eq(questions.id, questionId)),
+      );
+    await tx.insert(questionFlags).values({
+      userId: input.userId,
+      questionId,
+      origin: "learner",
+      reasons: normalized.reasons,
+      detail: normalized.detail,
+      createdAt: now,
+    });
+
+    return {
+      questionId,
+      lifecycle: "flagged" as const,
+      flag: {
+        origin: "learner" as const,
+        reasons: normalized.reasons,
+        detail: normalized.detail,
+        createdAt: now.toISOString(),
+        resolvedAt: null,
+      },
+    };
+  });
+}
+
 export async function replaceQuestion(input: {
   userId: string;
   questionId: string;
@@ -640,6 +701,13 @@ export async function replaceQuestion(input: {
 }> {
   const now = dependencies.now();
   const normalized = normalizeQuestionInput(input);
+  const assessment = await validateQuestionCandidate(normalized, dependencies);
+  const validationFlag = assessment.outcome === "pass"
+    ? null
+    : {
+        origin: "waxon_validation" as const,
+        reasons: assessment.reasons,
+      };
   return await getV2Db().transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
@@ -700,12 +768,20 @@ export async function replaceQuestion(input: {
         userId: input.userId,
         prompt: normalized.prompt,
         referenceAnswer: normalized.referenceAnswer,
-        lifecycle: "active",
+        lifecycle: validationFlag ? "flagged" : "active",
         targetKey: normalized.promptKey,
         createdAt: now,
         updatedAt: now,
       })
       .returning({ id: questions.id });
+    if (validationFlag) {
+      await tx.insert(questionFlags).values({
+        userId: input.userId,
+        questionId: replacement.id,
+        ...validationFlag,
+        createdAt: now,
+      });
+    }
     await tx.insert(jobs).values({
       userId: input.userId,
       type: "embed_question_batch",
@@ -716,7 +792,7 @@ export async function replaceQuestion(input: {
     return {
       questionId: replacement.id,
       archivedQuestionId: current.questionId,
-      lifecycle: "active" as const,
+      lifecycle: validationFlag ? "flagged" as const : "active" as const,
       status: "replaced" as const,
     };
   });
