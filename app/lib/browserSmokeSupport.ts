@@ -1,6 +1,6 @@
 import {
   browserAcceptanceTestLearner,
-} from "@/app/lib/localTestAuth";
+} from "@/app/lib/browserAcceptanceIdentity";
 
 export const BROWSER_SMOKE_CORRECT_TOKEN = "browser-smoke-correct-token";
 

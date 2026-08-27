@@ -1,16 +1,13 @@
+import { browserAcceptanceTestLearner } from "@/app/lib/browserAcceptanceIdentity";
+
+export { browserAcceptanceTestLearner } from "@/app/lib/browserAcceptanceIdentity";
+
 const LOCAL_TEST_AUTH_DISABLED_VALUES = new Set(["1", "true", "yes"]);
 
 export const localTestUser = {
   id: "local-test",
   displayName: "Tiago Silva",
   email: "eng.tiago.silva@gmail.com",
-  avatarUrl: null,
-} as const;
-
-export const browserAcceptanceTestLearner = {
-  id: "issue-20-native-browser-learner",
-  displayName: "Issue 20 browser learner",
-  email: "issue-20-browser@waxon.invalid",
   avatarUrl: null,
 } as const;
 

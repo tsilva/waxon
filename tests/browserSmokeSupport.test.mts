@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   BROWSER_SMOKE_ISOLATION_QUESTION,
@@ -14,6 +15,23 @@ import {
   getLocalTestLearner,
   localTestUser,
 } from "../app/lib/localTestAuth.ts";
+
+test("acceptance evaluator authorization does not depend on the hot-reloaded auth module", () => {
+  const supportSource = readFileSync(
+    new URL("../app/lib/browserSmokeSupport.ts", import.meta.url),
+    "utf8",
+  );
+  const identitySource = readFileSync(
+    new URL("../app/lib/browserAcceptanceIdentity.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.doesNotMatch(
+    supportSource,
+    /from ["']@\/app\/lib\/localTestAuth["']/u,
+  );
+  assert.doesNotMatch(identitySource, /^\s*import\s/mu);
+});
 
 test("browser acceptance grading is limited to the named Question Bank and Review fixture Questions", () => {
   assert.equal(BROWSER_SMOKE_QUESTIONS.length, 5);
