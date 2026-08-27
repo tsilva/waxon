@@ -19,6 +19,25 @@ jobs:
     name: Verify
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      APPLICATION_CONTRACT_TEST_DATABASE_URL: postgresql://waxon:waxon@127.0.0.1:5432/waxon
+      DATABASE_URL: postgresql://waxon:waxon@127.0.0.1:5432/waxon
+      DATABASE_URL_UNPOOLED: postgresql://waxon:waxon@127.0.0.1:5432/waxon
+      QUESTION_SEARCH_TEST_DATABASE_URL: postgresql://waxon:waxon@127.0.0.1:5432/waxon
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        env:
+          POSTGRES_DB: waxon
+          POSTGRES_PASSWORD: waxon
+          POSTGRES_USER: waxon
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U waxon -d waxon"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
 
     steps:
       - name: Checkout repository
@@ -49,10 +68,18 @@ jobs:
       - name: Type-check
         run: pnpm typecheck
 
+      - name: Install clean database baseline
+        run: pnpm db:reset -- --confirm-clean-break
+
       - name: Test
         run: pnpm test
 
-      - name: Build production application
+      - name: Verify schema declaration matches the clean baseline
+        run: |
+          pnpm db:generate
+          git diff --exit-code -- drizzle-v2
+
+      - name: Build hosted-mode production application
         run: pnpm build
         env:
-          DATABASE_URL: postgresql://waxon:waxon@127.0.0.1:5432/waxon
+          VERCEL_ENV: preview

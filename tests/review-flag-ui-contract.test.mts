@@ -22,6 +22,7 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 for (const name of [
   "document",
   "HTMLElement",
+  "HTMLButtonElement",
   "KeyboardEvent",
   "MouseEvent",
   "Node",
@@ -162,10 +163,38 @@ test("Review Flag dialog traps Tab during async empty submission and focuses the
     'button[aria-label="Close Flag dialog"]',
   );
   assert.ok(dialog);
+  assert.ok(firstReason);
   assert.equal(dialog.getAttribute("aria-modal"), "true");
   assert.equal(document.activeElement, firstReason);
   assert.ok(submit);
   assert.ok(close);
+
+  const secondReason = document.querySelectorAll<HTMLButtonElement>(
+    ".review-flag-reasons button",
+  )[1];
+  assert.ok(secondReason);
+  const firstTab = keydown(firstReason, "Tab");
+  assert.equal(firstTab.defaultPrevented, true);
+  assert.equal(document.activeElement, secondReason);
+
+  let firstActivation!: KeyboardEvent;
+  await act(async () => {
+    firstActivation = keydown(firstReason, "Enter");
+  });
+  assert.equal(firstActivation.defaultPrevented, true);
+  assert.equal(firstReason.getAttribute("aria-pressed"), "true");
+  let secondActivation!: KeyboardEvent;
+  await act(async () => {
+    secondActivation = keydown(secondReason, " ");
+  });
+  assert.equal(secondActivation.defaultPrevented, true);
+  assert.equal(secondReason.getAttribute("aria-pressed"), "true");
+  await act(async () => {
+    keydown(firstReason, "Enter");
+    keydown(secondReason, " ");
+  });
+  assert.equal(firstReason.getAttribute("aria-pressed"), "false");
+  assert.equal(secondReason.getAttribute("aria-pressed"), "false");
 
   close.focus();
   const reverseWrap = keydown(close, "Tab", true);

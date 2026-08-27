@@ -31,7 +31,7 @@ The stored evidence against which a Learner Answer is evaluated. It may be prose
 _Avoid_: Answer mode, expected output
 
 **Active Question**:
-A Question that participates in Review. Every newly added Question is active immediately.
+A Question that passed quality assessment and participates in Review. Every structurally and semantically valid newly added Question is Active immediately; a semantically questionable candidate is Flagged instead.
 _Avoid_: New question, live card
 
 **Flagged Question**:

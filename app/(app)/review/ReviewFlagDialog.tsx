@@ -73,6 +73,15 @@ export function ReviewFlagDialog({
       close();
       return;
     }
+    if (
+      (event.key === "Enter" || event.key === " ") &&
+      event.target instanceof HTMLButtonElement &&
+      !event.target.disabled
+    ) {
+      event.preventDefault();
+      event.target.click();
+      return;
+    }
     if (event.key !== "Tab") return;
 
     const focusable = Array.from(
@@ -83,15 +92,18 @@ export function ReviewFlagDialog({
       dialogRef.current?.focus();
       return;
     }
-    const first = focusable[0];
-    const last = focusable.at(-1);
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last?.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    event.preventDefault();
+    const currentIndex = focusable.findIndex(
+      (element) => element === document.activeElement,
+    );
+    const nextIndex =
+      currentIndex < 0
+        ? event.shiftKey
+          ? focusable.length - 1
+          : 0
+        : (currentIndex + (event.shiftKey ? -1 : 1) + focusable.length) %
+          focusable.length;
+    focusable[nextIndex]?.focus();
   }
 
   function toggleReason(reason: ReviewFlagReason) {

@@ -19,6 +19,7 @@ import {
   learnerSettings,
 } from "../../db/v2/schema.ts";
 import { claimV2Job } from "./jobs.ts";
+import { authorizeBrowserAcceptanceEvaluation } from "../browserSmokeSupport.ts";
 import { evaluateRecall } from "./model.ts";
 import {
   applyFsrsGrade,
@@ -476,6 +477,7 @@ export async function submitLiveReviewAnswer(
     const [question] = await tx
       .select({
         questionId: questions.id,
+        prompt: questions.prompt,
       })
       .from(questions)
       .leftJoin(
@@ -515,12 +517,23 @@ export async function submitLiveReviewAnswer(
         evaluator: "model",
       })
       .returning({ id: evaluations.id });
+    const browserAcceptanceEvaluationAuthorized =
+      authorizeBrowserAcceptanceEvaluation({
+        learnerId: input.userId,
+        prompt: question.prompt,
+      });
     await tx.insert(jobs).values({
       userId: input.userId,
       type: "evaluate_submission",
       idempotencyKey: submission.id,
       priority: 0,
-      payload: { submissionId: submission.id, evaluationId: evaluation.id },
+      payload: {
+        submissionId: submission.id,
+        evaluationId: evaluation.id,
+        ...(browserAcceptanceEvaluationAuthorized
+          ? { browserAcceptanceEvaluationAuthorized: true }
+          : {}),
+      },
     });
     await tx.insert(mutationReceipts).values({
       userId: input.userId,
@@ -895,6 +908,8 @@ export async function runLiveEvaluationJob(
       prompt: row.prompt,
       referenceAnswer: row.referenceAnswer,
       answer: row.answer,
+      browserAcceptanceEvaluationAuthorized:
+        job.payload.browserAcceptanceEvaluationAuthorized === true,
     });
     if (result.confidence < 0.55) {
       await db
