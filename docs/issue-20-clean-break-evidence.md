@@ -1,5 +1,35 @@
 # Issue 20 clean-break evidence
 
+## Issue 32 Question Bank Flagging extension
+
+- Branch: `codex/issue-32-final-question-semantics`
+- Tested code revision: `ff8d543697f4c385af760b7ecea09f21d0b98e8b`
+- Tested local URL: `http://localhost:65344`
+- Native Browser: connected Codex Desktop `iab`; no external browser or fallback used
+- Disposable database: local `pgvector/pgvector:pg16` on an automatically assigned loopback port; the clean baseline was installed immediately before the run and no production data or secrets were used
+
+The issue #32 extension in case 3A passed at desktop and `390 x 844`. Through visible Question Bank interactions, the dedicated acceptance Learner added two Active Questions, opened Review to identify the current Question, returned to the bank, and Flagged the other, non-current Question with `Prompt is unclear`, `Answer standard is wrong`, and the exact detail `Final-head retained Question needs attention outside Review.` The Flagged inbox showed Learner origin, both reasons, the detail, and the same recorded Question identity. At 390 px, the inbox and all action controls remained contained with no horizontal overflow; the modal fit inside the viewport at 359 x 824 with 10 px edge clearance, all five reason badges formed one column, and empty submission remained enabled. Submitting the second Flag without a reason or detail succeeded, retained that Question's identity, produced a distinct empty Learner Flag in the inbox, and left Review visibly at `0 due` with `Your queue is clear.` This journey was replayed after the final race/error/refresh review fixes on the exact revision above.
+
+Console inspection found no application exception, hydration error, failed request, or accessibility error. Only normal React/HMR/Web Analytics development messages and Next's known development-only smooth-scroll advisory appeared.
+
+| Issue 32 check | Result |
+| --- | --- |
+| Arbitrary non-current Active Question exposes and submits the shared Flag dialog | passed |
+| Multiple reasons, optional detail, Learner origin, and same Question identity | passed |
+| Empty Flag submission | passed |
+| Immediate removal from Review and Flagged inbox visibility | passed |
+| Desktop and 390 px containment, one-column narrow reason badges, and modal fit | passed |
+| Native console review | passed |
+
+Issue #32 screenshots:
+
+- `/private/tmp/issue-32-final-head-flag-modal-narrow.png`
+- `/private/tmp/issue-32-final-head-flagged-bank-narrow.png`
+- `/private/tmp/issue-32-final-head-flagged-bank-desktop.png`
+- `/private/tmp/issue-32-final-head-review-clear-desktop.png`
+
+The issue #32 disposable-database verification also passed before this final native replay: 93 tests, 0 failed, 0 skipped; typecheck; lint; dependency security; schema generation with no drift; and a `VERCEL_ENV=preview` hosted-mode build. The pull request's Vercel preview failure remains an external hosted-preview limitation and is not represented as a live-preview pass.
+
 ## Candidate
 
 - Base: `origin/main` at `2b568e592fbe6ba58bcd950a430dcdb4d0416f1e`

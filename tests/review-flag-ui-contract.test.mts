@@ -11,6 +11,10 @@ const libraryPath = new URL(
   "../app/(app)/library/LibraryPageClient.tsx",
   import.meta.url,
 );
+const questionBankFlagDialogPath = new URL(
+  "../app/(app)/library/QuestionBankFlagDialog.tsx",
+  import.meta.url,
+);
 const appStylesPath = new URL(
   "../app/(app)/app-globals.css",
   import.meta.url,
@@ -47,6 +51,9 @@ const { act } = React;
 const { createRoot } = await import("react-dom/client");
 const { ReviewFlagDialog } = await import(
   "../app/(app)/review/ReviewFlagDialog.tsx"
+);
+const { QuestionBankFlagDialog } = await import(
+  "../app/(app)/library/QuestionBankFlagDialog.tsx"
 );
 
 Object.defineProperty(globalThis, "IS_REACT_ACT_ENVIRONMENT", {
@@ -105,6 +112,95 @@ test("Review exposes one Flag action and no other Question Bank management actio
   ]) {
     assert.equal(source.includes(forbiddenAction), false);
   }
+});
+
+test("Question Bank exposes the shared Flag dialog only for Active Questions", async () => {
+  const [source, dialogSource] = await Promise.all([
+    readFile(libraryPath, "utf8"),
+    readFile(questionBankFlagDialogPath, "utf8"),
+  ]);
+
+  assert.equal(source.includes('aria-label="Flag question"'), true);
+  assert.equal(source.includes('question.lifecycle === "active"'), true);
+  assert.equal(source.includes('<QuestionBankFlagDialog'), true);
+  assert.equal(dialogSource.includes('<ReviewFlagDialog'), true);
+  assert.equal(dialogSource.includes('surface="question-bank"'), true);
+  assert.equal(source.includes('action: "flag"'), true);
+  assert.equal(source.includes("reasons"), true);
+  assert.equal(source.includes("detail"), true);
+});
+
+test("Question Bank reports a committed Flag separately from a failed refresh", async () => {
+  document.body.innerHTML = '<div id="root"></div>';
+  const container = document.querySelector<HTMLDivElement>("#root");
+  assert.ok(container);
+  const events: string[] = [];
+  const submissions: unknown[] = [];
+  const refreshErrors: string[] = [];
+
+  function Harness() {
+    const [open, setOpen] = React.useState(true);
+    const bankRef = React.useRef<HTMLDivElement | null>(null);
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement(
+        "div",
+        { ref: bankRef, tabIndex: -1 },
+        "Question Bank",
+      ),
+      open
+        ? React.createElement(QuestionBankFlagDialog, {
+            onClose: () => setOpen(false),
+            onCommitted: () => {
+              events.push("committed");
+              bankRef.current?.focus();
+            },
+            onFlag: async (input) => {
+              events.push("flagged");
+              submissions.push(input);
+            },
+            onRefresh: async () => {
+              events.push("refresh");
+              throw new Error("GET refresh failed.");
+            },
+            onRefreshError: (message) => {
+              events.push("refresh-error");
+              refreshErrors.push(message);
+            },
+          })
+        : null,
+    );
+  }
+
+  const root = createRoot(container);
+  await act(async () => root.render(React.createElement(Harness)));
+  await act(frame);
+  const submit = Array.from(
+    document.querySelectorAll<HTMLButtonElement>("button"),
+  ).find((button) => button.textContent?.includes("Flag Question"));
+  assert.ok(submit);
+
+  await act(async () => {
+    click(submit);
+    await Promise.resolve();
+  });
+  await act(frame);
+  await act(async () => Promise.resolve());
+
+  assert.deepEqual(submissions, [{ reasons: [], detail: "" }]);
+  assert.deepEqual(events, [
+    "flagged",
+    "committed",
+    "refresh",
+    "refresh-error",
+  ]);
+  assert.deepEqual(refreshErrors, [
+    "Question was Flagged, but the Question Bank could not be refreshed. Reload to see the latest state.",
+  ]);
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.equal(document.activeElement?.textContent, "Question Bank");
+  await act(async () => root.unmount());
 });
 
 test("Review Flag dialog traps Tab during async empty submission and focuses the resting state", async () => {
