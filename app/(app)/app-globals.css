@@ -2466,6 +2466,12 @@ textarea {
   font-style: normal;
 }
 
+.math-command-parallel {
+  font-family:
+    "STIX Two Math", "Cambria Math", "DejaVu Math TeX Gyre", "Noto Sans Math",
+    "Apple Symbols", sans-serif;
+}
+
 .math-literal,
 .math-blackboard,
 .math-calligraphic,

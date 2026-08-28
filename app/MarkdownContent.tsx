@@ -212,7 +212,14 @@ function renderMathNodes(expression: string): ReactNode[] {
         }
 
         nodes.push(
-          <span className="math-command" key={`command-${index}`}>
+          <span
+            className={
+              command.commandName === "parallel"
+                ? "math-command math-command-parallel"
+                : "math-command"
+            }
+            key={`command-${index}`}
+          >
             {commandText}
           </span>,
         );

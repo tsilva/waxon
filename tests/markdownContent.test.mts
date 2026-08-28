@@ -38,10 +38,21 @@ test("MarkdownContent renders KL-divergence relation and calligraphic set comman
     }),
   );
 
-  assert.doesNotMatch(html, /parallel|mathcal/u);
-  assert.match(html, />∥</u);
+  assert.doesNotMatch(html, /\\parallel|\\mathcal/u);
+  assert.match(html, /class="math-command math-command-parallel">∥</u);
   assert.match(html, />𝒳</u);
   assert.match(html, /class="math-fraction"/u);
+});
+
+test("the parallel relation uses a math font with a complete glyph", async () => {
+  const styles = await readFile(appStylesPath, "utf8");
+  const parallelRule = styles.match(
+    /\.math-command-parallel\s*\{([^}]*)\}/u,
+  )?.[1];
+
+  assert.ok(parallelRule);
+  assert.match(parallelRule, /"STIX Two Math"/u);
+  assert.match(parallelRule, /"Cambria Math"/u);
 });
 
 test("inline math permits long formulas to wrap", async () => {
