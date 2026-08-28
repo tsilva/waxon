@@ -2144,6 +2144,43 @@ textarea {
   display: none;
 }
 
+.review-handoff-actions {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 30px;
+}
+
+.review-handoff-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 129px;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: rgb(255 255 255 / 62%);
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.review-handoff-copy svg {
+  width: 14px;
+  height: 14px;
+}
+
+.review-handoff-copy:hover,
+.review-handoff-copy:focus-visible {
+  border-color: rgb(166 124 82 / 38%);
+  background: #ffffff;
+  color: var(--accent);
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 2px;
+}
+
 .previous-details-link {
   grid-column: 2;
   justify-self: end;

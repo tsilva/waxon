@@ -38,3 +38,12 @@ test("previous answers start collapsed but a newly completed evaluation opens", 
     /previousEvaluationStatus\.current === "pending"\s*&&\s*evaluation\.status !== "pending"/u,
   );
 });
+
+test("expanded answers expose a focused Markdown copy action", () => {
+  assert.match(reviewApp, /hidden=\{!open\}/u);
+  assert.match(reviewApp, /aria-label="Copy review as Markdown"/u);
+  assert.match(
+    reviewApp,
+    /navigator\.clipboard\.writeText\(reviewHandoffMarkdown\(turn\)\)/u,
+  );
+});

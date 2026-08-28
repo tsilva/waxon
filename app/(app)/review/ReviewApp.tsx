@@ -1,6 +1,14 @@
 "use client";
 
-import { ChevronDown, Flag, LoaderCircle, Settings2, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Copy,
+  Flag,
+  LoaderCircle,
+  Settings2,
+  X,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -13,6 +21,7 @@ import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { useToolbarState } from "@/app/ToolbarState";
 import { reviewIntervalLabel } from "@/app/lib/reviewIntervalLabel";
+import { reviewHandoffMarkdown } from "@/app/lib/reviewHandoffMarkdown";
 import { ReviewFlagDialog } from "./ReviewFlagDialog";
 import type {
   V2Grade,
@@ -83,6 +92,9 @@ function FeedbackRow({
   const [open, setOpen] = useState(false);
   const previousEvaluationStatus = useRef(evaluation.status);
   const [savingGrade, setSavingGrade] = useState<V2Grade | null>(null);
+  const [copyStatus, setCopyStatus] = useState<
+    "idle" | "copied" | "failed"
+  >("idle");
   const grade = gradeLabel(evaluation.grade);
   const scoreLabel =
     evaluation.status === "failed" || !evaluation.grade
@@ -101,12 +113,27 @@ function FeedbackRow({
     previousEvaluationStatus.current = evaluation.status;
   }, [evaluation.status]);
 
+  useEffect(() => {
+    if (copyStatus === "idle") return;
+    const timeout = window.setTimeout(() => setCopyStatus("idle"), 2_000);
+    return () => window.clearTimeout(timeout);
+  }, [copyStatus]);
+
   async function applyGrade(nextGrade: V2Grade) {
     setSavingGrade(nextGrade);
     try {
       await onGrade(evaluation.submissionId, nextGrade);
     } finally {
       setSavingGrade(null);
+    }
+  }
+
+  async function copyMarkdown() {
+    try {
+      await navigator.clipboard.writeText(reviewHandoffMarkdown(turn));
+      setCopyStatus("copied");
+    } catch {
+      setCopyStatus("failed");
     }
   }
 
@@ -166,6 +193,34 @@ function FeedbackRow({
           </div>
 
           <div className="previous-detail-grid" hidden={!open}>
+            <div className="review-handoff-actions">
+              <button
+                aria-label="Copy review as Markdown"
+                className="review-handoff-copy"
+                onClick={copyMarkdown}
+                type="button"
+              >
+                {copyStatus === "copied" ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <Copy aria-hidden="true" />
+                )}
+                <span>
+                  {copyStatus === "copied"
+                    ? "Copied"
+                    : copyStatus === "failed"
+                      ? "Copy failed"
+                      : "Copy Markdown"}
+                </span>
+              </button>
+              <span aria-live="polite" className="sr-only">
+                {copyStatus === "copied"
+                  ? "Review copied to clipboard as Markdown."
+                  : copyStatus === "failed"
+                    ? "Review could not be copied."
+                    : ""}
+              </span>
+            </div>
             <div className="previous-field">
               <span className="previous-field-label">Your answer</span>
               <p className="previous-answer">{turn.answer}</p>
