@@ -1197,11 +1197,12 @@ textarea {
 .review-flag-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  justify-content: center;
+  width: 36px;
   min-height: 36px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 0 13px;
+  padding: 0;
   background: var(--surface-soft);
   color: var(--muted-strong);
   font: 650 11px/1 var(--font-ui);

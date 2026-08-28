@@ -530,7 +530,6 @@ export default function ReviewApp() {
                     type="button"
                   >
                     <Flag aria-hidden="true" />
-                    <span>Flag</span>
                   </button>
                 </div>
               </div>

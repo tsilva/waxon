@@ -178,7 +178,7 @@ export function ReviewFlagDialog({
         </p>
         <form className="review-flag-form" onSubmit={submit}>
           <fieldset>
-            <legend>What needs attention?</legend>
+            <legend className="sr-only">What needs attention?</legend>
             <div className="review-flag-reasons">
               {REVIEW_FLAG_REASONS.map((reason, index) => (
                 <button
@@ -196,7 +196,7 @@ export function ReviewFlagDialog({
             </div>
           </fieldset>
           <label className="review-flag-detail">
-            Optional detail
+            <span className="sr-only">Optional detail</span>
             <textarea
               disabled={saving}
               maxLength={MAX_REVIEW_FLAG_DETAIL_LENGTH}

@@ -9,7 +9,7 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - Library presents Active, Flagged, and Archived filters; Question replacement is explicit.
 - The Flagged filter presents compact Waxon-validation or Learner origin labels, machine-readable reason badges rendered as readable labels, and restore, replace, or archive resolution controls without a redundant explanatory banner; each row keeps its Flag details in a collapsed disclosure matching Answer Standard.
 - Question creation asks only for the Prompt and Answer Standard.
-- Review uses the approved question → compact composer → `Previous answers` list in both its static loading and hydrated states. The current Question exposes only a compact Flag action, backed by the standard responsive modal and Library Flagged workflow.
+- Review uses the approved question → compact composer → `Previous answers` list in both its static loading and hydrated states. The current Question exposes only a compact icon-only Flag action, backed by the standard responsive modal and Library Flagged workflow; its reason and optional-detail labels remain accessible without visible label copy.
 - Review detects and persists the learner's IANA timezone, exposes it through a compact Local Day settings dialog, and refreshes queue membership after an edit.
 - The Local Day dialog uses the standard icon-first close control and keeps the timezone field self-explanatory without feature-description copy.
 - Resolved Review feedback uses numeric score badges, exposes the Answer Standard and Demonstrated Gap, shows the next Review as a relative interval, and keeps the existing four-grade control available for append-only Evaluation Correction; evaluator failures use the same control for self-grading.
