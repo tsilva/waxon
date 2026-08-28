@@ -1,10 +1,9 @@
-import type { V2Grade, V2ReviewAnswer } from "@/app/lib/v2/types";
+import type { V2RecallResult, V2ReviewAnswer } from "@/app/lib/v2/types";
 
-const GRADE_LABELS: Record<V2Grade, string> = {
-  again: "Again (0)",
-  hard: "Hard (2)",
-  good: "Good (3)",
-  easy: "Easy (4)",
+const RECALL_RESULT_LABELS: Record<V2RecallResult, string> = {
+  incorrect: "Incorrect",
+  partial: "Partial",
+  correct: "Correct",
 };
 
 function valueOrUnavailable(value: string | null): string {
@@ -25,10 +24,10 @@ export function reviewHandoffMarkdown(turn: V2ReviewAnswer): string {
     evaluation.status === "pending"
       ? "Evaluating"
       : evaluation.status === "failed"
-        ? "Self-grade needed"
+        ? "Retry needed"
         : "Complete";
-  const grade = evaluation.grade
-    ? GRADE_LABELS[evaluation.grade]
+  const recallResult = evaluation.recallResult
+    ? RECALL_RESULT_LABELS[evaluation.recallResult]
     : "Unavailable";
 
   return [
@@ -50,22 +49,22 @@ export function reviewHandoffMarkdown(turn: V2ReviewAnswer): string {
     "",
     valueOrUnavailable(evaluation.feedback),
     "",
-    "## Demonstrated gap",
-    "",
-    valueOrUnavailable(evaluation.demonstratedGap),
-    "",
     "## Recovered",
     "",
     markdownList(evaluation.coveredPoints),
     "",
-    "## Missing",
+    "## Scoring issues",
     "",
-    markdownList(evaluation.missingPoints),
+    markdownList(evaluation.scoringIssues),
+    "",
+    "## Clarifications",
+    "",
+    markdownList(evaluation.clarifications),
     "",
     "## Review metadata",
     "",
     `- Status: ${status}`,
-    `- Grade: ${grade}`,
+    `- Recall Result: ${recallResult}`,
     `- Submitted: ${turn.submittedAt}`,
     `- Next review: ${evaluation.nextDueOn ?? "Unavailable"}`,
   ].join("\n");

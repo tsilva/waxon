@@ -23,7 +23,7 @@ function styleRule(selector: string): CSSStyleRule | undefined {
   );
 }
 
-test("resolved-answer metadata stays in flow and cannot cover Answer Grade controls", () => {
+test("resolved-answer metadata stays in flow and cannot cover Recall Result controls", () => {
   const metadata = styleRule(".previous-row-meta");
   assert.ok(metadata);
   assert.equal(metadata.style.getPropertyValue("position"), "static");
@@ -46,4 +46,12 @@ test("expanded answers expose a focused Markdown copy action", () => {
     reviewApp,
     /navigator\.clipboard\.writeText\(reviewHandoffMarkdown\(turn\)\)/u,
   );
+});
+
+test("Review presents Recall Results without internal Answer Grade labels", () => {
+  assert.match(reviewApp, /Recall Result:/u);
+  assert.match(reviewApp, /Correct evaluation/u);
+  assert.match(reviewApp, /Retry evaluation/u);
+  assert.doesNotMatch(reviewApp, /GRADE_DISPLAY/u);
+  assert.doesNotMatch(reviewApp, /\["again", "hard", "good", "easy"\]/u);
 });

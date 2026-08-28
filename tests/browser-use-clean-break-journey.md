@@ -234,7 +234,7 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 1. Activate `Add question`, enter the exact Library Prompt and Original Answer Standard, and submit `Add to Library`.
 2. Require the visible status `Active Question added to your Library.`, an `Active` lifecycle badge, and the exact Prompt. Search for `replacement immutable` and require exactly the suite Question.
 3. Through runner-side `issue20DiagnosticRequest(issue20DiagnosticEndpoints.questionBank + "?search=replacement%20immutable")`, record the Active Question ID as `originalId`; do not treat this request as a replacement for the visible search assertion.
-4. Open `/review` for the first time and require the exact Library Prompt is current. Open `Local Day settings`, require the IANA timezone equals `Intl.DateTimeFormat().resolvedOptions().timeZone`, and close settings; this is the automatic-detection assertion. Answer with the stable Correct token and wait for evaluation. Require grade `Good`, visible Answer Standard and Demonstrated Gap, and a future `Scheduled` Local Day.
+4. Open `/review` for the first time and require the exact Library Prompt is current. Open `Local Day settings`, require the IANA timezone equals `Intl.DateTimeFormat().resolvedOptions().timeZone`, and close settings; this is the automatic-detection assertion. Answer with the stable Correct token and wait for evaluation. Require Recall Result `Correct`, a visible Answer Standard, and a future scheduled Local Day.
 5. Return to `/library`, search for `replacement immutable`, and require the original remains Active with a visible future due date. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.fixture)`, record the original's exact `dueAt` as `originalDueAt` and require its evidence is `{ learnerAnswers: 1, evaluations: 1, gradeEvents: 1, dueAt: originalDueAt }`.
 6. Activate `Replace question`. Require a modal named `Replace question` and the visible warning that replacement creates a new Question with reset mastery, archives the original with its Learning Evidence intact, and uses quality assessment to determine whether the replacement is Active or Flagged.
 7. Keep the Prompt unchanged, replace only the Answer Standard with the exact Replacement Answer Standard, and submit `Replace question`.
@@ -270,22 +270,22 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 2. Open `/review`. On its settled fixture load, require `timezoneBoundaryPrompt` visibly first and a queue count of six. This proves every new Active fixture entered immediately and equal unanswered Questions follow stable creation order.
 3. Open `Local Day settings`. Read the IANA timezone and require it still equals the automatically detected `Intl.DateTimeFormat().resolvedOptions().timeZone` from case 2, proving persistence.
 4. Set the timezone to `Pacific/Kiritimati`, save, and reopen settings to require persistence. Through runner-side `issue20DiagnosticRequest(issue20DiagnosticEndpoints.reviewQueue)`, retain the returned `localDay` as `eastDay`; require the boundary Prompt remains visibly current.
-5. Answer the boundary Question with the stable Incorrect answer and wait for `Again`. Require queue count six and `fixturePrompts[0]` current, proving the boundary Question moved to the end of the same Local Day.
+5. Answer the boundary Question with the stable Incorrect answer and wait for Recall Result `Incorrect`. Require queue count six and `fixturePrompts[0]` current, proving the derived Again moved the boundary Question to the end of the same Local Day.
 6. Set the timezone to `Pacific/Pago_Pago` and save. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.reviewQueue)` retain `westDay`; require `westDay < eastDay`, the visible queue count drops to five, and `fixturePrompts[0]` remains current. The only membership change is the boundary Question whose `Again` due date is now a future Local Day.
 7. Reload `/review`; require the queue remains five with no resume, recovery, rollover, daily-plan, or session prompt.
 8. Set the timezone back to `Pacific/Kiritimati`. Require the visible queue count returns to six without a session action, proving the boundary Question re-enters from live Local Day derivation.
 9. Set the timezone to `Pacific/Pago_Pago` once more. Require the visible queue returns to five and the setting persists after reopening. Leave this timezone selected so the boundary Question does not interfere with the five-Question grade and Flag journey.
 
-### 5. Generic evaluation, Again ordering, all four Answer Grades, and correction
+### 5. Generic evaluation, same-day failure, and Recall Result correction
 
 1. On `fixturePrompts[0]`, enter the stable Incorrect answer and submit with `ControlOrMeta+Enter`.
-2. Wait for evaluation completion. Require visible grade `Again`, `Answer Standard`, `Demonstrated Gap`, expected answer `browser-smoke-correct-token`, missing point `Required token`, and gap `Required token was missing.`.
+2. Wait for evaluation completion. Require visible Recall Result `Incorrect`, `Answer Standard`, expected answer `browser-smoke-correct-token`, and scoring issue `Required token was missing`.
 3. Require `fixturePrompts[1]` is now current. The failed first Question must have moved behind all remaining Questions rather than creating a delay or retry state.
-4. Answer `fixturePrompts[1]` with the stable Correct token. Require grade `Good`, visible expected Answer Standard and Demonstrated Gap, a future `Scheduled` Local Day, and `fixturePrompts[2]` current.
-5. Answer `fixturePrompts[2]` with the Correct token. In that answer's expanded feedback row, record the ISO scheduled date for `Good`.
-6. Under `Correct Answer Grade`, activate `Hard (2)`. Require `Hard` is pressed/effective and record its ISO scheduled date. Then activate `Good (3)` and record the restored Good date. Then activate `Easy (4)` and record its ISO scheduled date.
-7. Require `hardDate < goodDate < easyDate`. Require the original Learner Answer and evaluator feedback remain visible while only the effective Answer Grade and schedule change.
-8. Reload `/review`; require the corrected Question remains out of today's queue, its final effective grade is `Easy`, and its future schedule reconstructs unchanged.
+4. Answer `fixturePrompts[1]` with the stable Correct token. Require Recall Result `Correct`, a visible Answer Standard, a future scheduled Local Day, and `fixturePrompts[2]` current.
+5. Answer `fixturePrompts[2]` with the Correct token. In that answer's expanded feedback row, record its future ISO scheduled date.
+6. Activate `Correct evaluation`, choose `Partial`, and require the visible Recall Result becomes `Partial` with a same-Local-Day schedule. Reopen correction, choose `Correct`, and require the future schedule returns.
+7. Require the original Learner Answer and automated feedback remain visible while the effective Recall Result and derived schedule change. Require no Again, Hard, Good, Easy, or numeric score labels appear in the feedback row.
+8. Reload `/review`; require the corrected Question remains out of today's queue, its final Recall Result is `Correct`, and its future schedule reconstructs unchanged.
 
 ### 6. Review Flag modal: detailed and empty keyboard submissions
 
@@ -297,7 +297,7 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 6. Change to a 390 × 844 viewport, reload, wait for `fixturePrompts[4]`, and open its Flag modal. Require the full dialog fits within the viewport, can scroll if necessary, and reason badges form one column.
 7. Without selecting a badge or entering detail, use `Tab`/`Shift+Tab` to prove focus remains trapped in the modal, reach `Flag Question`, and submit with `Enter`.
 8. Require the empty submission succeeds, the modal closes, `fixturePrompts[4]` is immediately absent, `fixturePrompts[0]` returns immediately as the only remaining queued Question, and focus moves to `Your answer`.
-9. Submit the Correct token for `fixturePrompts[0]`. Require `Good`, a future Local Day, and the visible resting state `Your queue is clear.`.
+9. Submit the Correct token for `fixturePrompts[0]`. Require `Correct`, a future Local Day, and the visible resting state `Your queue is clear.`.
 10. In Library's `Flagged` inbox, require both learner-origin Flag records: one with the two selected reasons and exact detail, and one with no reason badges/detail. The earlier Waxon-validation Flag must remain distinct.
 11. Capture `/private/tmp/issue-20-clean-break-review-flag-narrow.png` before returning to desktop size.
 

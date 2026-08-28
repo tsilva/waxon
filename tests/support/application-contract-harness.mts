@@ -31,7 +31,7 @@ export type ApplicationContractClock = {
 };
 
 export type EvaluationController = {
-  setGrade(grade: "again" | "hard" | "good" | "easy"): void;
+  setRecallResult(result: "incorrect" | "partial" | "correct"): void;
 };
 
 type ApplicationContractLearner = {
@@ -99,10 +99,10 @@ export async function withApplicationContract(
     },
   };
   let semanticValidationOutcome: SemanticValidationOutcome = "pass";
-  let evaluationGrade: "again" | "hard" | "good" | "easy" = "good";
+  let evaluationRecallResult: "incorrect" | "partial" | "correct" = "correct";
   const evaluation: EvaluationController = {
-    setGrade(grade) {
-      evaluationGrade = grade;
+    setRecallResult(result) {
+      evaluationRecallResult = result;
     },
   };
   const semanticValidation: SemanticValidationController = {
@@ -126,13 +126,15 @@ export async function withApplicationContract(
       };
     },
   };
-  const evaluateAnswer = async ({ referenceAnswer }: { referenceAnswer: string }) => ({
-    grade: evaluationGrade,
-    feedback: "The deterministic evaluator accepted the answer.",
-    expectedAnswer: referenceAnswer,
-    coveredPoints: ["Application contract"],
-    missingPoints: [],
-    demonstratedGap: null,
+  const evaluateAnswer = async () => ({
+    recallResult: evaluationRecallResult,
+    coveredPoints:
+      evaluationRecallResult === "incorrect" ? [] : ["Application contract"],
+    scoringIssues:
+      evaluationRecallResult === "correct"
+        ? []
+        : ["Required application contract knowledge was missing"],
+    clarifications: [],
     confidence: 1,
   });
   const application = createWaxonApplication({

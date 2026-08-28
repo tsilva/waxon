@@ -20,26 +20,39 @@ const journal = JSON.parse(
     "utf8",
   ),
 );
-const [entry] = journal.entries ?? [];
+const entries = journal.entries ?? [];
+const [entry] = entries;
 
 if (
-  journal.entries?.length !== 1 ||
   entry?.idx !== 0 ||
   entry?.tag !== "0000_clean_baseline" ||
-  entry?.breakpoints !== true
+  entry?.breakpoints !== true ||
+  entries.some(
+    (migration, index) =>
+      migration.idx !== index || migration.breakpoints !== true,
+  )
 ) {
   throw new Error(
-    "The destructive clean break requires exactly the verified 0000_clean_baseline migration",
+    "The destructive clean break requires the verified 0000_clean_baseline followed by sequential migrations",
   );
 }
 
-const baselineSql = await readFile(
-  new URL(`../drizzle-v2/${entry.tag}.sql`, import.meta.url),
-  "utf8",
+const migrationSql = await Promise.all(
+  entries.map((migration) =>
+    readFile(
+      new URL(`../drizzle-v2/${migration.tag}.sql`, import.meta.url),
+      "utf8",
+    ),
+  ),
 );
+const [baselineSql, ...ordinarySql] = migrationSql;
 
 await replaceWithCleanBaseline({
   connectionString,
   baselineSql,
   migrationTimestamp: entry.when,
+  subsequentMigrations: ordinarySql.map((sql, index) => ({
+    sql,
+    timestamp: entries[index + 1].when,
+  })),
 });

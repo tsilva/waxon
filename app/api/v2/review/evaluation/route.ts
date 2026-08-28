@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { readJsonBodyWithLimit } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
 import {
-  asGrade,
+  asRecallResult,
   isRecord,
   v2Error,
 } from "@/app/lib/v2/http";
@@ -34,19 +34,25 @@ export async function POST(request: Request) {
     const user = await getCurrentUser();
     const application = waxonApplication.forLearner(user.id);
     if (!isRecord(parsed.value)) {
-      throw new Error("A grade payload is required.");
+      throw new Error("A Recall Result payload is required.");
     }
     const submissionId =
       typeof parsed.value.submissionId === "string"
         ? parsed.value.submissionId
         : "";
-    const grade = asGrade(parsed.value.grade);
-    if (!submissionId || !grade) {
-      throw new Error("A submission and valid grade are required.");
+    if (parsed.value.action === "retry") {
+      if (!submissionId) throw new Error("A submission is required.");
+      const result = await application.review.retryEvaluation(submissionId);
+      await startBackgroundJobs(user.id, 3);
+      return NextResponse.json(result);
     }
-    const result = await application.review.grade({
+    const recallResult = asRecallResult(parsed.value.recallResult);
+    if (!submissionId || !recallResult) {
+      throw new Error("A submission and valid Recall Result are required.");
+    }
+    const result = await application.review.correctRecallResult({
       submissionId,
-      grade,
+      recallResult,
     });
     await startBackgroundJobs(user.id, 3);
     return NextResponse.json(result);

@@ -15,9 +15,9 @@ import { beginLlmTrace, finishLlmTrace } from "../llmTraceStore.ts";
 import {
   RECALL_EVALUATION_SYSTEM_PROMPT,
   reconcileRecallEvaluation,
-  type RecallEvaluationResult,
+  type NormalizedRecallEvaluation,
 } from "./recallEvaluation.ts";
-import type { V2Grade } from "./types.ts";
+import type { V2RecallResult } from "./types.ts";
 
 async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
   url: string,
@@ -110,7 +110,7 @@ export async function evaluateRecall(input: {
   referenceAnswer: string;
   answer: string;
   browserAcceptanceEvaluationAuthorized?: boolean;
-}): Promise<RecallEvaluationResult> {
+}): Promise<NormalizedRecallEvaluation> {
   if (
     shouldUseBrowserAcceptanceEvaluator({
       authorized: input.browserAcceptanceEvaluationAuthorized === true,
@@ -119,17 +119,16 @@ export async function evaluateRecall(input: {
     })
   ) {
     const correct = input.answer.includes(BROWSER_SMOKE_CORRECT_TOKEN);
-    return {
-      grade: correct ? "good" : "again",
-      feedback: correct
-        ? "The smoke-test answer matched."
-        : "The smoke-test answer did not match.",
-      expectedAnswer: BROWSER_SMOKE_CORRECT_TOKEN,
-      coveredPoints: correct ? ["Required token"] : [],
-      missingPoints: correct ? [] : ["Required token"],
-      demonstratedGap: correct ? null : "Required token was missing.",
-      confidence: 1,
-    };
+    return reconcileRecallEvaluation({
+      prompt: input.prompt,
+      result: {
+        recallResult: correct ? "correct" : "incorrect",
+        coveredPoints: correct ? ["Required token"] : [],
+        scoringIssues: correct ? [] : ["Required token was missing"],
+        clarifications: [],
+        confidence: 1,
+      },
+    });
   }
   const model =
     resolveOpenRouterModel({
@@ -161,14 +160,15 @@ export async function evaluateRecall(input: {
     question: input.prompt,
   });
   const parsed = parseObject(chatText(response));
-  const candidate = parsed.grade;
-  const grade: V2Grade =
-    candidate === "again" ||
-    candidate === "hard" ||
-    candidate === "good" ||
-    candidate === "easy"
-      ? candidate
-      : "again";
+  const candidate = parsed.recallResult;
+  if (
+    candidate !== "incorrect" &&
+    candidate !== "partial" &&
+    candidate !== "correct"
+  ) {
+    throw new Error("Model returned an invalid Recall Result.");
+  }
+  const recallResult: V2RecallResult = candidate;
   const confidence =
     typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
       ? Math.max(0, Math.min(1, parsed.confidence))
@@ -177,25 +177,11 @@ export async function evaluateRecall(input: {
   return reconcileRecallEvaluation({
     prompt: input.prompt,
     result: {
-      grade,
-      feedback:
-        typeof parsed.feedback === "string" && parsed.feedback.trim()
-          ? parsed.feedback.trim().slice(0, 8_000)
-          : "Compare your answer with the Answer Standard.",
-      expectedAnswer:
-        typeof parsed.expectedAnswer === "string" &&
-        parsed.expectedAnswer.trim()
-          ? parsed.expectedAnswer.trim().slice(0, 65_536)
-          : input.referenceAnswer,
+      recallResult,
       coveredPoints: asStringArray(parsed.coveredPoints),
-      missingPoints: asStringArray(parsed.missingPoints),
-      demonstratedGap:
-        typeof parsed.demonstratedGap === "string" &&
-        parsed.demonstratedGap.trim()
-          ? parsed.demonstratedGap.trim().slice(0, 4_000)
-          : null,
+      scoringIssues: asStringArray(parsed.scoringIssues),
+      clarifications: asStringArray(parsed.clarifications),
       confidence,
-      presentationDifferences: asStringArray(parsed.presentationDifferences),
     },
   });
 }

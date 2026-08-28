@@ -56,16 +56,20 @@ _Avoid_: Capacity-limited plan, durable session, study deck
 The Learner's free-text attempt to recall an Active Question.
 _Avoid_: Response mode, answer type
 
+**Recall Result**:
+The effective classification of how fully one Learner Answer recovered its Recall Target: Incorrect, Partial, or Correct. It describes the current answer, not Review scheduling.
+_Avoid_: Answer Grade, difficulty, mastery
+
 **Answer Grade**:
-The effective assessment of a Learner Answer. Answer Grade history is the sole evidence used to schedule future Review.
-_Avoid_: Priority signal, mastery score
+The scheduling signal derived from a Recall Result and prior Learning Evidence. Its values Again, Hard, Good, and Easy are not correctness labels.
+_Avoid_: Recall Result, correctness score, mastery score
 
 **Learning Evidence**:
 The immutable history of Learner Answers, automated evaluations, and corrections used to derive Review scheduling.
 _Avoid_: Mutable mastery, current score
 
 **Evaluation Correction**:
-An immutable replacement of the effective Answer Grade for one Learner Answer. The original evaluation remains part of Learning Evidence.
+An immutable replacement of the effective Recall Result for one Learner Answer. The original automated evaluation remains part of Learning Evidence.
 _Avoid_: Evaluation edit, grade overwrite
 
 **Local Day**:

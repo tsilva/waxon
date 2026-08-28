@@ -46,6 +46,11 @@ export const grade = waxonV2.enum("grade", [
   "good",
   "easy",
 ]);
+export const recallResult = waxonV2.enum("recall_result", [
+  "incorrect",
+  "partial",
+  "correct",
+]);
 export const gradeOrigin = waxonV2.enum("grade_origin", [
   "deterministic",
   "model",
@@ -288,11 +293,14 @@ export const evaluations = waxonV2.table(
     status: evaluationStatus("status").notNull().default("pending"),
     evaluator: text("evaluator").notNull(),
     proposedGrade: grade("proposed_grade"),
+    proposedRecallResult: recallResult("proposed_recall_result"),
     feedback: text("feedback"),
     expectedAnswer: text("expected_answer"),
     coveredPoints: jsonb("covered_points").$type<string[]>().notNull().default([]),
     missingPoints: jsonb("missing_points").$type<string[]>().notNull().default([]),
     demonstratedGap: text("demonstrated_gap"),
+    scoringIssues: jsonb("scoring_issues").$type<string[]>().notNull().default([]),
+    clarifications: jsonb("clarifications").$type<string[]>().notNull().default([]),
     confidence: doublePrecision("confidence"),
     error: text("error"),
     createdAt: createdAt(),
@@ -321,6 +329,43 @@ export const evaluations = waxonV2.table(
   ],
 );
 
+export const recallResultCorrections = waxonV2.table(
+  "recall_result_corrections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id").notNull(),
+    questionId: uuid("question_id").notNull(),
+    submissionId: uuid("submission_id").notNull(),
+    value: recallResult("recall_result").notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    unique("recall_result_corrections_user_id_id_unique").on(
+      table.userId,
+      table.id,
+    ),
+    foreignKey({
+      name: "recall_result_corrections_question_fk",
+      columns: [table.userId, table.questionId],
+      foreignColumns: [questions.userId, questions.id],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "recall_result_corrections_submission_question_fk",
+      columns: [table.userId, table.submissionId, table.questionId],
+      foreignColumns: [
+        answerSubmissions.userId,
+        answerSubmissions.id,
+        answerSubmissions.questionId,
+      ],
+    }).onDelete("cascade"),
+    index("recall_result_corrections_submission_created_idx").on(
+      table.userId,
+      table.submissionId,
+      table.createdAt,
+    ),
+  ],
+);
+
 export const gradeEvents = waxonV2.table(
   "grade_events",
   {
@@ -331,6 +376,7 @@ export const gradeEvents = waxonV2.table(
     value: grade("grade").notNull(),
     origin: gradeOrigin("origin").notNull(),
     evaluationId: uuid("evaluation_id"),
+    derivationVersion: text("derivation_version"),
     createdAt: createdAt(),
   },
   (table) => [

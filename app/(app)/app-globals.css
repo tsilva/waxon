@@ -2376,8 +2376,38 @@ textarea {
 
 .review-grade-correction > div {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
+}
+
+.review-correction-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 7px;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: rgb(255 255 255 / 62%);
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.review-correction-trigger svg {
+  width: 14px;
+  height: 14px;
+}
+
+.review-correction-trigger:hover:not(:disabled),
+.review-correction-trigger:focus-visible {
+  border-color: rgb(166 124 82 / 38%);
+  background: #ffffff;
+  color: var(--accent);
+  outline: 2px solid rgb(166 124 82 / 14%);
+  outline-offset: 2px;
 }
 
 .review-grade-correction button {
@@ -4267,7 +4297,7 @@ textarea {
   }
 
   .review-grade-correction > div {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .previous-question {

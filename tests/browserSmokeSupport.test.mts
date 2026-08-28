@@ -238,8 +238,8 @@ test("an authorized job evaluates without request environment or a model key", a
       browserAcceptanceEvaluationAuthorized: true,
     });
 
-    assert.equal(result.grade, "good");
-    assert.equal(result.feedback, "The smoke-test answer matched.");
+    assert.equal(result.recallResult, "correct");
+    assert.equal(result.feedback, "Correct. You recovered the Recall Target.");
   } finally {
     globalThis.fetch = priorFetch;
     for (const [key, value] of Object.entries({
@@ -283,11 +283,9 @@ test("production and other Learners reach the normal evaluator for acceptance fi
                 content: JSON.stringify({
                   confidence: 0.75,
                   coveredPoints: ["Normal evaluator"],
-                  demonstratedGap: null,
-                  expectedAnswer: "Normal evaluator response",
-                  feedback: "Normal evaluator response",
-                  grade: "good",
-                  missingPoints: [],
+                  recallResult: "correct",
+                  scoringIssues: [],
+                  clarifications: [],
                 }),
               },
             },
@@ -306,7 +304,7 @@ test("production and other Learners reach the normal evaluator for acceptance fi
       answer: BROWSER_SMOKE_QUESTIONS[0].referenceAnswer,
       browserAcceptanceEvaluationAuthorized: true,
     });
-    assert.equal(otherLearnerResult.feedback, "Normal evaluator response");
+    assert.equal(otherLearnerResult.recallResult, "correct");
 
     Reflect.set(process.env, "NODE_ENV", "production");
     const productionResult = await evaluateRecall({
@@ -315,7 +313,7 @@ test("production and other Learners reach the normal evaluator for acceptance fi
       referenceAnswer: "A fixture Answer Standard",
       answer: BROWSER_SMOKE_QUESTIONS[0].referenceAnswer,
     });
-    assert.equal(productionResult.feedback, "Normal evaluator response");
+    assert.equal(productionResult.recallResult, "correct");
     assert.deepEqual(normalEvaluatorLearners, [
       "another-learner",
       browserAcceptanceTestLearner.id,

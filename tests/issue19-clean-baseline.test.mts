@@ -26,6 +26,7 @@ const expectedTables = [
   "question_flags",
   "question_search_embeddings",
   "questions",
+  "recall_result_corrections",
   "users",
 ];
 
@@ -36,6 +37,7 @@ const expectedEnums = [
   "job_status",
   "question_flag_origin",
   "question_lifecycle",
+  "recall_result",
   "submission_status",
 ];
 
@@ -52,6 +54,7 @@ const expectedEnumValues = {
   job_status: ["pending", "running", "succeeded", "failed", "cancelled"],
   question_flag_origin: ["waxon_validation", "learner"],
   question_lifecycle: ["active", "flagged", "archived"],
+  recall_result: ["incorrect", "partial", "correct"],
   submission_status: ["pending", "graded", "invalidated"],
 };
 
@@ -63,11 +66,11 @@ const expectedColumns: Record<string, string[]> = {
     "id", "user_id", "question_id", "submission_id", "status", "evaluator",
     "proposed_grade", "feedback", "expected_answer", "covered_points",
     "missing_points", "demonstrated_gap", "confidence", "error", "created_at",
-    "completed_at",
+    "completed_at", "proposed_recall_result", "scoring_issues", "clarifications",
   ],
   grade_events: [
     "id", "user_id", "question_id", "submission_id", "grade", "origin",
-    "evaluation_id", "created_at",
+    "evaluation_id", "created_at", "derivation_version",
   ],
   jobs: [
     "id", "user_id", "type", "idempotency_key", "status", "priority", "payload",
@@ -103,6 +106,9 @@ const expectedColumns: Record<string, string[]> = {
     "id", "user_id", "prompt", "reference_answer", "lifecycle", "target_key",
     "creation_order", "created_at", "updated_at",
   ],
+  recall_result_corrections: [
+    "id", "user_id", "question_id", "submission_id", "recall_result", "created_at",
+  ],
   users: [
     "id", "display_name", "email", "avatar_url", "created_at", "updated_at",
   ],
@@ -112,9 +118,9 @@ const expectedNullableColumns: Record<string, string[]> = {
   answer_submissions: [],
   evaluations: [
     "proposed_grade", "feedback", "expected_answer", "demonstrated_gap", "confidence",
-    "error", "completed_at",
+    "error", "completed_at", "proposed_recall_result",
   ],
-  grade_events: ["evaluation_id"],
+  grade_events: ["evaluation_id", "derivation_version"],
   jobs: ["result", "locked_until", "error"],
   learner_settings: ["timezone"],
   llm_trace_interactions: [],
@@ -124,6 +130,7 @@ const expectedNullableColumns: Record<string, string[]> = {
   question_flags: ["detail", "resolved_at"],
   question_search_embeddings: [],
   questions: [],
+  recall_result_corrections: [],
   users: ["avatar_url"],
 };
 
@@ -135,6 +142,8 @@ const expectedDefaults: Record<string, string> = {
   "evaluations.created_at": "now()",
   "evaluations.id": "gen_random_uuid()",
   "evaluations.missing_points": "'[]'::jsonb",
+  "evaluations.scoring_issues": "'[]'::jsonb",
+  "evaluations.clarifications": "'[]'::jsonb",
   "evaluations.status": "'pending'::waxon_v2.evaluation_status",
   "grade_events.created_at": "now()",
   "grade_events.id": "gen_random_uuid()",
@@ -165,6 +174,8 @@ const expectedDefaults: Record<string, string> = {
   "question_flags.created_at": "now()",
   "question_flags.id": "gen_random_uuid()",
   "question_flags.reasons": "'[]'::jsonb",
+  "recall_result_corrections.created_at": "now()",
+  "recall_result_corrections.id": "gen_random_uuid()",
   "question_search_embeddings.created_at": "now()",
   "question_search_embeddings.updated_at": "now()",
   "questions.created_at": "now()",
@@ -374,7 +385,7 @@ test("issue #19 removes retired route and source-migration compatibility surface
 });
 
 test(
-  "issue #19 creates the accepted catalog directly from one clean baseline",
+  "issue #19 creates the accepted catalog from the clean baseline and ordinary migrations",
   { skip: testDatabaseUrl ? false : "APPLICATION_CONTRACT_TEST_DATABASE_URL is not set" },
   async () => {
     if (!testDatabaseUrl) return;
@@ -387,8 +398,8 @@ test(
 
     assert.deepEqual(
       journal.entries.map(({ idx }) => idx),
-      [0],
-      "the clean break must not retain migration compatibility history",
+      [0, 1],
+      "the migration history must start at the clean baseline and remain sequential",
     );
 
     const entry = journal.entries[0];
@@ -396,6 +407,14 @@ test(
     const baseline = await readFile(
       new URL(`../drizzle-v2/${entry.tag}.sql`, import.meta.url),
       "utf8",
+    );
+    const migrations = await Promise.all(
+      journal.entries.map((migration) =>
+        readFile(
+          new URL(`../drizzle-v2/${migration.tag}.sql`, import.meta.url),
+          "utf8",
+        )
+      ),
     );
     assert.doesNotMatch(
       baseline,
@@ -415,7 +434,9 @@ test(
     const schemaName = `waxon_issue19_${randomUUID().replaceAll("-", "")}`;
 
     try {
-      await applySql(client, baseline.replaceAll("waxon_v2", schemaName));
+      for (const migration of migrations) {
+        await applySql(client, migration.replaceAll("waxon_v2", schemaName));
+      }
 
       const tables = await client.query<{ name: string }>(
         `SELECT table_name AS name
@@ -710,6 +731,10 @@ test(
             hash: "3cce11497894f07624fc4a358471687b3754453757d5433501f966c7ea574494",
             createdAt: "1787774146240",
           },
+          {
+            hash: "6143ce68278638ad8bfd8e27a86bed2d65b3d0c2aa0b45e9ebfe11c6ee54a09b",
+            createdAt: "1787936466888",
+          },
         ],
         "a cross-schema dependency must preserve old migration metadata",
       );
@@ -781,6 +806,10 @@ test(
             hash: "3cce11497894f07624fc4a358471687b3754453757d5433501f966c7ea574494",
             createdAt: "1787774146240",
           },
+          {
+            hash: "6143ce68278638ad8bfd8e27a86bed2d65b3d0c2aa0b45e9ebfe11c6ee54a09b",
+            createdAt: "1787936466888",
+          },
         ],
         "a baseline installation failure must restore old migration metadata",
       );
@@ -810,6 +839,10 @@ test(
         {
           hash: "3cce11497894f07624fc4a358471687b3754453757d5433501f966c7ea574494",
           createdAt: "1787774146240",
+        },
+        {
+          hash: "6143ce68278638ad8bfd8e27a86bed2d65b3d0c2aa0b45e9ebfe11c6ee54a09b",
+          createdAt: "1787936466888",
         },
       ]);
       assert.deepEqual(
@@ -866,7 +899,7 @@ test(
             "SELECT count(*)::text AS count FROM drizzle.__drizzle_migrations",
           )
         ).rows,
-        [{ count: "1" }],
+        [{ count: "2" }],
       );
     } finally {
       await pool.query(

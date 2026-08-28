@@ -41,12 +41,14 @@ Waxon is a multi-user question bank and adaptive recall-practice system. Learner
 - The learner's local day must use an automatically detected, persisted, and editable IANA timezone.
 - Queued questions must be ordered by earliest scheduled date, then oldest unanswered question, then stable creation order.
 - Answer-grade history must be the sole learning signal used to schedule future Review.
-- Waxon must use the grades Again, Hard, Good, and Easy without requiring question authors to select an answer mode.
+- Waxon must classify every Learner Answer automatically as Incorrect, Partial, or Correct against its Answer Standard without asking the Learner to grade routine recall.
+- Waxon must derive the Answer Grades Again, Hard, Good, and Easy from Recall Result and prior Learning Evidence rather than present them as correctness labels.
+- Incorrect and Partial must derive Again; the first Correct after either must derive Hard; other Correct results must derive Good until the third consecutive Correct derives Easy, and later Correct results must remain Easy until Incorrect or Partial resets the sequence.
 - Again must keep the question in the same day's queue at the end of the current ordering, becoming immediately available when it is the only queued question.
 - Hard, Good, and Easy must remove the question from Review until progressively later scheduled dates.
 - Repeated successful recall must lengthen future intervals, while weaker or failed recall must shorten them.
 - Waxon must not ask for or model daily minutes, practice capacity, item capacity, importance, uncertainty, incomplete-understanding priority, or a selected retention target.
 - Every learner answer must follow one generic free-text evaluation path.
 - Every automated evaluation must explain the expected answer and demonstrated gap sufficiently for the learner to correct their understanding.
-- Learners must be able to correct an evaluation; the original evaluation must remain immutable while scheduling is rebuilt from the latest effective grade for each answer.
+- Learners must be able to correct a Recall Result; the original automated evaluation must remain immutable while all affected Answer Grades and Review scheduling are rebuilt.
 - Review may let the learner flag a question for later attention but must provide no other bank-management actions.
