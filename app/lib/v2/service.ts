@@ -36,6 +36,7 @@ import type {
   V2Question,
 } from "./types.ts";
 import { evaluateRecall } from "./model.ts";
+import type { RecallEvaluationResult } from "./recallEvaluation.ts";
 import { runLiveEvaluationJob } from "./liveReview.ts";
 import { runQuestionEmbeddingJob } from "./questionEmbeddings.ts";
 
@@ -69,7 +70,9 @@ export type V2ServiceDependencies = {
   validateQuestion(
     input: QuestionValidationInput,
   ): QuestionQualityAssessment | Promise<QuestionQualityAssessment>;
-  evaluateAnswer: typeof evaluateRecall;
+  evaluateAnswer(
+    input: Parameters<typeof evaluateRecall>[0],
+  ): Promise<RecallEvaluationResult>;
 };
 
 export const defaultV2ServiceDependencies: V2ServiceDependencies = {

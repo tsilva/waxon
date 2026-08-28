@@ -124,8 +124,11 @@ test(
       delete process.env.WAXON_BROWSER_SMOKE_EVALUATOR;
       const completed = await review.evaluatePending(pending.submissionId);
       assert.equal(completed.status, "complete");
-      assert.equal(completed.grade, "good");
-      assert.equal(completed.feedback, "The smoke-test answer matched.");
+      assert.equal(completed.recallResult, "correct");
+      assert.equal(
+        completed.feedback,
+        "Correct. You recovered the Recall Target.",
+      );
 
       const job = await evaluationJobPayload(learnerId, pending.submissionId);
       assert.equal(job.payload.browserAcceptanceEvaluationAuthorized, true);

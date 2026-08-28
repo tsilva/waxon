@@ -1,4 +1,5 @@
 export type V2Grade = "again" | "hard" | "good" | "easy";
+export type V2RecallResult = "incorrect" | "partial" | "correct";
 export type V2QuestionLifecycle = "active" | "flagged" | "archived";
 
 export type V2QuestionFlagOrigin = "waxon_validation" | "learner";
@@ -58,16 +59,16 @@ export type V2Evaluation = {
   submissionId: string;
   evaluationId: string | null;
   status: "pending" | "complete" | "failed";
-  grade: V2Grade | null;
+  recallResult: V2RecallResult | null;
   nextDueOn: string | null;
   feedback: string | null;
   expectedAnswer: string | null;
   coveredPoints: string[];
-  missingPoints: string[];
-  demonstratedGap: string | null;
+  scoringIssues: string[];
+  clarifications: string[];
   confidence: number | null;
-  canSelfGrade: boolean;
-  canCorrectGrade: boolean;
+  canRetryEvaluation: boolean;
+  canCorrectRecallResult: boolean;
 };
 
 export type V2ReviewSummary = {

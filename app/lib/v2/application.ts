@@ -11,12 +11,13 @@ import {
   type V2ServiceDependencies,
 } from "./service.ts";
 import {
-  applyLiveLearnerGrade,
+  applyLiveRecallResultCorrection,
   flagCurrentReviewQuestion,
   getLiveEvaluation,
   getLiveReviewQueue,
   getLiveReviewSummary,
   runLiveEvaluationForSubmission,
+  retryLiveEvaluation,
   submitLiveReviewAnswer,
 } from "./liveReview.ts";
 import {
@@ -134,11 +135,20 @@ export function createWaxonApplication(
               serviceDependencies,
             );
           },
-          grade(
-            input: Omit<Parameters<typeof applyLiveLearnerGrade>[0], "userId">,
+          correctRecallResult(
+            input: Omit<
+              Parameters<typeof applyLiveRecallResultCorrection>[0],
+              "userId"
+            >,
           ) {
-            return applyLiveLearnerGrade(
+            return applyLiveRecallResultCorrection(
               { ...input, userId },
+              serviceDependencies,
+            );
+          },
+          retryEvaluation(submissionId: string) {
+            return retryLiveEvaluation(
+              { userId, submissionId },
               serviceDependencies,
             );
           },

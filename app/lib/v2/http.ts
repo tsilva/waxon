@@ -30,3 +30,11 @@ export function asGrade(
     ? value
     : null;
 }
+
+export function asRecallResult(
+  value: unknown,
+): "incorrect" | "partial" | "correct" | null {
+  return value === "incorrect" || value === "partial" || value === "correct"
+    ? value
+    : null;
+}

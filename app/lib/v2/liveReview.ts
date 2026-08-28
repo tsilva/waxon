@@ -16,6 +16,7 @@ import {
   mutationReceipts,
   questionFlags,
   questions,
+  recallResultCorrections,
   learnerSettings,
 } from "../../db/v2/schema.ts";
 import { claimV2Job } from "./jobs.ts";
@@ -31,18 +32,26 @@ import {
   getLearnerReviewDay,
 } from "./settings.ts";
 import { normalizeReviewFlagInput } from "./reviewFlag.ts";
-import { reconcileRecallEvaluation } from "./recallEvaluation.ts";
+import {
+  deriveAnswerGrades,
+  evaluateRecallWithRetries,
+  legacyGradeToRecallResult,
+  type RecallEvaluationResult,
+} from "./recallEvaluation.ts";
 import type {
   V2Evaluation,
   V2Grade,
   V2QuestionFlag,
+  V2RecallResult,
   V2ReviewQueueResponse,
   V2ReviewSummary,
 } from "./types.ts";
 
 type ReviewDependencies = {
   now(): Date;
-  evaluateAnswer: typeof evaluateRecall;
+  evaluateAnswer(
+    input: Parameters<typeof evaluateRecall>[0],
+  ): Promise<RecallEvaluationResult>;
 };
 
 export const defaultReviewDependencies: ReviewDependencies = {
@@ -85,36 +94,51 @@ function evaluationView(input: {
   evaluationId: string;
   evaluationStatus: string;
   proposedGrade: V2Grade | null;
+  proposedRecallResult: V2RecallResult | null;
+  correctedRecallResult: V2RecallResult | null;
   effectiveGrade: V2Grade | null;
   dueOn: string | null;
   feedback: string | null;
   expectedAnswer: string | null;
   coveredPoints: string[];
   missingPoints: string[];
-  demonstratedGap: string | null;
+  scoringIssues: string[];
+  clarifications: string[];
   confidence: number | null;
 }): V2Evaluation {
-  const grade = input.effectiveGrade ?? input.proposedGrade;
+  const legacyGrade = input.proposedGrade ?? input.effectiveGrade;
+  const automatedRecallResult =
+    input.proposedRecallResult ??
+    (legacyGrade ? legacyGradeToRecallResult(legacyGrade) : null);
+  const recallResult = input.correctedRecallResult ?? automatedRecallResult;
+  const scoringIssues =
+    input.scoringIssues.length > 0 ? input.scoringIssues : input.missingPoints;
+  const wasCorrected = Boolean(
+    input.correctedRecallResult &&
+      input.correctedRecallResult !== automatedRecallResult,
+  );
+  const feedback = wasCorrected && recallResult
+    ? `Recall Result corrected to ${recallResult[0].toUpperCase()}${recallResult.slice(1)}. The original automated feedback was: ${input.feedback ?? "Unavailable"}`
+    : input.feedback;
   return {
     submissionId: input.submissionId,
     evaluationId: input.evaluationId,
     status:
-      input.evaluationStatus === "complete" || input.effectiveGrade
+      input.evaluationStatus === "complete" || recallResult
         ? "complete"
         : input.evaluationStatus === "failed"
           ? "failed"
           : "pending",
-    grade,
-    nextDueOn: grade ? input.dueOn : null,
-    feedback: input.feedback,
+    recallResult,
+    nextDueOn: recallResult ? input.dueOn : null,
+    feedback,
     expectedAnswer: input.expectedAnswer,
     coveredPoints: input.coveredPoints,
-    missingPoints: input.missingPoints,
-    demonstratedGap: input.demonstratedGap,
+    scoringIssues,
+    clarifications: input.clarifications,
     confidence: input.confidence,
-    canSelfGrade:
-      input.evaluationStatus === "failed" && !input.effectiveGrade,
-    canCorrectGrade: Boolean(input.effectiveGrade),
+    canRetryEvaluation: input.evaluationStatus === "failed" && !recallResult,
+    canCorrectRecallResult: Boolean(recallResult),
   };
 }
 
@@ -321,13 +345,16 @@ async function recentReviewAnswers(userId: string) {
     evaluation_id: string;
     evaluation_status: "pending" | "complete" | "failed" | "superseded";
     proposed_grade: V2Grade | null;
+    proposed_recall_result: V2RecallResult | null;
+    corrected_recall_result: V2RecallResult | null;
     effective_grade: V2Grade | null;
     due_on: string | null;
     feedback: string | null;
     expected_answer: string | null;
     covered_points: unknown;
     missing_points: unknown;
-    demonstrated_gap: string | null;
+    scoring_issues: unknown;
+    clarifications: unknown;
     confidence: number | null;
   }>(
     `SELECT submission.id AS submission_id,
@@ -337,13 +364,16 @@ async function recentReviewAnswers(userId: string) {
             evaluation.id AS evaluation_id,
             evaluation.status::text AS evaluation_status,
             evaluation.proposed_grade::text AS proposed_grade,
+            evaluation.proposed_recall_result::text AS proposed_recall_result,
+            correction.value::text AS corrected_recall_result,
             effective.value::text AS effective_grade,
             memory.due_on::text,
             evaluation.feedback,
             evaluation.expected_answer,
             evaluation.covered_points,
             evaluation.missing_points,
-            evaluation.demonstrated_gap,
+            evaluation.scoring_issues,
+            evaluation.clarifications,
             evaluation.confidence
        FROM waxon_v2.answer_submissions submission
        JOIN waxon_v2.questions question
@@ -357,6 +387,14 @@ async function recentReviewAnswers(userId: string) {
           ORDER BY candidate.created_at DESC, candidate.id DESC
           LIMIT 1
        ) evaluation ON true
+       LEFT JOIN LATERAL (
+         SELECT event.recall_result AS value
+           FROM waxon_v2.recall_result_corrections event
+          WHERE event.user_id = submission.user_id
+            AND event.submission_id = submission.id
+          ORDER BY event.created_at DESC, event.id DESC
+          LIMIT 1
+       ) correction ON true
        LEFT JOIN LATERAL (
          SELECT event.grade AS value
            FROM waxon_v2.grade_events event
@@ -382,6 +420,8 @@ async function recentReviewAnswers(userId: string) {
         evaluationId: row.evaluation_id,
         evaluationStatus: row.evaluation_status,
         proposedGrade: row.proposed_grade,
+        proposedRecallResult: row.proposed_recall_result,
+        correctedRecallResult: row.corrected_recall_result,
         effectiveGrade: row.effective_grade,
         dueOn: row.due_on,
         feedback: row.feedback,
@@ -396,7 +436,16 @@ async function recentReviewAnswers(userId: string) {
               (point): point is string => typeof point === "string",
             )
           : [],
-        demonstratedGap: row.demonstrated_gap,
+        scoringIssues: Array.isArray(row.scoring_issues)
+          ? row.scoring_issues.filter(
+              (point): point is string => typeof point === "string",
+            )
+          : [],
+        clarifications: Array.isArray(row.clarifications)
+          ? row.clarifications.filter(
+              (point): point is string => typeof point === "string",
+            )
+          : [],
         confidence: row.confidence,
       }),
     }));
@@ -562,9 +611,23 @@ export async function getLiveEvaluation(
         eq(evaluations.submissionId, submissionId),
       ),
     )
-    .orderBy(desc(evaluations.createdAt))
+    .orderBy(desc(evaluations.createdAt), desc(evaluations.id))
     .limit(1);
   if (!row) throw new Error("Evaluation not found.");
+  const [correction] = await db
+    .select({ value: recallResultCorrections.value })
+    .from(recallResultCorrections)
+    .where(
+      and(
+        eq(recallResultCorrections.userId, userId),
+        eq(recallResultCorrections.submissionId, submissionId),
+      ),
+    )
+    .orderBy(
+      desc(recallResultCorrections.createdAt),
+      desc(recallResultCorrections.id),
+    )
+    .limit(1);
   const [effectiveGrade] = await db
     .select({ value: gradeEvents.value })
     .from(gradeEvents)
@@ -598,13 +661,16 @@ export async function getLiveEvaluation(
     evaluationId: row.id,
     evaluationStatus: row.status,
     proposedGrade: row.proposedGrade,
+    proposedRecallResult: row.proposedRecallResult,
+    correctedRecallResult: correction?.value ?? null,
     effectiveGrade: effectiveGrade?.value ?? null,
     dueOn: schedule?.dueOn ?? null,
     feedback: row.feedback,
     expectedAnswer: row.expectedAnswer,
     coveredPoints: row.coveredPoints,
     missingPoints: row.missingPoints,
-    demonstratedGap: row.demonstratedGap,
+    scoringIssues: row.scoringIssues,
+    clarifications: row.clarifications,
     confidence: row.confidence,
   });
 }
@@ -776,14 +842,12 @@ async function rebuildMemoryFromGradeHistory(
     });
 }
 
-async function applyGradeInTransaction(
+async function rebuildDerivedGradesInTransaction(
   tx: V2Tx,
   input: {
     userId: string;
     submissionId: string;
-    grade: V2Grade;
-    origin: "model" | "self" | "correction";
-    evaluationId?: string | null;
+    origin: "model" | "correction";
     effectiveTimezone: string;
     currentLocalDay: string;
   },
@@ -809,34 +873,80 @@ async function applyGradeInTransaction(
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtext(${`review-grade:${input.userId}`}))`,
   );
+  const evidence = await tx.execute<{
+    submission_id: string;
+    evaluation_id: string | null;
+    proposed_recall_result: V2RecallResult | null;
+    corrected_recall_result: V2RecallResult | null;
+    latest_grade: V2Grade | null;
+  }>(sql`
+    SELECT submission.id AS submission_id,
+           evaluation.id AS evaluation_id,
+           evaluation.proposed_recall_result::text AS proposed_recall_result,
+           correction.recall_result::text AS corrected_recall_result,
+           latest_grade.grade::text AS latest_grade
+      FROM waxon_v2.answer_submissions submission
+      LEFT JOIN LATERAL (
+        SELECT candidate.id, candidate.proposed_recall_result
+          FROM waxon_v2.evaluations candidate
+         WHERE candidate.user_id = submission.user_id
+           AND candidate.submission_id = submission.id
+         ORDER BY candidate.created_at DESC, candidate.id DESC
+         LIMIT 1
+      ) evaluation ON true
+      LEFT JOIN LATERAL (
+        SELECT event.recall_result
+          FROM waxon_v2.recall_result_corrections event
+         WHERE event.user_id = submission.user_id
+           AND event.submission_id = submission.id
+         ORDER BY event.created_at DESC, event.id DESC
+         LIMIT 1
+      ) correction ON true
+      LEFT JOIN LATERAL (
+        SELECT event.grade
+          FROM waxon_v2.grade_events event
+         WHERE event.user_id = submission.user_id
+           AND event.submission_id = submission.id
+         ORDER BY event.created_at DESC, event.id DESC
+         LIMIT 1
+      ) latest_grade ON true
+     WHERE submission.user_id = ${input.userId}
+       AND submission.question_id = ${submission.questionId}
+       AND submission.status = 'graded'
+     ORDER BY submission.submitted_at, submission.created_at, submission.id
+  `);
+  const effectiveResults = evidence.rows.map((row) => {
+    const result = row.corrected_recall_result ?? row.proposed_recall_result;
+    if (result) return result;
+    if (row.latest_grade) return legacyGradeToRecallResult(row.latest_grade);
+    throw new Error("Graded Learner Answer has no Recall Result evidence.");
+  });
+  const derivedGrades = deriveAnswerGrades(effectiveResults);
   const [latestEvent] = await tx
     .select({ createdAt: gradeEvents.createdAt })
     .from(gradeEvents)
     .where(eq(gradeEvents.userId, input.userId))
     .orderBy(desc(gradeEvents.createdAt), desc(gradeEvents.id))
     .limit(1);
-  const createdAt =
+  let createdAt =
     latestEvent && latestEvent.createdAt >= eventAt
       ? new Date(latestEvent.createdAt.getTime() + 1)
       : eventAt;
-  await tx.insert(gradeEvents).values({
-    userId: input.userId,
-    questionId: submission.questionId,
-    submissionId: input.submissionId,
-    value: input.grade,
-    origin: input.origin,
-    evaluationId: input.evaluationId ?? null,
-    createdAt,
-  });
-  await tx
-    .update(answerSubmissions)
-    .set({ status: "graded" })
-    .where(
-      and(
-        eq(answerSubmissions.userId, input.userId),
-        eq(answerSubmissions.id, submission.id),
-      ),
-    );
+  for (const [index, row] of evidence.rows.entries()) {
+    const grade = derivedGrades[index];
+    if (!grade || row.latest_grade === grade) continue;
+    await tx.insert(gradeEvents).values({
+      userId: input.userId,
+      questionId: submission.questionId,
+      submissionId: row.submission_id,
+      value: grade,
+      origin: input.origin,
+      evaluationId: row.evaluation_id,
+      derivationVersion: "recall-result-v1",
+      createdAt,
+    });
+    createdAt = new Date(createdAt.getTime() + 1);
+  }
   await rebuildMemoryFromGradeHistory(
     tx,
     {
@@ -848,18 +958,6 @@ async function applyGradeInTransaction(
     eventAt,
     createdAt,
   );
-}
-
-function demonstratedGapFor(input: {
-  demonstratedGap: string | null;
-  missingPoints: string[];
-}): string {
-  const statedGap = input.demonstratedGap?.trim();
-  if (input.missingPoints.length === 0) {
-    return "No gap was demonstrated by this successful recall.";
-  }
-  if (statedGap) return statedGap;
-  return `The Learner Answer did not demonstrate: ${input.missingPoints.join("; ")}.`;
 }
 
 export async function runLiveEvaluationJob(
@@ -905,34 +1003,19 @@ export async function runLiveEvaluationJob(
     return;
   }
   try {
-    const result = reconcileRecallEvaluation({
+    const result = await evaluateRecallWithRetries({
       prompt: row.prompt,
-      result: await dependencies.evaluateAnswer({
-        userId: job.userId,
-        prompt: row.prompt,
-        referenceAnswer: row.referenceAnswer,
-        answer: row.answer,
-        browserAcceptanceEvaluationAuthorized:
-          job.payload.browserAcceptanceEvaluationAuthorized === true,
-      }),
+      evaluate: () =>
+        dependencies.evaluateAnswer({
+          userId: job.userId,
+          prompt: row.prompt,
+          referenceAnswer: row.referenceAnswer,
+          answer: row.answer,
+          browserAcceptanceEvaluationAuthorized:
+            job.payload.browserAcceptanceEvaluationAuthorized === true,
+        }),
     });
-    if (result.confidence < 0.55) {
-      await db
-        .update(evaluations)
-        .set({
-          status: "failed",
-          feedback: "The evaluator was uncertain. Please self-grade.",
-          expectedAnswer: row.referenceAnswer,
-          demonstratedGap:
-            result.demonstratedGap?.trim() ||
-            "The evaluator could not determine a Demonstrated Gap.",
-          confidence: result.confidence,
-          error: "Low confidence",
-          completedAt: now,
-        })
-        .where(eq(evaluations.id, evaluationId));
-    } else {
-      await db.transaction(async (tx) => {
+    await db.transaction(async (tx) => {
         await tx.execute(
           sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${job.userId}`}))`,
         );
@@ -965,31 +1048,37 @@ export async function runLiveEvaluationJob(
           .update(evaluations)
           .set({
             status: "complete",
-            proposedGrade: result.grade,
+            proposedRecallResult: result.recallResult,
             feedback: result.feedback,
             expectedAnswer: row.referenceAnswer,
             coveredPoints: result.coveredPoints,
-            missingPoints: result.missingPoints,
-            demonstratedGap: demonstratedGapFor(result),
+            scoringIssues: result.scoringIssues,
+            clarifications: result.clarifications,
             confidence: result.confidence,
             completedAt: now,
           })
           .where(eq(evaluations.id, evaluationId));
-        await applyGradeInTransaction(
+        await tx
+          .update(answerSubmissions)
+          .set({ status: "graded" })
+          .where(
+            and(
+              eq(answerSubmissions.userId, job.userId),
+              eq(answerSubmissions.id, submissionId),
+            ),
+          );
+        await rebuildDerivedGradesInTransaction(
           tx,
           {
             userId: job.userId,
             submissionId,
-            grade: result.grade,
             origin: "model",
-            evaluationId,
             effectiveTimezone: reviewDay.effectiveTimezone,
             currentLocalDay: reviewDay.localDay,
           },
           now,
         );
-      });
-    }
+    });
     await db
       .update(jobs)
       .set({
@@ -1018,10 +1107,8 @@ export async function runLiveEvaluationJob(
         .update(evaluations)
         .set({
           status: "failed",
-          feedback: "Evaluation failed. Please self-grade.",
+          feedback: "Evaluation failed. Retry evaluation to classify this answer.",
           expectedAnswer: row.referenceAnswer,
-          demonstratedGap:
-            "The evaluator could not determine a Demonstrated Gap.",
           error:
             error instanceof Error
               ? error.message.slice(0, 2_000)
@@ -1060,8 +1147,12 @@ export async function runLiveEvaluationForSubmission(
   return getLiveEvaluation(userId, submissionId);
 }
 
-export async function applyLiveLearnerGrade(
-  input: { userId: string; submissionId: string; grade: V2Grade },
+export async function applyLiveRecallResultCorrection(
+  input: {
+    userId: string;
+    submissionId: string;
+    recallResult: V2RecallResult;
+  },
   dependencies: Pick<ReviewDependencies, "now"> = defaultReviewDependencies,
 ): Promise<V2Evaluation> {
   const db = getV2Db();
@@ -1076,7 +1167,10 @@ export async function applyLiveLearnerGrade(
       now,
     );
     const [submission] = await tx
-      .select({ status: answerSubmissions.status })
+      .select({
+        status: answerSubmissions.status,
+        questionId: answerSubmissions.questionId,
+      })
       .from(answerSubmissions)
       .where(
         and(
@@ -1100,33 +1194,109 @@ export async function applyLiveLearnerGrade(
     if (!latestEvaluation) {
       throw new Error("Evaluation not found.");
     }
-    if (submission.status === "pending" && latestEvaluation.status !== "failed") {
-      throw new Error("Self-grading is available only after evaluation fails.");
+    if (submission.status !== "graded") {
+      throw new Error("Only a completed Recall Result can be corrected.");
     }
-    if (submission.status !== "pending" && submission.status !== "graded") {
-      throw new Error("This Learner Answer cannot be graded.");
-    }
-    await applyGradeInTransaction(
+    await tx.insert(recallResultCorrections).values({
+      userId: input.userId,
+      questionId: submission.questionId,
+      submissionId: input.submissionId,
+      value: input.recallResult,
+      createdAt: now,
+    });
+    await rebuildDerivedGradesInTransaction(
       tx,
       {
-        ...input,
-        origin: submission.status === "pending" ? "self" : "correction",
-        evaluationId: latestEvaluation.id,
+        userId: input.userId,
+        submissionId: input.submissionId,
+        origin: "correction",
         effectiveTimezone: reviewDay.effectiveTimezone,
         currentLocalDay: reviewDay.localDay,
       },
       now,
     );
-    await tx
-      .update(evaluations)
-      .set({ status: "superseded", completedAt: now })
+  });
+  return getLiveEvaluation(input.userId, input.submissionId);
+}
+
+export async function retryLiveEvaluation(
+  input: { userId: string; submissionId: string },
+  dependencies: Pick<ReviewDependencies, "now"> = defaultReviewDependencies,
+): Promise<V2Evaluation> {
+  const now = dependencies.now();
+  await getV2Db().transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-grade:${input.userId}:${input.submissionId}`}))`,
+    );
+    const [submission] = await tx
+      .select({
+        status: answerSubmissions.status,
+        questionId: answerSubmissions.questionId,
+      })
+      .from(answerSubmissions)
+      .where(
+        and(
+          eq(answerSubmissions.userId, input.userId),
+          eq(answerSubmissions.id, input.submissionId),
+        ),
+      )
+      .limit(1);
+    if (!submission) throw new Error("Submission not found.");
+    const [latestEvaluation] = await tx
+      .select({ status: evaluations.status })
+      .from(evaluations)
       .where(
         and(
           eq(evaluations.userId, input.userId),
           eq(evaluations.submissionId, input.submissionId),
-          eq(evaluations.status, "pending"),
         ),
-      );
+      )
+      .orderBy(desc(evaluations.createdAt), desc(evaluations.id))
+      .limit(1);
+    if (submission.status !== "pending" || latestEvaluation?.status !== "failed") {
+      throw new Error("Only a failed evaluation can be retried.");
+    }
+    const [evaluationJob] = await tx
+      .select({ id: jobs.id, payload: jobs.payload })
+      .from(jobs)
+      .where(
+        and(
+          eq(jobs.userId, input.userId),
+          eq(jobs.type, "evaluate_submission"),
+          eq(jobs.idempotencyKey, input.submissionId),
+        ),
+      )
+      .limit(1);
+    if (!evaluationJob) throw new Error("Evaluation job not found.");
+    const [evaluation] = await tx
+      .insert(evaluations)
+      .values({
+        userId: input.userId,
+        questionId: submission.questionId,
+        submissionId: input.submissionId,
+        evaluator: "model",
+        createdAt: now,
+      })
+      .returning({ id: evaluations.id });
+    const [restartedJob] = await tx
+      .update(jobs)
+      .set({
+        status: "pending",
+        attempts: 0,
+        progress: 0,
+        runAfter: now,
+        lockedUntil: null,
+        error: null,
+        payload: {
+          ...evaluationJob.payload,
+          submissionId: input.submissionId,
+          evaluationId: evaluation.id,
+        },
+        updatedAt: now,
+      })
+      .where(eq(jobs.id, evaluationJob.id))
+      .returning({ id: jobs.id });
+    if (!restartedJob) throw new Error("Evaluation job could not be restarted.");
   });
   return getLiveEvaluation(input.userId, input.submissionId);
 }

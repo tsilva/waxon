@@ -82,10 +82,27 @@ test(
           assert.deepEqual(catalog.obsoleteContractObjects, []);
           assert.equal(catalog.evaluationColumns.includes("question_id"), true);
           assert.equal(catalog.gradeEventColumns.includes("question_id"), true);
+          assert.equal(
+            catalog.evaluationColumns.includes("proposed_recall_result"),
+            true,
+          );
+          assert.equal(
+            catalog.gradeEventColumns.includes("derivation_version"),
+            true,
+          );
+          assert.equal(
+            catalog.tables.includes("recall_result_corrections"),
+            true,
+          );
           assert.deepEqual(catalog.enumValues.question_lifecycle, [
             "active",
             "flagged",
             "archived",
+          ]);
+          assert.deepEqual(catalog.enumValues.recall_result, [
+            "incorrect",
+            "partial",
+            "correct",
           ]);
           assert.equal("answer_mode" in catalog.enumValues, false);
           for (const retiredEnum of [
@@ -777,7 +794,7 @@ test(
         async () => {
           clock.set("2030-08-20T10:00:00.000Z");
           semanticValidation.setOutcome("pass");
-          evaluation.setGrade("again");
+          evaluation.setRecallResult("incorrect");
           const learner = await provisionLearner("Library flag learner");
           const otherLearner = await provisionLearner(
             "Library flag isolation learner",
@@ -926,7 +943,7 @@ test(
               ],
             ]),
           );
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
         },
       );
 
@@ -1059,7 +1076,7 @@ test(
           });
           const futureQuestionId = future.results[0]?.id ?? "";
           const futureOpened = await learner.direct.review.open();
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
           const futurePending = await learner.direct.review.submitAnswer({
             questionId: futureOpened.question?.questionId ?? "",
             answer: "A Question that is not the queue head.",
@@ -1096,7 +1113,7 @@ test(
             "active",
           );
 
-          evaluation.setGrade("again");
+          evaluation.setRecallResult("incorrect");
           const pending = await learner.direct.review.submitAnswer({
             questionId: opened.question?.questionId ?? "",
             answer: "The current Review Question.",
@@ -1142,7 +1159,7 @@ test(
             evidenceBefore,
           );
 
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
           const second = await learner.direct.questionBank.add({
             idempotencyKey: "review-flag-reasons-candidate",
             items: [
@@ -1570,7 +1587,7 @@ test(
         "Again moves behind the current queue and returns immediately when alone after reopening Review",
         async () => {
           clock.set("2030-08-20T10:00:00.000Z");
-          evaluation.setGrade("again");
+          evaluation.setRecallResult("incorrect");
           const learner = await provisionLearner("Same-day Again learner");
           const added = await learner.direct.questionBank.add({
             idempotencyKey: "same-day-again-questions",
@@ -1612,7 +1629,7 @@ test(
             secondQuestion,
           );
 
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
           await answerCurrent("same-day-again-second-answer");
           assert.equal(
             (await learner.direct.review.open()).question?.questionId,
@@ -1624,7 +1641,7 @@ test(
           assert.equal(reopenedWhenAlone.summary.queueRemaining, 1);
           assert.equal(reopenedWhenAlone.question?.questionId, againQuestion);
 
-          evaluation.setGrade("again");
+          evaluation.setRecallResult("incorrect");
           await answerCurrent("same-day-again-only-answer");
           const reopenedImmediately = await learner.direct.review.open();
           assert.equal(reopenedImmediately.summary.queueRemaining, 1);
@@ -1659,25 +1676,25 @@ test(
             (await learner.direct.review.open()).question?.questionId,
             againQuestion,
           );
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
         },
       );
 
       await suite.test(
-        "Hard, Good, and Easy schedule progressively later Local Days",
+        "Recall Results derive same-day failure and future successful scheduling",
         async () => {
           clock.set("2030-08-20T10:00:00.000Z");
           const scheduled: string[] = [];
 
-          for (const grade of ["hard", "good", "easy"] as const) {
-            evaluation.setGrade(grade);
-            const learner = await provisionLearner(`${grade} interval learner`);
+          for (const result of ["partial", "correct"] as const) {
+            evaluation.setRecallResult(result);
+            const learner = await provisionLearner(`${result} interval learner`);
             await learner.direct.questionBank.add({
-              idempotencyKey: `${grade}-interval-question`,
+              idempotencyKey: `${result}-interval-question`,
               items: [
                 {
-                  prompt: `Which interval follows ${grade}?`,
-                  referenceAnswer: `${grade} uses its grade-history interval.`,
+                  prompt: `Which interval follows ${result}?`,
+                  referenceAnswer: `${result} derives its scheduling interval.`,
                 },
               ],
             });
@@ -1685,20 +1702,20 @@ test(
             const pending = await learner.direct.review.submitAnswer({
               questionId: opened.question?.questionId ?? "",
               answer: "Deterministic recall.",
-              idempotencyKey: `${grade}-interval-answer`,
+              idempotencyKey: `${result}-interval-answer`,
             });
             const completed = await learner.direct.review.evaluatePending(
               pending.submissionId,
             );
-            assert.equal(completed.grade, grade);
+            assert.equal(completed.recallResult, result);
             assert.ok(completed.nextDueOn);
             scheduled.push(completed.nextDueOn);
           }
 
-          assert.equal(scheduled[0]! < scheduled[1]!, true);
-          assert.equal(scheduled[1]! < scheduled[2]!, true);
+          assert.equal(scheduled[0], "2030-08-20");
+          assert.equal(scheduled[1]! > scheduled[0]!, true);
 
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
           clock.set("2030-08-20T10:00:00.000Z");
           const correctedLearner = await provisionLearner(
             "Delayed successful correction learner",
@@ -1724,19 +1741,19 @@ test(
             correctedPending.submissionId,
           );
           clock.set("2030-09-10T10:00:00.000Z");
-          const correctedDates: string[] = [];
-          for (const grade of ["hard", "good", "easy"] as const) {
-            const corrected = await correctedLearner.direct.review.grade({
+          for (const result of ["incorrect", "partial", "correct"] as const) {
+            const corrected =
+              await correctedLearner.direct.review.correctRecallResult({
               submissionId: correctedPending.submissionId,
-              grade,
+              recallResult: result,
             });
             assert.ok(corrected.nextDueOn);
-            assert.equal(corrected.nextDueOn! > "2030-09-10", true);
-            assert.equal((await correctedLearner.direct.review.open()).question, null);
-            correctedDates.push(corrected.nextDueOn);
+            assert.equal(
+              corrected.nextDueOn,
+              result === "correct" ? "2030-09-13" : "2030-09-10",
+            );
           }
-          assert.equal(correctedDates[0]! < correctedDates[1]!, true);
-          assert.equal(correctedDates[1]! < correctedDates[2]!, true);
+          assert.equal((await correctedLearner.direct.review.open()).question, null);
 
           clock.set("2030-08-20T10:00:00.000Z");
           const dstLearner = await provisionLearner(
@@ -1760,21 +1777,24 @@ test(
           await dstLearner.direct.review.evaluatePending(dstPending.submissionId);
           await dstLearner.direct.settings.updateTimezone("America/New_York");
           clock.set("2030-11-02T16:00:00.000Z");
-          const dstHard = await dstLearner.direct.review.grade({
+          const dstPartial = await dstLearner.direct.review.correctRecallResult({
             submissionId: dstPending.submissionId,
-            grade: "hard",
+            recallResult: "partial",
           });
-          assert.equal(dstHard.nextDueOn, "2030-11-04");
-          assert.equal((await dstLearner.direct.review.open()).question, null);
+          assert.equal(dstPartial.nextDueOn, "2030-11-02");
+          assert.equal(
+            (await dstLearner.direct.review.open()).question?.questionId,
+            dstAdded.results[0]?.id,
+          );
           assert.equal(
             (
               await dstLearner.direct.questionBank.evidence(
                 dstAdded.results[0]?.id ?? "",
               )
             ).dueAt,
-            "2030-11-04T05:00:00.000Z",
+            "2030-11-02T16:00:00.000Z",
           );
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
         },
       );
 
@@ -1782,7 +1802,7 @@ test(
         "correction chains replay every Learner Answer and update Review without crossing Learners",
         async () => {
           clock.set("2030-08-20T10:00:00.000Z");
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
           const learner = await provisionLearner("Correction chain learner");
           const otherLearner = await provisionLearner(
             "Correction isolation learner",
@@ -1830,36 +1850,37 @@ test(
           assert.equal((await learner.direct.review.open()).question, null);
 
           await assert.rejects(
-            otherLearner.direct.review.grade({
+            otherLearner.direct.review.correctRecallResult({
               submissionId: firstPending.submissionId,
-              grade: "hard",
+              recallResult: "partial",
             }),
             /Submission not found/u,
           );
 
-          const firstHard = await learner.direct.review.grade({
+          const firstPartial = await learner.direct.review.correctRecallResult({
             submissionId: firstPending.submissionId,
-            grade: "hard",
+            recallResult: "partial",
           });
-          assert.equal(firstHard.grade, "hard");
-          assert.ok(firstHard.nextDueOn);
-          assert.equal(firstHard.nextDueOn! < secondGood.nextDueOn!, true);
+          assert.equal(firstPartial.recallResult, "partial");
+          assert.ok(firstPartial.nextDueOn);
+          assert.equal(firstPartial.nextDueOn! < secondGood.nextDueOn!, true);
 
-          const firstEasy = await learner.direct.review.grade({
+          const firstCorrect = await learner.direct.review.correctRecallResult({
             submissionId: firstPending.submissionId,
-            grade: "easy",
+            recallResult: "correct",
           });
-          assert.equal(firstEasy.grade, "easy");
-          assert.ok(firstEasy.nextDueOn);
-          assert.equal(firstEasy.nextDueOn! > firstHard.nextDueOn!, true);
+          assert.equal(firstCorrect.recallResult, "correct");
+          assert.ok(firstCorrect.nextDueOn);
+          assert.equal(firstCorrect.nextDueOn! > firstPartial.nextDueOn!, true);
 
           clock.set("2030-08-25T10:00:00.000Z");
-          const secondAgain = await learner.direct.review.grade({
+          const secondIncorrect =
+            await learner.direct.review.correctRecallResult({
             submissionId: secondPending.submissionId,
-            grade: "again",
+            recallResult: "incorrect",
           });
-          assert.equal(secondAgain.grade, "again");
-          assert.equal(secondAgain.nextDueOn, "2030-08-25");
+          assert.equal(secondIncorrect.recallResult, "incorrect");
+          assert.equal(secondIncorrect.nextDueOn, "2030-08-25");
           const reopened = await learner.direct.review.open();
           assert.equal(reopened.question?.questionId, questionId);
           assert.equal(reopened.summary.queueRemaining, 1);
@@ -1870,11 +1891,11 @@ test(
             {
               learnerAnswers: 2,
               evaluations: 2,
-              gradeEvents: 5,
+              gradeEvents: 7,
               dueAt: "2030-08-25T10:00:00.000Z",
             },
           );
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
         },
       );
 
@@ -1929,23 +1950,22 @@ test(
           assert.deepEqual(
             {
               status: completed.status,
-              grade: completed.grade,
+              recallResult: completed.recallResult,
               expectedAnswer: completed.expectedAnswer,
-              demonstratedGap: completed.demonstratedGap,
+              scoringIssues: completed.scoringIssues,
               nextDueOn: completed.nextDueOn,
-              canSelfGrade: completed.canSelfGrade,
-              canCorrectGrade: completed.canCorrectGrade,
+              canRetryEvaluation: completed.canRetryEvaluation,
+              canCorrectRecallResult: completed.canCorrectRecallResult,
             },
             {
               status: "complete",
-              grade: "good",
+              recallResult: "correct",
               expectedAnswer:
                 "Active Questions, the Learner's Local Day, and immutable Learning Evidence.",
-              demonstratedGap:
-                "No gap was demonstrated by this successful recall.",
+              scoringIssues: [],
               nextDueOn: "2030-08-23",
-              canSelfGrade: false,
-              canCorrectGrade: true,
+              canRetryEvaluation: false,
+              canCorrectRecallResult: true,
             },
           );
           assert.deepEqual(
@@ -1968,8 +1988,8 @@ test(
               answer: closedOutcome.recentAnswers[0]?.answer,
               expectedAnswer:
                 closedOutcome.recentAnswers[0]?.evaluation.expectedAnswer,
-              demonstratedGap:
-                closedOutcome.recentAnswers[0]?.evaluation.demonstratedGap,
+              scoringIssues:
+                closedOutcome.recentAnswers[0]?.evaluation.scoringIssues,
               nextDueOn:
                 closedOutcome.recentAnswers[0]?.evaluation.nextDueOn,
             },
@@ -1979,8 +1999,7 @@ test(
                 "It is derived from Active Questions, Local Day, and Learning Evidence.",
               expectedAnswer:
                 "Active Questions, the Learner's Local Day, and immutable Learning Evidence.",
-              demonstratedGap:
-                "No gap was demonstrated by this successful recall.",
+              scoringIssues: [],
               nextDueOn: "2030-08-23",
             },
           );
@@ -2117,7 +2136,7 @@ test(
           }
 
           clock.set("2030-08-20T10:00:00.000Z");
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
           const answerLearner = await provisionLearner(
             "Serialized timezone answer learner",
           );
@@ -2171,7 +2190,7 @@ test(
             "2030-08-22",
           );
 
-          evaluation.setGrade("again");
+          evaluation.setRecallResult("incorrect");
           const gradeLearner = await provisionLearner(
             "Serialized timezone grade learner",
           );
@@ -2212,13 +2231,13 @@ test(
                 "America/Los_Angeles",
               ),
             operation: () =>
-              gradeLearner.direct.review.grade({
+              gradeLearner.direct.review.correctRecallResult({
                 submissionId: pendingGrade.submissionId,
-                grade: "again",
+                recallResult: "incorrect",
               }),
           });
           assert.equal(corrected.nextDueOn, "2030-08-22");
-          evaluation.setGrade("good");
+          evaluation.setRecallResult("correct");
         },
       );
 
@@ -2326,19 +2345,18 @@ test(
           assert.deepEqual(
             {
               status: completed.status,
-              grade: completed.grade,
+              recallResult: completed.recallResult,
               feedback: completed.feedback,
               expectedAnswer: completed.expectedAnswer,
-              demonstratedGap: completed.demonstratedGap,
+              scoringIssues: completed.scoringIssues,
             },
             {
               status: "complete",
-              grade: "good",
-              feedback: "The deterministic evaluator accepted the answer.",
+              recallResult: "correct",
+              feedback: "Correct. You recovered the Recall Target.",
               expectedAnswer:
                 "Learner Answers, evaluations, and Answer Grade history.",
-              demonstratedGap:
-                "No gap was demonstrated by this successful recall.",
+              scoringIssues: [],
             },
           );
           assert.equal(completed.nextDueOn, "2030-08-23");

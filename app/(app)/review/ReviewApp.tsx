@@ -24,18 +24,20 @@ import { reviewIntervalLabel } from "@/app/lib/reviewIntervalLabel";
 import { reviewHandoffMarkdown } from "@/app/lib/reviewHandoffMarkdown";
 import { ReviewFlagDialog } from "./ReviewFlagDialog";
 import type {
-  V2Grade,
   V2LearnerSettings,
+  V2RecallResult,
   V2ReviewAnswer,
   V2ReviewQuestion,
   V2ReviewQueueResponse,
 } from "@/app/lib/v2/types";
 
-const GRADE_DISPLAY: Record<V2Grade, { label: string; value: number }> = {
-  again: { label: "Again", value: 0 },
-  hard: { label: "Hard", value: 2 },
-  good: { label: "Good", value: 3 },
-  easy: { label: "Easy", value: 4 },
+const RECALL_RESULT_DISPLAY: Record<
+  V2RecallResult,
+  { label: string; symbol: string }
+> = {
+  incorrect: { label: "Incorrect", symbol: "I" },
+  partial: { label: "Partial", symbol: "P" },
+  correct: { label: "Correct", symbol: "C" },
 };
 
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
@@ -47,16 +49,19 @@ async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-function gradeLabel(grade: V2Grade | null): string {
-  return grade ? GRADE_DISPLAY[grade].label : "Waiting";
+function recallResultLabel(result: V2RecallResult | null): string {
+  return result ? RECALL_RESULT_DISPLAY[result].label : "Waiting";
 }
 
-function gradeTone(evaluation: V2ReviewAnswer["evaluation"]): string {
-  if (evaluation.status === "failed" || evaluation.grade === "again") {
+function recallResultTone(evaluation: V2ReviewAnswer["evaluation"]): string {
+  if (
+    evaluation.status === "failed" ||
+    evaluation.recallResult === "incorrect"
+  ) {
     return "low";
   }
-  if (evaluation.grade === "hard") return "medium";
-  if (evaluation.grade === "good" || evaluation.grade === "easy") {
+  if (evaluation.recallResult === "partial") return "medium";
+  if (evaluation.recallResult === "correct") {
     return "high";
   }
   return "neutral";
@@ -82,24 +87,31 @@ function submittedDate(value: string): string {
 
 function FeedbackRow({
   turn,
-  onGrade,
+  onCorrectRecallResult,
+  onRetryEvaluation,
 }: {
   turn: V2ReviewAnswer;
-  onGrade: (submissionId: string, grade: V2Grade) => Promise<void>;
+  onCorrectRecallResult: (
+    submissionId: string,
+    recallResult: V2RecallResult,
+  ) => Promise<void>;
+  onRetryEvaluation: (submissionId: string) => Promise<void>;
 }) {
   const evaluation = turn.evaluation;
   const isPending = evaluation.status === "pending";
   const [open, setOpen] = useState(false);
   const previousEvaluationStatus = useRef(evaluation.status);
-  const [savingGrade, setSavingGrade] = useState<V2Grade | null>(null);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [savingRecallResult, setSavingRecallResult] =
+    useState<V2RecallResult | null>(null);
+  const [retrying, setRetrying] = useState(false);
   const [copyStatus, setCopyStatus] = useState<
     "idle" | "copied" | "failed"
   >("idle");
-  const grade = gradeLabel(evaluation.grade);
-  const scoreLabel =
-    evaluation.status === "failed" || !evaluation.grade
-      ? "?"
-      : GRADE_DISPLAY[evaluation.grade].value;
+  const recallResult = recallResultLabel(evaluation.recallResult);
+  const resultSymbol = evaluation.recallResult
+    ? RECALL_RESULT_DISPLAY[evaluation.recallResult].symbol
+    : "?";
   const dueDateLabel = scheduledDate(evaluation.nextDueOn);
   const dueIntervalLabel = reviewIntervalLabel(evaluation.nextDueOn);
 
@@ -119,12 +131,22 @@ function FeedbackRow({
     return () => window.clearTimeout(timeout);
   }, [copyStatus]);
 
-  async function applyGrade(nextGrade: V2Grade) {
-    setSavingGrade(nextGrade);
+  async function correctRecallResult(nextResult: V2RecallResult) {
+    setSavingRecallResult(nextResult);
     try {
-      await onGrade(evaluation.submissionId, nextGrade);
+      await onCorrectRecallResult(evaluation.submissionId, nextResult);
+      setCorrectionOpen(false);
     } finally {
-      setSavingGrade(null);
+      setSavingRecallResult(null);
+    }
+  }
+
+  async function retryEvaluation() {
+    setRetrying(true);
+    try {
+      await onRetryEvaluation(evaluation.submissionId);
+    } finally {
+      setRetrying(false);
     }
   }
 
@@ -147,14 +169,18 @@ function FeedbackRow({
         ) : (
           <span
             aria-label={
-              evaluation.grade
-                ? `Grade ${grade} (${GRADE_DISPLAY[evaluation.grade].value})`
-                : `Grade ${grade}`
+              evaluation.recallResult
+                ? `Recall Result: ${recallResult}`
+                : evaluation.status === "failed"
+                  ? "Evaluation failed"
+                  : "Recall Result waiting"
             }
             className="previous-score-shell"
           >
-            <span className={`previous-score score-${gradeTone(evaluation)}`}>
-              {scoreLabel}
+            <span
+              className={`previous-score score-${recallResultTone(evaluation)}`}
+            >
+              {resultSymbol}
             </span>
           </span>
         )}
@@ -169,8 +195,8 @@ function FeedbackRow({
                 {isPending
                   ? "Evaluating…"
                   : evaluation.status === "failed"
-                    ? "Self-grade needed"
-                    : grade}
+                    ? "Evaluation failed"
+                    : recallResult}
               </span>
             </span>
             <MarkdownInline
@@ -235,14 +261,6 @@ function FeedbackRow({
                     text={evaluation.expectedAnswer ?? "Unavailable"}
                   />
                 </div>
-                <div className="previous-field">
-                  <span className="previous-field-label">Demonstrated Gap</span>
-                  <MarkdownContent
-                    className="previous-answer"
-                    enableMath
-                    text={evaluation.demonstratedGap ?? "Unavailable"}
-                  />
-                </div>
               </>
             ) : null}
             {evaluation.coveredPoints.length > 0 ? (
@@ -255,39 +273,66 @@ function FeedbackRow({
                 </ul>
               </div>
             ) : null}
-            {evaluation.missingPoints.length > 0 ? (
+            {evaluation.scoringIssues.length > 0 ? (
               <div className="previous-field review-feedback-points is-missing">
-                <span className="previous-field-label">Missing</span>
+                <span className="previous-field-label">Scoring issues</span>
                 <ul>
-                  {evaluation.missingPoints.map((point) => (
+                  {evaluation.scoringIssues.map((point) => (
                     <li key={point}>{point}</li>
                   ))}
                 </ul>
               </div>
             ) : null}
-            {evaluation.canSelfGrade || evaluation.canCorrectGrade ? (
+            {evaluation.clarifications.length > 0 ? (
+              <div className="previous-field review-feedback-points">
+                <span className="previous-field-label">Clarifications</span>
+                <ul>
+                  {evaluation.clarifications.map((point) => (
+                    <li key={point}>{point}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {evaluation.canRetryEvaluation ? (
+              <button
+                className="review-correction-trigger"
+                disabled={retrying}
+                onClick={retryEvaluation}
+                type="button"
+              >
+                {retrying ? <LoaderCircle className="v2-spin" /> : null}
+                Retry evaluation
+              </button>
+            ) : null}
+            {evaluation.canCorrectRecallResult && !correctionOpen ? (
+              <button
+                className="review-correction-trigger"
+                onClick={() => setCorrectionOpen(true)}
+                type="button"
+              >
+                Correct evaluation
+              </button>
+            ) : null}
+            {evaluation.canCorrectRecallResult && correctionOpen ? (
               <fieldset className="review-grade-correction">
-                <legend>
-                  {evaluation.canSelfGrade
-                    ? "How well did you recall it?"
-                    : "Correct Answer Grade"}
-                </legend>
+                <legend>Correct Recall Result</legend>
                 <div>
-                  {(["again", "hard", "good", "easy"] as V2Grade[]).map(
-                    (nextGrade) => (
+                  {(["incorrect", "partial", "correct"] as V2RecallResult[]).map(
+                    (nextResult) => (
                       <button
-                        aria-pressed={evaluation.grade === nextGrade}
+                        aria-pressed={evaluation.recallResult === nextResult}
                         disabled={
-                          Boolean(savingGrade) || evaluation.grade === nextGrade
+                          Boolean(savingRecallResult) ||
+                          evaluation.recallResult === nextResult
                         }
-                        key={nextGrade}
-                        onClick={() => applyGrade(nextGrade)}
+                        key={nextResult}
+                        onClick={() => correctRecallResult(nextResult)}
                         type="button"
                       >
-                        {savingGrade === nextGrade ? (
+                        {savingRecallResult === nextResult ? (
                           <LoaderCircle className="v2-spin" />
                         ) : (
-                          `${gradeLabel(nextGrade)} (${GRADE_DISPLAY[nextGrade].value})`
+                          recallResultLabel(nextResult)
                         )}
                       </button>
                     ),
@@ -538,13 +583,28 @@ export default function ReviewApp() {
     }
   }
 
-  async function gradeAnswer(submissionId: string, grade: V2Grade) {
+  async function correctRecallResult(
+    submissionId: string,
+    recallResult: V2RecallResult,
+  ) {
     await jsonRequest(
       "/api/v2/review/evaluation",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ submissionId, grade }),
+        body: JSON.stringify({ submissionId, recallResult }),
+      },
+    );
+    await loadQueue();
+  }
+
+  async function retryEvaluation(submissionId: string) {
+    await jsonRequest(
+      "/api/v2/review/evaluation",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ submissionId, action: "retry" }),
       },
     );
     await loadQueue();
@@ -681,7 +741,8 @@ export default function ReviewApp() {
                 review.recentAnswers.map((turn) => (
                   <FeedbackRow
                     key={turn.evaluation.submissionId}
-                    onGrade={gradeAnswer}
+                    onCorrectRecallResult={correctRecallResult}
+                    onRetryEvaluation={retryEvaluation}
                     turn={turn}
                   />
                 ))

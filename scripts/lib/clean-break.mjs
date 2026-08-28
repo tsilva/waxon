@@ -117,6 +117,7 @@ export async function replaceWithCleanBaseline({
   connectionString,
   baselineSql,
   migrationTimestamp,
+  subsequentMigrations = [],
 }) {
   if (typeof baselineSql !== "string" || baselineSql.trim().length === 0) {
     throw new Error("The clean baseline SQL must be non-empty");
@@ -128,9 +129,20 @@ export async function replaceWithCleanBaseline({
     throw new Error("The clean baseline migration timestamp must be a safe integer");
   }
 
-  const migrationHash = createHash("sha256")
-    .update(baselineSql)
-    .digest("hex");
+  const migrations = [
+    { sql: baselineSql, timestamp: migrationTimestamp },
+    ...subsequentMigrations,
+  ];
+  for (const migration of migrations) {
+    if (
+      typeof migration?.sql !== "string" ||
+      migration.sql.trim().length === 0 ||
+      !Number.isSafeInteger(migration.timestamp) ||
+      migration.timestamp < 0
+    ) {
+      throw new Error("Every migration must have non-empty SQL and a safe timestamp");
+    }
+  }
   const pool = new Pool({ connectionString });
   let client;
 
@@ -146,8 +158,10 @@ export async function replaceWithCleanBaseline({
     await client.query('DROP TABLE IF EXISTS "drizzle"."__drizzle_migrations"');
     await client.query('DROP SCHEMA IF EXISTS "drizzle"');
 
-    for (const statement of baselineSql.split("--> statement-breakpoint")) {
-      if (statement.trim()) await client.query(statement);
+    for (const migration of migrations) {
+      for (const statement of migration.sql.split("--> statement-breakpoint")) {
+        if (statement.trim()) await client.query(statement);
+      }
     }
 
     await client.query('CREATE SCHEMA "drizzle"');
@@ -158,11 +172,16 @@ export async function replaceWithCleanBaseline({
         created_at bigint
       )
     `);
-    await client.query(
-      `INSERT INTO "drizzle"."__drizzle_migrations" (hash, created_at)
-       VALUES ($1, $2)`,
-      [migrationHash, migrationTimestamp],
-    );
+    for (const migration of migrations) {
+      const migrationHash = createHash("sha256")
+        .update(migration.sql)
+        .digest("hex");
+      await client.query(
+        `INSERT INTO "drizzle"."__drizzle_migrations" (hash, created_at)
+         VALUES ($1, $2)`,
+        [migrationHash, migration.timestamp],
+      );
+    }
     await client.query("COMMIT");
   } catch (error) {
     await client?.query("ROLLBACK").catch(() => undefined);
