@@ -105,6 +105,7 @@ test("Review exposes one Flag action and no other Library management action", as
   const source = await readFile(reviewAppPath, "utf8");
 
   assert.equal(source.match(/aria-label="Flag current Question"/gu)?.length, 1);
+  assert.equal(source.includes("<span>Flag</span>"), false);
   for (const forbiddenAction of [
     "Archive question",
     "Replace question",
@@ -254,6 +255,10 @@ test("Review Flag dialog traps Tab during async empty submission and focuses the
   const firstReason = document.querySelector<HTMLButtonElement>(
     '.review-flag-reasons button',
   );
+  const reasonsLegend = dialog?.querySelector("legend");
+  const detailLabel = dialog?.querySelector<HTMLLabelElement>(
+    "label.review-flag-detail",
+  );
   const submit = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find(
     (button) => button.textContent?.includes("Flag Question"),
   );
@@ -265,6 +270,12 @@ test("Review Flag dialog traps Tab during async empty submission and focuses the
   );
   assert.ok(dialog);
   assert.ok(firstReason);
+  assert.equal(reasonsLegend?.textContent, "What needs attention?");
+  assert.equal(reasonsLegend?.classList.contains("sr-only"), true);
+  assert.equal(
+    detailLabel?.querySelector(".sr-only")?.textContent,
+    "Optional detail",
+  );
   assert.equal(dialog.getAttribute("aria-modal"), "true");
   assert.equal(document.activeElement, firstReason);
   assert.ok(submit);

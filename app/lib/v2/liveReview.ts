@@ -31,6 +31,7 @@ import {
   getLearnerReviewDay,
 } from "./settings.ts";
 import { normalizeReviewFlagInput } from "./reviewFlag.ts";
+import { reconcileRecallEvaluation } from "./recallEvaluation.ts";
 import type {
   V2Evaluation,
   V2Grade,
@@ -850,14 +851,15 @@ async function applyGradeInTransaction(
 }
 
 function demonstratedGapFor(input: {
-  grade: V2Grade;
   demonstratedGap: string | null;
+  missingPoints: string[];
 }): string {
   const statedGap = input.demonstratedGap?.trim();
+  if (input.missingPoints.length === 0) {
+    return "No gap was demonstrated by this successful recall.";
+  }
   if (statedGap) return statedGap;
-  return input.grade === "good" || input.grade === "easy"
-    ? "No gap was demonstrated by this successful recall."
-    : "The response did not fully demonstrate the Answer Standard.";
+  return `The Learner Answer did not demonstrate: ${input.missingPoints.join("; ")}.`;
 }
 
 export async function runLiveEvaluationJob(
@@ -903,13 +905,16 @@ export async function runLiveEvaluationJob(
     return;
   }
   try {
-    const result = await dependencies.evaluateAnswer({
-      userId: job.userId,
+    const result = reconcileRecallEvaluation({
       prompt: row.prompt,
-      referenceAnswer: row.referenceAnswer,
-      answer: row.answer,
-      browserAcceptanceEvaluationAuthorized:
-        job.payload.browserAcceptanceEvaluationAuthorized === true,
+      result: await dependencies.evaluateAnswer({
+        userId: job.userId,
+        prompt: row.prompt,
+        referenceAnswer: row.referenceAnswer,
+        answer: row.answer,
+        browserAcceptanceEvaluationAuthorized:
+          job.payload.browserAcceptanceEvaluationAuthorized === true,
+      }),
     });
     if (result.confidence < 0.55) {
       await db

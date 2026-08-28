@@ -12,6 +12,11 @@ import {
   shouldUseBrowserAcceptanceEvaluator,
 } from "../browserSmokeSupport.ts";
 import { beginLlmTrace, finishLlmTrace } from "../llmTraceStore.ts";
+import {
+  RECALL_EVALUATION_SYSTEM_PROMPT,
+  reconcileRecallEvaluation,
+  type RecallEvaluationResult,
+} from "./recallEvaluation.ts";
 import type { V2Grade } from "./types.ts";
 
 async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
@@ -105,15 +110,7 @@ export async function evaluateRecall(input: {
   referenceAnswer: string;
   answer: string;
   browserAcceptanceEvaluationAuthorized?: boolean;
-}): Promise<{
-  grade: V2Grade;
-  feedback: string;
-  expectedAnswer: string;
-  coveredPoints: string[];
-  missingPoints: string[];
-  demonstratedGap: string | null;
-  confidence: number;
-}> {
+}): Promise<RecallEvaluationResult> {
   if (
     shouldUseBrowserAcceptanceEvaluator({
       authorized: input.browserAcceptanceEvaluationAuthorized === true,
@@ -151,8 +148,7 @@ export async function evaluateRecall(input: {
     messages: [
       {
         role: "system",
-        content:
-          "Evaluate free recall directly from the question, stored reference answer, and learner answer without classifying the question by answer mode. Treat paraphrases, synonymous wording, equivalent mathematical notation, and reordered explanations as correct when their meaning and required content match. Infer any required points from the question and reference answer. Require literal characters only when the question explicitly asks for exact syntax, spelling, quotation, or an identifier whose characters determine correctness. Return JSON only with grade (again|hard|good|easy), feedback, expectedAnswer, coveredPoints, missingPoints, demonstratedGap, confidence. Use again for forgotten or substantially wrong, hard for fragile or partial recall, good for correct recall with minor omissions, and easy only for complete effortless recall. Never reward fluent unsupported claims.",
+        content: RECALL_EVALUATION_SYSTEM_PROMPT,
       },
       {
         role: "user",
@@ -178,24 +174,28 @@ export async function evaluateRecall(input: {
       ? Math.max(0, Math.min(1, parsed.confidence))
       : 0;
 
-  return {
-    grade,
-    feedback:
-      typeof parsed.feedback === "string" && parsed.feedback.trim()
-        ? parsed.feedback.trim().slice(0, 8_000)
-        : "Compare your answer with the reference answer.",
-    expectedAnswer:
-      typeof parsed.expectedAnswer === "string" &&
-      parsed.expectedAnswer.trim()
-        ? parsed.expectedAnswer.trim().slice(0, 65_536)
-        : input.referenceAnswer,
-    coveredPoints: asStringArray(parsed.coveredPoints),
-    missingPoints: asStringArray(parsed.missingPoints),
-    demonstratedGap:
-      typeof parsed.demonstratedGap === "string" &&
-      parsed.demonstratedGap.trim()
-        ? parsed.demonstratedGap.trim().slice(0, 4_000)
-        : null,
-    confidence,
-  };
+  return reconcileRecallEvaluation({
+    prompt: input.prompt,
+    result: {
+      grade,
+      feedback:
+        typeof parsed.feedback === "string" && parsed.feedback.trim()
+          ? parsed.feedback.trim().slice(0, 8_000)
+          : "Compare your answer with the Answer Standard.",
+      expectedAnswer:
+        typeof parsed.expectedAnswer === "string" &&
+        parsed.expectedAnswer.trim()
+          ? parsed.expectedAnswer.trim().slice(0, 65_536)
+          : input.referenceAnswer,
+      coveredPoints: asStringArray(parsed.coveredPoints),
+      missingPoints: asStringArray(parsed.missingPoints),
+      demonstratedGap:
+        typeof parsed.demonstratedGap === "string" &&
+        parsed.demonstratedGap.trim()
+          ? parsed.demonstratedGap.trim().slice(0, 4_000)
+          : null,
+      confidence,
+      presentationDifferences: asStringArray(parsed.presentationDifferences),
+    },
+  });
 }
