@@ -11,6 +11,10 @@ const reviewApp = await readFile(
   new URL("../app/(app)/review/ReviewApp.tsx", import.meta.url),
   "utf8",
 );
+const reviewQueueRoute = await readFile(
+  new URL("../app/api/v2/review/queue/route.ts", import.meta.url),
+  "utf8",
+);
 const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>");
 const style = dom.window.document.createElement("style");
 style.textContent = styles;
@@ -66,4 +70,16 @@ test("Review presents Recall Results without internal Answer Grade labels", () =
   assert.match(reviewApp, /Retry evaluation/u);
   assert.doesNotMatch(reviewApp, /GRADE_DISPLAY/u);
   assert.doesNotMatch(reviewApp, /\["again", "hard", "good", "easy"\]/u);
+});
+
+test("Review can advance to another due Question without submitting an answer", () => {
+  assert.match(reviewApp, /aria-label="Next question"/u);
+  assert.match(reviewApp, /onClick=\{nextQuestion\}/u);
+  assert.match(
+    reviewApp,
+    /loadQueue\(\{ afterQuestionId: current\.questionId \}\)/u,
+  );
+  assert.match(reviewApp, /question\.total <= 1/u);
+  assert.match(reviewApp, /(?:setAnswer|updateAnswer)\(""\)/u);
+  assert.match(reviewQueueRoute, /searchParams\.get\("afterQuestionId"\)/u);
 });

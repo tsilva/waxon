@@ -246,19 +246,34 @@ async function reviewStatus(userId: string, now: Date) {
 export async function getLiveReviewQueue(
   userId: string,
   dependencies: Pick<ReviewDependencies, "now"> = defaultReviewDependencies,
+  selection: {
+    questionId?: string | null;
+    afterQuestionId?: string | null;
+  } = {},
 ): Promise<V2ReviewQueueResponse> {
   const [status, recentAnswers] = await Promise.all([
     reviewStatus(userId, dependencies.now()),
     recentReviewAnswers(userId),
   ]);
-  const first = status.queue[0];
+  const requestedQuestionId = selection.questionId?.trim();
+  const afterQuestionId = selection.afterQuestionId?.trim();
+  const requested = requestedQuestionId
+    ? status.queue.find((question) => question.questionId === requestedQuestionId)
+    : undefined;
+  const afterIndex = afterQuestionId
+    ? status.queue.findIndex((question) => question.questionId === afterQuestionId)
+    : -1;
+  const selected =
+    afterIndex >= 0
+      ? status.queue[(afterIndex + 1) % status.queue.length]
+      : requested ?? status.queue[0];
   return {
-    question: first
+    question: selected
       ? {
-          questionId: first.questionId,
-          prompt: first.prompt,
+          questionId: selected.questionId,
+          prompt: selected.prompt,
           total: status.queue.length,
-          scheduledFor: first.scheduledFor,
+          scheduledFor: selected.scheduledFor,
         }
       : null,
     recentAnswers,
@@ -299,9 +314,10 @@ export async function flagCurrentReviewQuestion(input: {
       input.userId,
       now,
     );
-    const current = (await queueRows(input.userId, reviewDay.localDay, tx))[0];
-    if (!current || current.questionId !== questionId) {
-      throw new Error("This Question is no longer the current Review Question.");
+    const available = (await queueRows(input.userId, reviewDay.localDay, tx))
+      .some((question) => question.questionId === questionId);
+    if (!available) {
+      throw new Error("This Question is no longer available in Review.");
     }
 
     await tx

@@ -1059,7 +1059,7 @@ test(
       );
 
       await suite.test(
-        "Review Flagging records learner reasons, preserves evidence, isolates ownership, and removes the current Question immediately",
+        "Review Flagging records learner reasons, preserves evidence, isolates ownership, and removes the selected due Question immediately",
         async () => {
           const learner = await provisionLearner("Review flag learner");
           const otherLearner = await provisionLearner(
@@ -1070,7 +1070,7 @@ test(
             items: [
               {
                 prompt: "Which future Active Question must Review refuse to Flag?",
-                referenceAnswer: "A Question that is not the queue head.",
+                referenceAnswer: "A Question that is not currently due.",
               },
             ],
           });
@@ -1079,7 +1079,7 @@ test(
           evaluation.setRecallResult("correct");
           const futurePending = await learner.direct.review.submitAnswer({
             questionId: futureOpened.question?.questionId ?? "",
-            answer: "A Question that is not the queue head.",
+            answer: "A Question that is not currently due.",
             idempotencyKey: "review-flag-future-answer",
           });
           await learner.direct.review.evaluatePending(futurePending.submissionId);
@@ -1104,7 +1104,7 @@ test(
               reasons: ["prompt_unclear"],
               detail: "This future Question is not currently exposed.",
             }),
-            /current Review Question/u,
+            /available in Review/u,
           );
           assert.equal(
             (await learner.direct.questionBank.list()).questions.find(
@@ -1134,7 +1134,7 @@ test(
               reasons: [],
               detail: null,
             }),
-            /current Review Question/u,
+            /available in Review/u,
           );
 
           const emptyFlag = await learner.direct.review.flag({
@@ -1402,6 +1402,20 @@ test(
 
           const reopened = await learner.direct.review.open();
           assert.deepEqual(reopened, opened);
+
+          const advanced = await learner.direct.review.open({
+            afterQuestionId: opened.question?.questionId,
+          });
+          assert.equal(advanced.question?.questionId, added.results[1]?.id);
+          assert.equal(advanced.summary.queueRemaining, 80);
+          const preserved = await learner.direct.review.open({
+            questionId: advanced.question?.questionId,
+          });
+          assert.equal(preserved.question?.questionId, added.results[1]?.id);
+          const wrapped = await learner.direct.review.open({
+            afterQuestionId: added.results.at(-1)?.id,
+          });
+          assert.equal(wrapped.question?.questionId, added.results[0]?.id);
 
           const observedOrder: string[] = [];
           for (let index = 0; index < added.results.length; index += 1) {

@@ -111,8 +111,14 @@ export function createWaxonApplication(
           },
         },
         review: {
-          open() {
-            return getLiveReviewQueue(userId, serviceDependencies);
+          open(
+            selection: Parameters<typeof getLiveReviewQueue>[2] = {},
+          ) {
+            return getLiveReviewQueue(
+              userId,
+              serviceDependencies,
+              selection,
+            );
           },
           summary() {
             return getLiveReviewSummary(userId, serviceDependencies.now());
