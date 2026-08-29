@@ -268,13 +268,14 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 
 1. While `/library` remains visible, call runner-side `issue20DiagnosticRequest(issue20DiagnosticEndpoints.fixture, { method: "POST" })` with no body. Require HTTP `200`, `ok: true`, six Question results, six distinct IDs, every result `status: created`, `outcome: created_active`, and `lifecycle: active`. Retain `timezoneBoundaryPrompt`, the five-item `fixturePrompts`, and `isolationProbe` in runner memory.
 2. Open `/review`. On its settled fixture load, require `timezoneBoundaryPrompt` visibly first and a queue count of six. This proves every new Active fixture entered immediately and equal unanswered Questions follow stable creation order.
-3. Open `Local Day settings`. Read the IANA timezone and require it still equals the automatically detected `Intl.DateTimeFormat().resolvedOptions().timeZone` from case 2, proving persistence.
-4. Set the timezone to `Pacific/Kiritimati`, save, and reopen settings to require persistence. Through runner-side `issue20DiagnosticRequest(issue20DiagnosticEndpoints.reviewQueue)`, retain the returned `localDay` as `eastDay`; require the boundary Prompt remains visibly current.
-5. Answer the boundary Question with the stable Incorrect answer and wait for Recall Result `Incorrect`. Require queue count six and `fixturePrompts[0]` current, proving the derived Again moved the boundary Question to the end of the same Local Day.
-6. Set the timezone to `Pacific/Pago_Pago` and save. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.reviewQueue)` retain `westDay`; require `westDay < eastDay`, the visible queue count drops to five, and `fixturePrompts[0]` remains current. The only membership change is the boundary Question whose `Again` due date is now a future Local Day.
-7. Reload `/review`; require the queue remains five with no resume, recovery, rollover, daily-plan, or session prompt.
-8. Set the timezone back to `Pacific/Kiritimati`. Require the visible queue count returns to six without a session action, proving the boundary Question re-enters from live Local Day derivation.
-9. Set the timezone to `Pacific/Pago_Pago` once more. Require the visible queue returns to five and the setting persists after reopening. Leave this timezone selected so the boundary Question does not interfere with the five-Question grade and Flag journey.
+3. Activate `Next question`. Require `fixturePrompts[0]` becomes current, the answer field is empty, the queue count remains six, and no Previous answer was created. Reload `/review` and require `timezoneBoundaryPrompt` is first again, proving Next did not record learning evidence or change the canonical queue order.
+4. Open `Local Day settings`. Read the IANA timezone and require it still equals the automatically detected `Intl.DateTimeFormat().resolvedOptions().timeZone` from case 2, proving persistence.
+5. Set the timezone to `Pacific/Kiritimati`, save, and reopen settings to require persistence. Through runner-side `issue20DiagnosticRequest(issue20DiagnosticEndpoints.reviewQueue)`, retain the returned `localDay` as `eastDay`; require the boundary Prompt remains visibly current.
+6. Answer the boundary Question with the stable Incorrect answer and wait for Recall Result `Incorrect`. Require queue count six and `fixturePrompts[0]` current, proving the derived Again moved the boundary Question to the end of the same Local Day.
+7. Set the timezone to `Pacific/Pago_Pago` and save. Through `issue20DiagnosticRequest(issue20DiagnosticEndpoints.reviewQueue)` retain `westDay`; require `westDay < eastDay`, the visible queue count drops to five, and `fixturePrompts[0]` remains current. The only membership change is the boundary Question whose `Again` due date is now a future Local Day.
+8. Reload `/review`; require the queue remains five with no resume, recovery, rollover, daily-plan, or session prompt.
+9. Set the timezone back to `Pacific/Kiritimati`. Require the visible queue count returns to six without a session action, proving the boundary Question re-enters from live Local Day derivation.
+10. Set the timezone to `Pacific/Pago_Pago` once more. Require the visible queue returns to five and the setting persists after reopening. Leave this timezone selected so the boundary Question does not interfere with the five-Question grade and Flag journey.
 
 ### 5. Generic evaluation, same-day failure, and Recall Result correction
 
@@ -321,7 +322,7 @@ Create one `mcpClient` with `await issue20McpInitialize(mcpToken)`. For successf
 
 1. At desktop size, inspect Library and Review accessible controls. At 390 × 844, reload and inspect both routes again after visible content settles.
 2. Require navigation, search, lifecycle filters, Question actions, Local Day settings, answer composer, feedback, and Flag dialogs remain contained without horizontal clipping or overlapping actionable controls.
-3. On both routes and both viewports, require no visible control/accessibility name containing `Pause`, `Trash`, `capacity`, `retention`, `source`, `generation`, `concept`, `provenance`, `coverage`, or `document` (case-insensitive). Also require no daily-minutes, item-limit, importance, uncertainty, answer-mode, skip, session, retry, or Library action other than Flag in Review.
+3. On both routes and both viewports, require no visible control/accessibility name containing `Pause`, `Trash`, `capacity`, `retention`, `source`, `generation`, `concept`, `provenance`, `coverage`, or `document` (case-insensitive). Also require no daily-minutes, item-limit, importance, uncertainty, answer-mode, session, retry, or Library action other than Flag in Review.
 4. Capture `/private/tmp/issue-20-clean-break-library-narrow.png`, `/private/tmp/issue-20-clean-break-review-desktop.png`, and `/private/tmp/issue-20-clean-break-review-narrow.png`.
 
 ### 9. Console and final report
