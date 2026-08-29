@@ -12,7 +12,19 @@ import {
   Plus,
   Search,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import {
+  useAppViewCache,
+  type LibraryViewState,
+} from "@/app/AppViewCache";
 import { MarkdownContent } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { QuestionBankFlagDialog } from "@/app/(app)/library/QuestionBankFlagDialog";
@@ -318,10 +330,21 @@ function QuestionRow({
 }
 
 export default function LibraryPageClient() {
-  const [data, setData] = useState(EMPTY_DATA);
-  const [filter, setFilter] = useState<V2QuestionLifecycle | "all">("all");
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+  const viewCache = useAppViewCache();
+  const [{ initialView, initialData }] = useState(() => {
+    const cachedView = viewCache.readLibraryView();
+    return {
+      initialView: cachedView,
+      initialData: viewCache.readLibrary(cachedView),
+    };
+  });
+  const [data, setData] = useState(initialData ?? EMPTY_DATA);
+  const [filter, setFilter] = useState<V2QuestionLifecycle | "all">(
+    initialView.filter,
+  );
+  const [search, setSearch] = useState(initialView.search);
+  const [loading, setLoading] = useState(!initialData);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState<V2Question | null | undefined>(undefined);
@@ -331,22 +354,70 @@ export default function LibraryPageClient() {
     () => new Set(),
   );
   const [archiveAnnouncement, setArchiveAnnouncement] = useState(0);
+  const hasRenderedDataRef = useRef(Boolean(initialData));
+  const activeView = useMemo<LibraryViewState>(
+    () => ({ filter, search }),
+    [filter, search],
+  );
 
   const load = useCallback(async () => {
-    const params = new URLSearchParams();
-    if (filter !== "all") params.set("lifecycle", filter);
-    if (search.trim()) params.set("search", search.trim());
-    const result = await jsonRequest<V2LibraryResponse>(`/api/v2/library?${params}`);
+    const result = await viewCache.refreshLibrary(activeView);
+    hasRenderedDataRef.current = true;
     setData(result);
-  }, [filter, search]);
+  }, [activeView, viewCache]);
+
+  const replaceVisibleData = useCallback(
+    (next: V2LibraryResponse) => {
+      hasRenderedDataRef.current = true;
+      setData(next);
+      viewCache.writeLibrary(activeView, next);
+    },
+    [activeView, viewCache],
+  );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setLoading(true);
-      load().catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load Library.")).finally(() => setLoading(false));
+    router.prefetch("/review");
+    void import("../review/ReviewHydrator").then(
+      ({ ReviewHydrator }) => ReviewHydrator.preload(),
+    );
+    void viewCache.preloadReview();
+  }, [router, viewCache]);
+
+  useEffect(() => {
+    let cancelled = false;
+    viewCache.writeLibraryView(activeView);
+    const cached = viewCache.readLibrary(activeView);
+    if (cached) {
+      hasRenderedDataRef.current = true;
+      setData(cached);
+      setLoading(false);
+    }
+
+    const timer = window.setTimeout(async () => {
+      if (!hasRenderedDataRef.current) setLoading(true);
+      try {
+        const result = await viewCache.refreshLibrary(activeView);
+        if (cancelled) return;
+        hasRenderedDataRef.current = true;
+        setData(result);
+        setError(null);
+      } catch (caught) {
+        if (!cancelled) {
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "Could not load Library.",
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }, search ? 180 : 0);
-    return () => window.clearTimeout(timer);
-  }, [load, search]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeView, search, viewCache]);
 
   const total = useMemo(() => Object.values(data.counts).reduce((sum, value) => sum + value, 0), [data.counts]);
 
@@ -373,7 +444,9 @@ export default function LibraryPageClient() {
           }),
           new Promise((resolve) => window.setTimeout(resolve, fadeDuration)),
         ]);
-        setData((current) => removeArchivedQuestionFromView(current, questionId));
+        const next = removeArchivedQuestionFromView(data, questionId);
+        replaceVisibleData(next);
+        void viewCache.preloadReview();
         setArchiveAnnouncement((current) => current + 1);
         setRemovingQuestionIds((current) => {
           const next = new Set(current);
@@ -399,6 +472,7 @@ export default function LibraryPageClient() {
     });
     setMessage("Question restored.");
     await load();
+    void viewCache.preloadReview();
   }
 
   return (
@@ -414,10 +488,17 @@ export default function LibraryPageClient() {
             </div>
           </header>
           <div className="question-bank-controls">
-            <label className="lean-search"><Search /><span className="sr-only">Search questions</span><input onChange={(event) => setSearch(event.currentTarget.value)} placeholder="Search questions and answers" type="search" value={search} /></label>
+            <label className="lean-search"><Search /><span className="sr-only">Search questions</span><input onChange={(event) => {
+              const nextSearch = event.currentTarget.value;
+              setSearch(nextSearch);
+              viewCache.writeLibraryView({ filter, search: nextSearch });
+            }} placeholder="Search questions and answers" type="search" value={search} /></label>
             <nav aria-label="Question filters">
               {FILTERS.map((item) => (
-                <button aria-pressed={filter === item.value} key={item.value} onClick={() => setFilter(item.value)} type="button">
+                <button aria-pressed={filter === item.value} key={item.value} onClick={() => {
+                  setFilter(item.value);
+                  viewCache.writeLibraryView({ filter: item.value, search });
+                }} type="button">
                   {item.label}<span>{item.value === "all" ? total : data.counts[item.value]}</span>
                 </button>
               ))}
@@ -444,7 +525,7 @@ export default function LibraryPageClient() {
           ) : null}
         </div>
       </section>
-      {editing !== undefined ? <QuestionDialog question={editing} onClose={() => setEditing(undefined)} onSaved={async (nextMessage) => { setMessage(nextMessage); await load(); }} /> : null}
+      {editing !== undefined ? <QuestionDialog question={editing} onClose={() => setEditing(undefined)} onSaved={async (nextMessage) => { setMessage(nextMessage); await load(); void viewCache.preloadReview(); }} /> : null}
       {flagging ? <QuestionBankFlagDialog
         onClose={() => setFlagging(null)}
         onCommitted={() => {
@@ -463,6 +544,7 @@ export default function LibraryPageClient() {
               detail,
             }),
           });
+          void viewCache.preloadReview();
         }}
         onRefresh={load}
         onRefreshError={setError}

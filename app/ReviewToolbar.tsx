@@ -109,7 +109,7 @@ export function ReviewToolbar({
               pendingTab === "review",
             )}
             href="/review"
-            prefetch={false}
+            prefetch
             role="tab"
             id="review-tab"
             aria-selected={activeTab === "review"}
@@ -124,7 +124,7 @@ export function ReviewToolbar({
               pendingTab === "library",
             )}
             href="/library"
-            prefetch={false}
+            prefetch
             role="tab"
             aria-selected={activeTab === "library"}
             onClick={handleTabClick("library")}
@@ -211,7 +211,7 @@ export function ReviewToolbarActions({
         <Link
           className="queue-summary"
           href="/review"
-          prefetch={false}
+          prefetch
           aria-current={activeTab === "review" ? "page" : undefined}
           title="Open Review"
         >

@@ -17,7 +17,9 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { useRouter } from "next/navigation";
 import { AnswerComposer } from "@/app/AnswerComposer";
+import { useAppViewCache } from "@/app/AppViewCache";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { useToolbarState } from "@/app/ToolbarState";
@@ -461,10 +463,17 @@ function TimezoneSettings({
 }
 
 export default function ReviewApp() {
+  const router = useRouter();
   const { setDueCount } = useToolbarState();
-  const [review, setReview] = useState<V2ReviewQueueResponse | null>(null);
-  const [answer, setAnswer] = useState("");
-  const [isLoading, setIsLoading] = useState(true);
+  const viewCache = useAppViewCache();
+  const [initialReview] = useState(() => viewCache.readReview());
+  const [review, setReview] = useState<V2ReviewQueueResponse | null>(
+    initialReview,
+  );
+  const [answer, setAnswer] = useState(() =>
+    viewCache.readReviewDraft(initialReview?.question?.questionId),
+  );
+  const [isLoading, setIsLoading] = useState(!initialReview);
   const [isAdvancing, setIsAdvancing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -472,26 +481,37 @@ export default function ReviewApp() {
   const [error, setError] = useState<string | null>(null);
   const answerRef = useRef<HTMLTextAreaElement | null>(null);
   const restingRef = useRef<HTMLDivElement | null>(null);
-  const selectedQuestionIdRef = useRef<string | null>(null);
+  const selectedQuestionIdRef = useRef<string | null>(
+    initialReview?.question?.questionId ?? null,
+  );
+
+  const updateAnswer = useCallback(
+    (next: string) => {
+      setAnswer(next);
+      viewCache.writeReviewDraft(selectedQuestionIdRef.current, next);
+    },
+    [viewCache],
+  );
 
   const loadQueue = useCallback(async (selection: {
     questionId?: string | null;
     afterQuestionId?: string | null;
   } = {}) => {
-    const params = new URLSearchParams();
-    if (selection.questionId) params.set("questionId", selection.questionId);
-    if (selection.afterQuestionId) {
-      params.set("afterQuestionId", selection.afterQuestionId);
-    }
-    const query = params.toString();
-    const next = await jsonRequest<V2ReviewQueueResponse>(
-      `/api/v2/review/queue${query ? `?${query}` : ""}`,
-    );
+    const next = await viewCache.refreshReview(selection);
+    setAnswer(viewCache.readReviewDraft(next.question?.questionId));
     selectedQuestionIdRef.current = next.question?.questionId ?? null;
     setReview(next);
     setDueCount(next.summary.queueRemaining);
     return next;
-  }, [setDueCount]);
+  }, [setDueCount, viewCache]);
+
+  useEffect(() => {
+    router.prefetch("/library");
+    void import("../library/LibraryHydrator").then(
+      ({ LibraryHydrator }) => LibraryHydrator.preload(),
+    );
+    void viewCache.preloadLibrary();
+  }, [router, viewCache]);
 
   useEffect(() => {
     async function initializeReview() {
@@ -555,7 +575,7 @@ export default function ReviewApp() {
     if (!question || !responseText || isSubmitting) return;
     setIsSubmitting(true);
     setError(null);
-    setAnswer("");
+    updateAnswer("");
     try {
       await jsonRequest(
         "/api/v2/review/answer",
@@ -572,7 +592,7 @@ export default function ReviewApp() {
       selectedQuestionIdRef.current = null;
       await loadQueue();
     } catch (caught) {
-      setAnswer(responseText);
+      updateAnswer(responseText);
       setError(caught instanceof Error ? caught.message : "Could not submit.");
     } finally {
       setIsSubmitting(false);
@@ -590,11 +610,11 @@ export default function ReviewApp() {
     const draft = answer;
     setIsAdvancing(true);
     setError(null);
-    setAnswer("");
+    updateAnswer("");
     try {
       await loadQueue({ afterQuestionId: current.questionId });
     } catch (caught) {
-      setAnswer(draft);
+      updateAnswer(draft);
       setError(
         caught instanceof Error
           ? caught.message
@@ -673,7 +693,6 @@ export default function ReviewApp() {
                       title="Next question"
                       type="button"
                     >
-                      <span>Next</span>
                       <ArrowRight aria-hidden="true" />
                     </button>
                     <button
@@ -732,7 +751,7 @@ export default function ReviewApp() {
                 }
               }}
               onSubmit={submit}
-              onValueChange={setAnswer}
+              onValueChange={updateAnswer}
               placeholder="Type your answer here..."
               rows={4}
               submitAriaLabel="Submit answer"
@@ -821,7 +840,9 @@ export default function ReviewApp() {
                 detail,
               }),
             });
+            updateAnswer("");
             setReview(result.review);
+            viewCache.writeReview(result.review);
             selectedQuestionIdRef.current =
               result.review.question?.questionId ?? null;
             setDueCount(result.review.summary.queueRemaining);

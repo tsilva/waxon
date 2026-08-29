@@ -65,7 +65,8 @@ test("Library archive uses an in-place fade and restores the captured scroll pos
   ]);
 
   assert.match(source, /setRemovingQuestionIds/u);
-  assert.match(source, /removeArchivedQuestionFromView\(current, questionId\)/u);
+  assert.match(source, /removeArchivedQuestionFromView\(data, questionId\)/u);
+  assert.match(source, /replaceVisibleData\(next\)/u);
   assert.match(source, /window\.scrollTo\(scrollLeft, scrollTop\)/u);
   assert.match(styles, /\.lean-question-row-removing\s*\{[^}]*opacity:\s*0;/u);
   assert.match(styles, /\.lean-question-row-removing\s*\{[^}]*pointer-events:\s*none;/u);

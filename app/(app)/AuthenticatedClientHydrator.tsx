@@ -8,22 +8,24 @@ import {
 
 type AuthenticatedClientHydratorProps<TProps extends object> = {
   componentProps: TProps;
+  preloadedClient: ComponentType<TProps> | null;
   loadClient: () => Promise<ComponentType<TProps>>;
   staticSelector: string;
 };
 
 type AuthenticatedClientHydratorConfig<TProps extends object> = Omit<
   AuthenticatedClientHydratorProps<TProps>,
-  "componentProps"
+  "componentProps" | "preloadedClient"
 >;
 
 export function AuthenticatedClientHydrator<TProps extends object>({
   componentProps,
+  preloadedClient,
   loadClient,
   staticSelector,
 }: AuthenticatedClientHydratorProps<TProps>) {
   const [ClientComponent, setClientComponent] =
-    useState<ComponentType<TProps> | null>(null);
+    useState<ComponentType<TProps> | null>(() => preloadedClient);
   const [hydrationProps] = useState<TProps>(componentProps);
 
   useEffect(() => {
@@ -73,13 +75,33 @@ export function createAuthenticatedClientHydrator<TProps extends object>({
   loadClient,
   staticSelector,
 }: AuthenticatedClientHydratorConfig<TProps>) {
-  return function Hydrator(componentProps: TProps) {
+  let preloadedClient: ComponentType<TProps> | null = null;
+  let preloadPromise: Promise<ComponentType<TProps>> | null = null;
+
+  function preload() {
+    preloadPromise ??= loadClient()
+      .then((client) => {
+        preloadedClient = client;
+        return client;
+      })
+      .catch((error: unknown) => {
+        preloadPromise = null;
+        throw error;
+      });
+    return preloadPromise;
+  }
+
+  function Hydrator(componentProps: TProps) {
     return (
       <AuthenticatedClientHydrator
         componentProps={componentProps}
-        loadClient={loadClient}
+        loadClient={preload}
+        preloadedClient={preloadedClient}
         staticSelector={staticSelector}
       />
     );
-  };
+  }
+
+  Hydrator.preload = preload;
+  return Hydrator;
 }
