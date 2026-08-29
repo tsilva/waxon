@@ -272,11 +272,18 @@ test("production and other Learners reach the normal evaluator for acceptance fi
     delete process.env.DATABASE_URL;
     globalThis.fetch = async (_input, init) => {
       const request = JSON.parse(String(init?.body)) as {
+        model: string;
+        provider: { require_parameters: boolean };
+        response_format: { type: string; json_schema: { strict: boolean } };
         user: string;
       };
       normalEvaluatorLearners.push(request.user);
+      assert.equal(request.provider.require_parameters, true);
+      assert.equal(request.response_format.type, "json_schema");
+      assert.equal(request.response_format.json_schema.strict, true);
       return new Response(
         JSON.stringify({
+          model: request.model,
           choices: [
             {
               message: {
