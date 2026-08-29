@@ -1,5 +1,5 @@
 export const REVIEW_FLAG_REASONS = [
-  { id: "prompt_unclear", label: "Prompt is unclear" },
+  { id: "prompt_unclear", label: "Question is unclear" },
   { id: "answer_standard_incorrect", label: "Answer standard is wrong" },
   { id: "question_too_broad", label: "Question is too broad" },
   { id: "duplicate_question", label: "Possible duplicate" },

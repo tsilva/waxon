@@ -28,6 +28,21 @@ test("the policy separates Recall Result from scheduling grades", () => {
   assert.match(RECALL_EVALUATION_SYSTEM_PROMPT, /Clarifications must never lower/u);
 });
 
+test("the policy requires complete Answer Standard coverage for Correct", () => {
+  assert.match(
+    RECALL_EVALUATION_SYSTEM_PROMPT,
+    /Treat every distinct substantive claim in the Answer Standard as required unless the Answer Standard explicitly marks it optional/u,
+  );
+  assert.match(
+    RECALL_EVALUATION_SYSTEM_PROMPT,
+    /account for each required claim in exactly one of coveredPoints or scoringIssues/u,
+  );
+  assert.match(
+    RECALL_EVALUATION_SYSTEM_PROMPT,
+    /An omitted required claim is a scoring issue, not a clarification/u,
+  );
+});
+
 test("derives the approved Answer Grade sequences", () => {
   assert.deepEqual(deriveAnswerGrades(["correct"]), ["good"]);
   assert.deepEqual(deriveAnswerGrades(["correct", "correct"]), ["good", "good"]);

@@ -377,6 +377,7 @@ test("Review Flag dialog toggles reasons, reports errors, dismisses, and restore
   const [firstReason, secondReason] = reasons;
   assert.ok(firstReason);
   assert.ok(secondReason);
+  assert.equal(firstReason.textContent?.trim(), "Question is unclear");
   await act(async () => {
     click(firstReason);
     click(secondReason);

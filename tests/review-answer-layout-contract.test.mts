@@ -53,6 +53,12 @@ test("Review presents Recall Results without internal Answer Grade labels", () =
   assert.match(reviewApp, /Recall Result:/u);
   assert.match(
     reviewApp,
+    /incorrect: \{ label: "Incorrect", symbol: "C" \}/u,
+  );
+  assert.match(reviewApp, /partial: \{ label: "Partial", symbol: "B" \}/u);
+  assert.match(reviewApp, /correct: \{ label: "Correct", symbol: "A" \}/u);
+  assert.match(
+    reviewApp,
     /evaluation\.canCorrectRecallResult \? \(\s*<fieldset className="review-grade-correction">/u,
   );
   assert.doesNotMatch(reviewApp, /correctionOpen/u);
