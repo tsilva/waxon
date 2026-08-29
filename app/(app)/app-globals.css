@@ -2154,12 +2154,11 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  min-width: 129px;
-  min-height: 30px;
+  width: 30px;
+  height: 30px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  padding: 0 10px;
+  padding: 0;
   background: rgb(255 255 255 / 62%);
   color: var(--muted-strong);
   cursor: pointer;

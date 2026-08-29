@@ -39,9 +39,10 @@ test("previous answers start collapsed but a newly completed evaluation opens", 
   );
 });
 
-test("expanded answers expose a focused Markdown copy action", () => {
+test("expanded answers expose an icon-only Markdown copy action", () => {
   assert.match(reviewApp, /hidden=\{!open\}/u);
   assert.match(reviewApp, /aria-label="Copy review as Markdown"/u);
+  assert.doesNotMatch(reviewApp, />Copy Markdown</u);
   assert.match(
     reviewApp,
     /navigator\.clipboard\.writeText\(reviewHandoffMarkdown\(turn\)\)/u,
@@ -50,7 +51,12 @@ test("expanded answers expose a focused Markdown copy action", () => {
 
 test("Review presents Recall Results without internal Answer Grade labels", () => {
   assert.match(reviewApp, /Recall Result:/u);
-  assert.match(reviewApp, /Correct evaluation/u);
+  assert.match(
+    reviewApp,
+    /evaluation\.canCorrectRecallResult \? \(\s*<fieldset className="review-grade-correction">/u,
+  );
+  assert.doesNotMatch(reviewApp, /correctionOpen/u);
+  assert.doesNotMatch(reviewApp, /Correct evaluation/u);
   assert.match(reviewApp, /Retry evaluation/u);
   assert.doesNotMatch(reviewApp, /GRADE_DISPLAY/u);
   assert.doesNotMatch(reviewApp, /\["again", "hard", "good", "easy"\]/u);
