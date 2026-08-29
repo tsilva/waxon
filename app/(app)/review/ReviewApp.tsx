@@ -35,9 +35,9 @@ const RECALL_RESULT_DISPLAY: Record<
   V2RecallResult,
   { label: string; symbol: string }
 > = {
-  incorrect: { label: "Incorrect", symbol: "I" },
-  partial: { label: "Partial", symbol: "P" },
-  correct: { label: "Correct", symbol: "C" },
+  incorrect: { label: "Incorrect", symbol: "C" },
+  partial: { label: "Partial", symbol: "B" },
+  correct: { label: "Correct", symbol: "A" },
 };
 
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {

@@ -162,6 +162,10 @@ test("MCP tokens are high-entropy and hash deterministically", () => {
 
 test("Review Flag input accepts empty data and normalizes known multi-select reasons", () => {
   assert.equal(REVIEW_FLAG_REASONS.length >= 4, true);
+  assert.deepEqual(REVIEW_FLAG_REASONS[0], {
+    id: "prompt_unclear",
+    label: "Question is unclear",
+  });
   assert.deepEqual(normalizeReviewFlagInput({ reasons: [], detail: "  " }), {
     reasons: [],
     detail: null,
