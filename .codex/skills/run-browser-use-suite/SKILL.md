@@ -1,6 +1,6 @@
 ---
 name: run-browser-use-suite
-description: Run a Waxon browser-use test suite from a markdown file. Use when the user asks to run, rerun, execute, validate, or fix a Browser Use or signed-in user experience suite and provides or references a `.md` test-suite file such as `tests/browser-use-signed-in-user-experience.md`.
+description: Run a Waxon browser-use test suite from a markdown file. Use when the user asks to run, rerun, execute, validate, or fix a Browser Use or signed-in user experience suite and provides or references a `.md` test-suite file such as `tests/browser-use-clean-break-journey.md`.
 ---
 
 # Run Browser Use Suite
