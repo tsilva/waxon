@@ -1,4 +1,4 @@
 interface:
   display_name: "Run Browser Use Suite"
   short_description: "Run Waxon Browser Use suites from markdown files."
-  default_prompt: "Run the Browser Use test suite at tests/browser-use-signed-in-user-experience.md."
+  default_prompt: "Use $run-browser-use-suite to run the Browser Use test suite at tests/browser-use-clean-break-journey.md."
