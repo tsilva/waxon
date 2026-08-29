@@ -1205,14 +1205,13 @@ textarea {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  width: 36px;
   min-height: 36px;
   border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
   border-radius: 999px;
-  padding: 0 13px 0 15px;
+  padding: 0;
   background: color-mix(in srgb, var(--accent) 8%, var(--surface-soft));
   color: var(--ink-soft);
-  font: 700 12px/1 var(--font-ui);
   cursor: pointer;
 }
 

@@ -74,6 +74,7 @@ test("Review presents Recall Results without internal Answer Grade labels", () =
 
 test("Review can advance to another due Question without submitting an answer", () => {
   assert.match(reviewApp, /aria-label="Next question"/u);
+  assert.doesNotMatch(reviewApp, /<span>Next<\/span>/u);
   assert.match(reviewApp, /onClick=\{nextQuestion\}/u);
   assert.match(
     reviewApp,
