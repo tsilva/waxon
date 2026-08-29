@@ -101,7 +101,6 @@ function FeedbackRow({
   const isPending = evaluation.status === "pending";
   const [open, setOpen] = useState(false);
   const previousEvaluationStatus = useRef(evaluation.status);
-  const [correctionOpen, setCorrectionOpen] = useState(false);
   const [savingRecallResult, setSavingRecallResult] =
     useState<V2RecallResult | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -135,7 +134,6 @@ function FeedbackRow({
     setSavingRecallResult(nextResult);
     try {
       await onCorrectRecallResult(evaluation.submissionId, nextResult);
-      setCorrectionOpen(false);
     } finally {
       setSavingRecallResult(null);
     }
@@ -231,13 +229,6 @@ function FeedbackRow({
                 ) : (
                   <Copy aria-hidden="true" />
                 )}
-                <span>
-                  {copyStatus === "copied"
-                    ? "Copied"
-                    : copyStatus === "failed"
-                      ? "Copy failed"
-                      : "Copy Markdown"}
-                </span>
               </button>
               <span aria-live="polite" className="sr-only">
                 {copyStatus === "copied"
@@ -304,16 +295,7 @@ function FeedbackRow({
                 Retry evaluation
               </button>
             ) : null}
-            {evaluation.canCorrectRecallResult && !correctionOpen ? (
-              <button
-                className="review-correction-trigger"
-                onClick={() => setCorrectionOpen(true)}
-                type="button"
-              >
-                Correct evaluation
-              </button>
-            ) : null}
-            {evaluation.canCorrectRecallResult && correctionOpen ? (
+            {evaluation.canCorrectRecallResult ? (
               <fieldset className="review-grade-correction">
                 <legend>Correct Recall Result</legend>
                 <div>

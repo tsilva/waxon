@@ -12,9 +12,9 @@ Reference image: `design-reference/waxon-approved-ui.png`
 - Review uses the approved question → compact composer → `Previous answers` list in both its static loading and hydrated states. The current Question exposes only a compact icon-only Flag action, backed by the standard responsive modal and Library Flagged workflow; its reason and optional-detail labels remain accessible without visible label copy.
 - Review detects and persists the learner's IANA timezone, exposes it through a compact Local Day settings dialog, and refreshes queue membership after an edit.
 - The Local Day dialog uses the standard icon-first close control and keeps the timezone field self-explanatory without feature-description copy.
-- Resolved Review feedback shows Incorrect, Partial, or Correct instead of numeric scores, exposes the Answer Standard and structured scoring issues, and shows the next Review as a relative interval. A small `Correct evaluation` action reveals the three Recall Result choices only when needed; evaluator failures offer `Retry evaluation` instead of self-grading.
+- Resolved Review feedback shows Incorrect, Partial, or Correct instead of numeric scores, exposes the Answer Standard and structured scoring issues, and shows the next Review as a relative interval. The three Recall Result correction choices remain directly visible in expanded feedback; evaluator failures offer `Retry evaluation` instead of self-grading.
 - Resolved-answer timestamp and schedule metadata remain in the main content flow below the answer details, so Recall Result correction controls retain unobstructed hit targets without disabling the detail toggle.
-- Expanded Review feedback includes a compact `Copy Markdown` action that copies the full Question, learner answer, evaluation, and Review metadata for external discussion without adding controls to collapsed rows.
+- Expanded Review feedback includes a compact icon-only copy action that copies the full Question, learner answer, evaluation, and Review metadata for external discussion without adding controls to collapsed rows.
 - The approved reference’s typography, warm paper palette, subdued borders, header geometry, focused composer, and desktop/mobile rhythm remain authoritative. Its sample question and due count are not fixed requirements.
 
 ## Verification status
