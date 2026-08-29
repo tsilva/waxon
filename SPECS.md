@@ -49,6 +49,8 @@ Waxon is a multi-user question bank and adaptive recall-practice system. Learner
 - Repeated successful recall must lengthen future intervals, while weaker or failed recall must shorten them.
 - Waxon must not ask for or model daily minutes, practice capacity, item capacity, importance, uncertainty, incomplete-understanding priority, or a selected retention target.
 - Every learner answer must follow one generic free-text evaluation path.
+- An automated evaluation must require every substantive claim needed to answer the Prompt, but must not lower the Recall Result for omitted supporting explanation, definitions, ranges, examples, alternatives, or derivations unless the Prompt explicitly asks for them or the omission makes the answer ambiguous or wrong.
+- A model's self-reported confidence may be retained for diagnostics but must not affect Recall Result, retry behavior, Answer Grade, or scheduling.
 - Every automated evaluation must explain the expected answer and demonstrated gap sufficiently for the learner to correct their understanding.
 - Learners must be able to correct a Recall Result; the original automated evaluation must remain immutable while all affected Answer Grades and Review scheduling are rebuilt.
 - Review may let the learner flag a question for later attention but must provide no other bank-management actions.

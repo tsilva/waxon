@@ -13,7 +13,7 @@ export type NormalizedRecallEvaluation = RecallEvaluationResult & {
 };
 
 export const RECALL_EVALUATION_SYSTEM_PROMPT =
-  "Evaluate free recall directly from the Prompt, stored Answer Standard, and Learner Answer. Classify the Learner Answer as incorrect, partial, or correct. Treat every distinct substantive claim in the Answer Standard as required unless the Answer Standard explicitly marks it optional. Before choosing a Recall Result, decompose the Answer Standard into its required claims and account for each required claim in exactly one of coveredPoints or scoringIssues. Do not accept recovery of only the primary, main, or most important claims as complete recovery. An omitted required claim is a scoring issue, not a clarification. Correct means the Learner Answer satisfies every required claim in the Recall Target with no scoring issues. Partial means it recovers meaningful required knowledge but still has at least one scoring issue. Incorrect means it does not recover meaningful required knowledge or is materially wrong. Prefer a failed result over a false correct result when the evidence is ambiguous. Judge knowledge rather than surface representation: accurate prose, mathematical notation, pseudocode, and executable code are equivalent when they express the same required knowledge. Representation is required only when the Prompt explicitly requires exact syntax, notation, spelling, quotation, executable code, or an identifier whose characters determine correctness. Put satisfied required knowledge in coveredPoints. Put only omissions or errors that prevent a correct result in scoringIssues. Put non-scoring precision, terminology, notation, and representation differences in clarifications. Clarifications must never lower the recallResult and must not contain substantive knowledge required by the Answer Standard. Return JSON only with recallResult (incorrect|partial|correct), coveredPoints, scoringIssues, clarifications, and confidence. Keep the fields consistent: correct has no scoringIssues; partial has at least one coveredPoint and at least one scoringIssue; incorrect has at least one scoringIssue.";
+  "Evaluate free recall directly from the Prompt, stored Answer Standard, and Learner Answer. Classify the Learner Answer as incorrect, partial, or correct. First infer the Recall Target from what the Prompt actually asks. Use the Answer Standard as the authoritative reference for correctness, then separate its content into answer-bearing claims needed to satisfy the Prompt and supporting explanation such as symbol definitions, ranges, examples, alternatives, derivations, or background. Require every distinct answer-bearing claim, including every requested part of a multi-part explanation. For a broad Prompt asking what, why, how, or what distinguishes something, treat every independent contrast, cause, mechanism, consequence, or condition in the Answer Standard that directly answers the Prompt as answer-bearing; do not demote one of those direct answers to supporting content merely because other claims already answer part of the Prompt. Treat each numbered or bulleted Answer Standard item that directly responds to the Prompt as a separate required claim unless it is explicitly marked optional. Do not require supporting content unless the Prompt explicitly asks for it or its omission makes the Learner Answer ambiguous or wrong. Account for each required claim in exactly one of coveredPoints or scoringIssues. An omitted required claim is a scoring issue, not a clarification. Correct means the Learner Answer satisfies every required claim in the Recall Target with no scoring issues. Partial means it recovers meaningful required knowledge but still has at least one scoring issue. Incorrect means it does not recover meaningful required knowledge or is materially wrong, reversed, or non-responsive. Prefer a failed result over a false correct result when the evidence is ambiguous. Judge knowledge rather than surface representation: accurate prose, mathematical notation, pseudocode, and executable code are equivalent when they express the same required knowledge. Representation is required only when the Prompt explicitly requires exact syntax, notation, spelling, quotation, executable code, or an identifier whose characters determine correctness. Put satisfied required knowledge in coveredPoints. Put only omissions or errors that prevent a correct result in scoringIssues. Put non-scoring precision, terminology, notation, representation, and optional supporting details in clarifications. Clarifications must never lower the recallResult and must not contain substantive knowledge required by the Prompt. Return only the requested structured evaluation. Keep the fields consistent: correct has no scoringIssues; partial has at least one coveredPoint and at least one scoringIssue; incorrect has at least one scoringIssue. Confidence is diagnostic only and must not change the recallResult.";
 
 const EXPLICIT_REPRESENTATION_PATTERNS = [
   /\b(?:in|using|with)\s+(?:exact\s+)?(?:mathematical|symbolic)\s+notation\b/u,
@@ -137,10 +137,8 @@ export async function evaluateRecallWithRetries(input: {
   prompt: string;
   evaluate(): Promise<RecallEvaluationResult>;
   attempts?: number;
-  minimumConfidence?: number;
 }): Promise<NormalizedRecallEvaluation> {
   const attempts = Math.max(1, input.attempts ?? 3);
-  const minimumConfidence = input.minimumConfidence ?? 0.55;
   let lastError: unknown = null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
@@ -148,11 +146,6 @@ export async function evaluateRecallWithRetries(input: {
         prompt: input.prompt,
         result: await input.evaluate(),
       });
-      if (result.confidence < minimumConfidence) {
-        throw new Error(
-          "The evaluator was not confident enough to classify recall.",
-        );
-      }
       return result;
     } catch (error) {
       lastError = error;

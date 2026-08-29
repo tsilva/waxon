@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import {
   buildOpenRouterHeaders,
   OPENROUTER_CHAT_URL,
@@ -6,7 +7,6 @@ import {
   resolveOpenRouterModel,
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
 } from "../../../shared/openrouter-config.mts";
-import { extractJsonObject } from "../../../shared/json-object.mts";
 import {
   BROWSER_SMOKE_CORRECT_TOKEN,
   shouldUseBrowserAcceptanceEvaluator,
@@ -16,8 +16,63 @@ import {
   RECALL_EVALUATION_SYSTEM_PROMPT,
   reconcileRecallEvaluation,
   type NormalizedRecallEvaluation,
+  type RecallEvaluationResult,
 } from "./recallEvaluation.ts";
-import type { V2RecallResult } from "./types.ts";
+
+const pointArraySchema = z
+  .array(z.string().trim().min(1))
+  .max(32);
+
+const recallEvaluationResponseSchema = z.strictObject({
+  recallResult: z.enum(["incorrect", "partial", "correct"]),
+  coveredPoints: pointArraySchema,
+  scoringIssues: pointArraySchema,
+  clarifications: pointArraySchema,
+  confidence: z.number().min(0).max(1),
+});
+
+export const RECALL_EVALUATION_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    recallResult: {
+      type: "string",
+      enum: ["incorrect", "partial", "correct"],
+      description: "The learner's Recall Result.",
+    },
+    coveredPoints: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: 32,
+      description: "Required recall knowledge demonstrated by the learner.",
+    },
+    scoringIssues: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: 32,
+      description: "Only omissions or errors that prevent a Correct result.",
+    },
+    clarifications: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: 32,
+      description: "Non-scoring precision or optional supporting details.",
+    },
+    confidence: {
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      description: "Diagnostic confidence only; it never changes the result.",
+    },
+  },
+  required: [
+    "recallResult",
+    "coveredPoints",
+    "scoringIssues",
+    "clarifications",
+    "confidence",
+  ],
+  additionalProperties: false,
+} as const;
 
 async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
   url: string,
@@ -84,24 +139,23 @@ function chatText(body: {
   return "";
 }
 
-function parseObject(text: string): Record<string, unknown> {
-  const extracted = extractJsonObject(text);
-
-  if (!extracted || typeof extracted !== "object" || Array.isArray(extracted)) {
-    throw new Error("Model returned invalid structured output.");
+export function parseRecallEvaluationResponse(
+  text: string,
+): RecallEvaluationResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (error) {
+    throw new Error("Model returned malformed evaluation JSON.", {
+      cause: error,
+    });
   }
 
-  return extracted as Record<string, unknown>;
-}
-
-function asStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value
-        .filter((item): item is string => typeof item === "string")
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .slice(0, 32)
-    : [];
+  const result = recallEvaluationResponseSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new Error("Model returned an evaluation outside the required schema.");
+  }
+  return result.data;
 }
 
 export async function evaluateRecall(input: {
@@ -136,13 +190,22 @@ export async function evaluateRecall(input: {
       fallback: DEFAULT_OPENROUTER_EVALUATION_MODEL,
     }) ?? DEFAULT_OPENROUTER_EVALUATION_MODEL;
   const response = await postOpenRouter<{
+    model?: unknown;
     choices?: Array<{ message?: { content?: unknown } }>;
     usage?: Record<string, unknown>;
   }>(OPENROUTER_CHAT_URL, {
     model,
     temperature: 0,
     max_tokens: 900,
-    response_format: { type: "json_object" },
+    provider: { require_parameters: true },
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: "recall_evaluation",
+        strict: true,
+        schema: RECALL_EVALUATION_JSON_SCHEMA,
+      },
+    },
     user: input.userId,
     messages: [
       {
@@ -159,29 +222,13 @@ export async function evaluateRecall(input: {
     model,
     question: input.prompt,
   });
-  const parsed = parseObject(chatText(response));
-  const candidate = parsed.recallResult;
-  if (
-    candidate !== "incorrect" &&
-    candidate !== "partial" &&
-    candidate !== "correct"
-  ) {
-    throw new Error("Model returned an invalid Recall Result.");
+  if (response.model !== model) {
+    throw new Error("Model response did not identify the requested evaluator.");
   }
-  const recallResult: V2RecallResult = candidate;
-  const confidence =
-    typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
-      ? Math.max(0, Math.min(1, parsed.confidence))
-      : 0;
+  const parsed = parseRecallEvaluationResponse(chatText(response));
 
   return reconcileRecallEvaluation({
     prompt: input.prompt,
-    result: {
-      recallResult,
-      coveredPoints: asStringArray(parsed.coveredPoints),
-      scoringIssues: asStringArray(parsed.scoringIssues),
-      clarifications: asStringArray(parsed.clarifications),
-      confidence,
-    },
+    result: parsed,
   });
 }
