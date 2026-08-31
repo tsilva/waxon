@@ -30,6 +30,7 @@ import {
   promptCacheMetricsFromOpenRouterUsage,
   toFiniteNumber,
 } from "@/app/lib/openRouterUsageMetrics";
+import { useAppViewCache } from "@/app/AppViewCache";
 import {
   ADMIN_VIEW_STATE_COOKIE,
   type AdminCachedViewState,
@@ -50,10 +51,6 @@ type AdminPageClientProps = {
   initialInteractions: TraceInteraction[];
   initialViewState?: AdminCachedViewState | null;
   selectedTraceId?: string | null;
-};
-
-type AdminTracesResponse = {
-  interactions: TraceInteraction[];
 };
 
 type PayloadViewMode = "json" | "markdown";
@@ -986,20 +983,31 @@ export function AdminPageClient({
   initialViewState,
   selectedTraceId = null,
 }: AdminPageClientProps) {
+  const viewCache = useAppViewCache();
+  const [initialAdminState] = useState(() => {
+    const cachedInteractions = viewCache.readAdminTraces();
+
+    return {
+      interactions: cachedInteractions ?? initialInteractions,
+      hasLoadedInteractions:
+        cachedInteractions !== null || initialInteractions.length > 0,
+      viewState: viewCache.readAdminView() ?? initialViewState,
+    };
+  });
   const resolvedInitialViewState = useMemo(
     () =>
       initialAdminViewState({
-        initialInteractions,
-        initialViewState,
+        initialInteractions: initialAdminState.interactions,
+        initialViewState: initialAdminState.viewState,
       }),
-    [initialInteractions, initialViewState],
+    [initialAdminState],
   );
   const [traceInteractions, setTraceInteractions] = useState(
     () => resolvedInitialViewState.interactions,
   );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(
-    () => initialInteractions.length === 0,
+    () => !initialAdminState.hasLoadedInteractions,
   );
   const latestDate = useMemo(
     () => latestTraceDate(traceInteractions),
@@ -1042,27 +1050,13 @@ export function AdminPageClient({
     setIsRefreshing(true);
 
     try {
-      const response = await fetch("/api/admin/traces", {
-        cache: "no-store",
-        headers: {
-          Accept: "application/json",
-        },
+      const interactions = await viewCache.refreshAdminTraces();
+
+      setTraceInteractions((current) => {
+        const next = mergeTraceInteractions(current, interactions);
+        viewCache.writeAdminTraces(next);
+        return next;
       });
-
-      if (!response.ok) {
-        throw new Error("Could not refresh admin traces.");
-      }
-
-      const payload = (await response.json()) as AdminTracesResponse;
-
-      if (!Array.isArray(payload.interactions)) {
-        throw new Error("Admin traces response was malformed.");
-      }
-
-      setTraceInteractions((current) =>
-        mergeTraceInteractions(current, payload.interactions),
-      );
-
     } catch (error) {
       console.error("[waxon] admin traces refresh failed", {
         error: error instanceof Error ? error.message : "unknown error",
@@ -1071,7 +1065,7 @@ export function AdminPageClient({
       setIsRefreshing(false);
       setIsInitialLoading(false);
     }
-  }, []);
+  }, [viewCache]);
 
   const closeTracePanel = useCallback(() => {
     setSelectedCallId(null);
@@ -1086,7 +1080,7 @@ export function AdminPageClient({
   }, []);
 
   const persistAdminPageCache = useCallback(() => {
-    writeAdminViewStateCookie({
+    const viewState: AdminCachedViewState = {
       preset,
       fromDate,
       toDate,
@@ -1096,7 +1090,10 @@ export function AdminPageClient({
       sortKey,
       sortDirection,
       expandedInteractionId,
-    });
+    };
+
+    viewCache.writeAdminView(viewState);
+    writeAdminViewStateCookie(viewState);
   }, [
     expandedInteractionId,
     fromDate,
@@ -1107,6 +1104,7 @@ export function AdminPageClient({
     statusFilter,
     toDate,
     typeFilter,
+    viewCache,
   ]);
 
   function setPresetRange(nextPreset: DatePreset) {
