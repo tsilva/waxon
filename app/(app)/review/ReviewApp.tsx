@@ -220,27 +220,29 @@ function FeedbackRow({
           </div>
 
           <div className="previous-detail-grid" hidden={!open}>
-            <div className="review-handoff-actions">
-              <button
-                aria-label="Copy review as Markdown"
-                className="review-handoff-copy"
-                onClick={copyMarkdown}
-                type="button"
-              >
-                {copyStatus === "copied" ? (
-                  <Check aria-hidden="true" />
-                ) : (
-                  <Copy aria-hidden="true" />
-                )}
-              </button>
-              <span aria-live="polite" className="sr-only">
-                {copyStatus === "copied"
-                  ? "Review copied to clipboard as Markdown."
-                  : copyStatus === "failed"
-                    ? "Review could not be copied."
-                    : ""}
-              </span>
-            </div>
+            {open ? (
+              <div className="review-handoff-actions">
+                <button
+                  aria-label="Copy review as Markdown"
+                  className="review-handoff-copy"
+                  onClick={copyMarkdown}
+                  type="button"
+                >
+                  {copyStatus === "copied" ? (
+                    <Check aria-hidden="true" />
+                  ) : (
+                    <Copy aria-hidden="true" />
+                  )}
+                </button>
+                <span aria-live="polite" className="sr-only">
+                  {copyStatus === "copied"
+                    ? "Review copied to clipboard as Markdown."
+                    : copyStatus === "failed"
+                      ? "Review could not be copied."
+                      : ""}
+                </span>
+              </div>
+            ) : null}
             <div className="previous-field">
               <span className="previous-field-label">Your answer</span>
               <p className="previous-answer">{turn.answer}</p>

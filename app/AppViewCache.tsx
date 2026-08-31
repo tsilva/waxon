@@ -13,6 +13,8 @@ import type {
   V2QuestionLifecycle,
   V2ReviewQueueResponse,
 } from "@/app/lib/v2/types";
+import type { LlmTraceInteraction } from "@/app/lib/llmTraceStore";
+import type { AdminCachedViewState } from "@/app/(app)/admin/adminViewStateCookie";
 
 export type LibraryViewState = {
   filter: V2QuestionLifecycle | "all";
@@ -25,16 +27,22 @@ type ReviewSelection = {
 };
 
 type AppViewCacheValue = {
+  readAdminTraces: () => LlmTraceInteraction[] | null;
+  readAdminView: () => AdminCachedViewState | null;
   readLibrary: (view?: LibraryViewState) => V2LibraryResponse | null;
   readLibraryView: () => LibraryViewState;
   readReview: () => V2ReviewQueueResponse | null;
   readReviewDraft: (questionId: string | null | undefined) => string;
   refreshLibrary: (view?: LibraryViewState) => Promise<V2LibraryResponse>;
+  refreshAdminTraces: () => Promise<LlmTraceInteraction[]>;
   refreshReview: (
     selection?: ReviewSelection,
   ) => Promise<V2ReviewQueueResponse>;
+  preloadAdmin: () => Promise<void>;
   preloadLibrary: () => Promise<void>;
   preloadReview: () => Promise<void>;
+  writeAdminTraces: (interactions: LlmTraceInteraction[]) => void;
+  writeAdminView: (view: AdminCachedViewState) => void;
   writeLibrary: (view: LibraryViewState, data: V2LibraryResponse) => void;
   writeLibraryView: (view: LibraryViewState) => void;
   writeReview: (data: V2ReviewQueueResponse) => void;
@@ -79,10 +87,13 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 export function AppViewCacheProvider({ children }: { children: ReactNode }) {
+  const adminTracesRef = useRef<LlmTraceInteraction[] | null>(null);
+  const adminViewRef = useRef<AdminCachedViewState | null>(null);
   const reviewRef = useRef<V2ReviewQueueResponse | null>(null);
   const reviewDraftRef = useRef({ questionId: null as string | null, draft: "" });
   const libraryViewRef = useRef<LibraryViewState>(DEFAULT_LIBRARY_VIEW);
   const libraryRef = useRef(new Map<string, V2LibraryResponse>());
+  const adminRequestRef = useRef<Promise<LlmTraceInteraction[]> | null>(null);
   const reviewRequestsRef = useRef(
     new Map<string, Promise<V2ReviewQueueResponse>>(),
   );
@@ -90,6 +101,14 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
     new Map<string, Promise<V2LibraryResponse>>(),
   );
 
+  const readAdminTraces = useCallback(() => adminTracesRef.current, []);
+  const writeAdminTraces = useCallback((interactions: LlmTraceInteraction[]) => {
+    adminTracesRef.current = interactions;
+  }, []);
+  const readAdminView = useCallback(() => adminViewRef.current, []);
+  const writeAdminView = useCallback((view: AdminCachedViewState) => {
+    adminViewRef.current = view;
+  }, []);
   const readReview = useCallback(() => reviewRef.current, []);
   const writeReview = useCallback((data: V2ReviewQueueResponse) => {
     reviewRef.current = data;
@@ -121,6 +140,27 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const refreshAdminTraces = useCallback(async () => {
+    if (adminRequestRef.current) return adminRequestRef.current;
+
+    const request = getJson<{ interactions: LlmTraceInteraction[] }>(
+      "/api/admin/traces",
+    )
+      .then((data) => {
+        if (!Array.isArray(data.interactions)) {
+          throw new Error("Admin traces response was malformed.");
+        }
+
+        adminTracesRef.current = data.interactions;
+        return data.interactions;
+      })
+      .finally(() => {
+        adminRequestRef.current = null;
+      });
+    adminRequestRef.current = request;
+    return request;
+  }, []);
+
   const refreshReview = useCallback(async (selection: ReviewSelection = {}) => {
     const url = reviewUrl(selection);
     const existing = reviewRequestsRef.current.get(url);
@@ -151,6 +191,14 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
     return request;
   }, []);
 
+  const preloadAdmin = useCallback(async () => {
+    try {
+      await refreshAdminTraces();
+    } catch {
+      // Preloading is opportunistic; the Admin view reports refresh failures.
+    }
+  }, [refreshAdminTraces]);
+
   const preloadReview = useCallback(async () => {
     try {
       await refreshReview({
@@ -171,28 +219,40 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppViewCacheValue>(
     () => ({
+      preloadAdmin,
       preloadLibrary,
       preloadReview,
+      readAdminTraces,
+      readAdminView,
       readLibrary,
       readLibraryView,
       readReview,
       readReviewDraft,
+      refreshAdminTraces,
       refreshLibrary,
       refreshReview,
+      writeAdminTraces,
+      writeAdminView,
       writeLibrary,
       writeLibraryView,
       writeReview,
       writeReviewDraft,
     }),
     [
+      preloadAdmin,
       preloadLibrary,
       preloadReview,
+      readAdminTraces,
+      readAdminView,
       readLibrary,
       readLibraryView,
       readReview,
       readReviewDraft,
+      refreshAdminTraces,
       refreshLibrary,
       refreshReview,
+      writeAdminTraces,
+      writeAdminView,
       writeLibrary,
       writeLibraryView,
       writeReview,

@@ -22,15 +22,18 @@ const AdminPageClientHydrator =
     staticSelector: "[data-admin-static]",
   });
 
-export function AdminHydrator({
-  initialViewState,
-  selectedTraceId,
-}: AdminHydratorProps) {
-  const componentProps: AdminPageClientProps = {
-    initialInteractions: [],
+export const AdminHydrator = Object.assign(
+  function AdminHydrator({
     initialViewState,
     selectedTraceId,
-  };
+  }: AdminHydratorProps) {
+    const componentProps: AdminPageClientProps = {
+      initialInteractions: [],
+      initialViewState,
+      selectedTraceId,
+    };
 
-  return <AdminPageClientHydrator {...componentProps} />;
-}
+    return <AdminPageClientHydrator {...componentProps} />;
+  },
+  { preload: AdminPageClientHydrator.preload },
+);

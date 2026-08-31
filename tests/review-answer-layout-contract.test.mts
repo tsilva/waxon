@@ -43,8 +43,12 @@ test("previous answers start collapsed but a newly completed evaluation opens", 
   );
 });
 
-test("expanded answers expose an icon-only Markdown copy action", () => {
+test("only expanded answers expose an icon-only Markdown copy action", () => {
   assert.match(reviewApp, /hidden=\{!open\}/u);
+  assert.match(
+    reviewApp,
+    /\{open \? \(\s*<div className="review-handoff-actions">/u,
+  );
   assert.match(reviewApp, /aria-label="Copy review as Markdown"/u);
   assert.doesNotMatch(reviewApp, />Copy Markdown</u);
   assert.match(

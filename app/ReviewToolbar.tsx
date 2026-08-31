@@ -3,7 +3,7 @@
 import { LogOut, User, UserCog } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
   reviewToolbarTabFromPathname,
   type ReviewToolbarTab,
@@ -47,7 +47,6 @@ export function ReviewToolbar({
   onAdminClick,
 }: ReviewToolbarProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const activeTab = reviewToolbarTabFromPathname(pathname);
   const { canViewAdmin } = useToolbarState();
   const [pendingTab, setPendingTab] = useState<ReviewToolbarTab | null>(null);
@@ -138,12 +137,10 @@ export function ReviewToolbar({
                 pendingTab === "admin",
               )}
               href="/admin"
-              prefetch={false}
+              prefetch
               role="tab"
               aria-selected={activeTab === "admin"}
               onClick={handleTabClick("admin", onAdminClick)}
-              onFocus={() => router.prefetch("/admin")}
-              onPointerEnter={() => router.prefetch("/admin")}
             >
               Admin
             </Link>
