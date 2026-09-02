@@ -15,6 +15,7 @@
     "question-search:evaluate": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/question-search-evaluate.mts",
     "question-search:benchmark": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/question-search-benchmark.mts",
     "semantic-tags:benchmark": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/semantic-tags-benchmark.mts",
+    "semantic-tags:backfill": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/backfill-semantic-tag-space.mts",
     "recall-evaluator:smoke": "node --import tsx scripts/recall-evaluator-smoke.mts",
     "start": "node scripts/next-server.mjs start",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.mts",

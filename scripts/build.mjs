@@ -27,6 +27,16 @@ export function runBuild({
       ["db:migrate"],
     );
     if (migrationStatus !== 0) return migrationStatus;
+
+    if (environment.WAXON_BACKFILL_SEMANTIC_TAGS === "1") {
+      const backfillStatus = runCommand(
+        spawn,
+        environment,
+        "pnpm",
+        ["semantic-tags:backfill"],
+      );
+      if (backfillStatus !== 0) return backfillStatus;
+    }
   }
 
   return runCommand(spawn, environment, "next", ["build"]);

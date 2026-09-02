@@ -8,7 +8,7 @@ Questions often cross subject boundaries. Stored Tag assignments force Waxon or 
 
 ## Decision
 
-Each Learner has a private, flat registry of English Tags. Tags and Questions have embeddings in explicitly declared Embedding Spaces. Waxon calculates their relatedness at read time and compares only embeddings from the same space.
+Each Learner has a private, flat registry of English Tags. A Tag embedding represents its aliases, canonical label, and semantic description. Tags and Questions have embeddings in explicitly declared Embedding Spaces. Waxon calculates their relatedness at read time and compares only embeddings from the same space.
 
 Questions have no stored Tag membership, assignment provenance, learner override, or Untagged state. Synonymous and overlapping Tags may coexist. Selecting several Tags ranks each Question by its strongest similarity to any selected Tag.
 

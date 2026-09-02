@@ -1,5 +1,7 @@
-export const ACTIVE_EMBEDDING_SPACE_KEY =
+const LEGACY_EMBEDDING_SPACE_KEY =
   "openai:text-embedding-3-small:512:topic-v1" as const;
+export const ACTIVE_EMBEDDING_SPACE_KEY =
+  "openai:text-embedding-3-small:512:topic-v2" as const;
 
 export type EmbeddingSpace = {
   id: number;
@@ -10,8 +12,15 @@ export type EmbeddingSpace = {
 };
 
 const EMBEDDING_SPACES: Readonly<Record<string, EmbeddingSpace>> = {
-  [ACTIVE_EMBEDDING_SPACE_KEY]: {
+  [LEGACY_EMBEDDING_SPACE_KEY]: {
     id: 1,
+    key: LEGACY_EMBEDDING_SPACE_KEY,
+    dimensions: 512,
+    metric: "cosine",
+    requestModel: "openai/text-embedding-3-small",
+  },
+  [ACTIVE_EMBEDDING_SPACE_KEY]: {
+    id: 2,
     key: ACTIVE_EMBEDDING_SPACE_KEY,
     dimensions: 512,
     metric: "cosine",
