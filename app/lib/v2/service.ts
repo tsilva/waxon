@@ -576,7 +576,7 @@ export async function listLibrary(input: {
     relatedTags({
       learnerId: input.userId,
       questionIds: pageRows.map((row) => row.id),
-      limit: 10,
+      limit: 3,
     }),
     pool.query<{ lifecycle: string; count: string }>(
       `SELECT lifecycle::text, count(*)::text

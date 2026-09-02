@@ -7,7 +7,9 @@ import type { V2QuestionLifecycle, V2TagRef } from "./types.ts";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_RELATED_QUESTIONS = 50;
-const MAX_RELATED_TAGS = 10;
+export const MAX_RELATED_TAGS = 3;
+export const MIN_RELATED_TAG_SIMILARITY = 0.55;
+const MAX_RELATED_TAG_DISTANCE = 1 - MIN_RELATED_TAG_SIMILARITY;
 const MAX_SELECTED_TAGS = 10;
 
 type SemanticCursor = {
@@ -89,6 +91,7 @@ export async function relatedTags(input: {
       attributes: {
         "embedding.space": space.key,
         "semantic.question_count": questionIds.length,
+        "semantic.minimum_similarity": MIN_RELATED_TAG_SIMILARITY,
       },
     },
     async (span) => {
@@ -134,11 +137,18 @@ export async function relatedTags(input: {
                 AND embedding.space_id = $2
                 AND selected.embedding IS NOT NULL
                 AND tag.deleted_at IS NULL
+                AND (embedding.embedding <=> selected.embedding) <= $5
               ORDER BY distance, tag.id
               LIMIT $4
            ) nearest ON true
           ORDER BY selected.question_id, nearest.distance, nearest.tag_id`,
-        [input.learnerId, space.id, questionIds, limit],
+        [
+          input.learnerId,
+          space.id,
+          questionIds,
+          limit,
+          MAX_RELATED_TAG_DISTANCE,
+        ],
       );
       for (const row of result.rows) {
         if (row.tag_id && row.label) {
