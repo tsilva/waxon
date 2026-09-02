@@ -219,15 +219,12 @@ try {
             properties: {
               judgments: {
                 type: "array",
-                minItems: questions.length,
-                maxItems: questions.length,
                 items: {
                   type: "object",
                   properties: {
                     question: { type: "integer", minimum: 0 },
                     relevant: {
                       type: "array",
-                      uniqueItems: true,
                       items: { type: "integer", minimum: 0, maximum: 2 },
                     },
                   },
