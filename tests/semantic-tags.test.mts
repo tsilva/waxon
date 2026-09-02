@@ -57,7 +57,7 @@ test("embedding writes validate dimensions, finiteness, and magnitude", () => {
 
 test("related Tag display uses the calibrated precision-first cutoff", () => {
   assert.equal(MAX_RELATED_TAGS, 3);
-  assert.equal(MIN_RELATED_TAG_SIMILARITY, 0.55);
+  assert.equal(MIN_RELATED_TAG_SIMILARITY, 0.51);
 });
 
 test("a semantic cursor cannot be reused for another query", async () => {
