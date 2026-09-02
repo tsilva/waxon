@@ -82,6 +82,26 @@ test("a failed semantic Tag backfill prevents activation of that space", () => {
   ]);
 });
 
+test("a requested production build calibrates the active semantic Tag space", () => {
+  const runner = recordingSpawn();
+
+  assert.equal(
+    runBuild({
+      environment: {
+        VERCEL_ENV: "production",
+        WAXON_CALIBRATE_SEMANTIC_TAGS: "1",
+      },
+      spawn: runner.spawn,
+    }),
+    0,
+  );
+  assert.deepEqual(runner.calls, [
+    { command: "pnpm", args: ["db:migrate"] },
+    { command: "pnpm", args: ["semantic-tags:calibrate"] },
+    { command: "next", args: ["build"] },
+  ]);
+});
+
 test("a failed Vercel migration prevents an incompatible app build", () => {
   for (const vercelEnvironment of ["preview", "production"]) {
     const runner = recordingSpawn([1]);

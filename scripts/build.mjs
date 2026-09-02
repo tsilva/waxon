@@ -37,6 +37,16 @@ export function runBuild({
       );
       if (backfillStatus !== 0) return backfillStatus;
     }
+
+    if (environment.WAXON_CALIBRATE_SEMANTIC_TAGS === "1") {
+      const calibrationStatus = runCommand(
+        spawn,
+        environment,
+        "pnpm",
+        ["semantic-tags:calibrate"],
+      );
+      if (calibrationStatus !== 0) return calibrationStatus;
+    }
   }
 
   return runCommand(spawn, environment, "next", ["build"]);
