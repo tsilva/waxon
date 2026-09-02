@@ -57,7 +57,7 @@ export type ApplicationContractHarness = {
     answerSubmissionColumns: string[];
     evaluationColumns: string[];
     gradeEventColumns: string[];
-    questionSearchEmbeddingColumns: string[];
+    questionEmbeddingColumns: string[];
     questionVersionIdLocations: string[];
     obsoleteContractObjects: string[];
     enumValues: Record<string, string[]>;
@@ -179,7 +179,7 @@ export async function withApplicationContract(
           answerSubmissionColumns,
           evaluationColumns,
           gradeEventColumns,
-          questionSearchEmbeddingColumns,
+          questionEmbeddingColumns,
           enumValues,
           questionVersionIdLocations,
           obsoleteContractObjects,
@@ -230,7 +230,7 @@ export async function withApplicationContract(
               `SELECT column_name AS "columnName"
                  FROM information_schema.columns
                 WHERE table_schema = 'waxon_v2'
-                  AND table_name = 'question_search_embeddings'
+                  AND table_name = 'question_embeddings'
                 ORDER BY ordinal_position`,
             ),
             pool.query<{ enumName: string; enumValue: string }>(
@@ -285,8 +285,8 @@ export async function withApplicationContract(
           ),
           evaluationColumns: evaluationColumns.rows.map((row) => row.columnName),
           gradeEventColumns: gradeEventColumns.rows.map((row) => row.columnName),
-          questionSearchEmbeddingColumns:
-            questionSearchEmbeddingColumns.rows.map((row) => row.columnName),
+          questionEmbeddingColumns:
+            questionEmbeddingColumns.rows.map((row) => row.columnName),
           questionVersionIdLocations: questionVersionIdLocations.rows.map(
             (row) => row.location,
           ),

@@ -11,6 +11,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Tags,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
@@ -32,6 +33,7 @@ import type {
   V2LibraryResponse,
   V2QuestionLifecycle,
   V2Question,
+  V2TagRef,
 } from "@/app/lib/v2/types";
 import { REVIEW_FLAG_REASON_LABELS } from "@/app/lib/v2/reviewFlag";
 import {
@@ -42,6 +44,7 @@ import {
 const EMPTY_DATA: V2LibraryResponse = {
   questions: [],
   counts: { active: 0, flagged: 0, archived: 0 },
+  nextCursor: null,
 };
 const FILTERS: Array<{ value: V2QuestionLifecycle | "all"; label: string }> = [
   { value: "all", label: "All" },
@@ -269,12 +272,14 @@ function QuestionRow({
   isRemoving,
   onEdit,
   onFlag,
+  onTagClick,
   onAction,
 }: {
   question: V2Question;
   isRemoving: boolean;
   onEdit: () => void;
   onFlag: () => void;
+  onTagClick: (tagId: string) => void;
   onAction: (action: "archive" | "restore") => void;
 }) {
   const unresolvedFlags = question.flags.filter((flag) => !flag.resolvedAt);
@@ -289,6 +294,7 @@ function QuestionRow({
           {question.dueAt ? <span><CalendarClock /> {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(question.dueAt))}</span> : null}
         </div>
         <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
+        {question.relatedTags.length > 0 ? <div className="lean-question-tags" aria-label="Related Tags">{question.relatedTags.map((tag) => <button key={tag.id} onClick={() => onTagClick(tag.id)} type="button">{tag.label}</button>)}</div> : null}
         {question.lifecycle === "flagged" && unresolvedFlags.length > 0 ? (
           <details className="lean-flag-details">
             <summary>Flag details</summary>
@@ -344,20 +350,26 @@ export default function LibraryPageClient() {
     initialView.filter,
   );
   const [search, setSearch] = useState(initialView.search);
+  const [tagIds, setTagIds] = useState<string[]>(initialView.tagIds ?? []);
+  const [availableTags, setAvailableTags] = useState<V2TagRef[]>([]);
+  const [tagNextCursor, setTagNextCursor] = useState<string | null>(null);
+  const [loadingTags, setLoadingTags] = useState(true);
   const [loading, setLoading] = useState(!initialData);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState<V2Question | null | undefined>(undefined);
   const [flagging, setFlagging] = useState<V2Question | null>(null);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [tagFilterSearch, setTagFilterSearch] = useState("");
   const [removingQuestionIds, setRemovingQuestionIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [archiveAnnouncement, setArchiveAnnouncement] = useState(0);
   const hasRenderedDataRef = useRef(Boolean(initialData));
   const activeView = useMemo<LibraryViewState>(
-    () => ({ filter, search }),
-    [filter, search],
+    () => ({ filter, search, tagIds }),
+    [filter, search, tagIds],
   );
 
   const load = useCallback(async () => {
@@ -382,6 +394,35 @@ export default function LibraryPageClient() {
     );
     void viewCache.preloadReview();
   }, [router, viewCache]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setLoadingTags(true);
+      try {
+        const params = new URLSearchParams();
+        if (tagFilterSearch.trim()) params.set("search", tagFilterSearch.trim());
+        const result = await jsonRequest<{
+          tags: V2TagRef[];
+          nextCursor: string | null;
+        }>(`/api/v2/tags${params.size > 0 ? `?${params.toString()}` : ""}`);
+        if (!cancelled) {
+          setAvailableTags(result.tags);
+          setTagNextCursor(result.nextCursor);
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : "Could not load Tags.");
+        }
+      } finally {
+        if (!cancelled) setLoadingTags(false);
+      }
+    }, tagFilterSearch ? 180 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [tagFilterSearch]);
 
   useEffect(() => {
     let cancelled = false;
@@ -420,6 +461,49 @@ export default function LibraryPageClient() {
   }, [activeView, search, viewCache]);
 
   const total = useMemo(() => Object.values(data.counts).reduce((sum, value) => sum + value, 0), [data.counts]);
+
+  async function loadMore() {
+    if (!data.nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams();
+      if (filter !== "all") params.set("lifecycle", filter);
+      if (search.trim()) params.set("search", search.trim());
+      for (const tagId of tagIds) params.append("tag", tagId);
+      params.set("cursor", data.nextCursor);
+      const page = await jsonRequest<V2LibraryResponse>(`/api/v2/library?${params.toString()}`);
+      replaceVisibleData({
+        ...page,
+        questions: [...data.questions, ...page.questions],
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load more Questions.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  async function loadMoreTags() {
+    if (!tagNextCursor || loadingTags) return;
+    setLoadingTags(true);
+    try {
+      const params = new URLSearchParams({ cursor: tagNextCursor });
+      if (tagFilterSearch.trim()) params.set("search", tagFilterSearch.trim());
+      const result = await jsonRequest<{
+        tags: V2TagRef[];
+        nextCursor: string | null;
+      }>(`/api/v2/tags?${params.toString()}`);
+      setAvailableTags((current) => [
+        ...current,
+        ...result.tags.filter((tag) => !current.some(({ id }) => id === tag.id)),
+      ]);
+      setTagNextCursor(result.nextCursor);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load more Tags.");
+    } finally {
+      setLoadingTags(false);
+    }
+  }
 
   async function questionAction(questionId: string, action: "archive" | "restore") {
     setError(null);
@@ -491,19 +575,37 @@ export default function LibraryPageClient() {
             <label className="lean-search"><Search /><span className="sr-only">Search questions</span><input onChange={(event) => {
               const nextSearch = event.currentTarget.value;
               setSearch(nextSearch);
-              viewCache.writeLibraryView({ filter, search: nextSearch });
+              viewCache.writeLibraryView({ filter, search: nextSearch, tagIds });
             }} placeholder="Search questions and answers" type="search" value={search} /></label>
             <nav aria-label="Question filters">
               {FILTERS.map((item) => (
                 <button aria-pressed={filter === item.value} key={item.value} onClick={() => {
                   setFilter(item.value);
-                  viewCache.writeLibraryView({ filter: item.value, search });
+                  viewCache.writeLibraryView({ filter: item.value, search, tagIds });
                 }} type="button">
                   {item.label}<span>{item.value === "all" ? total : data.counts[item.value]}</span>
                 </button>
               ))}
             </nav>
           </div>
+          {loadingTags || availableTags.length > 0 || tagIds.length > 0 ? <div className="lean-tag-filter-row">
+            <details className="lean-tag-filter" onToggle={(event) => {
+              if (!event.currentTarget.open) setTagFilterSearch("");
+            }}>
+              <summary><Tags /> {tagIds.length > 0 ? `${tagIds.length} selected` : "Filter by Tags"}</summary>
+              <div>
+                <label className="lean-tag-filter-search"><Search /><span className="sr-only">Search Tags</span><input onChange={(event) => setTagFilterSearch(event.currentTarget.value)} placeholder="Search Tags" type="search" value={tagFilterSearch} /></label>
+                {availableTags.map((tag) => <label key={tag.id}><input checked={tagIds.includes(tag.id)} disabled={!tagIds.includes(tag.id) && tagIds.length >= 10} onChange={(event) => {
+                  const next = event.currentTarget.checked ? [...tagIds, tag.id] : tagIds.filter((tagId) => tagId !== tag.id);
+                  setTagIds(next);
+                  viewCache.writeLibraryView({ filter, search, tagIds: next });
+                }} type="checkbox" /><span>{tag.label}</span></label>)}
+                {loadingTags ? <span className="lean-tag-loading"><LoaderCircle className="v2-spin" /> Loading Tags</span> : null}
+                {tagNextCursor ? <button disabled={loadingTags} onClick={() => void loadMoreTags()} type="button">Load more Tags</button> : null}
+              </div>
+            </details>
+            {tagIds.length > 0 ? <button onClick={() => { setTagIds([]); viewCache.writeLibraryView({ filter, search, tagIds: [] }); }} type="button">Clear Tags</button> : null}
+          </div> : null}
           {message ? <p className="question-bank-message" role="status">{message}</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
           <div className="lean-question-list">
@@ -514,10 +616,12 @@ export default function LibraryPageClient() {
                 onAction={(action) => void questionAction(question.id, action).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not update question."))}
                 onEdit={() => setEditing(question)}
                 onFlag={() => setFlagging(question)}
+                onTagClick={(tagId) => { setTagIds([tagId]); viewCache.writeLibraryView({ filter, search, tagIds: [tagId] }); }}
                 question={question}
               />
-            )) : <div className="question-bank-empty"><h2>{search ? "No matching questions" : filter === "flagged" ? "No Questions need attention" : filter === "archived" ? "No Archived Questions" : "Your Library is empty"}</h2><p>{search ? "Try a different phrase or filter." : filter === "flagged" ? "Nothing is waiting for attention." : filter === "archived" ? "Nothing is out of circulation." : "Add one clear Prompt and its Answer Standard."}</p>{!search && (filter === "all" || filter === "active") ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
+            )) : <div className="question-bank-empty"><h2>{search || tagIds.length > 0 ? "No matching questions" : filter === "flagged" ? "No Questions need attention" : filter === "archived" ? "No Archived Questions" : "Your Library is empty"}</h2><p>{search || tagIds.length > 0 ? "Try a different phrase or filter." : filter === "flagged" ? "Nothing is waiting for attention." : filter === "archived" ? "Nothing is out of circulation." : "Add one clear Prompt and its Answer Standard."}</p>{!search && tagIds.length === 0 && (filter === "all" || filter === "active") ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}
           </div>
+          {data.nextCursor ? <div className="lean-load-more"><button disabled={loadingMore} onClick={() => void loadMore()} type="button">{loadingMore ? <LoaderCircle className="v2-spin" /> : null}Load more</button></div> : null}
           {archiveAnnouncement > 0 ? (
             <p className="sr-only" key={archiveAnnouncement} role="status">
               Question archived.

@@ -15,6 +15,7 @@ type MigrationJournal = {
 
 const expectedTables = [
   "answer_submissions",
+  "embedding_spaces",
   "evaluations",
   "grade_events",
   "jobs",
@@ -23,10 +24,12 @@ const expectedTables = [
   "mcp_credentials",
   "memory_states",
   "mutation_receipts",
+  "question_embeddings",
   "question_flags",
-  "question_search_embeddings",
   "questions",
   "recall_result_corrections",
+  "tag_embeddings",
+  "tags",
   "users",
 ];
 
@@ -62,6 +65,7 @@ const expectedColumns: Record<string, string[]> = {
   answer_submissions: [
     "id", "user_id", "question_id", "answer", "status", "submitted_at", "created_at",
   ],
+  embedding_spaces: ["id", "key"],
   evaluations: [
     "id", "user_id", "question_id", "submission_id", "status", "evaluator",
     "proposed_grade", "feedback", "expected_answer", "covered_points",
@@ -98,16 +102,18 @@ const expectedColumns: Record<string, string[]> = {
     "id", "user_id", "question_id", "origin", "reasons", "detail", "created_at",
     "resolved_at",
   ],
-  question_search_embeddings: [
-    "user_id", "question_id", "model", "embedding_version", "prompt_hash", "embedding",
-    "created_at", "updated_at",
-  ],
+  question_embeddings: ["user_id", "space_id", "question_id", "embedding"],
   questions: [
     "id", "user_id", "prompt", "reference_answer", "lifecycle", "target_key",
     "creation_order", "created_at", "updated_at",
   ],
   recall_result_corrections: [
     "id", "user_id", "question_id", "submission_id", "recall_result", "created_at",
+  ],
+  tag_embeddings: ["user_id", "space_id", "tag_id", "embedding"],
+  tags: [
+    "id", "user_id", "label", "normalized_label", "scope_note", "deleted_at",
+    "created_at", "updated_at",
   ],
   users: [
     "id", "display_name", "email", "avatar_url", "created_at", "updated_at",
@@ -116,6 +122,7 @@ const expectedColumns: Record<string, string[]> = {
 
 const expectedNullableColumns: Record<string, string[]> = {
   answer_submissions: [],
+  embedding_spaces: [],
   evaluations: [
     "proposed_grade", "feedback", "expected_answer", "demonstrated_gap", "confidence",
     "error", "completed_at", "proposed_recall_result",
@@ -128,9 +135,11 @@ const expectedNullableColumns: Record<string, string[]> = {
   memory_states: ["last_review_at"],
   mutation_receipts: [],
   question_flags: ["detail", "resolved_at"],
-  question_search_embeddings: [],
+  question_embeddings: [],
   questions: [],
   recall_result_corrections: [],
+  tag_embeddings: [],
+  tags: ["deleted_at"],
   users: ["avatar_url"],
 };
 
@@ -176,14 +185,15 @@ const expectedDefaults: Record<string, string> = {
   "question_flags.reasons": "'[]'::jsonb",
   "recall_result_corrections.created_at": "now()",
   "recall_result_corrections.id": "gen_random_uuid()",
-  "question_search_embeddings.created_at": "now()",
-  "question_search_embeddings.updated_at": "now()",
   "questions.created_at": "now()",
   "questions.creation_order":
     "nextval('waxon_v2.questions_creation_order_seq'::regclass)",
   "questions.id": "gen_random_uuid()",
   "questions.lifecycle": "'active'::waxon_v2.question_lifecycle",
   "questions.updated_at": "now()",
+  "tags.created_at": "now()",
+  "tags.id": "gen_random_uuid()",
+  "tags.updated_at": "now()",
   "users.created_at": "now()",
   "users.updated_at": "now()",
 };
@@ -195,6 +205,8 @@ const expectedConstraintDefinitions: Record<string, string> = {
   answer_submissions_user_id_id_unique: "UNIQUE (user_id, id)",
   answer_submissions_user_id_id_question_id_unique:
     "UNIQUE (user_id, id, question_id)",
+  embedding_spaces_pkey: "PRIMARY KEY (id)",
+  embedding_spaces_key_unique: "UNIQUE (key)",
   evaluations_pkey: "PRIMARY KEY (id)",
   evaluations_question_fk:
     "FOREIGN KEY (user_id, question_id) REFERENCES waxon_v2.questions(user_id, id) ON DELETE RESTRICT",
@@ -228,14 +240,23 @@ const expectedConstraintDefinitions: Record<string, string> = {
   question_flags_pkey: "PRIMARY KEY (id)",
   question_flags_question_fk:
     "FOREIGN KEY (user_id, question_id) REFERENCES waxon_v2.questions(user_id, id) ON DELETE CASCADE",
-  question_search_embeddings_pk:
-    "PRIMARY KEY (user_id, question_id, model, embedding_version)",
-  question_search_embeddings_question_fk:
+  question_embeddings_pk:
+    "PRIMARY KEY (user_id, space_id, question_id)",
+  question_embeddings_question_fk:
     "FOREIGN KEY (user_id, question_id) REFERENCES waxon_v2.questions(user_id, id) ON DELETE CASCADE",
+  question_embeddings_space_id_embedding_spaces_id_fk:
+    "FOREIGN KEY (space_id) REFERENCES waxon_v2.embedding_spaces(id)",
   questions_pkey: "PRIMARY KEY (id)",
   questions_user_id_id_unique: "UNIQUE (user_id, id)",
   questions_user_id_users_id_fk:
     "FOREIGN KEY (user_id) REFERENCES waxon_v2.users(id) ON DELETE CASCADE",
+  tag_embeddings_pk: "PRIMARY KEY (user_id, space_id, tag_id)",
+  tag_embeddings_space_id_embedding_spaces_id_fk:
+    "FOREIGN KEY (space_id) REFERENCES waxon_v2.embedding_spaces(id)",
+  tag_embeddings_tag_fk:
+    "FOREIGN KEY (user_id, tag_id) REFERENCES waxon_v2.tags(user_id, id) ON DELETE CASCADE",
+  tags_pkey: "PRIMARY KEY (id)",
+  tags_user_id_id_unique: "UNIQUE (user_id, id)",
   users_id_nonempty: "CHECK ((length(TRIM(BOTH FROM id)) > 0))",
   users_pkey: "PRIMARY KEY (id)",
 };
@@ -254,9 +275,6 @@ const expectedIndexFragments: Record<string, string[]> = {
     "(user_id, question_id)",
     "WHERE (resolved_at IS NULL)",
   ],
-  question_search_embeddings_lookup_idx: [
-    "(user_id, model, embedding_version)",
-  ],
   questions_active_target_unique: [
     "CREATE UNIQUE INDEX",
     "(user_id, target_key)",
@@ -266,6 +284,12 @@ const expectedIndexFragments: Record<string, string[]> = {
   questions_search_idx: ["USING gin", "to_tsvector", "reference_answer"],
   questions_user_lifecycle_idx: ["(user_id, lifecycle)"],
   questions_user_target_idx: ["(user_id, target_key)"],
+  tags_active_normalized_label_unique: [
+    "CREATE UNIQUE INDEX",
+    "(user_id, normalized_label)",
+    "WHERE (deleted_at IS NULL)",
+  ],
+  tags_user_deleted_label_idx: ["(user_id, deleted_at, label)"],
   users_email_idx: ["(email)"],
   v2_llm_trace_interactions_started_at_idx: [
     "(started_at DESC NULLS LAST)",
@@ -283,7 +307,6 @@ const retiredIdentifiers = [
   "generation_run_artifacts",
   "generation_runs",
   "question_concepts",
-  "question_embeddings",
   "question_evidence",
   "question_relations",
   "question_versions",
@@ -398,7 +421,7 @@ test(
 
     assert.deepEqual(
       journal.entries.map(({ idx }) => idx),
-      [0, 1],
+      [0, 1, 2, 3],
       "the migration history must start at the clean baseline and remain sequential",
     );
 
@@ -560,7 +583,7 @@ test(
         `SELECT column_name AS name
            FROM information_schema.columns
           WHERE table_schema = $1
-            AND table_name = 'question_search_embeddings'
+            AND table_name = 'question_embeddings'
           ORDER BY ordinal_position`,
         [schemaName],
       );
@@ -568,13 +591,9 @@ test(
         searchColumns.rows.map(({ name }) => name),
         [
           "user_id",
+          "space_id",
           "question_id",
-          "model",
-          "embedding_version",
-          "prompt_hash",
           "embedding",
-          "created_at",
-          "updated_at",
         ],
       );
     } finally {

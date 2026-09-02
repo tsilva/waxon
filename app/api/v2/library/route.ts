@@ -13,6 +13,7 @@ const LIFECYCLES = new Set<V2QuestionLifecycle>([
   "flagged",
   "archived",
 ]);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 async function startEmbeddingJobsBestEffort(userId: string) {
   try {
@@ -34,10 +35,16 @@ export async function GET(request: Request) {
       requested && LIFECYCLES.has(requested as V2QuestionLifecycle)
         ? (requested as V2QuestionLifecycle)
         : "all";
+    const tagIds = url.searchParams.getAll("tag");
+    if (tagIds.length > 10 || tagIds.some((tagId) => !UUID_PATTERN.test(tagId))) {
+      throw new Error("Choose at most 10 valid Tags.");
+    }
     return NextResponse.json(
       await application.questionBank.list({
         lifecycle,
         search: url.searchParams.get("search") ?? "",
+        tagIds,
+        cursor: url.searchParams.get("cursor") ?? undefined,
       }),
     );
   } catch (error) {

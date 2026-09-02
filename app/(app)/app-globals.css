@@ -181,6 +181,128 @@
   pointer-events: none;
 }
 
+.lean-question-tags,
+.lean-tag-filter-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lean-question-tags button {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.55rem;
+}
+
+.lean-tag-filter-row {
+  margin: 0.75rem 0;
+}
+
+.lean-tag-filter {
+  position: relative;
+}
+
+.lean-tag-filter summary,
+.lean-tag-filter-row > button,
+.lean-load-more button {
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--surface);
+  color: inherit;
+  padding: 0.55rem 0.75rem;
+}
+
+.lean-tag-filter summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.lean-tag-filter summary svg,
+.lean-question-tags + svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.lean-tag-filter[open] > div {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  display: grid;
+  min-width: 17rem;
+  max-height: 22rem;
+  overflow: auto;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: var(--surface);
+  box-shadow: 0 1rem 2.5rem rgb(0 0 0 / 15%);
+}
+
+.lean-tag-filter label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem;
+}
+
+.lean-tag-filter .lean-tag-filter-search {
+  position: sticky;
+  top: -0.5rem;
+  z-index: 1;
+  grid-template-columns: auto minmax(0, 1fr);
+  background: var(--surface);
+}
+
+.lean-tag-filter-search svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.lean-tag-filter-search input {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: var(--surface);
+  color: inherit;
+  padding: 0.5rem;
+}
+
+.lean-tag-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem;
+}
+
+.lean-load-more {
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+}
+
+@media (max-width: 640px) {
+  .lean-tag-filter-row,
+  .lean-tag-filter-row > *,
+  .lean-tag-filter {
+    width: 100%;
+  }
+
+  .lean-tag-filter[open] > div {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
 .lean-question-copy {
   min-width: 0;
 }

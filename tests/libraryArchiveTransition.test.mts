@@ -24,6 +24,7 @@ function question(
     referenceAnswer: `${id} answer`,
     lifecycle,
     flags: [],
+    relatedTags: [],
     dueAt: null,
     createdAt: "2026-08-27T12:00:00.000Z",
     updatedAt: "2026-08-27T12:00:00.000Z",
@@ -34,6 +35,7 @@ test("archiving removes only the selected Library row and updates lifecycle coun
   const data: V2LibraryResponse = {
     questions: [question("active-1", "active"), question("flagged-1", "flagged")],
     counts: { active: 1, flagged: 1, archived: 2 },
+    nextCursor: null,
   };
 
   const next = removeArchivedQuestionFromView(data, "active-1");
@@ -52,6 +54,7 @@ test("archive removal is a no-op for absent or already archived questions", () =
   const data: V2LibraryResponse = {
     questions: [question("archived-1", "archived")],
     counts: { active: 0, flagged: 0, archived: 1 },
+    nextCursor: null,
   };
 
   assert.equal(removeArchivedQuestionFromView(data, "missing"), data);

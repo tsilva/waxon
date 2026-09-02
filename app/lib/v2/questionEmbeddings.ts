@@ -1,16 +1,16 @@
 import * as Sentry from "@sentry/nextjs";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getV2Db } from "../../db/v2/client.ts";
 import {
   jobs,
-  questionSearchEmbeddings,
+  questionEmbeddings,
   questions,
 } from "../../db/v2/schema.ts";
+import { resolveQuestionSearchConfig } from "../../../shared/question-search.mts";
 import {
-  QUESTION_SEARCH_EMBEDDING_VERSION,
-  questionSearchPromptHash,
-  resolveQuestionSearchConfig,
-} from "../../../shared/question-search.mts";
+  activeEmbeddingSpace,
+  validateEmbedding,
+} from "./embeddingSpaces.ts";
 import { claimV2Job } from "./jobs.ts";
 import { embedQuestionSearchPrompts } from "./questionSearch.ts";
 
@@ -55,63 +55,49 @@ export async function runQuestionEmbeddingJob(jobId: string): Promise<void> {
           inArray(questions.id, questionIds),
         ),
       );
+    const space = activeEmbeddingSpace();
     const { model } = resolveQuestionSearchConfig();
+    if (model !== space.requestModel) {
+      throw new Error(`Embedding space ${space.key} requires ${space.requestModel}.`);
+    }
     const existing = await db
       .select({
-        questionId: questionSearchEmbeddings.questionId,
-        promptHash: questionSearchEmbeddings.promptHash,
+        questionId: questionEmbeddings.questionId,
       })
-      .from(questionSearchEmbeddings)
+      .from(questionEmbeddings)
       .where(
         and(
-          eq(questionSearchEmbeddings.userId, job.userId),
-          eq(questionSearchEmbeddings.model, model),
-          eq(
-            questionSearchEmbeddings.embeddingVersion,
-            QUESTION_SEARCH_EMBEDDING_VERSION,
-          ),
-          inArray(questionSearchEmbeddings.questionId, questionIds),
+          eq(questionEmbeddings.userId, job.userId),
+          eq(questionEmbeddings.spaceId, space.id),
+          inArray(questionEmbeddings.questionId, questionIds),
         ),
       );
-    const existingByQuestion = new Map(
-      existing.map((row) => [row.questionId, row] as const),
-    );
-    const missing = current.filter((row) => {
-      const prior = existingByQuestion.get(row.questionId);
-      return (
-        !prior ||
-        prior.promptHash !== questionSearchPromptHash(row.prompt)
-      );
-    });
+    const existingQuestionIds = new Set(existing.map((row) => row.questionId));
+    const missing = current.filter((row) => !existingQuestionIds.has(row.questionId));
     if (missing.length > 0) {
       const embedded = await embedQuestionSearchPrompts(
         job.userId,
         missing.map((row) => row.prompt),
       );
+      if (embedded.model !== space.requestModel) {
+        throw new Error(`Embedding provider returned ${embedded.model}, expected ${space.requestModel}.`);
+      }
       await db
-        .insert(questionSearchEmbeddings)
+        .insert(questionEmbeddings)
         .values(
           missing.map((row, index) => ({
             userId: job.userId,
+            spaceId: space.id,
             questionId: row.questionId,
-            model: embedded.model,
-            embeddingVersion: QUESTION_SEARCH_EMBEDDING_VERSION,
-            promptHash: questionSearchPromptHash(row.prompt),
-            embedding: embedded.embeddings[index] ?? [],
+            embedding: validateEmbedding(embedded.embeddings[index] ?? [], space),
           })),
         )
-        .onConflictDoUpdate({
+        .onConflictDoNothing({
           target: [
-            questionSearchEmbeddings.userId,
-            questionSearchEmbeddings.questionId,
-            questionSearchEmbeddings.model,
-            questionSearchEmbeddings.embeddingVersion,
+            questionEmbeddings.userId,
+            questionEmbeddings.spaceId,
+            questionEmbeddings.questionId,
           ],
-          set: {
-            promptHash: sql`excluded.prompt_hash`,
-            embedding: sql`excluded.embedding`,
-            updatedAt: new Date(),
-          },
         });
     }
     await db

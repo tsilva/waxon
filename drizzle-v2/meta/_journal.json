@@ -15,6 +15,20 @@
       "when": 1787936466888,
       "tag": "0001_tough_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788189764230,
+      "tag": "0002_brief_boomerang",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788364325673,
+      "tag": "0003_semantic_tag_retrieval",
+      "breakpoints": true
     }
   ]
 }

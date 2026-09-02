@@ -19,6 +19,7 @@ import type { AdminCachedViewState } from "@/app/(app)/admin/adminViewStateCooki
 export type LibraryViewState = {
   filter: V2QuestionLifecycle | "all";
   search: string;
+  tagIds: string[];
 };
 
 type ReviewSelection = {
@@ -55,6 +56,7 @@ type AppViewCacheValue = {
 const DEFAULT_LIBRARY_VIEW: LibraryViewState = {
   filter: "all",
   search: "",
+  tagIds: [],
 };
 
 const AppViewCacheContext = createContext<AppViewCacheValue | null>(null);
@@ -63,6 +65,7 @@ function libraryUrl(view: LibraryViewState): string {
   const params = new URLSearchParams();
   if (view.filter !== "all") params.set("lifecycle", view.filter);
   if (view.search.trim()) params.set("search", view.search.trim());
+  for (const tagId of view.tagIds) params.append("tag", tagId);
   const query = params.toString();
   return `/api/v2/library${query ? `?${query}` : ""}`;
 }

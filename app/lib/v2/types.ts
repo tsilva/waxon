@@ -12,11 +12,17 @@ export type V2QuestionFlag = {
   resolvedAt: string | null;
 };
 
+export type V2TagRef = {
+  id: string;
+  label: string;
+};
+
 export type V2Question = {
   id: string;
   prompt: string;
   referenceAnswer: string;
   lifecycle: V2QuestionLifecycle;
+  relatedTags: V2TagRef[];
   flags: V2QuestionFlag[];
   dueAt: string | null;
   createdAt: string;
@@ -26,6 +32,12 @@ export type V2Question = {
 export type V2LibraryResponse = {
   questions: V2Question[];
   counts: Record<V2QuestionLifecycle, number>;
+  nextCursor: string | null;
+};
+
+export type V2TagListResponse = {
+  tags: V2TagRef[];
+  nextCursor: string | null;
 };
 
 export type V2ReviewQuestion = {

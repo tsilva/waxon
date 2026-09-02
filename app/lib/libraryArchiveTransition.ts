@@ -17,6 +17,7 @@ export function removeArchivedQuestionFromView(
   counts.archived += 1;
 
   return {
+    ...data,
     counts,
     questions: data.questions.filter((candidate) => candidate.id !== questionId),
   };
