@@ -134,10 +134,7 @@ test(
         (await service.listLibrary({ userId: learnerA })).questions
           .find(({ id }) => id === neural)
           ?.relatedTags,
-        [
-          { id: deepLearning, label: "Deep learning" },
-          { id: statistics, label: "Statistics" },
-        ],
+        [{ id: deepLearning, label: "Deep learning" }],
       );
       assert.equal(
         (await service.listLibrary({ userId: learnerA })).questions.some(

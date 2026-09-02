@@ -9,6 +9,8 @@ import {
   validateEmbedding,
 } from "../app/lib/v2/embeddingSpaces.ts";
 import {
+  MAX_RELATED_TAGS,
+  MIN_RELATED_TAG_SIMILARITY,
   relatedQuestions,
   relatedTags,
 } from "../app/lib/v2/semanticTags.ts";
@@ -39,6 +41,11 @@ test("embedding writes validate dimensions, finiteness, and magnitude", () => {
     /finite/u,
   );
   assert.throws(() => validateEmbedding(Array(512).fill(0)), /non-zero/u);
+});
+
+test("related Tag display uses the calibrated precision-first cutoff", () => {
+  assert.equal(MAX_RELATED_TAGS, 3);
+  assert.equal(MIN_RELATED_TAG_SIMILARITY, 0.55);
 });
 
 test("a semantic cursor cannot be reused for another query", async () => {
