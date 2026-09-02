@@ -14,11 +14,12 @@ import {
   relatedQuestions,
   relatedTags,
 } from "../app/lib/v2/semanticTags.ts";
+import { tagEmbeddingInput } from "../shared/tag-embedding.mts";
 
 test("the active semantic space fixes model, dimensions, and metric", () => {
   assert.deepEqual(activeEmbeddingSpace(), {
-    id: 1,
-    key: "openai:text-embedding-3-small:512:topic-v1",
+    id: 2,
+    key: "openai:text-embedding-3-small:512:topic-v2",
     dimensions: 512,
     metric: "cosine",
     requestModel: "openai/text-embedding-3-small",
@@ -28,6 +29,17 @@ test("the active semantic space fixes model, dimensions, and metric", () => {
     activeEmbeddingSpace().id,
   );
   assert.throws(() => embeddingSpaceForKey("unknown"), /not supported/u);
+});
+
+test("Tag embedding input puts normalized aliases before the label and description", () => {
+  assert.equal(
+    tagEmbeddingInput({
+      label: " Proximal  Policy Optimization ",
+      aliases: ["PPO", "ppo", "Proximal Policy Optimization"],
+      description: " On-policy   optimization. ",
+    }),
+    "PPO. Proximal Policy Optimization.\nOn-policy optimization.",
+  );
 });
 
 test("embedding writes validate dimensions, finiteness, and magnitude", () => {
@@ -141,4 +153,21 @@ test("the forward migration preserves compatible vectors and removes assignments
     assert.match(migration, new RegExp(`DROP TABLE .*${retired}`, "u"));
   }
   assert.doesNotMatch(migration, /DROP TABLE "waxon_v2"\."questions"/u);
+});
+
+test("the enriched Tag migration preserves Question vectors and seeds aliases", async () => {
+  const migration = await readFile(
+    new URL("../drizzle-v2/0004_quiet_doctor_octopus.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(migration, /ADD COLUMN "aliases" text\[\]/u);
+  assert.match(migration, /topic-v2/u);
+  assert.match(
+    migration,
+    /INSERT INTO "waxon_v2"\."question_embeddings"[\s\S]*WHERE "space_id" = 1/u,
+  );
+  assert.match(
+    migration,
+    /'Proximal Policy Optimization', ARRAY\['PPO'\]/u,
+  );
 });

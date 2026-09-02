@@ -24,8 +24,8 @@ test(
     const pool = getV2Client().pool;
     const learnerA = "semantic-tags-a";
     const learnerB = "semantic-tags-b";
-    const firstSpace = 1;
-    const secondSpace = 2;
+    const firstSpace = 2;
+    const secondSpace = 101;
     try {
       await pool.query(
         `INSERT INTO waxon_v2.users (id, display_name, email)

@@ -273,6 +273,7 @@ export const tags = waxonV2.table(
       .references(() => users.id, { onDelete: "cascade" }),
     label: text("label").notNull(),
     normalizedLabel: text("normalized_label").notNull(),
+    aliases: text("aliases").array().notNull().default(sql`'{}'::text[]`),
     scopeNote: text("scope_note").notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
     createdAt: createdAt(),

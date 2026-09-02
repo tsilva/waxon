@@ -49,7 +49,7 @@ _Avoid_: Paused question, deleted question, trashed question, flagged question
 ## Organization
 
 **Tag**:
-A learner-specific English subject-matter query used to rank semantically related Questions without partitioning the Library. A Tag is not assigned to a Question and does not change its Recall Target, identity, Learning Evidence, or Review behavior.
+A learner-specific English subject-matter query identified by a canonical label, optional aliases, and a concise semantic description. Waxon uses that content to rank semantically related Questions without partitioning the Library. A Tag is not assigned to a Question and does not change its Recall Target, identity, Learning Evidence, or Review behavior.
 _Avoid_: Deck, category, topic hierarchy, Recall Target
 
 **Embedding Space**:

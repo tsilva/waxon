@@ -112,7 +112,7 @@ const expectedColumns: Record<string, string[]> = {
   ],
   tag_embeddings: ["user_id", "space_id", "tag_id", "embedding"],
   tags: [
-    "id", "user_id", "label", "normalized_label", "scope_note", "deleted_at",
+    "id", "user_id", "label", "normalized_label", "aliases", "scope_note", "deleted_at",
     "created_at", "updated_at",
   ],
   users: [
