@@ -190,7 +190,7 @@ test(
       }
       const embedded = await pool.query<{ question_id: string }>(
         `SELECT question_id
-           FROM waxon_v2.question_search_embeddings
+           FROM waxon_v2.question_embeddings
           WHERE user_id = $1 AND question_id = $2`,
         [userA, lexicalId],
       );

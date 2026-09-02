@@ -19,6 +19,16 @@ Waxon is a multi-user question bank and adaptive recall-practice system. Learner
 - Editing a question must create a new question with reset mastery and archive the original question with its immutable learning evidence; the replacement's quality determines whether it starts Active or Flagged.
 - Active, Flagged, and Archived must be the only question lifecycle states.
 - Learners must be able to add, find, replace, flag, archive, restore, and unflag questions.
+- Questions must be discoverable through learner-specific, flat subject-matter Tags rather than decks, categories, or a topic hierarchy.
+- Tag labels and semantic descriptions must always use English; Waxon must not support multilingual Tags or Tag localization.
+- Tags must describe subject matter materially relevant to a Question's Recall Target rather than lifecycle, learning state, difficulty, importance, or Review behavior.
+- Tags must act as semantic search queries; Waxon must derive Question–Tag relevance from compatible embeddings at read time rather than persist Tag assignments, assignment provenance, learner overrides, or an Untagged state.
+- A Question and Tag may each have multiple embedding representations, but Waxon must compare only representations from the same declared embedding space.
+- Learners must be able to view the closest Tags to a Question and the closest Questions to one or more selected Tags; multiple selected Tags match by strongest relevance to any selected Tag, while lifecycle and text search narrow the result.
+- Synonymous or overlapping Tags may coexist without automatic renaming, merging, or deletion.
+- Learners must be able to reach every semantically ranked result through stable pagination without silent truncation.
+- Tag discovery must remain learner-isolated and responsive with billions of Questions overall and thousands in one learner's Library.
+- Tags must not affect Review scheduling or queue membership.
 - Archived questions must remain out of Review until restored, and restoration without replacement must preserve their learning evidence.
 - Flagged questions must remain out of Review until restored unchanged, replaced by a new question, or archived.
 - Flagging may record zero or more structured reasons and optional free-text detail.

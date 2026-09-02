@@ -1,8 +1,8 @@
 import { performance } from "node:perf_hooks";
 import { Pool } from "pg";
 import { questionPromptKey } from "../app/lib/v2/questionInput.ts";
+import { activeEmbeddingSpace } from "../app/lib/v2/embeddingSpaces.ts";
 import {
-  QUESTION_SEARCH_EMBEDDING_VERSION,
   questionSearchVectorLiteral,
   requestQuestionSearchEmbeddings,
   resolveQuestionSearchConfig,
@@ -124,14 +124,13 @@ try {
       const vector = questionSearchVectorLiteral(embedded.embeddings[0] ?? []);
       await pool.query(
         `SELECT question_id
-           FROM waxon_v2.question_search_embeddings
-          WHERE user_id = $1 AND model = $2 AND embedding_version = $3
-          ORDER BY embedding <#> $4::halfvec(512), question_id
+           FROM waxon_v2.question_embeddings
+          WHERE user_id = $1 AND space_id = $2
+          ORDER BY embedding <#> $3::halfvec(512), question_id
           LIMIT 25`,
         [
           userId,
-          embedded.model,
-          QUESTION_SEARCH_EMBEDDING_VERSION,
+          activeEmbeddingSpace().id,
           vector,
         ],
       );

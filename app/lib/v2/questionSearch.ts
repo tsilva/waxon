@@ -3,7 +3,6 @@ import * as Sentry from "@sentry/nextjs";
 import { getV2Client } from "../../db/v2/client.ts";
 import { beginLlmTrace, finishLlmTrace } from "../llmTraceStore.ts";
 import {
-  QUESTION_SEARCH_EMBEDDING_VERSION,
   QUESTION_SEARCH_TRIGRAM_THRESHOLD,
   questionSearchAdvisory,
   questionSearchVectorLiteral,
@@ -14,6 +13,7 @@ import {
   type QuestionSearchMode,
 } from "../../../shared/question-search.mts";
 import { questionPromptKey } from "./questionInput.ts";
+import { activeEmbeddingSpace } from "./embeddingSpaces.ts";
 import type {
   V2QuestionFlag,
   V2QuestionLifecycle,
@@ -335,6 +335,8 @@ async function semanticRows(input: {
   branchLimit: number;
 }): Promise<SemanticSearchRow[]> {
   if (input.candidates.length === 0) return [];
+  const space = activeEmbeddingSpace();
+  if (input.model !== space.requestModel) return [];
   const vectors = input.candidates.map((candidate, index) => ({
     candidate_id: candidate.candidateId,
     embedding: questionSearchVectorLiteral(input.embeddings[index] ?? []),
@@ -354,22 +356,20 @@ async function semanticRows(input: {
                 row_number() OVER (
                   ORDER BY qse.embedding <#> input.embedding, q.id
                 ) AS semantic_rank
-           FROM waxon_v2.question_search_embeddings qse
+         FROM waxon_v2.question_embeddings qse
            JOIN waxon_v2.questions q
              ON q.user_id = qse.user_id AND q.id = qse.question_id
           WHERE qse.user_id = $1
-            AND qse.model = $3
-            AND qse.embedding_version = $4
-            AND -(qse.embedding <#> input.embedding) >= $5
+            AND qse.space_id = $3
+            AND -(qse.embedding <#> input.embedding) >= $4
             AND q.lifecycle::text IN ('active','flagged','archived')
           ORDER BY qse.embedding <#> input.embedding, q.id
-          LIMIT $6
+          LIMIT $5
        ) hit`,
     [
       input.userId,
       JSON.stringify(vectors),
-      input.model,
-      QUESTION_SEARCH_EMBEDDING_VERSION,
+      space.id,
       input.threshold,
       input.branchLimit,
     ],
@@ -381,21 +381,22 @@ async function semanticSearchComplete(
   userId: string,
   model: string,
 ): Promise<boolean> {
+  const space = activeEmbeddingSpace();
+  if (model !== space.requestModel) return false;
   const result = await getV2Client().pool.query<{ complete: boolean }>(
     `SELECT NOT EXISTS (
        SELECT 1
          FROM waxon_v2.questions q
-         LEFT JOIN waxon_v2.question_search_embeddings qse
+         LEFT JOIN waxon_v2.question_embeddings qse
            ON qse.user_id = q.user_id
           AND qse.question_id = q.id
-          AND qse.model = $2
-          AND qse.embedding_version = $3
+          AND qse.space_id = $2
         WHERE q.user_id = $1
           AND q.lifecycle::text IN ('active','flagged','archived')
           AND qse.question_id IS NULL
         LIMIT 1
      ) AS complete`,
-    [userId, model, QUESTION_SEARCH_EMBEDDING_VERSION],
+    [userId, space.id],
   );
   return result.rows[0]?.complete === true;
 }

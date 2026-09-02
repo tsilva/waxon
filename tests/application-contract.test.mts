@@ -73,7 +73,7 @@ test(
             false,
           );
           assert.equal(
-            catalog.questionSearchEmbeddingColumns.includes(
+            catalog.questionEmbeddingColumns.includes(
               "question_version_id",
             ),
             false,

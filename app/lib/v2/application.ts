@@ -24,6 +24,7 @@ import {
   getLearnerSettings,
   updateLearnerTimezone,
 } from "./settings.ts";
+import { listTags } from "./tags.ts";
 
 export type WaxonApplicationDependencies = {
   clock?: { now(): Date };
@@ -108,6 +109,11 @@ export function createWaxonApplication(
           },
           evidence(questionId: string) {
             return getQuestionLearningEvidence({ userId, questionId });
+          },
+        },
+        tags: {
+          list(input: Omit<Parameters<typeof listTags>[0], "userId"> = {}) {
+            return listTags({ ...input, userId });
           },
         },
         review: {

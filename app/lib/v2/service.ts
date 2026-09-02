@@ -27,7 +27,6 @@ import {
   assessQuestionQuality,
   type QuestionQualityAssessment,
 } from "./questionQuality.ts";
-import { rankQuestionIdsLexically } from "./questionSearch.ts";
 import { normalizeReviewFlagInput } from "./reviewFlag.ts";
 import type {
   V2LibraryResponse,
@@ -39,8 +38,42 @@ import { evaluateRecall } from "./model.ts";
 import type { RecallEvaluationResult } from "./recallEvaluation.ts";
 import { runLiveEvaluationJob } from "./liveReview.ts";
 import { runQuestionEmbeddingJob } from "./questionEmbeddings.ts";
+import { relatedQuestions, relatedTags } from "./semanticTags.ts";
 
-const QUESTION_PAGE_LIMIT = 100;
+const QUESTION_PAGE_LIMIT = 50;
+
+type LibraryCursor = { updatedAt: Date; id: string };
+
+function parseLibraryCursor(cursor: string | undefined): LibraryCursor | null {
+  if (!cursor) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      updatedAt?: unknown;
+      id?: unknown;
+    };
+    const updatedAt = new Date(
+      typeof parsed.updatedAt === "string" ? parsed.updatedAt : "",
+    );
+    if (
+      Number.isNaN(updatedAt.getTime()) ||
+      typeof parsed.id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+        parsed.id,
+      )
+    ) {
+      throw new Error("invalid cursor");
+    }
+    return { updatedAt, id: parsed.id };
+  } catch {
+    throw new Error("The Library cursor is invalid.");
+  }
+}
+
+function libraryCursor(cursor: LibraryCursor): string {
+  return Buffer.from(
+    JSON.stringify({ updatedAt: cursor.updatedAt.toISOString(), id: cursor.id }),
+  ).toString("base64url");
+}
 
 type V2Tx = Parameters<
   Parameters<ReturnType<typeof getV2Db>["transaction"]>[0]
@@ -224,7 +257,7 @@ export async function addQuestions(
     items.map((item) => validateQuestionCandidate(item, dependencies)),
   );
 
-  return await getV2Db().transaction(async (tx) => {
+  const response = await getV2Db().transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
     );
@@ -397,6 +430,7 @@ export async function addQuestions(
     });
     return response;
   });
+  return response;
 }
 
 export async function createDirectQuestion(
@@ -436,21 +470,16 @@ export async function listLibrary(input: {
   search?: string;
   lifecycle?: V2QuestionLifecycle | "all";
   limit?: number;
+  tagIds?: string[];
+  cursor?: string;
 }): Promise<V2LibraryResponse> {
-  const limit = Math.max(1, Math.min(QUESTION_PAGE_LIMIT, input.limit ?? 100));
-  const search = input.search?.trim() ?? "";
+  const limit = Math.max(1, Math.min(QUESTION_PAGE_LIMIT, input.limit ?? QUESTION_PAGE_LIMIT));
+  const search = input.search?.normalize("NFKC").trim().slice(0, 2_000) ?? "";
+  const tagIds = [...new Set(input.tagIds ?? [])];
   const lifecycle =
     input.lifecycle && input.lifecycle !== "all" ? input.lifecycle : null;
   const pool = getV2Client().pool;
-  const rankedIds = search
-    ? await rankQuestionIdsLexically({
-        userId: input.userId,
-        query: search,
-        lifecycle,
-        limit,
-      })
-    : [];
-  const rows = await pool.query<{
+  type LibraryRow = {
     id: string;
     prompt: string;
     reference_answer: string;
@@ -459,8 +488,8 @@ export async function listLibrary(input: {
     created_at: Date;
     updated_at: Date;
     flags: V2QuestionFlag[];
-  }>(
-    `SELECT q.id, q.prompt, q.reference_answer,
+  };
+  const questionSelect = `SELECT q.id, q.prompt, q.reference_answer,
             q.lifecycle::text, ms.due_at, q.created_at, q.updated_at,
             COALESCE(
               (SELECT jsonb_agg(
@@ -479,37 +508,96 @@ export async function listLibrary(input: {
             ) AS flags
        FROM waxon_v2.questions q
        LEFT JOIN waxon_v2.memory_states ms
-         ON ms.user_id = q.user_id AND ms.question_id = q.id
-      WHERE q.user_id = $1
-        AND (
-          $2::text IS NULL
-          OR q.lifecycle::text = $2
-        )
-        AND ($3 = '' OR q.id = ANY($5::uuid[]))
-        AND q.lifecycle::text IN ('active','flagged','archived')
-      ORDER BY CASE WHEN $3 <> '' THEN array_position($5::uuid[], q.id) END,
-               q.updated_at DESC, q.id
-      LIMIT $4`,
-    [input.userId, lifecycle, search, limit, rankedIds],
-  );
-  const questionsOut: V2Question[] = rows.rows.map((row) => ({
+         ON ms.user_id = q.user_id AND ms.question_id = q.id`;
+
+  let pageRows: LibraryRow[];
+  let nextCursor: string | null;
+  if (tagIds.length > 0) {
+    const ranked = await relatedQuestions({
+      learnerId: input.userId,
+      tagIds,
+      lifecycle,
+      text: search,
+      limit,
+      cursor: input.cursor,
+    });
+    const details = ranked.questionIds.length === 0
+      ? []
+      : (
+          await pool.query<LibraryRow>(
+            `${questionSelect}
+              WHERE q.user_id = $1 AND q.id = ANY($2::uuid[])`,
+            [input.userId, ranked.questionIds],
+          )
+        ).rows;
+    const detailsById = new Map(details.map((row) => [row.id, row]));
+    pageRows = ranked.questionIds.flatMap((id) => {
+      const row = detailsById.get(id);
+      return row ? [row] : [];
+    });
+    nextCursor = ranked.nextCursor;
+  } else {
+    const cursor = parseLibraryCursor(input.cursor);
+    const rows = await pool.query<LibraryRow>(
+      `${questionSelect}
+        WHERE q.user_id = $1
+          AND ($2::text IS NULL OR q.lifecycle::text = $2)
+          AND (
+            $3 = ''
+            OR to_tsvector('simple', q.prompt || ' ' || q.reference_answer)
+               @@ websearch_to_tsquery('simple', $3)
+            OR q.prompt % $3
+          )
+          AND q.lifecycle::text IN ('active','flagged','archived')
+          AND (
+            $5::timestamptz IS NULL
+            OR (q.updated_at, q.id) < ($5::timestamptz, $6::uuid)
+          )
+        ORDER BY q.updated_at DESC, q.id DESC
+        LIMIT $4`,
+      [
+        input.userId,
+        lifecycle,
+        search,
+        limit + 1,
+        cursor?.updatedAt ?? null,
+        cursor?.id ?? null,
+      ],
+    );
+    const hasMore = rows.rows.length > limit;
+    pageRows = rows.rows.slice(0, limit);
+    const last = pageRows.at(-1);
+    nextCursor = hasMore && last
+      ? libraryCursor({ updatedAt: last.updated_at, id: last.id })
+      : null;
+  }
+
+  const [relatedByQuestion, countRows] = await Promise.all([
+    relatedTags({
+      learnerId: input.userId,
+      questionIds: pageRows.map((row) => row.id),
+      limit: 10,
+    }),
+    pool.query<{ lifecycle: string; count: string }>(
+      `SELECT lifecycle::text, count(*)::text
+         FROM waxon_v2.questions
+        WHERE user_id = $1
+          AND lifecycle::text IN ('active','flagged','archived')
+        GROUP BY lifecycle`,
+      [input.userId],
+    ),
+  ]);
+  const questionsOut: V2Question[] = pageRows.map((row) => ({
       id: row.id,
       prompt: row.prompt,
       referenceAnswer: row.reference_answer,
       lifecycle: row.lifecycle as V2QuestionLifecycle,
+      relatedTags: relatedByQuestion.get(row.id) ?? [],
       flags: row.flags,
       dueAt: row.due_at?.toISOString() ?? null,
       createdAt: row.created_at.toISOString(),
       updatedAt: row.updated_at.toISOString(),
-    }));
-  const countRows = await pool.query<{ lifecycle: string; count: string }>(
-    `SELECT lifecycle::text, count(*)::text
-       FROM waxon_v2.questions
-      WHERE user_id = $1
-        AND lifecycle::text IN ('active','flagged','archived')
-      GROUP BY lifecycle`,
-    [input.userId],
-  );
+  }));
   const counts: Record<V2QuestionLifecycle, number> = {
     active: 0,
     flagged: 0,
@@ -520,7 +608,11 @@ export async function listLibrary(input: {
       counts[row.lifecycle] += Number(row.count);
     }
   }
-  return { questions: questionsOut, counts };
+  return {
+    questions: questionsOut,
+    counts,
+    nextCursor,
+  };
 }
 
 export async function getQuestionLearningEvidence(input: {
@@ -714,7 +806,7 @@ export async function replaceQuestion(input: {
         origin: "waxon_validation" as const,
         reasons: assessment.reasons,
       };
-  return await getV2Db().transaction(async (tx) => {
+  const result = await getV2Db().transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${`question-bank:${input.userId}`}))`,
     );
@@ -802,6 +894,7 @@ export async function replaceQuestion(input: {
       status: "replaced" as const,
     };
   });
+  return result;
 }
 
 export async function runPendingJobs(input: {
@@ -816,7 +909,10 @@ export async function runPendingJobs(input: {
       and(
         input.userId ? eq(jobs.userId, input.userId) : undefined,
         eq(jobs.status, "pending"),
-        inArray(jobs.type, ["evaluate_submission", "embed_question_batch"]),
+        inArray(jobs.type, [
+          "evaluate_submission",
+          "embed_question_batch",
+        ]),
         lte(jobs.runAfter, new Date()),
       ),
     )

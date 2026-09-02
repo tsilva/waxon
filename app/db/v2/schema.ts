@@ -4,15 +4,16 @@ import {
   bigserial,
   boolean,
   check,
+  customType,
   date,
   doublePrecision,
   foreignKey,
-  halfvec,
   index,
   integer,
   jsonb,
   pgSchema,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -76,6 +77,23 @@ export const jobStatus = waxonV2.enum("job_status", [
   "failed",
   "cancelled",
 ]);
+const variableHalfvec = customType<{
+  data: number[];
+  driverData: string;
+}>({
+  dataType() {
+    return "halfvec";
+  },
+  toDriver(value) {
+    return JSON.stringify(value);
+  },
+  fromDriver(value) {
+    return value
+      .slice(1, -1)
+      .split(",")
+      .map((item) => Number.parseFloat(item));
+  },
+});
 
 export const users = waxonV2.table(
   "users",
@@ -214,38 +232,85 @@ export const questionFlags = waxonV2.table(
   ],
 );
 
-export const questionSearchEmbeddings = waxonV2.table(
-  "question_search_embeddings",
+export const embeddingSpaces = waxonV2.table(
+  "embedding_spaces",
+  {
+    id: smallint("id").primaryKey(),
+    key: text("key").notNull(),
+  },
+  (table) => [unique("embedding_spaces_key_unique").on(table.key)],
+);
+
+export const questionEmbeddings = waxonV2.table(
+  "question_embeddings",
   {
     userId: text("user_id").notNull(),
+    spaceId: smallint("space_id")
+      .notNull()
+      .references(() => embeddingSpaces.id),
     questionId: uuid("question_id").notNull(),
-    model: text("model").notNull(),
-    embeddingVersion: integer("embedding_version").notNull(),
-    promptHash: text("prompt_hash").notNull(),
-    embedding: halfvec("embedding", { dimensions: 512 }).notNull(),
+    embedding: variableHalfvec("embedding").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "question_embeddings_pk",
+      columns: [table.userId, table.spaceId, table.questionId],
+    }),
+    foreignKey({
+      name: "question_embeddings_question_fk",
+      columns: [table.userId, table.questionId],
+      foreignColumns: [questions.userId, questions.id],
+    }).onDelete("cascade"),
+  ],
+);
+
+export const tags = waxonV2.table(
+  "tags",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    normalizedLabel: text("normalized_label").notNull(),
+    scopeNote: text("scope_note").notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true, mode: "date" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
+    unique("tags_user_id_id_unique").on(table.userId, table.id),
+    uniqueIndex("tags_active_normalized_label_unique")
+      .on(table.userId, table.normalizedLabel)
+      .where(sql`${table.deletedAt} IS NULL`),
+    index("tags_user_deleted_label_idx").on(
+      table.userId,
+      table.deletedAt,
+      table.label,
+    ),
+  ],
+);
+
+export const tagEmbeddings = waxonV2.table(
+  "tag_embeddings",
+  {
+    userId: text("user_id").notNull(),
+    spaceId: smallint("space_id")
+      .notNull()
+      .references(() => embeddingSpaces.id),
+    tagId: uuid("tag_id").notNull(),
+    embedding: variableHalfvec("embedding").notNull(),
+  },
+  (table) => [
     primaryKey({
-      name: "question_search_embeddings_pk",
-      columns: [
-        table.userId,
-        table.questionId,
-        table.model,
-        table.embeddingVersion,
-      ],
+      name: "tag_embeddings_pk",
+      columns: [table.userId, table.spaceId, table.tagId],
     }),
     foreignKey({
-      name: "question_search_embeddings_question_fk",
-      columns: [table.userId, table.questionId],
-      foreignColumns: [questions.userId, questions.id],
+      name: "tag_embeddings_tag_fk",
+      columns: [table.userId, table.tagId],
+      foreignColumns: [tags.userId, tags.id],
     }).onDelete("cascade"),
-    index("question_search_embeddings_lookup_idx").on(
-      table.userId,
-      table.model,
-      table.embeddingVersion,
-    ),
   ],
 );
 
