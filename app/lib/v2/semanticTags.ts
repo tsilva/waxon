@@ -8,7 +8,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_RELATED_QUESTIONS = 50;
 export const MAX_RELATED_TAGS = 3;
-export const MIN_RELATED_TAG_SIMILARITY = 0.55;
+export const MIN_RELATED_TAG_SIMILARITY = 0.51;
 const MAX_RELATED_TAG_DISTANCE = 1 - MIN_RELATED_TAG_SIMILARITY;
 const MAX_SELECTED_TAGS = 10;
 
