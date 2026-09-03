@@ -332,25 +332,25 @@ function QuestionRow({
             <MarkdownContent className="v2-markdown" enableMath text={question.referenceAnswer} />
           </div>
         </div>
-        <div className="lean-question-footer">
-          <button
-            aria-controls={`question-details-${question.id}`}
-            aria-expanded={detailsOpen}
-            aria-label={detailsOpen ? "Hide question details" : "Show question details"}
-            className="review-feedback-toggle lean-question-details-toggle"
-            disabled={isRemoving}
-            onClick={() => setDetailsOpen((value) => !value)}
-            type="button"
-          >
-            <ChevronDown className="lean-question-collapse-icon" aria-hidden="true" />
-          </button>
-        </div>
       </div>
       <div className="lean-question-actions">
         <button aria-label="Replace question" disabled={isRemoving} onClick={onEdit} title={question.lifecycle === "flagged" ? "Replace with a new Question" : "Replace"} type="button"><Pencil /></button>
         {question.lifecycle === "active" ? <button aria-label="Flag question" disabled={isRemoving} onClick={onFlag} title="Flag" type="button"><Flag /></button> : null}
         {question.lifecycle !== "archived" ? <button aria-label="Archive question" disabled={isRemoving} onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
         {question.lifecycle !== "active" ? <button aria-label="Restore question" disabled={isRemoving} onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
+      </div>
+      <div className="lean-question-footer">
+        <button
+          aria-controls={`question-details-${question.id}`}
+          aria-expanded={detailsOpen}
+          aria-label={detailsOpen ? "Hide question details" : "Show question details"}
+          className="review-feedback-toggle lean-question-details-toggle"
+          disabled={isRemoving}
+          onClick={() => setDetailsOpen((value) => !value)}
+          type="button"
+        >
+          <ChevronDown className="lean-question-collapse-icon" aria-hidden="true" />
+        </button>
       </div>
     </article>
   );

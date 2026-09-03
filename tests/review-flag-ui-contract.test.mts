@@ -486,8 +486,14 @@ test("Review Flag modal has a narrow responsive contract and Library groups ques
     (rule) =>
       "selectorText" in rule && rule.selectorText === ".lean-question-tags button",
   ) as CSSStyleRule | undefined;
+  const questionFooterRule = Array.from(style.sheet?.cssRules ?? []).find(
+    (rule) =>
+      "selectorText" in rule && rule.selectorText === ".lean-question-footer",
+  ) as CSSStyleRule | undefined;
   assert.equal(tagRule?.style.getPropertyValue("border-radius"), "7px");
   assert.equal(tagRule?.style.getPropertyValue("cursor"), "pointer");
+  assert.equal(questionFooterRule?.style.getPropertyValue("grid-column"), "1 / -1");
+  assert.equal(questionFooterRule?.style.getPropertyValue("justify-content"), "flex-end");
   style.remove();
 });
 
