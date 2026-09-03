@@ -178,7 +178,7 @@ test("semantic Tag calibration uses the Codex-authored reference set", async () 
 
   assert.equal(reference.authoredBy, "Codex");
   assert.match(String(reference.judgmentMethod), /manual full-catalog review/u);
-  assert.equal(reference.questions?.length, 254);
+  assert.equal(reference.questions?.length, 256);
   assert.equal(
     new Set(reference.questions?.map(({ questionId }) => questionId)).size,
     reference.questions?.length,
