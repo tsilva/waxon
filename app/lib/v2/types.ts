@@ -23,6 +23,7 @@ export type V2Question = {
   referenceAnswer: string;
   lifecycle: V2QuestionLifecycle;
   relatedTags: V2TagRef[];
+  referenceTags: V2TagRef[] | null;
   flags: V2QuestionFlag[];
   dueAt: string | null;
   createdAt: string;

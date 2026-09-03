@@ -474,7 +474,13 @@ test("Review Flag modal has a narrow responsive contract and Library groups ques
   assert.equal(questionBank.includes("<summary>Answer standard</summary>"), false);
   assert.equal(questionBank.includes("flag.detail"), true);
   assert.equal(questionBank.includes("question-bank-flag-detail"), true);
-  assert.equal(questionBank.includes('question.lifecycle !== "flagged"'), true);
+  assert.equal(questionBank.includes('question.lifecycle !== "flagged"'), false);
+  assert.equal(
+    questionBank.includes(
+      '<span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle[0]?.toUpperCase()}{question.lifecycle.slice(1)}</span>',
+    ),
+    true,
+  );
   assert.equal(questionBank.includes("Learner flag"), false);
   assert.equal(styles.includes(".lean-flag-origin"), false);
   assert.equal(
@@ -490,10 +496,32 @@ test("Review Flag modal has a narrow responsive contract and Library groups ques
     (rule) =>
       "selectorText" in rule && rule.selectorText === ".lean-question-footer",
   ) as CSSStyleRule | undefined;
+  const collapsedQuestionRule = Array.from(style.sheet?.cssRules ?? []).find(
+    (rule) =>
+      "selectorText" in rule &&
+      rule.selectorText === ".lean-question-row-collapsed",
+  ) as CSSStyleRule | undefined;
+  const collapsedQuestionFooterRule = Array.from(
+    style.sheet?.cssRules ?? [],
+  ).find(
+    (rule) =>
+      "selectorText" in rule &&
+      rule.selectorText ===
+        ".lean-question-row-collapsed .lean-question-footer",
+  ) as CSSStyleRule | undefined;
   assert.equal(tagRule?.style.getPropertyValue("border-radius"), "7px");
   assert.equal(tagRule?.style.getPropertyValue("cursor"), "pointer");
   assert.equal(questionFooterRule?.style.getPropertyValue("grid-column"), "1 / -1");
   assert.equal(questionFooterRule?.style.getPropertyValue("justify-content"), "flex-end");
+  assert.equal(collapsedQuestionRule?.style.getPropertyValue("row-gap"), "8px");
+  assert.equal(
+    collapsedQuestionRule?.style.getPropertyValue("padding-bottom"),
+    "14px",
+  );
+  assert.equal(
+    collapsedQuestionFooterRule?.style.getPropertyValue("margin-top"),
+    "0",
+  );
   style.remove();
 });
 

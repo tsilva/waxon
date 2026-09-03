@@ -296,10 +296,33 @@ function QuestionRow({
     >
       <div className="lean-question-copy">
         <div className="lean-question-meta">
-          {question.lifecycle !== "flagged" ? <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle[0]?.toUpperCase()}{question.lifecycle.slice(1)}</span> : null}
-          {question.relatedTags.length > 0 ? <div className="lean-question-tags" aria-label="Related Tags">{question.relatedTags.map((tag) => <button key={tag.id} onClick={() => onTagClick(tag.id)} type="button">{tag.label}</button>)}</div> : null}
+          <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle[0]?.toUpperCase()}{question.lifecycle.slice(1)}</span>
           {question.dueAt ? <span><CalendarClock /> {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(question.dueAt))}</span> : null}
         </div>
+        {question.referenceTags !== null ? (
+          <div className="lean-question-tag-comparison" aria-label="Tag evaluation">
+            <div>
+              <span>Predicted</span>
+              <div className="lean-question-tags is-predicted" aria-label="Predicted Tags">
+                {question.relatedTags.length > 0
+                  ? question.relatedTags.map((tag) => <button key={tag.id} onClick={() => onTagClick(tag.id)} type="button">{tag.label}</button>)
+                  : <span className="lean-question-tags-empty">None</span>}
+              </div>
+            </div>
+            <div>
+              <span>Reference</span>
+              <div className="lean-question-tags is-reference" aria-label="Reference Tags">
+                {question.referenceTags.length > 0
+                  ? question.referenceTags.map((tag) => <span key={tag.id}>{tag.label}</span>)
+                  : <span className="lean-question-tags-empty">None</span>}
+              </div>
+            </div>
+          </div>
+        ) : question.relatedTags.length > 0 ? (
+          <div className="lean-question-tags" aria-label="Related Tags">
+            {question.relatedTags.map((tag) => <button key={tag.id} onClick={() => onTagClick(tag.id)} type="button">{tag.label}</button>)}
+          </div>
+        ) : null}
         <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
         <div
           className="lean-question-detail-grid"
