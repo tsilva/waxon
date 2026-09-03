@@ -220,29 +220,6 @@ function FeedbackRow({
           </div>
 
           <div className="previous-detail-grid" hidden={!open}>
-            {open ? (
-              <div className="review-handoff-actions">
-                <button
-                  aria-label="Copy review as Markdown"
-                  className="review-handoff-copy"
-                  onClick={copyMarkdown}
-                  type="button"
-                >
-                  {copyStatus === "copied" ? (
-                    <Check aria-hidden="true" />
-                  ) : (
-                    <Copy aria-hidden="true" />
-                  )}
-                </button>
-                <span aria-live="polite" className="sr-only">
-                  {copyStatus === "copied"
-                    ? "Review copied to clipboard as Markdown."
-                    : copyStatus === "failed"
-                      ? "Review could not be copied."
-                      : ""}
-                </span>
-              </div>
-            ) : null}
             <div className="previous-field">
               <span className="previous-field-label">Your answer</span>
               <p className="previous-answer">{turn.answer}</p>
@@ -330,31 +307,61 @@ function FeedbackRow({
           </div>
         </div>
 
-        <span className="previous-row-meta">
-          <span className="previous-time-control">
-            <time className="previous-time" dateTime={turn.submittedAt}>
-              {submittedDate(turn.submittedAt)}
-            </time>
-            <button
-              aria-expanded={open}
-              aria-label={open ? "Hide answer details" : "Show answer details"}
-              className="review-feedback-toggle"
-              onClick={() => setOpen((value) => !value)}
-              type="button"
-            >
-              <ChevronDown className="previous-collapse-icon" aria-hidden="true" />
-            </button>
-          </span>
-          {dueDateLabel && dueIntervalLabel && evaluation.nextDueOn ? (
-            <time
-              aria-label={`Next review on ${dueDateLabel}`}
-              className="previous-schedule-label"
-              dateTime={evaluation.nextDueOn}
-            >
-              {dueIntervalLabel}
-            </time>
+        <div className="previous-row-footer">
+          {open ? (
+            <div className="review-handoff-actions">
+              <button
+                aria-label="Copy review as Markdown"
+                className="review-handoff-copy"
+                onClick={copyMarkdown}
+                type="button"
+              >
+                {copyStatus === "copied" ? (
+                  <Check aria-hidden="true" />
+                ) : (
+                  <Copy aria-hidden="true" />
+                )}
+              </button>
+              <span aria-live="polite" className="sr-only">
+                {copyStatus === "copied"
+                  ? "Review copied to clipboard as Markdown."
+                  : copyStatus === "failed"
+                    ? "Review could not be copied."
+                    : ""}
+              </span>
+            </div>
           ) : null}
-        </span>
+          <span className="previous-row-meta">
+            <span className="previous-time-control">
+              <time className="previous-time" dateTime={turn.submittedAt}>
+                {submittedDate(turn.submittedAt)}
+              </time>
+              <button
+                aria-expanded={open}
+                aria-label={
+                  open ? "Hide answer details" : "Show answer details"
+                }
+                className="review-feedback-toggle"
+                onClick={() => setOpen((value) => !value)}
+                type="button"
+              >
+                <ChevronDown
+                  className="previous-collapse-icon"
+                  aria-hidden="true"
+                />
+              </button>
+            </span>
+            {dueDateLabel && dueIntervalLabel && evaluation.nextDueOn ? (
+              <time
+                aria-label={`Next review on ${dueDateLabel}`}
+                className="previous-schedule-label"
+                dateTime={evaluation.nextDueOn}
+              >
+                {dueIntervalLabel}
+              </time>
+            ) : null}
+          </span>
+        </div>
       </div>
     </li>
   );

@@ -190,13 +190,16 @@
 }
 
 .lean-question-tags button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: 999px;
+  padding: 0 8px;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: inherit;
-  font: inherit;
-  font-size: 0.78rem;
-  padding: 0.25rem 0.55rem;
+  font: 600 10px/1 var(--font-ui);
+  white-space: nowrap;
 }
 
 .lean-tag-filter-row {
@@ -255,12 +258,21 @@
   padding: 0.45rem;
 }
 
-.lean-tag-filter .lean-tag-filter-search {
+.lean-tag-filter-tools {
   position: sticky;
   top: -0.5rem;
   z-index: 1;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem;
   background: var(--surface);
+}
+
+.lean-tag-filter .lean-tag-filter-search {
+  flex: 1;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 0;
 }
 
 .lean-tag-filter-search svg {
@@ -275,6 +287,33 @@
   background: var(--surface);
   color: inherit;
   padding: 0.5rem;
+}
+
+.lean-tag-filter-clear {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: var(--surface);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.lean-tag-filter-clear:hover,
+.lean-tag-filter-clear:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--ink);
+  outline: 2px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  outline-offset: 2px;
+}
+
+.lean-tag-filter-clear svg {
+  width: 1rem;
+  height: 1rem;
 }
 
 .lean-tag-loading {
@@ -324,7 +363,6 @@
 }
 
 .lean-flag-evidence > div,
-.lean-flag-origin,
 .lean-flag-reasons {
   display: flex;
   flex-wrap: wrap;
@@ -332,31 +370,12 @@
   gap: 7px;
 }
 
-.lean-flag-origin {
-  color: var(--formula);
-  font: 600 11px/1 var(--font-ui);
-}
-
-.lean-flag-origin svg {
-  width: 13px;
-  height: 13px;
-}
-
 .lean-flag-reasons > span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 23px;
-  border: 1px solid color-mix(in srgb, var(--formula) 22%, transparent);
-  border-radius: 999px;
-  padding: 0 8px;
-  background: var(--formula-soft);
   color: var(--formula);
-  font: 600 10px/1 var(--font-ui);
+  font: 600 12px/1.5 var(--font-ui);
 }
 
 .question-bank-flag-detail {
-  flex-basis: 100%;
-  margin: 2px 0 0 20px;
   color: var(--ink-soft);
   font: 400 12px/1.5 var(--font-ui);
   overflow-wrap: anywhere;
@@ -2308,9 +2327,19 @@ textarea {
   display: none;
 }
 
+.previous-row-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+
 .review-handoff-actions {
   display: flex;
-  justify-content: flex-end;
+  flex: 0 0 auto;
+  justify-content: flex-start;
   min-height: 30px;
 }
 
@@ -2440,15 +2469,15 @@ textarea {
 
 .previous-row-meta {
   position: static;
-  grid-column: 1 / -1;
   display: flex;
+  flex: 1 1 auto;
   align-items: flex-end;
   flex-direction: column;
   gap: 6px;
   justify-content: flex-end;
   min-height: 24px;
   text-align: right;
-  width: 100%;
+  width: auto;
 }
 
 .previous-time-control {
@@ -4486,7 +4515,7 @@ textarea {
     flex-direction: column;
     justify-content: flex-end;
     min-height: 24px;
-    width: 100%;
+    width: auto;
   }
 
   .previous-secondary-meta {

@@ -12,6 +12,7 @@ import {
   Plus,
   Search,
   Tags,
+  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
@@ -283,6 +284,9 @@ function QuestionRow({
   onAction: (action: "archive" | "restore") => void;
 }) {
   const unresolvedFlags = question.flags.filter((flag) => !flag.resolvedAt);
+  const visibleFlags = unresolvedFlags.filter(
+    (flag) => flag.reasons.length > 0 || Boolean(flag.detail),
+  );
   return (
     <article
       aria-busy={isRemoving ? true : undefined}
@@ -290,21 +294,17 @@ function QuestionRow({
     >
       <div className="lean-question-copy">
         <div className="lean-question-meta">
-          <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle[0]?.toUpperCase()}{question.lifecycle.slice(1)}</span>
+          {question.lifecycle !== "flagged" ? <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle[0]?.toUpperCase()}{question.lifecycle.slice(1)}</span> : null}
+          {question.relatedTags.length > 0 ? <div className="lean-question-tags" aria-label="Related Tags">{question.relatedTags.map((tag) => <button key={tag.id} onClick={() => onTagClick(tag.id)} type="button">{tag.label}</button>)}</div> : null}
           {question.dueAt ? <span><CalendarClock /> {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(question.dueAt))}</span> : null}
         </div>
         <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
-        {question.relatedTags.length > 0 ? <div className="lean-question-tags" aria-label="Related Tags">{question.relatedTags.map((tag) => <button key={tag.id} onClick={() => onTagClick(tag.id)} type="button">{tag.label}</button>)}</div> : null}
-        {question.lifecycle === "flagged" && unresolvedFlags.length > 0 ? (
+        {question.lifecycle === "flagged" && visibleFlags.length > 0 ? (
           <details className="lean-flag-details">
             <summary>Flag details</summary>
             <div className="lean-flag-evidence" aria-label="Flag reasons">
-              {unresolvedFlags.map((flag, flagIndex) => (
+              {visibleFlags.map((flag, flagIndex) => (
                 <div key={`${flag.origin}-${flag.createdAt}-${flagIndex}`}>
-                  <span className="lean-flag-origin">
-                    <Flag />
-                    {flag.origin === "waxon_validation" ? "Waxon validation" : "Learner flag"}
-                  </span>
                   {flag.reasons.length > 0 ? (
                     <span className="lean-flag-reasons">
                       {flag.reasons.map((reason) => (
@@ -313,7 +313,7 @@ function QuestionRow({
                     </span>
                   ) : null}
                   {flag.detail ? (
-                    <p className="question-bank-flag-detail">{flag.detail}</p>
+                    <span className="question-bank-flag-detail">{flag.detail}</span>
                   ) : null}
                 </div>
               ))}
@@ -367,6 +367,7 @@ export default function LibraryPageClient() {
   );
   const [archiveAnnouncement, setArchiveAnnouncement] = useState(0);
   const hasRenderedDataRef = useRef(Boolean(initialData));
+  const tagFilterRef = useRef<HTMLDetailsElement>(null);
   const activeView = useMemo<LibraryViewState>(
     () => ({ filter, search, tagIds }),
     [filter, search, tagIds],
@@ -394,6 +395,22 @@ export default function LibraryPageClient() {
     );
     void viewCache.preloadReview();
   }, [router, viewCache]);
+
+  useEffect(() => {
+    function closeTagFilter(event: PointerEvent) {
+      const tagFilter = tagFilterRef.current;
+      if (
+        tagFilter?.open &&
+        !event.composedPath().includes(tagFilter)
+      ) {
+        tagFilter.open = false;
+        setTagFilterSearch("");
+      }
+    }
+
+    document.addEventListener("pointerdown", closeTagFilter);
+    return () => document.removeEventListener("pointerdown", closeTagFilter);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -591,10 +608,13 @@ export default function LibraryPageClient() {
           {loadingTags || availableTags.length > 0 || tagIds.length > 0 ? <div className="lean-tag-filter-row">
             <details className="lean-tag-filter" onToggle={(event) => {
               if (!event.currentTarget.open) setTagFilterSearch("");
-            }}>
+            }} ref={tagFilterRef}>
               <summary><Tags /> {tagIds.length > 0 ? `${tagIds.length} selected` : "Filter by Tags"}</summary>
               <div>
-                <label className="lean-tag-filter-search"><Search /><span className="sr-only">Search Tags</span><input onChange={(event) => setTagFilterSearch(event.currentTarget.value)} placeholder="Search Tags" type="search" value={tagFilterSearch} /></label>
+                <div className="lean-tag-filter-tools">
+                  <label className="lean-tag-filter-search"><Search /><span className="sr-only">Search Tags</span><input onChange={(event) => setTagFilterSearch(event.currentTarget.value)} placeholder="Search Tags" type="search" value={tagFilterSearch} /></label>
+                  {tagIds.length > 0 ? <button aria-label="Clear selected Tags" className="lean-tag-filter-clear" onClick={() => { setTagIds([]); viewCache.writeLibraryView({ filter, search, tagIds: [] }); }} title="Clear selected Tags" type="button"><X /></button> : null}
+                </div>
                 {availableTags.map((tag) => <label key={tag.id}><input checked={tagIds.includes(tag.id)} disabled={!tagIds.includes(tag.id) && tagIds.length >= 10} onChange={(event) => {
                   const next = event.currentTarget.checked ? [...tagIds, tag.id] : tagIds.filter((tagId) => tagId !== tag.id);
                   setTagIds(next);
@@ -604,7 +624,6 @@ export default function LibraryPageClient() {
                 {tagNextCursor ? <button disabled={loadingTags} onClick={() => void loadMoreTags()} type="button">Load more Tags</button> : null}
               </div>
             </details>
-            {tagIds.length > 0 ? <button onClick={() => { setTagIds([]); viewCache.writeLibraryView({ filter, search, tagIds: [] }); }} type="button">Clear Tags</button> : null}
           </div> : null}
           {message ? <p className="question-bank-message" role="status">{message}</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
