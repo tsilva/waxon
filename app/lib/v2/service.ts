@@ -28,6 +28,7 @@ import {
   type QuestionQualityAssessment,
 } from "./questionQuality.ts";
 import { normalizeReviewFlagInput } from "./reviewFlag.ts";
+import { libraryCursor, parseLibraryCursor } from "./libraryPagination.ts";
 import type {
   V2LibraryResponse,
   V2QuestionFlag,
@@ -42,39 +43,6 @@ import { relatedQuestions, relatedTags } from "./semanticTags.ts";
 import { referenceTags } from "./tagReferenceSet.ts";
 
 const QUESTION_PAGE_LIMIT = 50;
-
-type LibraryCursor = { updatedAt: Date; id: string };
-
-function parseLibraryCursor(cursor: string | undefined): LibraryCursor | null {
-  if (!cursor) return null;
-  try {
-    const parsed = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
-      updatedAt?: unknown;
-      id?: unknown;
-    };
-    const updatedAt = new Date(
-      typeof parsed.updatedAt === "string" ? parsed.updatedAt : "",
-    );
-    if (
-      Number.isNaN(updatedAt.getTime()) ||
-      typeof parsed.id !== "string" ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-        parsed.id,
-      )
-    ) {
-      throw new Error("invalid cursor");
-    }
-    return { updatedAt, id: parsed.id };
-  } catch {
-    throw new Error("The Library cursor is invalid.");
-  }
-}
-
-function libraryCursor(cursor: LibraryCursor): string {
-  return Buffer.from(
-    JSON.stringify({ updatedAt: cursor.updatedAt.toISOString(), id: cursor.id }),
-  ).toString("base64url");
-}
 
 type V2Tx = Parameters<
   Parameters<ReturnType<typeof getV2Db>["transaction"]>[0]
@@ -488,10 +456,12 @@ export async function listLibrary(input: {
     due_at: Date | null;
     created_at: Date;
     updated_at: Date;
+    cursor_updated_at: string;
     flags: V2QuestionFlag[];
   };
   const questionSelect = `SELECT q.id, q.prompt, q.reference_answer,
             q.lifecycle::text, ms.due_at, q.created_at, q.updated_at,
+            q.updated_at::text AS cursor_updated_at,
             COALESCE(
               (SELECT jsonb_agg(
                  jsonb_build_object(
@@ -569,7 +539,7 @@ export async function listLibrary(input: {
     pageRows = rows.rows.slice(0, limit);
     const last = pageRows.at(-1);
     nextCursor = hasMore && last
-      ? libraryCursor({ updatedAt: last.updated_at, id: last.id })
+      ? libraryCursor({ updatedAt: last.cursor_updated_at, id: last.id })
       : null;
   }
 

@@ -297,30 +297,20 @@ function QuestionRow({
       <div className="lean-question-copy">
         <div className="lean-question-meta">
           <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle[0]?.toUpperCase()}{question.lifecycle.slice(1)}</span>
-          {question.dueAt ? <span><CalendarClock /> {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(question.dueAt))}</span> : null}
+          {question.relatedTags.length > 0 ? (
+            <div className="lean-question-tags" aria-label="Predicted Tags">
+              {question.relatedTags.map((tag) => <button key={tag.id} onClick={() => onTagClick(tag.id)} type="button">{tag.label}</button>)}
+            </div>
+          ) : null}
         </div>
         {question.referenceTags !== null ? (
-          <div className="lean-question-tag-comparison" aria-label="Tag evaluation">
-            <div>
-              <span>Predicted</span>
-              <div className="lean-question-tags is-predicted" aria-label="Predicted Tags">
-                {question.relatedTags.length > 0
-                  ? question.relatedTags.map((tag) => <button key={tag.id} onClick={() => onTagClick(tag.id)} type="button">{tag.label}</button>)
-                  : <span className="lean-question-tags-empty">None</span>}
-              </div>
+          <div className="lean-question-ground-truth">
+            <span>Ground Truth</span>
+            <div className="lean-question-tags is-reference" aria-label="Ground Truth Tags">
+              {question.referenceTags.length > 0
+                ? question.referenceTags.map((tag) => <span key={tag.id}>{tag.label}</span>)
+                : <span className="lean-question-tags-empty">None</span>}
             </div>
-            <div>
-              <span>Codex reference</span>
-              <div className="lean-question-tags is-reference" aria-label="Codex Reference Tags">
-                {question.referenceTags.length > 0
-                  ? question.referenceTags.map((tag) => <span key={tag.id}>{tag.label}</span>)
-                  : <span className="lean-question-tags-empty">None</span>}
-              </div>
-            </div>
-          </div>
-        ) : question.relatedTags.length > 0 ? (
-          <div className="lean-question-tags" aria-label="Related Tags">
-            {question.relatedTags.map((tag) => <button key={tag.id} onClick={() => onTagClick(tag.id)} type="button">{tag.label}</button>)}
           </div>
         ) : null}
         <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
@@ -356,24 +346,27 @@ function QuestionRow({
           </div>
         </div>
       </div>
-      <div className="lean-question-actions">
-        <button aria-label="Replace question" disabled={isRemoving} onClick={onEdit} title={question.lifecycle === "flagged" ? "Replace with a new Question" : "Replace"} type="button"><Pencil /></button>
-        {question.lifecycle === "active" ? <button aria-label="Flag question" disabled={isRemoving} onClick={onFlag} title="Flag" type="button"><Flag /></button> : null}
-        {question.lifecycle !== "archived" ? <button aria-label="Archive question" disabled={isRemoving} onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
-        {question.lifecycle !== "active" ? <button aria-label="Restore question" disabled={isRemoving} onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
-      </div>
-      <div className="lean-question-footer">
-        <button
-          aria-controls={`question-details-${question.id}`}
-          aria-expanded={detailsOpen}
-          aria-label={detailsOpen ? "Hide question details" : "Show question details"}
-          className="review-feedback-toggle lean-question-details-toggle"
-          disabled={isRemoving}
-          onClick={() => setDetailsOpen((value) => !value)}
-          type="button"
-        >
-          <ChevronDown className="lean-question-collapse-icon" aria-hidden="true" />
-        </button>
+      <div className="lean-question-side">
+        <div className="lean-question-actions">
+          <button aria-label="Replace question" disabled={isRemoving} onClick={onEdit} title={question.lifecycle === "flagged" ? "Replace with a new Question" : "Replace"} type="button"><Pencil /></button>
+          {question.lifecycle === "active" ? <button aria-label="Flag question" disabled={isRemoving} onClick={onFlag} title="Flag" type="button"><Flag /></button> : null}
+          {question.lifecycle !== "archived" ? <button aria-label="Archive question" disabled={isRemoving} onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
+          {question.lifecycle !== "active" ? <button aria-label="Restore question" disabled={isRemoving} onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
+        </div>
+        <div className="lean-question-footer">
+          {question.dueAt ? <span className="lean-question-date"><CalendarClock /> {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(question.dueAt))}</span> : null}
+          <button
+            aria-controls={`question-details-${question.id}`}
+            aria-expanded={detailsOpen}
+            aria-label={detailsOpen ? "Hide question details" : "Show question details"}
+            className="review-feedback-toggle lean-question-details-toggle"
+            disabled={isRemoving}
+            onClick={() => setDetailsOpen((value) => !value)}
+            type="button"
+          >
+            <ChevronDown className="lean-question-collapse-icon" aria-hidden="true" />
+          </button>
+        </div>
       </div>
     </article>
   );
