@@ -481,7 +481,22 @@ test("Review Flag modal has a narrow responsive contract and Library groups ques
     ),
     true,
   );
+  assert.match(
+    questionBank,
+    /<div className="lean-question-meta">[\s\S]*?<span className=\{`lean-lifecycle[^\n]+[\s\S]*?question\.relatedTags\.length > 0[\s\S]*?<div className="lean-question-tags" aria-label="Predicted Tags">[\s\S]*?<\/div>\s*\) : null\}\s*<\/div>\s*\{question\.referenceTags !== null \? \([\s\S]*?<span>Ground Truth<\/span>[\s\S]*?\) : null\}\s*<h2>/u,
+  );
   assert.equal(questionBank.includes("Learner flag"), false);
+  const questionFooterIndex = questionBank.indexOf(
+    '<div className="lean-question-footer">',
+  );
+  const questionDateIndex = questionBank.indexOf(
+    'className="lean-question-date"',
+  );
+  const questionToggleIndex = questionBank.indexOf(
+    'aria-controls={`question-details-${question.id}`}',
+  );
+  assert.equal(questionDateIndex > questionFooterIndex, true);
+  assert.equal(questionDateIndex < questionToggleIndex, true);
   assert.equal(styles.includes(".lean-flag-origin"), false);
   assert.equal(
     styles.includes(".lean-flag-reasons > span {\n  display: inline-flex"),
@@ -501,27 +516,40 @@ test("Review Flag modal has a narrow responsive contract and Library groups ques
       "selectorText" in rule &&
       rule.selectorText === ".lean-question-row-collapsed",
   ) as CSSStyleRule | undefined;
-  const collapsedQuestionFooterRule = Array.from(
+  const collapsedQuestionHeadingRule = Array.from(
     style.sheet?.cssRules ?? [],
   ).find(
     (rule) =>
       "selectorText" in rule &&
       rule.selectorText ===
-        ".lean-question-row-collapsed .lean-question-footer",
+        ".lean-question-row-collapsed .lean-question-copy h2",
+  ) as CSSStyleRule | undefined;
+  const questionSideRule = Array.from(style.sheet?.cssRules ?? []).find(
+    (rule) =>
+      "selectorText" in rule && rule.selectorText === ".lean-question-side",
+  ) as CSSStyleRule | undefined;
+  const questionDateRule = Array.from(style.sheet?.cssRules ?? []).find(
+    (rule) =>
+      "selectorText" in rule && rule.selectorText === ".lean-question-date",
   ) as CSSStyleRule | undefined;
   assert.equal(tagRule?.style.getPropertyValue("border-radius"), "7px");
   assert.equal(tagRule?.style.getPropertyValue("cursor"), "pointer");
-  assert.equal(questionFooterRule?.style.getPropertyValue("grid-column"), "1 / -1");
   assert.equal(questionFooterRule?.style.getPropertyValue("justify-content"), "flex-end");
-  assert.equal(collapsedQuestionRule?.style.getPropertyValue("row-gap"), "8px");
   assert.equal(
     collapsedQuestionRule?.style.getPropertyValue("padding-bottom"),
-    "14px",
+    "10px",
   );
   assert.equal(
-    collapsedQuestionFooterRule?.style.getPropertyValue("margin-top"),
+    collapsedQuestionHeadingRule?.style.getPropertyValue("margin-bottom"),
     "0",
   );
+  assert.equal(questionSideRule?.style.getPropertyValue("flex-direction"), "column");
+  assert.equal(
+    questionSideRule?.style.getPropertyValue("justify-content"),
+    "space-between",
+  );
+  assert.equal(questionDateRule?.style.getPropertyValue("display"), "inline-flex");
+  assert.equal(questionDateRule?.style.getPropertyValue("white-space"), "nowrap");
   style.remove();
 });
 
