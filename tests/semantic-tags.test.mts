@@ -132,7 +132,10 @@ test("Library exposes semantic Tags without assignment management", async () => 
       ),
     ]);
 
-  assert.match(library, /Filter by Tags/u);
+  assert.match(library, /aria-label=\{tagIds\.length > 0 \? `Filter by Tags, \$\{tagIds\.length\} selected` : "Filter by Tags"\}/u);
+  assert.match(library, /<Tags aria-hidden="true" \/>/u);
+  assert.match(library, /\{tagIds\.length > 0 \? <span>\{tagIds\.length\} selected<\/span> : null\}/u);
+  assert.doesNotMatch(library, /: "Filter by Tags"\}<\/summary>/u);
   assert.match(library, /Search Tags/u);
   assert.match(library, /relatedTags/u);
   assert.match(library, /Load more/u);

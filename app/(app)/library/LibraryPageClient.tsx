@@ -4,6 +4,7 @@ import {
   Archive,
   ArchiveRestore,
   CalendarClock,
+  ChevronDown,
   Copy,
   Flag,
   KeyRound,
@@ -283,6 +284,7 @@ function QuestionRow({
   onTagClick: (tagId: string) => void;
   onAction: (action: "archive" | "restore") => void;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const unresolvedFlags = question.flags.filter((flag) => !flag.resolvedAt);
   const visibleFlags = unresolvedFlags.filter(
     (flag) => flag.reasons.length > 0 || Boolean(flag.detail),
@@ -290,7 +292,7 @@ function QuestionRow({
   return (
     <article
       aria-busy={isRemoving ? true : undefined}
-      className={`lean-question-row${isRemoving ? " lean-question-row-removing" : ""}`}
+      className={`lean-question-row${detailsOpen ? " lean-question-row-open" : " lean-question-row-collapsed"}${isRemoving ? " lean-question-row-removing" : ""}`}
     >
       <div className="lean-question-copy">
         <div className="lean-question-meta">
@@ -299,31 +301,50 @@ function QuestionRow({
           {question.dueAt ? <span><CalendarClock /> {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(question.dueAt))}</span> : null}
         </div>
         <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
-        {question.lifecycle === "flagged" && visibleFlags.length > 0 ? (
-          <details className="lean-flag-details">
-            <summary>Flag details</summary>
-            <div className="lean-flag-evidence" aria-label="Flag reasons">
-              {visibleFlags.map((flag, flagIndex) => (
-                <div key={`${flag.origin}-${flag.createdAt}-${flagIndex}`}>
-                  {flag.reasons.length > 0 ? (
-                    <span className="lean-flag-reasons">
-                      {flag.reasons.map((reason) => (
-                        <span key={reason}>{flagReasonLabel(reason)}</span>
-                      ))}
-                    </span>
-                  ) : null}
-                  {flag.detail ? (
-                    <span className="question-bank-flag-detail">{flag.detail}</span>
-                  ) : null}
-                </div>
-              ))}
+        <div
+          className="lean-question-detail-grid"
+          hidden={!detailsOpen}
+          id={`question-details-${question.id}`}
+        >
+          {question.lifecycle === "flagged" && visibleFlags.length > 0 ? (
+            <div className="lean-question-detail-section">
+              <span className="lean-question-detail-label">Flag details</span>
+              <div className="lean-flag-evidence" aria-label="Flag reasons">
+                {visibleFlags.map((flag, flagIndex) => (
+                  <div key={`${flag.origin}-${flag.createdAt}-${flagIndex}`}>
+                    {flag.reasons.length > 0 ? (
+                      <span className="lean-flag-reasons">
+                        {flag.reasons.map((reason) => (
+                          <span key={reason}>{flagReasonLabel(reason)}</span>
+                        ))}
+                      </span>
+                    ) : null}
+                    {flag.detail ? (
+                      <span className="question-bank-flag-detail">{flag.detail}</span>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             </div>
-          </details>
-        ) : null}
-        <details>
-          <summary>Answer standard</summary>
-          <MarkdownContent className="v2-markdown" enableMath text={question.referenceAnswer} />
-        </details>
+          ) : null}
+          <div className="lean-question-detail-section">
+            <span className="lean-question-detail-label">Answer standard</span>
+            <MarkdownContent className="v2-markdown" enableMath text={question.referenceAnswer} />
+          </div>
+        </div>
+        <div className="lean-question-footer">
+          <button
+            aria-controls={`question-details-${question.id}`}
+            aria-expanded={detailsOpen}
+            aria-label={detailsOpen ? "Hide question details" : "Show question details"}
+            className="review-feedback-toggle lean-question-details-toggle"
+            disabled={isRemoving}
+            onClick={() => setDetailsOpen((value) => !value)}
+            type="button"
+          >
+            <ChevronDown className="lean-question-collapse-icon" aria-hidden="true" />
+          </button>
+        </div>
       </div>
       <div className="lean-question-actions">
         <button aria-label="Replace question" disabled={isRemoving} onClick={onEdit} title={question.lifecycle === "flagged" ? "Replace with a new Question" : "Replace"} type="button"><Pencil /></button>
@@ -609,7 +630,13 @@ export default function LibraryPageClient() {
             <details className="lean-tag-filter" onToggle={(event) => {
               if (!event.currentTarget.open) setTagFilterSearch("");
             }} ref={tagFilterRef}>
-              <summary><Tags /> {tagIds.length > 0 ? `${tagIds.length} selected` : "Filter by Tags"}</summary>
+              <summary
+                aria-label={tagIds.length > 0 ? `Filter by Tags, ${tagIds.length} selected` : "Filter by Tags"}
+                title="Filter by Tags"
+              >
+                <Tags aria-hidden="true" />
+                {tagIds.length > 0 ? <span>{tagIds.length} selected</span> : null}
+              </summary>
               <div>
                 <div className="lean-tag-filter-tools">
                   <label className="lean-tag-filter-search"><Search /><span className="sr-only">Search Tags</span><input onChange={(event) => setTagFilterSearch(event.currentTarget.value)} placeholder="Search Tags" type="search" value={tagFilterSearch} /></label>
