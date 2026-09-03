@@ -251,7 +251,7 @@ try {
   const bestF1 = [...allMetrics].sort(
     (left, right) => right.f1 - left.f1 || right.precision - left.precision,
   )[0];
-  const checkpoints = [0.45, 0.475, 0.5, 0.51, 0.525, 0.55].map((threshold) =>
+  const checkpoints = [0.45, 0.475, 0.5, 0.51, 0.52, 0.525, 0.55].map((threshold) =>
     metrics(questions, judgments, threshold, 0.4),
   );
   console.log(
