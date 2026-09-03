@@ -1,13 +1,9 @@
 import pg from "pg";
 
-import {
-  buildOpenRouterHeaders,
-  DEFAULT_OPENROUTER_EVALUATION_MODEL,
-  OPENROUTER_CHAT_URL,
-  resolveOpenRouterApiKey,
-  resolveOpenRouterModel,
-} from "../shared/openrouter-config.mts";
 import { activeEmbeddingSpace } from "../app/lib/v2/embeddingSpaces.ts";
+import referenceSet from "../reference/semantic-tag-reference-set.json" with {
+  type: "json",
+};
 
 for (const envFile of [".env", ".env.local"]) {
   try {
@@ -22,23 +18,26 @@ const connectionString =
 if (!connectionString) {
   throw new Error("DATABASE_URL or DATABASE_URL_UNPOOLED is required.");
 }
-const apiKey = resolveOpenRouterApiKey();
-if (!apiKey) throw new Error("OPENROUTER_API_KEY is required.");
-const calibrationApiKey = apiKey;
-
-const model =
-  resolveOpenRouterModel({
-    variable: "LLM_EVALUATION_MODEL",
-    fallback: DEFAULT_OPENROUTER_EVALUATION_MODEL,
-  }) ?? DEFAULT_OPENROUTER_EVALUATION_MODEL;
 const space = activeEmbeddingSpace();
 const pool = new pg.Pool({ connectionString });
 
+const expectedTagIdsByQuestion = new Map(
+  referenceSet.questions.map(({ questionId, expectedTagIds }) => [
+    questionId,
+    new Set(expectedTagIds),
+  ]),
+);
+if (expectedTagIdsByQuestion.size === 0) {
+  throw new Error("The semantic Tag reference set is empty.");
+}
+
 type CandidateRow = {
   question_index: number;
+  question_id: string;
   prompt: string;
   reference_answer: string;
   candidate_index: number;
+  tag_id: string;
   semantic_rank: number;
   label: string;
   aliases: string[];
@@ -49,6 +48,7 @@ type CandidateRow = {
 
 type Candidate = {
   index: number;
+  tagId: string;
   label: string;
   aliases: string[];
   description: string;
@@ -59,70 +59,13 @@ type Candidate = {
 
 type EvaluationQuestion = {
   id: number;
+  questionId: string;
   prompt: string;
   answerStandard: string;
   candidates: Candidate[];
 };
 
 type Judgment = { question: number; relevant: number[] };
-
-function chatText(body: {
-  choices?: Array<{ message?: { content?: unknown } }>;
-}): string {
-  const content = body.choices?.[0]?.message?.content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part) => {
-      const record = part as { text?: unknown };
-      return typeof record.text === "string" ? record.text : "";
-    })
-    .join("");
-}
-
-function validateJudgments(
-  value: unknown,
-  questions: readonly EvaluationQuestion[],
-): Judgment[] {
-  if (!value || typeof value !== "object") {
-    throw new Error("Calibration response was not an object.");
-  }
-  const judgments = (value as { judgments?: unknown }).judgments;
-  if (!Array.isArray(judgments) || judgments.length !== questions.length) {
-    throw new Error("Calibration response omitted Questions.");
-  }
-  const normalized = judgments.map((judgment) => {
-    if (!judgment || typeof judgment !== "object") {
-      throw new Error("Calibration response contained a malformed judgment.");
-    }
-    const { question, relevant } = judgment as {
-      question?: unknown;
-      relevant?: unknown;
-    };
-    if (
-      !Number.isInteger(question) ||
-      Number(question) < 0 ||
-      Number(question) >= questions.length ||
-      !Array.isArray(relevant) ||
-      relevant.some(
-        (index) =>
-          !Number.isInteger(index) ||
-          Number(index) < 0 ||
-          Number(index) >= questions[Number(question)]!.candidates.length,
-      )
-    ) {
-      throw new Error("Calibration response contained an invalid judgment.");
-    }
-    return {
-      question: Number(question),
-      relevant: [...new Set(relevant.map(Number))],
-    };
-  });
-  if (new Set(normalized.map(({ question }) => question)).size !== questions.length) {
-    throw new Error("Calibration response duplicated Questions.");
-  }
-  return normalized.sort((left, right) => left.question - right.question);
-}
 
 function metrics(
   questions: readonly EvaluationQuestion[],
@@ -203,82 +146,6 @@ function metrics(
   };
 }
 
-async function requestJudgments(
-  questions: readonly EvaluationQuestion[],
-): Promise<Judgment[]> {
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      const response = await fetch(OPENROUTER_CHAT_URL, {
-        method: "POST",
-        headers: buildOpenRouterHeaders(calibrationApiKey),
-        body: JSON.stringify({
-          model,
-          temperature: 0,
-          max_tokens: 4_000,
-          provider: { require_parameters: true },
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "semantic_tag_calibration",
-              strict: true,
-              schema: {
-                type: "object",
-                properties: {
-                  judgments: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        question: { type: "integer", minimum: 0 },
-                        relevant: {
-                          type: "array",
-                          items: {
-                            type: "integer",
-                            minimum: 0,
-                            maximum: 10_000,
-                          },
-                        },
-                      },
-                      required: ["question", "relevant"],
-                      additionalProperties: false,
-                    },
-                  },
-                },
-                required: ["judgments"],
-                additionalProperties: false,
-              },
-            },
-          },
-          messages: [
-            {
-              role: "system",
-              content:
-                "Judge whether each candidate Tag describes subject matter materially relevant to the Question's Recall Target. Use the Prompt and Answer Standard to infer that target. A Tag is relevant when a learner could reasonably drill this Question through that Tag. Reject lifecycle, difficulty, incidental mentions, broad neighboring fields, and concepts present only in optional background. Evaluate each candidate independently. Return one judgment for every Question and use only candidate indexes present on that Question.",
-            },
-            { role: "user", content: JSON.stringify(questions) },
-          ],
-        }),
-        signal: AbortSignal.timeout(180_000),
-      });
-      const text = await response.text();
-      if (!response.ok) {
-        throw new Error(
-          `Calibration request failed (${response.status}): ${text.slice(0, 300)}`,
-        );
-      }
-      const body = JSON.parse(text) as {
-        choices?: Array<{ message?: { content?: unknown } }>;
-      };
-      return validateJudgments(JSON.parse(chatText(body)), questions);
-    } catch (error) {
-      lastError = error;
-      if (attempt === 2) throw error;
-    }
-  }
-  throw lastError;
-}
-
 try {
   const result = await pool.query<CandidateRow>(
     `WITH questions AS (
@@ -287,12 +154,15 @@ try {
               row_number() OVER (ORDER BY question.id)::int - 1 AS question_index
          FROM waxon_v2.questions question
          JOIN waxon_v2.question_embeddings embedding
-           ON embedding.user_id = question.user_id
+          ON embedding.user_id = question.user_id
           AND embedding.question_id = question.id
           AND embedding.space_id = $1
+        WHERE question.id = ANY($2::uuid[])
     ), scored AS (
-       SELECT question.question_index, question.prompt, question.reference_answer,
-              tag.label, tag.aliases, tag.scope_note AS description,
+       SELECT question.question_index, question.id AS question_id,
+              question.prompt, question.reference_answer,
+              tag.id AS tag_id, tag.label, tag.aliases,
+              tag.scope_note AS description,
               1 - (tag_embedding.embedding <=> question.embedding) AS similarity,
               row_number() OVER (
                 PARTITION BY question.id
@@ -317,19 +187,20 @@ try {
          PARTITION BY question_index ORDER BY semantic_rank
        )::int - 1 AS candidate_index
          FROM scored
-        WHERE semantic_rank < 3 OR lexical_match
      )
      SELECT * FROM candidates
       ORDER BY question_index, candidate_index`,
-    [space.id],
+    [space.id, [...expectedTagIdsByQuestion.keys()]],
   );
   const grouped = Map.groupBy(result.rows, (row) => row.question_index);
   const questions = [...grouped.entries()].map(([id, rows]) => ({
     id,
+    questionId: rows[0]!.question_id,
     prompt: rows[0]!.prompt,
     answerStandard: rows[0]!.reference_answer,
     candidates: rows.map((row) => ({
       index: row.candidate_index,
+      tagId: row.tag_id,
       label: row.label,
       aliases: row.aliases,
       description: row.description,
@@ -338,24 +209,27 @@ try {
       semanticRank: row.semantic_rank,
     })),
   }));
-  if (questions.length === 0 || questions.some(({ candidates }) => candidates.length < 3)) {
-    throw new Error("Calibration requires at least three candidates for every embedded Question.");
+  if (questions.length === 0) {
+    throw new Error("Calibration found no embedded reference Questions.");
   }
+  const unembeddedReferenceQuestions =
+    expectedTagIdsByQuestion.size - questions.length;
 
-  const judgments: Judgment[] = [];
-  const calibrationBatchSize = 30;
-  for (let offset = 0; offset < questions.length; offset += calibrationBatchSize) {
-    const batch = questions.slice(offset, offset + calibrationBatchSize).map(
-      (question, index) => ({ ...question, id: index }),
-    );
-    const batchJudgments = await requestJudgments(batch);
-    judgments.push(
-      ...batchJudgments.map((judgment) => ({
-        ...judgment,
-        question: judgment.question + offset,
-      })),
-    );
-  }
+  const judgments: Judgment[] = questions.map((question, questionIndex) => {
+    const expectedTagIds = expectedTagIdsByQuestion.get(question.questionId)!;
+    const judgment = {
+      question: questionIndex,
+      relevant: question.candidates.flatMap((candidate) =>
+        expectedTagIds.has(candidate.tagId) ? [candidate.index] : [],
+      ),
+    };
+    if (judgment.relevant.length !== expectedTagIds.size) {
+      throw new Error(
+        `Reference Question ${question.questionId} contains an inactive or unembedded Tag.`,
+      );
+    }
+    return judgment;
+  });
   const thresholds = [
     ...new Set([
       0,
@@ -384,8 +258,9 @@ try {
     JSON.stringify(
       {
         space: space.key,
-        model,
+        referenceAuthor: referenceSet.authoredBy,
         questions: questions.length,
+        unembeddedReferenceQuestions,
         judgedCandidates: questions.reduce(
           (count, question) => count + question.candidates.length,
           0,

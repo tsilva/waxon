@@ -17,7 +17,6 @@
     "semantic-tags:benchmark": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/semantic-tags-benchmark.mts",
     "semantic-tags:backfill": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/backfill-semantic-tag-space.mts",
     "semantic-tags:calibrate": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/calibrate-semantic-tag-threshold.mts",
-    "semantic-tags:reference": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/generate-semantic-tag-reference-set.mts",
     "recall-evaluator:smoke": "node --import tsx scripts/recall-evaluator-smoke.mts",
     "start": "node scripts/next-server.mjs start",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.mts",
