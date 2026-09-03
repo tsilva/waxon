@@ -481,10 +481,21 @@ test("Review Flag modal has a narrow responsive contract and Library groups ques
     ),
     true,
   );
-  assert.match(
-    questionBank,
-    /<div className="lean-question-meta">[\s\S]*?<span className=\{`lean-lifecycle[^\n]+[\s\S]*?question\.relatedTags\.length > 0[\s\S]*?<div className="lean-question-tags" aria-label="Predicted Tags">[\s\S]*?<\/div>\s*\) : null\}\s*<\/div>\s*\{question\.referenceTags !== null \? \([\s\S]*?<span>Ground Truth<\/span>[\s\S]*?\) : null\}\s*<h2>/u,
+  assert.equal(questionBank.includes("const comparisonTags = ["), true);
+  assert.equal(questionBank.includes('comparison: "missing" as const'), true);
+  assert.equal(questionBank.includes('? "matched" as const'), true);
+  assert.equal(questionBank.includes(': "extra" as const'), true);
+  assert.equal(
+    questionBank.includes(
+      'aria-label={question.referenceTags === null ? "Predicted Tags" : "Tag comparison"}',
+    ),
+    true,
   );
+  assert.equal(questionBank.includes('className={`is-${tag.comparison}`}'), true);
+  assert.equal(questionBank.includes('className="lean-question-ground-truth"'), false);
+  assert.equal(questionBank.includes("Ground Truth Tags"), false);
+  assert.equal(styles.includes(".lean-question-tags button.is-missing"), true);
+  assert.equal(styles.includes(".lean-question-tags button.is-extra"), true);
   assert.equal(questionBank.includes("Learner flag"), false);
   const questionFooterIndex = questionBank.indexOf(
     '<div className="lean-question-footer">',
