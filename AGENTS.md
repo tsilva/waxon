@@ -43,7 +43,7 @@ This is a single-context repository using root `CONTEXT.md` and `docs/adr/`. See
 
 ## Questions
 
-When creating, cleaning up, deduplicating, or generating knowledge-base questions and probing questions, use the shared question-quality reference in [reference/question-quality.md](reference/question-quality.md).
+The authoritative scoped specification for Question quality is [reference/question-quality.md](reference/question-quality.md). Use it whenever creating, cleaning up, deduplicating, or generating knowledge-bank Questions and probing questions. Treat its normative requirements as stakeholder intent: propose exact changes and obtain explicit stakeholder approval before editing them. Keep project-wide invariants and lifecycle policy in root `SPECS.md`.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

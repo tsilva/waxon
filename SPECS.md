@@ -32,7 +32,7 @@ Waxon is a multi-user question bank and adaptive recall-practice system. Learner
 - Archived questions must remain out of Review until restored, and restoration without replacement must preserve their learning evidence.
 - Flagged questions must remain out of Review until restored unchanged, replaced by a new question, or archived.
 - Flagging may record zero or more structured reasons and optional free-text detail.
-- Every active question must be self-contained, atomic, recall-oriented, and answerable from its stored answer standard.
+- Every Active Question must satisfy the canonical [Question Quality Standard](reference/question-quality.md), including being self-contained, atomic, recall-oriented, and answerable from its stored Answer Standard.
 - A semantically questionable but structurally valid candidate must enter the bank as Flagged with validation reasons instead of becoming active.
 - Structurally unusable input must be rejected rather than stored.
 - Adding a valid question must not depend on concepts, provenance, embeddings, enrichment, or model generation.

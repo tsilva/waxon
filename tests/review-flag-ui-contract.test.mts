@@ -427,7 +427,7 @@ test("Review Flag dialog toggles reasons, reports errors, dismisses, and restore
   assert.equal(document.activeElement, opener);
 });
 
-test("Review Flag modal has a narrow responsive contract and Library renders inline flag evidence", async () => {
+test("Review Flag modal has a narrow responsive contract and Library groups question details behind one disclosure", async () => {
   const [styles, questionBank] = await Promise.all([
     readFile(appStylesPath, "utf8"),
     readFile(libraryPath, "utf8"),
@@ -461,16 +461,17 @@ test("Review Flag modal has a narrow responsive contract and Library renders inl
     reasonsRule?.style.getPropertyValue("grid-template-columns"),
     "minmax(0, 1fr)",
   );
-  style.remove();
-  assert.equal(
-    questionBank.includes('<details className="lean-flag-details">'),
-    true,
-  );
-  assert.equal(
-    questionBank.includes('<details className="lean-flag-details" open>'),
-    false,
-  );
-  assert.equal(questionBank.includes("<summary>Flag details</summary>"), true);
+  assert.equal(questionBank.includes("const [detailsOpen, setDetailsOpen] = useState(false)"), true);
+  assert.equal(questionBank.includes('className="lean-question-detail-grid"'), true);
+  assert.equal(questionBank.includes("hidden={!detailsOpen}"), true);
+  assert.equal(questionBank.includes('aria-expanded={detailsOpen}'), true);
+  assert.equal(questionBank.includes('"Show question details"'), true);
+  assert.equal(questionBank.includes('"Hide question details"'), true);
+  assert.equal(questionBank.includes('<ChevronDown className="lean-question-collapse-icon"'), true);
+  assert.equal(questionBank.includes('<span className="lean-question-detail-label">Flag details</span>'), true);
+  assert.equal(questionBank.includes('<span className="lean-question-detail-label">Answer standard</span>'), true);
+  assert.equal(questionBank.includes("<summary>Flag details</summary>"), false);
+  assert.equal(questionBank.includes("<summary>Answer standard</summary>"), false);
   assert.equal(questionBank.includes("flag.detail"), true);
   assert.equal(questionBank.includes("question-bank-flag-detail"), true);
   assert.equal(questionBank.includes('question.lifecycle !== "flagged"'), true);
@@ -480,6 +481,14 @@ test("Review Flag modal has a narrow responsive contract and Library renders inl
     styles.includes(".lean-flag-reasons > span {\n  display: inline-flex"),
     false,
   );
+
+  const tagRule = Array.from(style.sheet?.cssRules ?? []).find(
+    (rule) =>
+      "selectorText" in rule && rule.selectorText === ".lean-question-tags button",
+  ) as CSSStyleRule | undefined;
+  assert.equal(tagRule?.style.getPropertyValue("border-radius"), "7px");
+  assert.equal(tagRule?.style.getPropertyValue("cursor"), "pointer");
+  style.remove();
 });
 
 test("Review question scroller reserves room for the Flag interaction ring", async () => {

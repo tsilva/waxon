@@ -194,12 +194,21 @@
   align-items: center;
   min-height: 23px;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: 999px;
+  border-radius: 7px;
   padding: 0 8px;
   background: color-mix(in srgb, var(--accent) 10%, transparent);
   color: inherit;
+  cursor: pointer;
   font: 600 10px/1 var(--font-ui);
   white-space: nowrap;
+}
+
+.lean-question-tags button:hover,
+.lean-question-tags button:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  outline-offset: 2px;
 }
 
 .lean-tag-filter-row {
@@ -358,10 +367,6 @@
   margin: 0;
 }
 
-.lean-question-copy .lean-flag-details {
-  margin: -1px 0 10px;
-}
-
 .lean-flag-evidence > div,
 .lean-flag-reasons {
   display: flex;
@@ -426,20 +431,52 @@
   color: var(--formula);
 }
 
-.lean-question-copy details {
+.lean-question-detail-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 13px;
+  padding-top: 13px;
+  border-top: 1px solid rgb(227 218 196 / 62%);
   color: var(--ink-soft);
   font: 400 14px/1.55 var(--font-ui);
 }
 
-.lean-question-copy summary {
-  width: fit-content;
-  color: var(--muted-strong);
-  font: 600 12px/1.3 var(--font-ui);
-  cursor: pointer;
+.lean-question-detail-grid[hidden] {
+  display: none;
 }
 
-.lean-question-copy details[open] summary {
-  margin-bottom: 10px;
+.lean-question-detail-section {
+  display: grid;
+  gap: 7px;
+}
+
+.lean-question-detail-label {
+  color: var(--muted);
+  font: 700 11px/1.2 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lean-question-footer {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 28px;
+  margin-top: 8px;
+}
+
+.lean-question-details-toggle {
+  flex: 0 0 auto;
+}
+
+.lean-question-collapse-icon {
+  width: 18px;
+  height: 18px;
+  color: rgb(166 124 82 / 70%);
+  transition: transform 160ms ease;
+}
+
+.lean-question-row-open .lean-question-collapse-icon {
+  transform: rotate(180deg);
 }
 
 .lean-question-actions {
