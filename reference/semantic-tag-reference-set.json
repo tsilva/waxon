@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "generatedAt": null,
+  "model": null,
+  "embeddingSpace": "openai:text-embedding-3-small:512:topic-v2",
+  "tagCatalogFingerprint": null,
+  "questions": []
+}

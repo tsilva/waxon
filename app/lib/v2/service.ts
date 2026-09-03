@@ -39,6 +39,7 @@ import type { RecallEvaluationResult } from "./recallEvaluation.ts";
 import { runLiveEvaluationJob } from "./liveReview.ts";
 import { runQuestionEmbeddingJob } from "./questionEmbeddings.ts";
 import { relatedQuestions, relatedTags } from "./semanticTags.ts";
+import { referenceTags } from "./tagReferenceSet.ts";
 
 const QUESTION_PAGE_LIMIT = 50;
 
@@ -572,11 +573,15 @@ export async function listLibrary(input: {
       : null;
   }
 
-  const [relatedByQuestion, countRows] = await Promise.all([
+  const [relatedByQuestion, referenceByQuestion, countRows] = await Promise.all([
     relatedTags({
       learnerId: input.userId,
       questionIds: pageRows.map((row) => row.id),
       limit: 3,
+    }),
+    referenceTags({
+      learnerId: input.userId,
+      questionIds: pageRows.map((row) => row.id),
     }),
     pool.query<{ lifecycle: string; count: string }>(
       `SELECT lifecycle::text, count(*)::text
@@ -593,6 +598,7 @@ export async function listLibrary(input: {
       referenceAnswer: row.reference_answer,
       lifecycle: row.lifecycle as V2QuestionLifecycle,
       relatedTags: relatedByQuestion.get(row.id) ?? [],
+      referenceTags: referenceByQuestion.get(row.id) ?? null,
       flags: row.flags,
       dueAt: row.due_at?.toISOString() ?? null,
       createdAt: row.created_at.toISOString(),
