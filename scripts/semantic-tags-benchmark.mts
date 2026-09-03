@@ -125,7 +125,7 @@ const relatedTagsSql = `
                    AS lexical_match
             FROM active_tags tag
         ) scored
-       WHERE scored.distance <= 0.49
+       WHERE scored.distance <= 0.48
           OR (scored.lexical_match AND scored.distance <= 0.6)
        ORDER BY scored.lexical_match DESC, scored.distance, scored.tag_id
        LIMIT 3

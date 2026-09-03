@@ -58,7 +58,7 @@ test("embedding writes validate dimensions, finiteness, and magnitude", () => {
 
 test("related Tag display uses the calibrated hybrid cutoffs", () => {
   assert.equal(MAX_RELATED_TAGS, 3);
-  assert.equal(MIN_RELATED_TAG_SIMILARITY, 0.51);
+  assert.equal(MIN_RELATED_TAG_SIMILARITY, 0.52);
   assert.equal(MIN_LEXICAL_RESCUE_SIMILARITY, 0.4);
 });
 
