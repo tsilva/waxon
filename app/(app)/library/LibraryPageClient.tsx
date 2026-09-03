@@ -310,8 +310,8 @@ function QuestionRow({
               </div>
             </div>
             <div>
-              <span>Reference</span>
-              <div className="lean-question-tags is-reference" aria-label="Reference Tags">
+              <span>Codex reference</span>
+              <div className="lean-question-tags is-reference" aria-label="Codex Reference Tags">
                 {question.referenceTags.length > 0
                   ? question.referenceTags.map((tag) => <span key={tag.id}>{tag.label}</span>)
                   : <span className="lean-question-tags-empty">None</span>}

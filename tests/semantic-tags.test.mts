@@ -139,7 +139,8 @@ test("Library exposes semantic Tags without assignment management", async () => 
   assert.match(library, /Search Tags/u);
   assert.match(library, /relatedTags/u);
   assert.match(library, /Predicted Tags/u);
-  assert.match(library, /Reference Tags/u);
+  assert.match(library, /Codex reference/u);
+  assert.match(library, /Codex Reference Tags/u);
   assert.match(library, /question\.referenceTags !== null/u);
   assert.match(library, /Load more/u);
   assert.doesNotMatch(library, /Untagged|Manage Tags|Edit Question Tags/u);
@@ -151,6 +152,44 @@ test("Library exposes semantic Tags without assignment management", async () => 
     /requestQuestionSearchEmbeddings|embedQuestionSearchPrompts|fetch\(/u,
   );
   assert.doesNotMatch(review, /relatedTags|Filter by Tags/u);
+});
+
+test("semantic Tag calibration uses the Codex-authored reference set", async () => {
+  const [referenceSource, calibration] = await Promise.all([
+    readFile(
+      new URL("../reference/semantic-tag-reference-set.json", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../scripts/calibrate-semantic-tag-threshold.mts",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+  ]);
+  const reference = JSON.parse(referenceSource) as {
+    authoredBy?: unknown;
+    judgmentMethod?: unknown;
+    questions?: Array<{ questionId: string; expectedTagIds: string[] }>;
+  };
+
+  assert.equal(reference.authoredBy, "Codex");
+  assert.match(String(reference.judgmentMethod), /manual full-catalog review/u);
+  assert.equal(reference.questions?.length, 254);
+  assert.equal(
+    new Set(reference.questions?.map(({ questionId }) => questionId)).size,
+    reference.questions?.length,
+  );
+  assert.ok(
+    reference.questions?.every(
+      ({ expectedTagIds }) =>
+        expectedTagIds.length <= 3 &&
+        new Set(expectedTagIds).size === expectedTagIds.length,
+    ),
+  );
+  assert.match(calibration, /expectedTagIdsByQuestion/u);
+  assert.doesNotMatch(calibration, /OPENROUTER|requestJudgments|fetch\(/u);
 });
 
 test("the forward migration preserves compatible vectors and removes assignments", async () => {
