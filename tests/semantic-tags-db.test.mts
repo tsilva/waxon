@@ -9,6 +9,15 @@ function axisVector(axis: number, dimensions = 512): string {
   ).join(",")}]`;
 }
 
+function cosineVector(
+  components: ReadonlyArray<readonly [axis: number, value: number]>,
+  dimensions = 512,
+): string {
+  const vector = Array(dimensions).fill(0) as number[];
+  for (const [axis, value] of components) vector[axis] = value;
+  return `[${vector.join(",")}]`;
+}
+
 test(
   "semantic Tags rank only compatible embeddings within one Learner",
   { skip: TEST_DATABASE_URL ? false : "TAGS_TEST_DATABASE_URL is not set" },
@@ -27,6 +36,39 @@ test(
     const firstSpace = 2;
     const secondSpace = 101;
     try {
+      const lexical = await pool.query<{
+        acronym_once: boolean;
+        acronym_repeated: boolean;
+        phrase_case_folded: boolean;
+        phrase_not_consecutive: boolean;
+        whole_token_boundary: boolean;
+        no_stemming: boolean;
+      }>(
+        `SELECT
+           to_tsvector('simple', 'PPO')
+             @@ phraseto_tsquery('simple', 'ppo') AS acronym_once,
+           to_tsvector('simple', 'PPO, PPO, and PPO')
+             @@ phraseto_tsquery('simple', 'ppo') AS acronym_repeated,
+           to_tsvector('simple', 'PROXIMAL policy optimization, explained')
+             @@ phraseto_tsquery('simple', 'Proximal Policy Optimization')
+               AS phrase_case_folded,
+           to_tsvector('simple', 'proximal stochastic policy optimization')
+             @@ phraseto_tsquery('simple', 'proximal policy optimization')
+               AS phrase_not_consecutive,
+           to_tsvector('simple', 'PPOptimizer')
+             @@ phraseto_tsquery('simple', 'PPO') AS whole_token_boundary,
+           to_tsvector('simple', 'network')
+             @@ phraseto_tsquery('simple', 'networks') AS no_stemming`,
+      );
+      assert.deepEqual(lexical.rows[0], {
+        acronym_once: true,
+        acronym_repeated: true,
+        phrase_case_folded: true,
+        phrase_not_consecutive: false,
+        whole_token_boundary: false,
+        no_stemming: false,
+      });
+
       await pool.query(
         `INSERT INTO waxon_v2.users (id, display_name, email)
          VALUES ($1, 'Semantic Tags A', 'semantic-a@waxon.invalid'),
@@ -136,6 +178,129 @@ test(
           ?.relatedTags,
         [{ id: deepLearning, label: "Deep learning" }],
       );
+
+      const hybridQuestions = await pool.query<{ id: string; prompt: string }>(
+        `INSERT INTO waxon_v2.questions
+           (user_id, prompt, reference_answer, target_key)
+         VALUES
+           ($1, 'What is a typical combined PPO loss?', 'Policy, value, and entropy terms.', 'hybrid-ppo-acronym'),
+           ($1, 'How does proximal policy optimization clip its objective?', 'It bounds the policy update.', 'hybrid-ppo-expanded'),
+           ($1, 'Which optimizer is used here?', 'PPO is used.', 'hybrid-answer-only'),
+           ($1, 'What does PPOptimizer return?', 'An optimizer.', 'hybrid-token-boundary'),
+           ($1, 'Why was PPO mentioned incidentally?', 'It was background only.', 'hybrid-low-similarity')
+         RETURNING id, prompt`,
+        [learnerA],
+      );
+      const hybridQuestionByPrompt = new Map(
+        hybridQuestions.rows.map((row) => [row.prompt, row.id]),
+      );
+      const hybridTags = await pool.query<{ id: string; label: string }>(
+        `INSERT INTO waxon_v2.tags
+           (user_id, label, normalized_label, aliases, scope_note)
+         VALUES
+           ($1, 'Proximal Policy Optimization', 'proximal policy optimization', ARRAY['PPO'], 'Questions about the PPO reinforcement-learning algorithm.'),
+           ($1, 'Policy Gradient Methods', 'policy gradient methods', ARRAY[]::text[], 'Questions about policy-gradient methods.')
+         RETURNING id, label`,
+        [learnerA],
+      );
+      const hybridTagByLabel = new Map(
+        hybridTags.rows.map((row) => [row.label, row.id]),
+      );
+      const ppo = hybridTagByLabel.get("Proximal Policy Optimization")!;
+      const policyGradient = hybridTagByLabel.get("Policy Gradient Methods")!;
+      const acronymQuestion = hybridQuestionByPrompt.get(
+        "What is a typical combined PPO loss?",
+      )!;
+      const expandedQuestion = hybridQuestionByPrompt.get(
+        "How does proximal policy optimization clip its objective?",
+      )!;
+      const answerOnlyQuestion = hybridQuestionByPrompt.get(
+        "Which optimizer is used here?",
+      )!;
+      const boundaryQuestion = hybridQuestionByPrompt.get(
+        "What does PPOptimizer return?",
+      )!;
+      const lowSimilarityQuestion = hybridQuestionByPrompt.get(
+        "Why was PPO mentioned incidentally?",
+      )!;
+      await pool.query(
+        `INSERT INTO waxon_v2.tag_embeddings
+           (user_id, space_id, tag_id, embedding)
+         VALUES ($1, $2, $3, $5::halfvec), ($1, $2, $4, $6::halfvec)`,
+        [
+          learnerA,
+          firstSpace,
+          ppo,
+          policyGradient,
+          axisVector(2),
+          axisVector(3),
+        ],
+      );
+      await pool.query(
+        `INSERT INTO waxon_v2.question_embeddings
+           (user_id, space_id, question_id, embedding)
+         VALUES
+           ($1, $2, $3, $8::halfvec),
+           ($1, $2, $4, $8::halfvec),
+           ($1, $2, $5, $9::halfvec),
+           ($1, $2, $6, $9::halfvec),
+           ($1, $2, $7, $10::halfvec)`,
+        [
+          learnerA,
+          firstSpace,
+          acronymQuestion,
+          expandedQuestion,
+          answerOnlyQuestion,
+          boundaryQuestion,
+          lowSimilarityQuestion,
+          cosineVector([
+            [2, 0.45],
+            [3, 0.89],
+            [4, Math.sqrt(1 - 0.45 ** 2 - 0.89 ** 2)],
+          ]),
+          cosineVector([
+            [2, 0.45],
+            [4, Math.sqrt(1 - 0.45 ** 2)],
+          ]),
+          cosineVector([
+            [2, 0.3],
+            [4, Math.sqrt(1 - 0.3 ** 2)],
+          ]),
+        ],
+      );
+
+      for (const questionId of [acronymQuestion, expandedQuestion]) {
+        assert.deepEqual(
+          (await semantic.relatedTags({
+            learnerId: learnerA,
+            questionIds: [questionId],
+            limit: 1,
+          })).get(questionId),
+          [{ id: ppo, label: "Proximal Policy Optimization" }],
+        );
+      }
+      for (const questionId of [
+        answerOnlyQuestion,
+        boundaryQuestion,
+        lowSimilarityQuestion,
+      ]) {
+        assert.equal(
+          (await semantic.relatedTags({
+            learnerId: learnerA,
+            questionIds: [questionId],
+          })).get(questionId)?.some(({ id }) => id === ppo),
+          false,
+        );
+      }
+      const ppoQuestions = (
+        await semantic.relatedQuestions({
+          learnerId: learnerA,
+          tagIds: [ppo],
+          limit: 10,
+        })
+      ).questionIds;
+      assert.ok(ppoQuestions.indexOf(acronymQuestion) < ppoQuestions.indexOf(answerOnlyQuestion));
+      assert.ok(ppoQuestions.indexOf(expandedQuestion) < ppoQuestions.indexOf(answerOnlyQuestion));
       assert.equal(
         (await service.listLibrary({ userId: learnerA })).questions.some(
           ({ prompt }) => prompt === "Question without an embedding",
@@ -193,7 +358,7 @@ test(
       assert.equal(secondPage.nextCursor, null);
       assert.equal(
         new Set([...firstPage.questionIds, ...secondPage.questionIds]).size,
-        53,
+        58,
       );
 
       const paginatedTags = await pool.query<{ id: string }>(

@@ -10,6 +10,7 @@ import {
 } from "../app/lib/v2/embeddingSpaces.ts";
 import {
   MAX_RELATED_TAGS,
+  MIN_LEXICAL_RESCUE_SIMILARITY,
   MIN_RELATED_TAG_SIMILARITY,
   relatedQuestions,
   relatedTags,
@@ -55,9 +56,24 @@ test("embedding writes validate dimensions, finiteness, and magnitude", () => {
   assert.throws(() => validateEmbedding(Array(512).fill(0)), /non-zero/u);
 });
 
-test("related Tag display uses the calibrated precision-first cutoff", () => {
+test("related Tag display uses the calibrated hybrid cutoffs", () => {
   assert.equal(MAX_RELATED_TAGS, 3);
   assert.equal(MIN_RELATED_TAG_SIMILARITY, 0.51);
+  assert.equal(MIN_LEXICAL_RESCUE_SIMILARITY, 0.4);
+});
+
+test("hybrid retrieval uses Prompt-only simple phrase matching and stable tiers", async () => {
+  const source = await readFile(
+    new URL("../app/lib/v2/semanticTags.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /to_tsvector\('simple', question\.prompt\)/u);
+  assert.match(source, /ARRAY\([\s\S]*phraseto_tsquery\('simple', term\.value\)/u);
+  assert.match(source, /array_prepend\(tag\.label, tag\.aliases\)/u);
+  assert.match(source, /prompt_document @@ ANY\(tag\.lexical_queries\)/u);
+  assert.match(source, /ORDER BY lexical_priority DESC, distance, tag_id/u);
+  assert.match(source, /ORDER BY lexical_tier, distance, question_id/u);
+  assert.match(source, /hybrid-lexical-semantic-v1/u);
 });
 
 test("a semantic cursor cannot be reused for another query", async () => {

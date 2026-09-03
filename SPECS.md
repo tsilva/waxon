@@ -20,11 +20,11 @@ Waxon is a multi-user question bank and adaptive recall-practice system. Learner
 - Active, Flagged, and Archived must be the only question lifecycle states.
 - Learners must be able to add, find, replace, flag, archive, restore, and unflag questions.
 - Questions must be discoverable through learner-specific, flat subject-matter Tags rather than decks, categories, or a topic hierarchy.
-- Tag labels and semantic descriptions must always use English; Waxon must not support multilingual Tags or Tag localization.
+- Tag labels, aliases, and semantic descriptions must always use English; Waxon must not support multilingual Tags or Tag localization.
 - Tags must describe subject matter materially relevant to a Question's Recall Target rather than lifecycle, learning state, difficulty, importance, or Review behavior.
-- Tags must act as semantic search queries; Waxon must derive Question–Tag relevance from compatible embeddings at read time rather than persist Tag assignments, assignment provenance, learner overrides, or an Untagged state.
+- Tags must act as hybrid semantic and lexical search queries; Waxon must derive Question–Tag relevance at read time from compatible embeddings and whole-token or consecutive-phrase matches of English Tag labels and aliases in the Question Prompt rather than persist Tag assignments, assignment provenance, learner overrides, or an Untagged state.
 - A Question and Tag may each have multiple embedding representations, but Waxon must compare only representations from the same declared embedding space.
-- Learners must be able to view the closest Tags to a Question and the closest Questions to one or more selected Tags; multiple selected Tags match by strongest relevance to any selected Tag, while lifecycle and text search narrow the result.
+- Learners must be able to view the most relevant Tags to a Question and the most relevant Questions to one or more selected Tags; exact Prompt matches to a Tag label or alias must rank ahead of purely semantic matches when compatible embeddings remain sufficiently related, multiple selected Tags must match by strongest relevance to any selected Tag, and lifecycle and text search must narrow the result.
 - Synonymous or overlapping Tags may coexist without automatic renaming, merging, or deletion.
 - Learners must be able to reach every semantically ranked result through stable pagination without silent truncation.
 - Tag discovery must remain learner-isolated and responsive with billions of Questions overall and thousands in one learner's Library.
