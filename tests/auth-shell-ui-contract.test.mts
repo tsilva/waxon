@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 
@@ -24,6 +25,44 @@ const React = await import("react");
 const { act } = React;
 const { createRoot } = await import("react-dom/client");
 const { ClientAuthGateView } = await import("../app/AuthShell.tsx");
+
+test("auth routes render only Clerk's prebuilt panels", async () => {
+  const [layout, provider, signInPage, signUpPage, styles] = await Promise.all([
+    readFile(new URL("../app/(auth)/layout.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/(auth)/ClerkAuthProvider.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../app/(auth)/sign-in/[[...sign-in]]/page.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../app/(auth)/sign-up/[[...sign-up]]/page.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL("../app/(auth)/auth-globals.css", import.meta.url),
+      "utf8",
+    ),
+  ]);
+  const authSource = [layout, provider, signInPage, signUpPage, styles].join(
+    "\n",
+  );
+
+  assert.match(layout, /<ClerkAuthProvider/u);
+  assert.match(provider, /<ClerkProvider/u);
+  assert.match(signInPage, /<SignIn\s*\/>/u);
+  assert.match(signUpPage, /<SignUp\s*\/>/u);
+  assert.doesNotMatch(authSource, /AuthClerkHydrator|auth-static-shell/u);
+  assert.doesNotMatch(authSource, /Continue to sign (?:in|up)/u);
+});
 
 test("the authenticated app shell stays hidden until Clerk confirms sign-in", async () => {
   const container = document.createElement("div");

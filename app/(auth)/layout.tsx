@@ -1,3 +1,4 @@
+import { ClerkAuthProvider } from "./ClerkAuthProvider";
 import "./auth-globals.css";
 
 export default function AuthLayout({
@@ -5,5 +6,5 @@ export default function AuthLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return children;
+  return <ClerkAuthProvider>{children}</ClerkAuthProvider>;
 }
