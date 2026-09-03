@@ -427,7 +427,7 @@ test("Review Flag dialog toggles reasons, reports errors, dismisses, and restore
   assert.equal(document.activeElement, opener);
 });
 
-test("Review Flag modal has a narrow responsive contract and Library renders learner detail", async () => {
+test("Review Flag modal has a narrow responsive contract and Library renders inline flag evidence", async () => {
   const [styles, questionBank] = await Promise.all([
     readFile(appStylesPath, "utf8"),
     readFile(libraryPath, "utf8"),
@@ -473,6 +473,13 @@ test("Review Flag modal has a narrow responsive contract and Library renders lea
   assert.equal(questionBank.includes("<summary>Flag details</summary>"), true);
   assert.equal(questionBank.includes("flag.detail"), true);
   assert.equal(questionBank.includes("question-bank-flag-detail"), true);
+  assert.equal(questionBank.includes('question.lifecycle !== "flagged"'), true);
+  assert.equal(questionBank.includes("Learner flag"), false);
+  assert.equal(styles.includes(".lean-flag-origin"), false);
+  assert.equal(
+    styles.includes(".lean-flag-reasons > span {\n  display: inline-flex"),
+    false,
+  );
 });
 
 test("Review question scroller reserves room for the Flag interaction ring", async () => {

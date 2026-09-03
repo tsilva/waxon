@@ -307,6 +307,25 @@ function renderInlineMarkdown(
 
     if (
       options.enableMath &&
+      text.startsWith("$$", index) &&
+      text[index - 1] !== "\\"
+    ) {
+      const closeIndex = findClosingDelimiter(text, "$$", index + 2);
+
+      if (closeIndex > index + 2) {
+        nodes.push(
+          <MathExpression
+            expression={text.slice(index + 2, closeIndex)}
+            key={`double-dollar-math-${index}`}
+          />,
+        );
+        index = closeIndex + 2;
+        continue;
+      }
+    }
+
+    if (
+      options.enableMath &&
       isInlineMathDollarDelimiter(text, index)
     ) {
       const closeIndex = findClosingInlineMathDollar(text, index + 1);

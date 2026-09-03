@@ -28,11 +28,18 @@ function styleRule(selector: string): CSSStyleRule | undefined {
 }
 
 test("resolved-answer metadata stays in flow and cannot cover Recall Result controls", () => {
+  const footer = styleRule(".previous-row-footer");
   const metadata = styleRule(".previous-row-meta");
+  assert.ok(footer);
   assert.ok(metadata);
+  assert.equal(footer.style.getPropertyValue("display"), "flex");
+  assert.equal(
+    footer.style.getPropertyValue("justify-content"),
+    "space-between",
+  );
   assert.equal(metadata.style.getPropertyValue("position"), "static");
-  assert.equal(metadata.style.getPropertyValue("grid-column"), "1 / -1");
-  assert.equal(metadata.style.getPropertyValue("width"), "100%");
+  assert.equal(metadata.style.getPropertyValue("flex"), "1 1 auto");
+  assert.equal(metadata.style.getPropertyValue("width"), "auto");
 });
 
 test("previous answers start collapsed but a newly completed evaluation opens", () => {
@@ -43,11 +50,11 @@ test("previous answers start collapsed but a newly completed evaluation opens", 
   );
 });
 
-test("only expanded answers expose an icon-only Markdown copy action", () => {
+test("only expanded answers put the Markdown copy action in the bottom-left footer", () => {
   assert.match(reviewApp, /hidden=\{!open\}/u);
   assert.match(
     reviewApp,
-    /\{open \? \(\s*<div className="review-handoff-actions">/u,
+    /<div className="previous-row-footer">\s*\{open \? \(\s*<div className="review-handoff-actions">/u,
   );
   assert.match(reviewApp, /aria-label="Copy review as Markdown"/u);
   assert.doesNotMatch(reviewApp, />Copy Markdown</u);
@@ -55,6 +62,9 @@ test("only expanded answers expose an icon-only Markdown copy action", () => {
     reviewApp,
     /navigator\.clipboard\.writeText\(reviewHandoffMarkdown\(turn\)\)/u,
   );
+  const actions = styleRule(".review-handoff-actions");
+  assert.ok(actions);
+  assert.equal(actions.style.getPropertyValue("justify-content"), "flex-start");
 });
 
 test("Review presents Recall Results without internal Answer Grade labels", () => {

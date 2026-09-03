@@ -44,6 +44,22 @@ test("MarkdownContent renders KL-divergence relation and calligraphic set comman
   assert.match(html, /class="math-fraction"/u);
 });
 
+test("MarkdownContent consumes double-dollar delimiters when prose follows inline", () => {
+  const text = String.raw`$$\operatorname{Attention}(Q, K, V) = \operatorname{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$ where the softmax is applied row-wise.`;
+  const html = renderToStaticMarkup(
+    createElement(MarkdownContent, {
+      className: "v2-markdown",
+      enableMath: true,
+      text,
+    }),
+  );
+
+  assert.doesNotMatch(html, /\$/u);
+  assert.match(html, /class="math-expression"/u);
+  assert.match(html, />Attention</u);
+  assert.match(html, / where the softmax is applied row-wise\./u);
+});
+
 test("the parallel relation uses a math font with a complete glyph", async () => {
   const styles = await readFile(appStylesPath, "utf8");
   const parallelRule = styles.match(
