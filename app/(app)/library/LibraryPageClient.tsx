@@ -289,6 +289,23 @@ function QuestionRow({
   const visibleFlags = unresolvedFlags.filter(
     (flag) => flag.reasons.length > 0 || Boolean(flag.detail),
   );
+  const predictedTagIds = new Set(question.relatedTags.map((tag) => tag.id));
+  const referenceTagIds = question.referenceTags === null
+    ? null
+    : new Set(question.referenceTags.map((tag) => tag.id));
+  const comparisonTags = [
+    ...question.relatedTags.map((tag) => ({
+      ...tag,
+      comparison: referenceTagIds === null
+        ? "unscored" as const
+        : referenceTagIds.has(tag.id)
+          ? "matched" as const
+          : "extra" as const,
+    })),
+    ...(question.referenceTags ?? [])
+      .filter((tag) => !predictedTagIds.has(tag.id))
+      .map((tag) => ({ ...tag, comparison: "missing" as const })),
+  ];
   return (
     <article
       aria-busy={isRemoving ? true : undefined}
@@ -297,22 +314,35 @@ function QuestionRow({
       <div className="lean-question-copy">
         <div className="lean-question-meta">
           <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle[0]?.toUpperCase()}{question.lifecycle.slice(1)}</span>
-          {question.relatedTags.length > 0 ? (
-            <div className="lean-question-tags" aria-label="Predicted Tags">
-              {question.relatedTags.map((tag) => <button key={tag.id} onClick={() => onTagClick(tag.id)} type="button">{tag.label}</button>)}
+          {comparisonTags.length > 0 ? (
+            <div
+              className="lean-question-tags"
+              aria-label={question.referenceTags === null ? "Predicted Tags" : "Tag comparison"}
+            >
+              {comparisonTags.map((tag) => {
+                const comparisonLabel = tag.comparison === "missing"
+                  ? `${tag.label}, in ground truth but not predicted`
+                  : tag.comparison === "extra"
+                    ? `${tag.label}, predicted but not in ground truth`
+                    : tag.comparison === "matched"
+                      ? `${tag.label}, predicted and in ground truth`
+                      : tag.label;
+                return (
+                  <button
+                    aria-label={comparisonLabel}
+                    className={`is-${tag.comparison}`}
+                    key={tag.id}
+                    onClick={() => onTagClick(tag.id)}
+                    title={comparisonLabel}
+                    type="button"
+                  >
+                    {tag.label}
+                  </button>
+                );
+              })}
             </div>
           ) : null}
         </div>
-        {question.referenceTags !== null ? (
-          <div className="lean-question-ground-truth">
-            <span>Ground Truth</span>
-            <div className="lean-question-tags is-reference" aria-label="Ground Truth Tags">
-              {question.referenceTags.length > 0
-                ? question.referenceTags.map((tag) => <span key={tag.id}>{tag.label}</span>)
-                : <span className="lean-question-tags-empty">None</span>}
-            </div>
-          </div>
-        ) : null}
         <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
         <div
           className="lean-question-detail-grid"

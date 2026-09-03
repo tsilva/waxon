@@ -140,10 +140,12 @@ test("Library exposes semantic Tags without assignment management", async () => 
   assert.match(library, /relatedTags/u);
   assert.match(library, /Predicted Tags/u);
   assert.doesNotMatch(library, /<span>Predicted<\/span>/u);
-  assert.match(library, /Ground Truth/u);
-  assert.match(library, /Ground Truth Tags/u);
+  assert.match(library, /Tag comparison/u);
+  assert.match(library, /in ground truth but not predicted/u);
+  assert.match(library, /predicted but not in ground truth/u);
+  assert.doesNotMatch(library, /Ground Truth Tags/u);
   assert.doesNotMatch(library, /Codex reference|Codex Reference Tags/u);
-  assert.match(library, /question\.referenceTags !== null/u);
+  assert.match(library, /question\.referenceTags === null/u);
   assert.match(library, /Load more/u);
   assert.doesNotMatch(library, /Untagged|Manage Tags|Edit Question Tags/u);
   assert.match(libraryRoute, /searchParams\.getAll\("tag"\)/u);
