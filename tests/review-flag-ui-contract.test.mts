@@ -11,6 +11,7 @@ const libraryPath = new URL(
   "../app/(app)/library/LibraryPageClient.tsx",
   import.meta.url,
 );
+const questionTagsPath = new URL("../app/QuestionTags.tsx", import.meta.url);
 const questionBankFlagDialogPath = new URL(
   "../app/(app)/library/QuestionBankFlagDialog.tsx",
   import.meta.url,
@@ -428,9 +429,10 @@ test("Review Flag dialog toggles reasons, reports errors, dismisses, and restore
 });
 
 test("Review Flag modal has a narrow responsive contract and Library groups question details behind one disclosure", async () => {
-  const [styles, questionBank] = await Promise.all([
+  const [styles, questionBank, questionTags] = await Promise.all([
     readFile(appStylesPath, "utf8"),
     readFile(libraryPath, "utf8"),
+    readFile(questionTagsPath, "utf8"),
   ]);
 
   const style = document.createElement("style");
@@ -487,11 +489,11 @@ test("Review Flag modal has a narrow responsive contract and Library groups ques
   assert.equal(questionBank.includes(': "extra" as const'), true);
   assert.equal(
     questionBank.includes(
-      'aria-label={question.referenceTags === null ? "Predicted Tags" : "Tag comparison"}',
+      'ariaLabel={question.referenceTags === null ? "Predicted Tags" : "Tag comparison"}',
     ),
     true,
   );
-  assert.equal(questionBank.includes('className={`is-${tag.comparison}`}'), true);
+  assert.equal(questionTags.includes('const tagClassName = `is-${tag.comparison ?? "unscored"}`'), true);
   assert.equal(questionBank.includes('className="lean-question-ground-truth"'), false);
   assert.equal(questionBank.includes("Ground Truth Tags"), false);
   assert.equal(styles.includes(".lean-question-tags button.is-missing"), true);

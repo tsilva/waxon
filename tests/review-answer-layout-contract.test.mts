@@ -98,3 +98,16 @@ test("Review can advance to another due Question without submitting an answer", 
   assert.match(reviewApp, /(?:setAnswer|updateAnswer)\(""\)/u);
   assert.match(reviewQueueRoute, /searchParams\.get\("afterQuestionId"\)/u);
 });
+
+test("Review shows the shared Question Tags above the current Prompt", () => {
+  const tagsIndex = reviewApp.indexOf(
+    '<QuestionTags\n                  ariaLabel="Predicted Tags"',
+  );
+  const headingIndex = reviewApp.indexOf(
+    '<div className="review-question-heading">',
+  );
+  assert.equal(tagsIndex >= 0, true);
+  assert.equal(headingIndex > tagsIndex, true);
+  assert.match(reviewApp, /className="review-question-tags"/u);
+  assert.match(reviewApp, /tags=\{question\.relatedTags\}/u);
+});

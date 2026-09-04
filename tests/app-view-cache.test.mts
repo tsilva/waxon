@@ -40,6 +40,7 @@ test("the authenticated view cache deduplicates preloads and keys drafts to ques
     question: {
       questionId: "question-1",
       prompt: "Prompt",
+      relatedTags: [],
       total: 2,
       scheduledFor: null,
     },

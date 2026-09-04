@@ -104,8 +104,8 @@ test("semantic query boundaries reject oversized batches before database work", 
   );
 });
 
-test("Library exposes semantic Tags without assignment management", async () => {
-  const [library, review, libraryRoute, tagRoute, semanticModule] =
+test("Library and Review expose semantic Tags without assignment management", async () => {
+  const [library, review, questionTags, liveReview, libraryRoute, tagRoute, semanticModule] =
     await Promise.all([
       readFile(
         new URL(
@@ -116,6 +116,14 @@ test("Library exposes semantic Tags without assignment management", async () => 
       ),
       readFile(
         new URL("../app/(app)/review/ReviewApp.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/QuestionTags.tsx", import.meta.url),
+        "utf8",
+      ),
+      readFile(
+        new URL("../app/lib/v2/liveReview.ts", import.meta.url),
         "utf8",
       ),
       readFile(
@@ -141,8 +149,8 @@ test("Library exposes semantic Tags without assignment management", async () => 
   assert.match(library, /Predicted Tags/u);
   assert.doesNotMatch(library, /<span>Predicted<\/span>/u);
   assert.match(library, /Tag comparison/u);
-  assert.match(library, /in ground truth but not predicted/u);
-  assert.match(library, /predicted but not in ground truth/u);
+  assert.match(questionTags, /in ground truth but not predicted/u);
+  assert.match(questionTags, /predicted but not in ground truth/u);
   assert.doesNotMatch(library, /Ground Truth Tags/u);
   assert.doesNotMatch(library, /Codex reference|Codex Reference Tags/u);
   assert.match(library, /question\.referenceTags === null/u);
@@ -155,7 +163,11 @@ test("Library exposes semantic Tags without assignment management", async () => 
     semanticModule,
     /requestQuestionSearchEmbeddings|embedQuestionSearchPrompts|fetch\(/u,
   );
-  assert.doesNotMatch(review, /relatedTags|Filter by Tags/u);
+  assert.match(review, /tags=\{question\.relatedTags\}/u);
+  assert.doesNotMatch(review, /Filter by Tags/u);
+  assert.match(liveReview, /relatedTags\(\{/u);
+  assert.match(liveReview, /questionIds: \[selected\.questionId\]/u);
+  assert.match(liveReview, /relatedTags: selectedTags\?\.get\(selected\.questionId\) \?\? \[\]/u);
 });
 
 test("semantic Tag calibration uses the Codex-authored reference set", async () => {

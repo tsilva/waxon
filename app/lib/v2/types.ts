@@ -44,6 +44,7 @@ export type V2TagListResponse = {
 export type V2ReviewQuestion = {
   questionId: string;
   prompt: string;
+  relatedTags: V2TagRef[];
   total: number;
   scheduledFor: string | null;
 };

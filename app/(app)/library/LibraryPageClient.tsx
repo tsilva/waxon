@@ -29,6 +29,7 @@ import {
   type LibraryViewState,
 } from "@/app/AppViewCache";
 import { MarkdownContent } from "@/app/MarkdownContent";
+import { QuestionTags } from "@/app/QuestionTags";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { QuestionBankFlagDialog } from "@/app/(app)/library/QuestionBankFlagDialog";
 import type {
@@ -314,34 +315,11 @@ function QuestionRow({
       <div className="lean-question-copy">
         <div className="lean-question-meta">
           <span className={`lean-lifecycle is-${question.lifecycle}`}>{question.lifecycle[0]?.toUpperCase()}{question.lifecycle.slice(1)}</span>
-          {comparisonTags.length > 0 ? (
-            <div
-              className="lean-question-tags"
-              aria-label={question.referenceTags === null ? "Predicted Tags" : "Tag comparison"}
-            >
-              {comparisonTags.map((tag) => {
-                const comparisonLabel = tag.comparison === "missing"
-                  ? `${tag.label}, in ground truth but not predicted`
-                  : tag.comparison === "extra"
-                    ? `${tag.label}, predicted but not in ground truth`
-                    : tag.comparison === "matched"
-                      ? `${tag.label}, predicted and in ground truth`
-                      : tag.label;
-                return (
-                  <button
-                    aria-label={comparisonLabel}
-                    className={`is-${tag.comparison}`}
-                    key={tag.id}
-                    onClick={() => onTagClick(tag.id)}
-                    title={comparisonLabel}
-                    type="button"
-                  >
-                    {tag.label}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
+          <QuestionTags
+            ariaLabel={question.referenceTags === null ? "Predicted Tags" : "Tag comparison"}
+            onTagClick={onTagClick}
+            tags={comparisonTags}
+          />
         </div>
         <h2><MarkdownContent className="v2-markdown" enableMath text={question.prompt} /></h2>
         <div
