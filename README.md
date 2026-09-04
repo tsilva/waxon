@@ -48,7 +48,7 @@ Secrets declared in `.keyenv.toml`—including Neon, OpenRouter, Clerk, and Sent
 Optional non-secret model overrides may remain in `.env.local`:
 
 ```bash
-LLM_EVALUATION_MODEL=google/gemini-3.7-flash
+LLM_EVALUATION_MODEL=google/gemini-3.8-flash
 WAXON_QUESTION_SEARCH_MODE=lexical
 ```
 
