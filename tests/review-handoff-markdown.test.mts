@@ -16,7 +16,7 @@ function reviewAnswer(
       status: "complete",
       recallResult: "partial",
       nextDueOn: "2026-08-28",
-      feedback: "Partial. You recovered part of the Recall Target.",
+      feedback: "Partially correct. Short trajectories can bias GAE.",
       expectedAnswer: "More environments can shorten each trajectory.",
       coveredPoints: ["Memory and CPU overhead"],
       scoringIssues: ["Short trajectories can\nbias GAE"],
@@ -29,11 +29,12 @@ function reviewAnswer(
   };
 }
 
-test("builds a Recall Result handoff without exposing Answer Grades", () => {
+test("builds a learner-friendly result handoff without exposing Answer Grades", () => {
   const markdown = reviewHandoffMarkdown(reviewAnswer());
-  assert.match(markdown, /## Scoring issues\n\n- Short trajectories can\n  bias GAE/u);
+  assert.match(markdown, /## What to improve\n\n- Short trajectories can\n  bias GAE/u);
   assert.match(markdown, /## Clarifications/u);
-  assert.match(markdown, /- Recall Result: Partial/u);
+  assert.match(markdown, /- Result: Partial/u);
+  assert.doesNotMatch(markdown, /Recall (?:Target|Result)/u);
   assert.doesNotMatch(markdown, /\b(?:Again|Hard|Good|Easy) \([0-4]\)/u);
   assert.doesNotMatch(markdown, /- Grade:/u);
 });
@@ -54,9 +55,9 @@ test("represents incomplete evaluation content without leaking null values", () 
   );
 
   assert.match(markdown, /## Answer standard\n\nUnavailable/u);
-  assert.match(markdown, /## Recovered\n\n- None/u);
+  assert.match(markdown, /## What you got right\n\n- None/u);
   assert.match(markdown, /- Status: Evaluating/u);
-  assert.match(markdown, /- Recall Result: Unavailable/u);
+  assert.match(markdown, /- Result: Unavailable/u);
   assert.equal(markdown.includes("null"), false);
   assert.equal(markdown.includes("undefined"), false);
 });

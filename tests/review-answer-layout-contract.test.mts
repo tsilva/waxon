@@ -27,7 +27,7 @@ function styleRule(selector: string): CSSStyleRule | undefined {
   );
 }
 
-test("resolved-answer metadata stays in flow and cannot cover Recall Result controls", () => {
+test("resolved-answer metadata stays in flow and cannot cover evaluation controls", () => {
   const footer = styleRule(".previous-row-footer");
   const metadata = styleRule(".previous-row-meta");
   assert.ok(footer);
@@ -67,8 +67,8 @@ test("only expanded answers put the Markdown copy action in the bottom-left foot
   assert.equal(actions.style.getPropertyValue("justify-content"), "flex-start");
 });
 
-test("Review presents Recall Results without internal Answer Grade labels", () => {
-  assert.match(reviewApp, /Recall Result:/u);
+test("Review presents learner-friendly results without internal domain labels", () => {
+  assert.match(reviewApp, /Result:/u);
   assert.match(
     reviewApp,
     /incorrect: \{ label: "Incorrect", symbol: "C" \}/u,
@@ -80,7 +80,8 @@ test("Review presents Recall Results without internal Answer Grade labels", () =
     /evaluation\.canCorrectRecallResult \? \(\s*<fieldset className="review-grade-correction">/u,
   );
   assert.doesNotMatch(reviewApp, /correctionOpen/u);
-  assert.doesNotMatch(reviewApp, /Correct evaluation/u);
+  assert.match(reviewApp, /Change evaluation/u);
+  assert.doesNotMatch(reviewApp, /Recall (?:Target|Result)/u);
   assert.match(reviewApp, /Retry evaluation/u);
   assert.doesNotMatch(reviewApp, /GRADE_DISPLAY/u);
   assert.doesNotMatch(reviewApp, /\["again", "hard", "good", "easy"\]/u);
