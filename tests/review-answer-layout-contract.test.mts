@@ -99,6 +99,34 @@ test("Review can advance to another due Question without submitting an answer", 
   assert.match(reviewQueueRoute, /searchParams\.get\("afterQuestionId"\)/u);
 });
 
+test("answer submission keeps its text until the next Review state is ready", () => {
+  const submitStart = reviewApp.indexOf(
+    "async function submit(event: FormEvent) {",
+  );
+  const submitEnd = reviewApp.indexOf(
+    "\n  async function nextQuestion()",
+    submitStart,
+  );
+  const submit = reviewApp.slice(submitStart, submitEnd);
+  const requestIndex = submit.indexOf("await jsonRequest(");
+  const clearDraftIndex = submit.indexOf(
+    'viewCache.writeReviewDraft(question.questionId, "");',
+  );
+  const loadQueueIndex = submit.indexOf("await loadQueue();");
+
+  assert.equal(submitStart >= 0, true);
+  assert.equal(submitEnd > submitStart, true);
+  assert.equal(requestIndex >= 0, true);
+  assert.equal(clearDraftIndex > requestIndex, true);
+  assert.equal(loadQueueIndex > clearDraftIndex, true);
+  assert.doesNotMatch(submit.slice(0, requestIndex), /updateAnswer\(""\)/u);
+  assert.match(reviewApp, /disabled=\{isSubmitting \|\| isAdvancing\}/u);
+  assert.match(
+    reviewApp,
+    /isSubmitting \? <LoaderCircle className="v2-spin" \/> : undefined/u,
+  );
+});
+
 test("Review shows the shared Question Tags above the current Prompt", () => {
   const tagsIndex = reviewApp.indexOf(
     '<QuestionTags\n                  ariaLabel="Predicted Tags"',

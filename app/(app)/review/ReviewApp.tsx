@@ -585,7 +585,6 @@ export default function ReviewApp() {
     if (!question || !responseText || isSubmitting) return;
     setIsSubmitting(true);
     setError(null);
-    updateAnswer("");
     try {
       await jsonRequest(
         "/api/v2/review/answer",
@@ -599,6 +598,7 @@ export default function ReviewApp() {
           }),
         },
       );
+      viewCache.writeReviewDraft(question.questionId, "");
       selectedQuestionIdRef.current = null;
       await loadQueue();
     } catch (caught) {
