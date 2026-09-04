@@ -239,7 +239,10 @@ test("an authorized job evaluates without request environment or a model key", a
     });
 
     assert.equal(result.recallResult, "correct");
-    assert.equal(result.feedback, "Correct. You recovered the Recall Target.");
+    assert.equal(
+      result.feedback,
+      "Correct. Your answer covered everything needed.",
+    );
   } finally {
     globalThis.fetch = priorFetch;
     for (const [key, value] of Object.entries({

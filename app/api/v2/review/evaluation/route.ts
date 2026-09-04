@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     const user = await getCurrentUser();
     const application = waxonApplication.forLearner(user.id);
     if (!isRecord(parsed.value)) {
-      throw new Error("A Recall Result payload is required.");
+      throw new Error("An evaluation result is required.");
     }
     const submissionId =
       typeof parsed.value.submissionId === "string"
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     }
     const recallResult = asRecallResult(parsed.value.recallResult);
     if (!submissionId || !recallResult) {
-      throw new Error("A submission and valid Recall Result are required.");
+      throw new Error("A submission and valid evaluation result are required.");
     }
     const result = await application.review.correctRecallResult({
       submissionId,

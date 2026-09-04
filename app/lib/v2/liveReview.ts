@@ -34,6 +34,7 @@ import {
 import { normalizeReviewFlagInput } from "./reviewFlag.ts";
 import { relatedTags } from "./semanticTags.ts";
 import {
+  composeRecallFeedback,
   deriveAnswerGrades,
   evaluateRecallWithRetries,
   legacyGradeToRecallResult,
@@ -118,9 +119,16 @@ function evaluationView(input: {
     input.correctedRecallResult &&
       input.correctedRecallResult !== automatedRecallResult,
   );
-  const feedback = wasCorrected && recallResult
-    ? `Recall Result corrected to ${recallResult[0].toUpperCase()}${recallResult.slice(1)}. The original automated feedback was: ${input.feedback ?? "Unavailable"}`
+  const automatedFeedback = automatedRecallResult
+    ? composeRecallFeedback({
+        recallResult: automatedRecallResult,
+        scoringIssues,
+        clarifications: input.clarifications,
+      })
     : input.feedback;
+  const feedback = wasCorrected && recallResult
+    ? `Evaluation changed to ${recallResult[0].toUpperCase()}${recallResult.slice(1)}. Original feedback: ${automatedFeedback ?? "Unavailable"}`
+    : automatedFeedback;
   return {
     submissionId: input.submissionId,
     evaluationId: input.evaluationId,
@@ -944,7 +952,7 @@ async function rebuildDerivedGradesInTransaction(
     const result = row.corrected_recall_result ?? row.proposed_recall_result;
     if (result) return result;
     if (row.latest_grade) return legacyGradeToRecallResult(row.latest_grade);
-    throw new Error("Graded Learner Answer has no Recall Result evidence.");
+    throw new Error("Graded Learner Answer has no evaluation result evidence.");
   });
   const derivedGrades = deriveAnswerGrades(effectiveResults);
   const [latestEvent] = await tx
@@ -1220,7 +1228,7 @@ export async function applyLiveRecallResultCorrection(
       throw new Error("Evaluation not found.");
     }
     if (submission.status !== "graded") {
-      throw new Error("Only a completed Recall Result can be corrected.");
+      throw new Error("Only a completed evaluation can be corrected.");
     }
     await tx.insert(recallResultCorrections).values({
       userId: input.userId,

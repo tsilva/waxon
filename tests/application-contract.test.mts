@@ -2367,7 +2367,7 @@ test(
             {
               status: "complete",
               recallResult: "correct",
-              feedback: "Correct. You recovered the Recall Target.",
+              feedback: "Correct. Your answer covered everything needed.",
               expectedAnswer:
                 "Learner Answers, evaluations, and Answer Grade history.",
               scoringIssues: [],

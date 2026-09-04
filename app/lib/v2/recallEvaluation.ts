@@ -75,12 +75,12 @@ export function composeRecallFeedback(input: {
   const clarification = input.clarifications.map(asSentence).join(" ");
   const core =
     input.recallResult === "correct"
-      ? "Correct. You recovered the Recall Target."
+      ? "Correct. Your answer covered everything needed."
       : input.recallResult === "partial"
-        ? `Partial. You recovered part of the Recall Target, but ${scoring}`
-        : `Incorrect. Your answer did not recover the Recall Target. ${scoring}`;
+        ? `Partially correct. ${scoring}`
+        : `Incorrect. ${scoring}`;
   return clarification
-    ? `${core} For precision only, this does not affect your Recall Result: ${clarification}`
+    ? `${core} Additional note (this did not change your result): ${clarification}`
     : core;
 }
 

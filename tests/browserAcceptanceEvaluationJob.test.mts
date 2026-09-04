@@ -127,7 +127,7 @@ test(
       assert.equal(completed.recallResult, "correct");
       assert.equal(
         completed.feedback,
-        "Correct. You recovered the Recall Target.",
+        "Correct. Your answer covered everything needed.",
       );
 
       const job = await evaluationJobPayload(learnerId, pending.submissionId);

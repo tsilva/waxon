@@ -172,10 +172,10 @@ function FeedbackRow({
           <span
             aria-label={
               evaluation.recallResult
-                ? `Recall Result: ${recallResult}`
+                ? `Result: ${recallResult}`
                 : evaluation.status === "failed"
                   ? "Evaluation failed"
-                  : "Recall Result waiting"
+                  : "Result pending"
             }
             className="previous-score-shell"
           >
@@ -239,7 +239,7 @@ function FeedbackRow({
             ) : null}
             {evaluation.coveredPoints.length > 0 ? (
               <div className="previous-field review-feedback-points is-covered">
-                <span className="previous-field-label">Recovered</span>
+                <span className="previous-field-label">What you got right</span>
                 <ul>
                   {evaluation.coveredPoints.map((point) => (
                     <li key={point}>{point}</li>
@@ -249,7 +249,7 @@ function FeedbackRow({
             ) : null}
             {evaluation.scoringIssues.length > 0 ? (
               <div className="previous-field review-feedback-points is-missing">
-                <span className="previous-field-label">Scoring issues</span>
+                <span className="previous-field-label">What to improve</span>
                 <ul>
                   {evaluation.scoringIssues.map((point) => (
                     <li key={point}>{point}</li>
@@ -280,7 +280,7 @@ function FeedbackRow({
             ) : null}
             {evaluation.canCorrectRecallResult ? (
               <fieldset className="review-grade-correction">
-                <legend>Correct Recall Result</legend>
+                <legend>Change evaluation</legend>
                 <div>
                   {(["incorrect", "partial", "correct"] as V2RecallResult[]).map(
                     (nextResult) => (

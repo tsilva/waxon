@@ -153,8 +153,9 @@ test("moves a non-required presentation difference into clarifications", () => {
   assert.equal(result.recallResult, "correct");
   assert.deepEqual(result.scoringIssues, []);
   assert.deepEqual(result.clarifications, ["Mathematical notation"]);
-  assert.match(result.feedback, /For precision only/u);
-  assert.match(result.feedback, /does not affect your Recall Result/u);
+  assert.match(result.feedback, /Additional note/u);
+  assert.match(result.feedback, /did not change your result/u);
+  assert.doesNotMatch(result.feedback, /Recall (?:Target|Result)/u);
 });
 
 test("keeps explicitly requested notation as a scoring issue", () => {
