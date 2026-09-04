@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 import { AnswerComposer } from "@/app/AnswerComposer";
 import { useAppViewCache } from "@/app/AppViewCache";
 import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
+import { QuestionTags } from "@/app/QuestionTags";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { useToolbarState } from "@/app/ToolbarState";
 import { reviewIntervalLabel } from "@/app/lib/reviewIntervalLabel";
@@ -682,6 +683,11 @@ export default function ReviewApp() {
               </div>
             ) : question ? (
               <div className="question-copy">
+                <QuestionTags
+                  ariaLabel="Predicted Tags"
+                  className="review-question-tags"
+                  tags={question.relatedTags}
+                />
                 <div className="review-question-heading">
                   <MarkdownInline
                     as="h2"

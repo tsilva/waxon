@@ -32,6 +32,7 @@ import {
   getLearnerReviewDay,
 } from "./settings.ts";
 import { normalizeReviewFlagInput } from "./reviewFlag.ts";
+import { relatedTags } from "./semanticTags.ts";
 import {
   deriveAnswerGrades,
   evaluateRecallWithRetries,
@@ -267,11 +268,19 @@ export async function getLiveReviewQueue(
     afterIndex >= 0
       ? status.queue[(afterIndex + 1) % status.queue.length]
       : requested ?? status.queue[0];
+  const selectedTags = selected
+    ? await relatedTags({
+        learnerId: userId,
+        questionIds: [selected.questionId],
+        limit: 3,
+      })
+    : null;
   return {
     question: selected
       ? {
           questionId: selected.questionId,
           prompt: selected.prompt,
+          relatedTags: selectedTags?.get(selected.questionId) ?? [],
           total: status.queue.length,
           scheduledFor: selected.scheduledFor,
         }
