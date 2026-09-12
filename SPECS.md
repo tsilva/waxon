@@ -49,7 +49,7 @@ Waxon is a multi-user question bank and adaptive recall-practice system. Learner
 - Every newly added Active question must enter Review immediately regardless of queue size.
 - Review must contain every Active question scheduled on or before the learner's current local day without daily-item or first-exposure limits.
 - The learner's local day must use an automatically detected, persisted, and editable IANA timezone.
-- Queued questions must be ordered by earliest scheduled date, then oldest unanswered question, then stable creation order.
+- Active questions added through MCP must appear first until their first answer, newest additions first. All remaining questions retain the existing Review ordering.
 - Answer-grade history must be the sole learning signal used to schedule future Review.
 - Waxon must classify every Learner Answer automatically as Incorrect, Partial, or Correct against its Answer Standard without asking the Learner to grade routine recall.
 - Waxon must derive the Answer Grades Again, Hard, Good, and Easy from Recall Result and prior Learning Evidence rather than present them as correctness labels.

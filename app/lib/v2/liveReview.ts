@@ -169,6 +169,11 @@ async function queueRows(
   localDay: string,
   database: Pick<ReturnType<typeof getV2Db>, "select"> = getV2Db(),
 ) {
+  const unansweredMcpQuestion = sql`(${questions.addedThroughMcp} AND NOT EXISTS (
+    SELECT 1 FROM waxon_v2.answer_submissions submission
+     WHERE submission.user_id = ${questions.userId}
+       AND submission.question_id = ${questions.id}
+  ))`;
   const latestEffectiveGrade = sql`(
     SELECT event.grade::text
       FROM waxon_v2.answer_submissions submission
@@ -205,6 +210,8 @@ async function queueRows(
       ),
     )
     .orderBy(
+      sql`${unansweredMcpQuestion} DESC`,
+      sql`CASE WHEN ${unansweredMcpQuestion} THEN ${questions.creationOrder} END DESC NULLS LAST`,
       sql`COALESCE(${memoryStates.dueOn}, ${localDay}::date) ASC`,
       sql`(${memoryStates.questionId} IS NULL) DESC`,
       sql`CASE
