@@ -1,0 +1,1 @@
+ALTER TABLE "waxon_v2"."questions" ADD COLUMN "added_through_mcp" boolean DEFAULT false NOT NULL;

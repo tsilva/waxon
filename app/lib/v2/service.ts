@@ -351,6 +351,7 @@ export async function addQuestions(
           referenceAnswer: item.referenceAnswer,
           lifecycle: flag ? "flagged" : "active",
           targetKey: item.promptKey,
+          addedThroughMcp: input.scope === "mcp",
         })
         .returning({ id: questions.id });
       if (flag) {

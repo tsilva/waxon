@@ -179,6 +179,7 @@ export const questions = waxonV2.table(
     lifecycle: questionLifecycle("lifecycle").notNull().default("active"),
     targetKey: text("target_key").notNull(),
     creationOrder: bigserial("creation_order", { mode: "number" }),
+    addedThroughMcp: boolean("added_through_mcp").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

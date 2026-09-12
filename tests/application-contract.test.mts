@@ -1438,6 +1438,75 @@ test(
       );
 
       await suite.test(
+        "new MCP Questions lead Review newest first until their first answer",
+        async () => {
+          clock.set("2030-08-01T10:00:00.000Z");
+          const learner = await provisionLearner("MCP queue priority learner");
+          const directInput = {
+            idempotencyKey: "mcp-priority-direct",
+            items: [{ prompt: "Which Question becomes overdue?", referenceAnswer: "The direct Question." }],
+          };
+          const direct = await learner.direct.questionBank.add(directInput);
+          const dueId = direct.results[0]!.id;
+          const initial = await learner.direct.review.submitAnswer({
+            questionId: dueId,
+            answer: "The direct Question.",
+            idempotencyKey: "mcp-priority-initial-answer",
+          });
+          await learner.direct.review.evaluatePending(initial.submissionId);
+          clock.set("2030-09-01T10:00:00.000Z");
+          const batchInput = {
+            idempotencyKey: "mcp-priority-batch",
+            items: [
+              { prompt: "Which MCP Question was added first?", referenceAnswer: "The first." },
+              { prompt: "Which MCP Question was added second?", referenceAnswer: "The second." },
+            ],
+          };
+          const batch = await learner.authorizedMcpClient.questionBank.add(batchInput);
+          const older = batch.results[0]!.id;
+          const newer = batch.results[1]!.id;
+          const latestInput = {
+            idempotencyKey: "mcp-priority-latest",
+            items: [{ prompt: "Which MCP Question was added last?", referenceAnswer: "The last." }],
+          };
+          const latest = (await learner.authorizedMcpClient.questionBank.add(latestInput)).results[0]!.id;
+          await learner.authorizedMcpClient.questionBank.add(batchInput);
+          await learner.authorizedMcpClient.questionBank.add({ ...directInput, idempotencyKey: "mcp-direct-duplicate" });
+          assert.equal((await learner.direct.review.open()).question?.questionId, latest);
+          assert.equal((await learner.direct.review.open({ afterQuestionId: latest })).question?.questionId, newer);
+          assert.equal((await learner.direct.review.open({ afterQuestionId: newer })).question?.questionId, older);
+          assert.equal((await learner.direct.review.open({ afterQuestionId: older })).question?.questionId, dueId);
+          await learner.direct.questionBank.archive(latest);
+          assert.equal((await learner.direct.review.open()).question?.questionId, newer);
+          await learner.direct.questionBank.restore(latest);
+          evaluation.setRecallResult("incorrect");
+          try {
+            const pending = await learner.direct.review.submitAnswer({
+              questionId: latest,
+              answer: "I do not remember.",
+              idempotencyKey: "mcp-priority-first-answer",
+            });
+            assert.equal((await learner.direct.review.open()).question?.questionId, newer);
+            await learner.direct.review.evaluatePending(pending.submissionId);
+            assert.equal((await learner.direct.review.open()).question?.questionId, newer);
+            assert.equal((await learner.direct.review.open({ afterQuestionId: dueId })).question?.questionId, latest);
+          } finally {
+            evaluation.setRecallResult("correct");
+          }
+          for (const questionId of [newer, older, dueId, latest]) {
+            assert.equal((await learner.direct.review.open()).question?.questionId, questionId);
+            const pending = await learner.direct.review.submitAnswer({
+              questionId,
+              answer: "Deterministic successful recall.",
+              idempotencyKey: `mcp-priority-answer-${questionId}`,
+            });
+            await learner.direct.review.evaluatePending(pending.submissionId);
+          }
+          assert.equal((await learner.direct.review.open()).question, null);
+        },
+      );
+
+      await suite.test(
         "Review includes due and unanswered Active Questions in exact deterministic order",
         async () => {
           const learner = await provisionLearner("Ordered queue learner");

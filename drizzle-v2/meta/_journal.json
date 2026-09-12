@@ -36,6 +36,13 @@
       "when": 1788376124069,
       "tag": "0004_quiet_doctor_octopus",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789244459935,
+      "tag": "0005_tired_white_tiger",
+      "breakpoints": true
     }
   ]
 }
