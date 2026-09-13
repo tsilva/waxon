@@ -96,6 +96,12 @@ VERCEL_ENV=preview DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL_UNPOOLED="$
 
 `ISSUE20_DATABASE_URL` must never identify production. The exact clean catalog is asserted by the database-backed tests; `db:generate` followed by the scoped diff check proves the Drizzle declaration and baseline have not drifted.
 
+## Auxiliary scripts
+
+The [question quality experiment](./docs/question-quality-experiment.md) sends each question independently to DeepSeek and grades its answer with the production evaluator. Run a two-question pilot with `keyenv run -- pnpm question-quality:experiment --limit 2`, then generate a local report with `pnpm question-quality:report`.
+
+These tools keep experiment results under ignored `test-results/question-quality/` and do not write learning history. Applying question flags requires `--apply-flags`. The experiment guide covers full-bank runs, concurrency, resuming, and learner selection.
+
 ## Implementation notes
 
 - Schema declarations live in `app/db/v2/schema.ts`; the clean baseline lives in `drizzle-v2/`.
