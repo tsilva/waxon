@@ -105,7 +105,6 @@ function evaluationView(input: {
   coveredPoints: string[];
   missingPoints: string[];
   scoringIssues: string[];
-  clarifications: string[];
   confidence: number | null;
 }): V2Evaluation {
   const legacyGrade = input.proposedGrade ?? input.effectiveGrade;
@@ -123,7 +122,6 @@ function evaluationView(input: {
     ? composeRecallFeedback({
         recallResult: automatedRecallResult,
         scoringIssues,
-        clarifications: input.clarifications,
       })
     : input.feedback;
   const feedback = wasCorrected && recallResult
@@ -144,7 +142,6 @@ function evaluationView(input: {
     expectedAnswer: input.expectedAnswer,
     coveredPoints: input.coveredPoints,
     scoringIssues,
-    clarifications: input.clarifications,
     confidence: input.confidence,
     canRetryEvaluation: input.evaluationStatus === "failed" && !recallResult,
     canCorrectRecallResult: Boolean(recallResult),
@@ -394,7 +391,6 @@ async function recentReviewAnswers(userId: string) {
     covered_points: unknown;
     missing_points: unknown;
     scoring_issues: unknown;
-    clarifications: unknown;
     confidence: number | null;
   }>(
     `SELECT submission.id AS submission_id,
@@ -413,7 +409,6 @@ async function recentReviewAnswers(userId: string) {
             evaluation.covered_points,
             evaluation.missing_points,
             evaluation.scoring_issues,
-            evaluation.clarifications,
             evaluation.confidence
        FROM waxon_v2.answer_submissions submission
        JOIN waxon_v2.questions question
@@ -478,11 +473,6 @@ async function recentReviewAnswers(userId: string) {
           : [],
         scoringIssues: Array.isArray(row.scoring_issues)
           ? row.scoring_issues.filter(
-              (point): point is string => typeof point === "string",
-            )
-          : [],
-        clarifications: Array.isArray(row.clarifications)
-          ? row.clarifications.filter(
               (point): point is string => typeof point === "string",
             )
           : [],
@@ -710,7 +700,6 @@ export async function getLiveEvaluation(
     coveredPoints: row.coveredPoints,
     missingPoints: row.missingPoints,
     scoringIssues: row.scoringIssues,
-    clarifications: row.clarifications,
     confidence: row.confidence,
   });
 }
@@ -1093,7 +1082,6 @@ export async function runLiveEvaluationJob(
             expectedAnswer: row.referenceAnswer,
             coveredPoints: result.coveredPoints,
             scoringIssues: result.scoringIssues,
-            clarifications: result.clarifications,
             confidence: result.confidence,
             completedAt: now,
           })

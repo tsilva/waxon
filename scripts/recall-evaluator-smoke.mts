@@ -135,7 +135,6 @@ const retryProbe = await evaluateRecallWithRetries({
       recallResult: "correct",
       coveredPoints: ["Retryable failures were recovered"],
       scoringIssues: [],
-      clarifications: [],
       confidence: 0,
     };
   },

@@ -16,7 +16,7 @@ test("answer request exposes only one prompt and evaluator receives the standard
     assert.equal(input.referenceAnswer, question.referenceAnswer);
     assert.equal(input.answer, "four");
     assert.equal(input.browserAcceptanceEvaluationAuthorized, undefined);
-    return { recallResult: "correct", coveredPoints: ["four"], scoringIssues: [], clarifications: [], confidence: 1, feedback: "Correct" };
+    return { recallResult: "correct", coveredPoints: ["four"], scoringIssues: [], confidence: 1, feedback: "Correct" };
   });
   assert.equal(result.evaluation?.recallResult, "correct");
   assert.equal(flagDetail(result, "run"), null);
@@ -42,7 +42,7 @@ test("workers are bounded and process each question once", async () => {
 });
 test("non-correct feedback is framed as suspected quality and fits the flag limit", () => {
   const detail = flagDetail({ question, answer: "x".repeat(5000), elapsedMs: 1, evaluation: {
-    recallResult: "partial", coveredPoints: ["addition"], scoringIssues: ["wrong total"], clarifications: [], confidence: 1, feedback: "Wrong total",
+    recallResult: "partial", coveredPoints: ["addition"], scoringIssues: ["wrong total"], confidence: 1, feedback: "Wrong total",
   } }, "run")!;
   assert.ok(detail.includes("suspected") || detail.includes("Suspected"));
   assert.ok(detail.includes("wrong total"));

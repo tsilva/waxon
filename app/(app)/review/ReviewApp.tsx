@@ -257,16 +257,6 @@ function FeedbackRow({
                 </ul>
               </div>
             ) : null}
-            {evaluation.clarifications.length > 0 ? (
-              <div className="previous-field review-feedback-points">
-                <span className="previous-field-label">Clarifications</span>
-                <ul>
-                  {evaluation.clarifications.map((point) => (
-                    <li key={point}>{point}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
             {evaluation.canRetryEvaluation ? (
               <button
                 className="review-correction-trigger"

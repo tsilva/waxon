@@ -79,7 +79,6 @@ export type V2Evaluation = {
   expectedAnswer: string | null;
   coveredPoints: string[];
   scoringIssues: string[];
-  clarifications: string[];
   confidence: number | null;
   canRetryEvaluation: boolean;
   canCorrectRecallResult: boolean;

@@ -20,7 +20,6 @@ function evaluation(
     recallResult: "correct",
     coveredPoints: ["Required knowledge"],
     scoringIssues: [],
-    clarifications: [],
     confidence: 0.95,
     ...overrides,
   };
@@ -29,7 +28,7 @@ function evaluation(
 test("the policy separates Recall Result from scheduling grades", () => {
   assert.match(RECALL_EVALUATION_SYSTEM_PROMPT, /incorrect, partial, or correct/u);
   assert.doesNotMatch(RECALL_EVALUATION_SYSTEM_PROMPT, /again\|hard\|good\|easy/u);
-  assert.match(RECALL_EVALUATION_SYSTEM_PROMPT, /Clarifications must never lower/u);
+  assert.match(RECALL_EVALUATION_SYSTEM_PROMPT, /Omit non-scoring precision/u);
   assert.match(RECALL_EVALUATION_SYSTEM_PROMPT, /Confidence is diagnostic only/u);
 });
 
@@ -62,7 +61,6 @@ test("declares a strict bounded evaluator response schema", () => {
     "recallResult",
     "coveredPoints",
     "scoringIssues",
-    "clarifications",
     "confidence",
   ]);
   assert.deepEqual(
@@ -81,7 +79,6 @@ test("parses only complete type-safe evaluator responses", () => {
         recallResult: "correct",
         coveredPoints: ["Formula"],
         scoringIssues: [],
-        clarifications: [],
         confidence: 0.1,
       }),
     ),
@@ -90,24 +87,22 @@ test("parses only complete type-safe evaluator responses", () => {
 
   for (const invalid of [
     "not JSON",
+    JSON.stringify({ ...evaluation({}), clarifications: ["Optional note"] }),
     JSON.stringify({
       recallResult: "correct",
       coveredPoints: ["Formula"],
       scoringIssues: [],
-      clarifications: [],
       confidence: "high",
     }),
     JSON.stringify({
       recallResult: "correct",
       coveredPoints: ["Formula"],
-      scoringIssues: [],
       confidence: 1,
     }),
     JSON.stringify({
       recallResult: "correct",
       coveredPoints: ["Formula"],
       scoringIssues: [],
-      clarifications: [],
       confidence: 1,
       extra: true,
     }),
@@ -140,7 +135,7 @@ test("maps legacy grades conservatively to Recall Results", () => {
   assert.equal(legacyGradeToRecallResult("easy"), "correct");
 });
 
-test("moves a non-required presentation difference into clarifications", () => {
+test("discards a non-required presentation difference without adding feedback", () => {
   const result = reconcileRecallEvaluation({
     prompt: "What is the clipped PPO surrogate objective for one transition?",
     result: evaluation({
@@ -152,9 +147,8 @@ test("moves a non-required presentation difference into clarifications", () => {
 
   assert.equal(result.recallResult, "correct");
   assert.deepEqual(result.scoringIssues, []);
-  assert.deepEqual(result.clarifications, ["Mathematical notation"]);
-  assert.match(result.feedback, /Additional note/u);
-  assert.match(result.feedback, /did not change your result/u);
+  assert.equal(result.feedback, "Correct. Your answer covered everything needed.");
+  assert.equal("clarifications" in result, false);
   assert.doesNotMatch(result.feedback, /Recall (?:Target|Result)/u);
 });
 
@@ -174,17 +168,16 @@ test("keeps explicitly requested notation as a scoring issue", () => {
 test("accepts complete formula answers without supporting symbol definitions", () => {
   const prompt = "What is the formula for the discounted return G_t from time step t?";
   const answers = [
-    ["Exact formula", "Mathematical notation"],
-    ["Equivalent finite-horizon formula", "Alternative horizon form"],
-    ["Equivalent prose formula", "Prose representation"],
+    "Exact formula",
+    "Equivalent finite-horizon formula",
+    "Equivalent prose formula",
   ];
 
-  for (const [covered, clarification] of answers) {
+  for (const covered of answers) {
     const result = reconcileRecallEvaluation({
       prompt,
       result: evaluation({
         coveredPoints: [covered],
-        clarifications: [clarification],
       }),
     });
     assert.equal(result.recallResult, "correct");
@@ -300,7 +293,6 @@ test("retries malformed, schema-invalid, and inconsistent evaluations", async ()
             recallResult: "correct",
             coveredPoints: ["Required knowledge"],
             scoringIssues: [],
-            clarifications: [],
             confidence: "high",
           }),
         );

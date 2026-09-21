@@ -20,7 +20,6 @@ function reviewAnswer(
       expectedAnswer: "More environments can shorten each trajectory.",
       coveredPoints: ["Memory and CPU overhead"],
       scoringIssues: ["Short trajectories can\nbias GAE"],
-      clarifications: ["Vectorization can still improve throughput"],
       confidence: 0.9,
       canRetryEvaluation: false,
       canCorrectRecallResult: true,
@@ -32,7 +31,7 @@ function reviewAnswer(
 test("builds a learner-friendly result handoff without exposing Answer Grades", () => {
   const markdown = reviewHandoffMarkdown(reviewAnswer());
   assert.match(markdown, /## What to improve\n\n- Short trajectories can\n  bias GAE/u);
-  assert.match(markdown, /## Clarifications/u);
+  assert.doesNotMatch(markdown, /## Clarifications/u);
   assert.match(markdown, /- Result: Partial/u);
   assert.doesNotMatch(markdown, /Recall (?:Target|Result)/u);
   assert.doesNotMatch(markdown, /\b(?:Again|Hard|Good|Easy) \([0-4]\)/u);
@@ -49,7 +48,6 @@ test("represents incomplete evaluation content without leaking null values", () 
       expectedAnswer: null,
       coveredPoints: [],
       scoringIssues: [],
-      clarifications: [],
       canCorrectRecallResult: false,
     }),
   );
