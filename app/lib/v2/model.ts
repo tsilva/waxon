@@ -27,7 +27,6 @@ const recallEvaluationResponseSchema = z.strictObject({
   recallResult: z.enum(["incorrect", "partial", "correct"]),
   coveredPoints: pointArraySchema,
   scoringIssues: pointArraySchema,
-  clarifications: pointArraySchema,
   confidence: z.number().min(0).max(1),
 });
 
@@ -51,12 +50,6 @@ export const RECALL_EVALUATION_JSON_SCHEMA = {
       maxItems: 32,
       description: "Only omissions or errors that prevent a Correct result.",
     },
-    clarifications: {
-      type: "array",
-      items: { type: "string" },
-      maxItems: 32,
-      description: "Non-scoring precision or optional supporting details.",
-    },
     confidence: {
       type: "number",
       minimum: 0,
@@ -68,7 +61,6 @@ export const RECALL_EVALUATION_JSON_SCHEMA = {
     "recallResult",
     "coveredPoints",
     "scoringIssues",
-    "clarifications",
     "confidence",
   ],
   additionalProperties: false,
@@ -179,7 +171,6 @@ export async function evaluateRecall(input: {
         recallResult: correct ? "correct" : "incorrect",
         coveredPoints: correct ? ["Required token"] : [],
         scoringIssues: correct ? [] : ["Required token was missing"],
-        clarifications: [],
         confidence: 1,
       },
     });

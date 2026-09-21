@@ -70,7 +70,7 @@ const expectedColumns: Record<string, string[]> = {
     "id", "user_id", "question_id", "submission_id", "status", "evaluator",
     "proposed_grade", "feedback", "expected_answer", "covered_points",
     "missing_points", "demonstrated_gap", "confidence", "error", "created_at",
-    "completed_at", "proposed_recall_result", "scoring_issues", "clarifications",
+    "completed_at", "proposed_recall_result", "scoring_issues",
   ],
   grade_events: [
     "id", "user_id", "question_id", "submission_id", "grade", "origin",
@@ -152,7 +152,6 @@ const expectedDefaults: Record<string, string> = {
   "evaluations.id": "gen_random_uuid()",
   "evaluations.missing_points": "'[]'::jsonb",
   "evaluations.scoring_issues": "'[]'::jsonb",
-  "evaluations.clarifications": "'[]'::jsonb",
   "evaluations.status": "'pending'::waxon_v2.evaluation_status",
   "grade_events.created_at": "now()",
   "grade_events.id": "gen_random_uuid()",

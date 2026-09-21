@@ -134,7 +134,6 @@ export async function withApplicationContract(
       evaluationRecallResult === "correct"
         ? []
         : ["Required application contract knowledge was missing"],
-    clarifications: [],
     confidence: 1,
   });
   const application = createWaxonApplication({

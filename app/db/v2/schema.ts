@@ -367,7 +367,6 @@ export const evaluations = waxonV2.table(
     missingPoints: jsonb("missing_points").$type<string[]>().notNull().default([]),
     demonstratedGap: text("demonstrated_gap"),
     scoringIssues: jsonb("scoring_issues").$type<string[]>().notNull().default([]),
-    clarifications: jsonb("clarifications").$type<string[]>().notNull().default([]),
     confidence: doublePrecision("confidence"),
     error: text("error"),
     createdAt: createdAt(),

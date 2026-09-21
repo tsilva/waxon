@@ -295,7 +295,6 @@ test("production and other Learners reach the normal evaluator for acceptance fi
                   coveredPoints: ["Normal evaluator"],
                   recallResult: "correct",
                   scoringIssues: [],
-                  clarifications: [],
                 }),
               },
             },
