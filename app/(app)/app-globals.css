@@ -2450,6 +2450,7 @@ textarea {
 }
 
 .previous-row-footer {
+  grid-column: 1 / -1;
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -2820,6 +2821,7 @@ textarea {
 .math-blackboard,
 .math-calligraphic,
 .math-operator,
+.math-roman,
 .math-text {
   font-style: normal;
 }

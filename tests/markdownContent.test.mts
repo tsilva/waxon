@@ -3,12 +3,45 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { JSDOM } from "jsdom";
 import { MarkdownContent } from "../app/MarkdownContent.tsx";
 
 const appStylesPath = new URL(
   "../app/(app)/app-globals.css",
   import.meta.url,
 );
+
+test("MarkdownContent renders the accuracy formula with an upright label and fraction", () => {
+  const text = String.raw`Fish caught plus pieces of rubbish left behind, divided by all fish and pieces of rubbish originally in the pond: $\mathrm{accuracy}=\frac{\text{fish caught}+\text{rubbish left behind}}{\text{all original fish and rubbish}}$. Catching a fish and leaving a piece of rubbish outside the net are both correct decisions.`;
+  const html = renderToStaticMarkup(
+    createElement(MarkdownContent, { className: "v2-markdown", enableMath: true, text }),
+  );
+  const document = new JSDOM(html).window.document;
+
+  assert.equal(document.querySelector(".math-roman")?.textContent, "accuracy");
+  assert.equal(document.querySelector(".math-fraction-numerator")?.textContent, "fish caught+rubbish left behind");
+  assert.equal(document.querySelector(".math-fraction-denominator")?.textContent, "all original fish and rubbish");
+  assert.doesNotMatch(document.body.textContent ?? "", /mathrm|[{}$]/u);
+  assert.match(document.body.textContent ?? "", /both correct decisions\.$/u);
+});
+
+test("roman math groups preserve nested commands, fractions, and scripts", () => {
+  const html = renderToStaticMarkup(
+    createElement(MarkdownContent, {
+      className: "v2-markdown",
+      enableMath: true,
+      text: String.raw`$\mathrm {x_{i}+\frac{\alpha}{2}}+y$`,
+    }),
+  );
+  const document = new JSDOM(html).window.document;
+  const roman = document.querySelector(".math-roman");
+
+  assert.equal(roman?.querySelector("sub")?.textContent, "i");
+  assert.equal(roman?.querySelector(".math-fraction-numerator")?.textContent, "α");
+  assert.equal(roman?.querySelector(".math-fraction-denominator")?.textContent, "2");
+  assert.equal(roman?.textContent, "xi+α2");
+  assert.equal(document.querySelector(".math-expression")?.textContent, "xi+α2+y");
+});
 
 test("MarkdownContent repairs emphasized dollar delimiters around inline math", () => {
   const text = String.raw`Using the identity **$*****\nabla_\theta P(\tau; \theta) = P(\tau; \theta) \frac{\nabla_\theta P(\tau; \theta)}{P(\tau; \theta)} = P(\tau; \theta) \nabla_\theta \log P(\tau; \theta)$***.`;
