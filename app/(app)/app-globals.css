@@ -91,6 +91,10 @@
   padding: 22px 0 18px;
 }
 
+.question-bank-controls:has(.lean-tag-filter-row) {
+  grid-template-columns: minmax(240px, 1fr) auto auto;
+}
+
 .lean-search {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -263,7 +267,7 @@
 }
 
 .lean-tag-filter-row {
-  margin: 0.75rem 0;
+  margin: 0;
 }
 
 .lean-tag-filter {
@@ -555,7 +559,6 @@
 }
 
 .lean-question-actions {
-  align-self: start;
   gap: 5px;
 }
 
@@ -676,7 +679,8 @@
     justify-content: center;
   }
 
-  .question-bank-controls {
+  .question-bank-controls,
+  .question-bank-controls:has(.lean-tag-filter-row) {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -639,6 +639,32 @@ export default function LibraryPageClient() {
               setSearch(nextSearch);
               viewCache.writeLibraryView({ filter, search: nextSearch, tagIds });
             }} placeholder="Search questions and answers" type="search" value={search} /></label>
+            {loadingTags || availableTags.length > 0 || tagIds.length > 0 ? <div className="lean-tag-filter-row">
+              <details className="lean-tag-filter" onToggle={(event) => {
+                if (!event.currentTarget.open) setTagFilterSearch("");
+              }} ref={tagFilterRef}>
+                <summary
+                  aria-label={tagIds.length > 0 ? `Filter by Tags, ${tagIds.length} selected` : "Filter by Tags"}
+                  title="Filter by Tags"
+                >
+                  <Tags aria-hidden="true" />
+                  {tagIds.length > 0 ? <span>{tagIds.length} selected</span> : null}
+                </summary>
+                <div>
+                  <div className="lean-tag-filter-tools">
+                    <label className="lean-tag-filter-search"><Search /><span className="sr-only">Search Tags</span><input onChange={(event) => setTagFilterSearch(event.currentTarget.value)} placeholder="Search Tags" type="search" value={tagFilterSearch} /></label>
+                    {tagIds.length > 0 ? <button aria-label="Clear selected Tags" className="lean-tag-filter-clear" onClick={() => { setTagIds([]); viewCache.writeLibraryView({ filter, search, tagIds: [] }); }} title="Clear selected Tags" type="button"><X /></button> : null}
+                  </div>
+                  {availableTags.map((tag) => <label key={tag.id}><input checked={tagIds.includes(tag.id)} disabled={!tagIds.includes(tag.id) && tagIds.length >= 10} onChange={(event) => {
+                    const next = event.currentTarget.checked ? [...tagIds, tag.id] : tagIds.filter((tagId) => tagId !== tag.id);
+                    setTagIds(next);
+                    viewCache.writeLibraryView({ filter, search, tagIds: next });
+                  }} type="checkbox" /><span>{tag.label}</span></label>)}
+                  {loadingTags ? <span className="lean-tag-loading"><LoaderCircle className="v2-spin" /> Loading Tags</span> : null}
+                  {tagNextCursor ? <button disabled={loadingTags} onClick={() => void loadMoreTags()} type="button">Load more Tags</button> : null}
+                </div>
+              </details>
+            </div> : null}
             <nav aria-label="Question filters">
               {FILTERS.map((item) => (
                 <button aria-pressed={filter === item.value} key={item.value} onClick={() => {
@@ -650,32 +676,7 @@ export default function LibraryPageClient() {
               ))}
             </nav>
           </div>
-          {loadingTags || availableTags.length > 0 || tagIds.length > 0 ? <div className="lean-tag-filter-row">
-            <details className="lean-tag-filter" onToggle={(event) => {
-              if (!event.currentTarget.open) setTagFilterSearch("");
-            }} ref={tagFilterRef}>
-              <summary
-                aria-label={tagIds.length > 0 ? `Filter by Tags, ${tagIds.length} selected` : "Filter by Tags"}
-                title="Filter by Tags"
-              >
-                <Tags aria-hidden="true" />
-                {tagIds.length > 0 ? <span>{tagIds.length} selected</span> : null}
-              </summary>
-              <div>
-                <div className="lean-tag-filter-tools">
-                  <label className="lean-tag-filter-search"><Search /><span className="sr-only">Search Tags</span><input onChange={(event) => setTagFilterSearch(event.currentTarget.value)} placeholder="Search Tags" type="search" value={tagFilterSearch} /></label>
-                  {tagIds.length > 0 ? <button aria-label="Clear selected Tags" className="lean-tag-filter-clear" onClick={() => { setTagIds([]); viewCache.writeLibraryView({ filter, search, tagIds: [] }); }} title="Clear selected Tags" type="button"><X /></button> : null}
-                </div>
-                {availableTags.map((tag) => <label key={tag.id}><input checked={tagIds.includes(tag.id)} disabled={!tagIds.includes(tag.id) && tagIds.length >= 10} onChange={(event) => {
-                  const next = event.currentTarget.checked ? [...tagIds, tag.id] : tagIds.filter((tagId) => tagId !== tag.id);
-                  setTagIds(next);
-                  viewCache.writeLibraryView({ filter, search, tagIds: next });
-                }} type="checkbox" /><span>{tag.label}</span></label>)}
-                {loadingTags ? <span className="lean-tag-loading"><LoaderCircle className="v2-spin" /> Loading Tags</span> : null}
-                {tagNextCursor ? <button disabled={loadingTags} onClick={() => void loadMoreTags()} type="button">Load more Tags</button> : null}
-              </div>
-            </details>
-          </div> : null}
+
           {message ? <p className="question-bank-message" role="status">{message}</p> : null}
           {error ? <p className="v2-error" role="alert">{error}</p> : null}
           <div className="lean-question-list">
