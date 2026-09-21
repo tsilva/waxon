@@ -3,7 +3,6 @@
 import {
   Archive,
   ArchiveRestore,
-  CalendarClock,
   ChevronDown,
   Copy,
   Flag,
@@ -32,6 +31,7 @@ import { MarkdownContent } from "@/app/MarkdownContent";
 import { QuestionTags } from "@/app/QuestionTags";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { QuestionBankFlagDialog } from "@/app/(app)/library/QuestionBankFlagDialog";
+import { LibraryDueDate } from "@/app/(app)/library/LibraryDueDate";
 import type {
   V2LibraryResponse,
   V2QuestionLifecycle,
@@ -362,7 +362,7 @@ function QuestionRow({
           {question.lifecycle !== "active" ? <button aria-label="Restore question" disabled={isRemoving} onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
         </div>
         <div className="lean-question-footer">
-          {question.dueAt ? <span className="lean-question-date"><CalendarClock /> {new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(question.dueAt))}</span> : null}
+          {question.dueAt ? <LibraryDueDate dueAt={question.dueAt} /> : null}
           <button
             aria-controls={`question-details-${question.id}`}
             aria-expanded={detailsOpen}
