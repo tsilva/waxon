@@ -307,62 +307,62 @@ function FeedbackRow({
             ) : null}
           </div>
         </div>
+      </div>
 
-        <div className="previous-row-footer">
-          {open ? (
-            <div className="review-handoff-actions">
-              <button
-                aria-label="Copy review as Markdown"
-                className="review-handoff-copy"
-                onClick={copyMarkdown}
-                type="button"
-              >
-                {copyStatus === "copied" ? (
-                  <Check aria-hidden="true" />
-                ) : (
-                  <Copy aria-hidden="true" />
-                )}
-              </button>
-              <span aria-live="polite" className="sr-only">
-                {copyStatus === "copied"
-                  ? "Review copied to clipboard as Markdown."
-                  : copyStatus === "failed"
-                    ? "Review could not be copied."
-                    : ""}
-              </span>
-            </div>
-          ) : null}
-          <span className="previous-row-meta">
-            <span className="previous-time-control">
-              <time className="previous-time" dateTime={turn.submittedAt}>
-                {submittedDate(turn.submittedAt)}
-              </time>
-              <button
-                aria-expanded={open}
-                aria-label={
-                  open ? "Hide answer details" : "Show answer details"
-                }
-                className="review-feedback-toggle"
-                onClick={() => setOpen((value) => !value)}
-                type="button"
-              >
-                <ChevronDown
-                  className="previous-collapse-icon"
-                  aria-hidden="true"
-                />
-              </button>
+      <div className="previous-row-footer">
+        {open ? (
+          <div className="review-handoff-actions">
+            <button
+              aria-label="Copy review as Markdown"
+              className="review-handoff-copy"
+              onClick={copyMarkdown}
+              type="button"
+            >
+              {copyStatus === "copied" ? (
+                <Check aria-hidden="true" />
+              ) : (
+                <Copy aria-hidden="true" />
+              )}
+            </button>
+            <span aria-live="polite" className="sr-only">
+              {copyStatus === "copied"
+                ? "Review copied to clipboard as Markdown."
+                : copyStatus === "failed"
+                  ? "Review could not be copied."
+                  : ""}
             </span>
-            {dueDateLabel && dueIntervalLabel && evaluation.nextDueOn ? (
-              <time
-                aria-label={`Next review on ${dueDateLabel}`}
-                className="previous-schedule-label"
-                dateTime={evaluation.nextDueOn}
-              >
-                {dueIntervalLabel}
-              </time>
-            ) : null}
+          </div>
+        ) : null}
+        <span className="previous-row-meta">
+          <span className="previous-time-control">
+            <time className="previous-time" dateTime={turn.submittedAt}>
+              {submittedDate(turn.submittedAt)}
+            </time>
+            <button
+              aria-expanded={open}
+              aria-label={
+                open ? "Hide answer details" : "Show answer details"
+              }
+              className="review-feedback-toggle"
+              onClick={() => setOpen((value) => !value)}
+              type="button"
+            >
+              <ChevronDown
+                className="previous-collapse-icon"
+                aria-hidden="true"
+              />
+            </button>
           </span>
-        </div>
+          {dueDateLabel && dueIntervalLabel && evaluation.nextDueOn ? (
+            <time
+              aria-label={`Next review on ${dueDateLabel}`}
+              className="previous-schedule-label"
+              dateTime={evaluation.nextDueOn}
+            >
+              {dueIntervalLabel}
+            </time>
+          ) : null}
+        </span>
       </div>
     </li>
   );

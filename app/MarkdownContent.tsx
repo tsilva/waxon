@@ -190,6 +190,24 @@ function renderMathNodes(expression: string): ReactNode[] {
       const command = readLatexCommand(expression, index);
 
       if (command) {
+        if (command.commandName === "mathrm") {
+          let groupStart = command.nextIndex;
+          while (/\s/u.test(expression[groupStart] ?? "")) {
+            groupStart += 1;
+          }
+          const group = readLatexMathGroup(expression, groupStart);
+
+          if (group) {
+            nodes.push(
+              <span className="math-roman" key={`mathrm-${index}`}>
+                {renderMathNodes(group.content)}
+              </span>,
+            );
+            index = group.nextIndex;
+            continue;
+          }
+        }
+
         if (command.commandName === "hat") {
           const atom = readLatexMathAtom(expression, command.nextIndex);
 
