@@ -58,6 +58,7 @@ export type V2ReviewAnswer = {
 
 export type V2ReviewQueueResponse = {
   question: V2ReviewQuestion | null;
+  upcomingQuestions?: V2ReviewQuestion[];
   isLibraryEmpty: boolean;
   recentAnswers: V2ReviewAnswer[];
   waitingOnEvaluation: boolean;

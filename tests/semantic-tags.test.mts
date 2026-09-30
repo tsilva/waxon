@@ -71,7 +71,7 @@ test("hybrid retrieval uses Prompt-only simple phrase matching and stable tiers"
   assert.match(source, /ARRAY\([\s\S]*phraseto_tsquery\('simple', term\.value\)/u);
   assert.match(source, /array_prepend\(tag\.label, tag\.aliases\)/u);
   assert.match(source, /prompt_document @@ ANY\(tag\.lexical_queries\)/u);
-  assert.match(source, /ORDER BY lexical_priority DESC, distance, tag_id/u);
+  assert.match(source, /ORDER BY \(semantic_match OR lexical_priority\) DESC, lexical_priority DESC, distance, tag_id/u);
   assert.match(source, /ORDER BY lexical_tier, distance, question_id/u);
   assert.match(source, /hybrid-lexical-semantic-v1/u);
 });
@@ -166,8 +166,8 @@ test("Library and Review expose semantic Tags without assignment management", as
   assert.match(review, /tags=\{question\.relatedTags\}/u);
   assert.doesNotMatch(review, /Filter by Tags/u);
   assert.match(liveReview, /relatedTags\(\{/u);
-  assert.match(liveReview, /questionIds: \[selected\.questionId\]/u);
-  assert.match(liveReview, /relatedTags: selectedTags\?\.get\(selected\.questionId\) \?\? \[\]/u);
+  assert.match(liveReview, /questionIds: status\.candidates\.map\(\(question\) => question\.questionId\)/u);
+  assert.match(liveReview, /relatedTags: tags\.get\(question\.questionId\) \?\? \[\]/u);
 });
 
 test("semantic Tag calibration uses the Codex-authored reference set", async () => {

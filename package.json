@@ -24,7 +24,8 @@
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.mts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "security:check": "node scripts/check-dependency-sources.mjs && pnpm audit --audit-level=low"
+    "security:check": "node scripts/check-dependency-sources.mjs && pnpm audit --audit-level=low",
+    "performance:benchmark": "node --import tsx scripts/performance-benchmark.mts"
   },
   "dependencies": {
     "@clerk/nextjs": "7.4.2",

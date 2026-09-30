@@ -119,27 +119,45 @@ export function reconcileRecallEvaluation(input: {
   };
 }
 
+export class EvaluationFailure extends Error {
+  constructor(message: string, readonly retryable: boolean, options?: ErrorOptions) {
+    super(message, options); this.name = "EvaluationFailure";
+  }
+}
+
+export function isRetryableEvaluationError(error: unknown): boolean {
+  return !(error instanceof EvaluationFailure) || error.retryable;
+}
+
 export async function evaluateRecallWithRetries(input: {
   prompt: string;
-  evaluate(): Promise<RecallEvaluationResult>;
+  evaluate(signal: AbortSignal): Promise<RecallEvaluationResult>;
   attempts?: number;
+  deadlineMs?: number;
 }): Promise<NormalizedRecallEvaluation> {
-  const attempts = Math.max(1, input.attempts ?? 3);
-  let lastError: unknown = null;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      const result = reconcileRecallEvaluation({
-        prompt: input.prompt,
-        result: await input.evaluate(),
-      });
-      return result;
-    } catch (error) {
-      lastError = error;
+  const attempts = Math.max(1, Math.min(3, input.attempts ?? 3));
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      const error = new EvaluationFailure("Evaluation exceeded its total time limit. You can retry it.", false);
+      controller.abort(error); reject(error);
+    }, input.deadlineMs ?? 30_000);
+  });
+  try {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        return reconcileRecallEvaluation({ prompt: input.prompt,
+          result: await Promise.race([input.evaluate(controller.signal), deadline]) });
+      } catch (error) {
+        if (controller.signal.aborted || !isRetryableEvaluationError(error)) throw error;
+        lastError = error;
+      }
     }
-  }
-  throw lastError instanceof Error
-    ? lastError
-    : new Error("Evaluation failed after automatic retries.");
+    throw new EvaluationFailure(lastError instanceof Error ? lastError.message : "Evaluation failed after automatic retries.",
+      false, { cause: lastError });
+  } finally { clearTimeout(timer); }
 }
 
 export function deriveAnswerGrades(results: V2RecallResult[]): V2Grade[] {

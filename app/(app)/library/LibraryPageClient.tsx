@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -270,7 +271,7 @@ function McpDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-function QuestionRow({
+const QuestionRow = memo(function QuestionRow({
   question,
   isRemoving,
   onEdit,
@@ -280,10 +281,10 @@ function QuestionRow({
 }: {
   question: V2Question;
   isRemoving: boolean;
-  onEdit: () => void;
-  onFlag: () => void;
+  onEdit: (question: V2Question) => void;
+  onFlag: (question: V2Question) => void;
   onTagClick: (tagId: string) => void;
-  onAction: (action: "archive" | "restore") => void;
+  onAction: (questionId: string, action: "archive" | "restore") => void;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const unresolvedFlags = question.flags.filter((flag) => !flag.resolvedAt);
@@ -327,6 +328,7 @@ function QuestionRow({
           hidden={!detailsOpen}
           id={`question-details-${question.id}`}
         >
+          {detailsOpen ? <>
           {question.lifecycle === "flagged" && visibleFlags.length > 0 ? (
             <div className="lean-question-detail-section">
               <span className="lean-question-detail-label">Flag details</span>
@@ -352,14 +354,15 @@ function QuestionRow({
             <span className="lean-question-detail-label">Answer standard</span>
             <MarkdownContent className="v2-markdown" enableMath text={question.referenceAnswer} />
           </div>
+          </> : null}
         </div>
       </div>
       <div className="lean-question-side">
         <div className="lean-question-actions">
-          <button aria-label="Replace question" disabled={isRemoving} onClick={onEdit} title={question.lifecycle === "flagged" ? "Replace with a new Question" : "Replace"} type="button"><Pencil /></button>
-          {question.lifecycle === "active" ? <button aria-label="Flag question" disabled={isRemoving} onClick={onFlag} title="Flag" type="button"><Flag /></button> : null}
-          {question.lifecycle !== "archived" ? <button aria-label="Archive question" disabled={isRemoving} onClick={() => onAction("archive")} title="Archive" type="button"><Archive /></button> : null}
-          {question.lifecycle !== "active" ? <button aria-label="Restore question" disabled={isRemoving} onClick={() => onAction("restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
+          <button aria-label="Replace question" disabled={isRemoving} onClick={() => onEdit(question)} title={question.lifecycle === "flagged" ? "Replace with a new Question" : "Replace"} type="button"><Pencil /></button>
+          {question.lifecycle === "active" ? <button aria-label="Flag question" disabled={isRemoving} onClick={() => onFlag(question)} title="Flag" type="button"><Flag /></button> : null}
+          {question.lifecycle !== "archived" ? <button aria-label="Archive question" disabled={isRemoving} onClick={() => onAction(question.id, "archive")} title="Archive" type="button"><Archive /></button> : null}
+          {question.lifecycle !== "active" ? <button aria-label="Restore question" disabled={isRemoving} onClick={() => onAction(question.id, "restore")} title="Restore" type="button"><ArchiveRestore /></button> : null}
         </div>
         <div className="lean-question-footer">
           {question.dueAt ? <LibraryDueDate dueAt={question.dueAt} /> : null}
@@ -378,7 +381,7 @@ function QuestionRow({
       </div>
     </article>
   );
-}
+});
 
 export default function LibraryPageClient() {
   const router = useRouter();
@@ -418,7 +421,11 @@ export default function LibraryPageClient() {
     [filter, search, tagIds],
   );
 
+  const handleTagClick = useCallback((tagId: string) => { setTagIds([tagId]);
+    viewCache.writeLibraryView({ filter, search, tagIds: [tagId] }); }, [filter, search, viewCache]);
+
   const load = useCallback(async () => {
+    viewCache.invalidateLearningViews();
     const result = await viewCache.refreshLibrary(activeView);
     hasRenderedDataRef.current = true;
     setData(result);
@@ -621,6 +628,12 @@ export default function LibraryPageClient() {
     void viewCache.preloadReview();
   }
 
+  const questionActionRef = useRef(questionAction);
+  useEffect(() => { questionActionRef.current = questionAction; });
+  const handleQuestionAction = useCallback((id: string, action: "archive" | "restore") => {
+    void questionActionRef.current(id, action).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not update question."));
+  }, []);
+
   return (
     <main className="page">
       <section className="review-shell question-bank-shell">
@@ -684,10 +697,10 @@ export default function LibraryPageClient() {
               <QuestionRow
                 isRemoving={removingQuestionIds.has(question.id)}
                 key={question.id}
-                onAction={(action) => void questionAction(question.id, action).catch((caught) => setError(caught instanceof Error ? caught.message : "Could not update question."))}
-                onEdit={() => setEditing(question)}
-                onFlag={() => setFlagging(question)}
-                onTagClick={(tagId) => { setTagIds([tagId]); viewCache.writeLibraryView({ filter, search, tagIds: [tagId] }); }}
+                onAction={handleQuestionAction}
+                onEdit={setEditing}
+                onFlag={setFlagging}
+                onTagClick={handleTagClick}
                 question={question}
               />
             )) : <div className="question-bank-empty"><h2>{search || tagIds.length > 0 ? "No matching questions" : filter === "flagged" ? "No Questions need attention" : filter === "archived" ? "No Archived Questions" : "Your Library is empty"}</h2><p>{search || tagIds.length > 0 ? "Try a different phrase or filter." : filter === "flagged" ? "Nothing is waiting for attention." : filter === "archived" ? "Nothing is out of circulation." : "Add one clear Prompt and its Answer Standard."}</p>{!search && tagIds.length === 0 && (filter === "all" || filter === "active") ? <button className="v2-button-primary" onClick={() => setEditing(null)} type="button"><Plus /> Add your first question</button> : null}</div>}

@@ -28,6 +28,8 @@ type ReviewSelection = {
 };
 
 type AppViewCacheValue = {
+  invalidateLearningViews: () => void;
+  readAdminCursor: () => string | null;
   readAdminTraces: () => LlmTraceInteraction[] | null;
   readAdminView: () => AdminCachedViewState | null;
   readLibrary: (view?: LibraryViewState) => V2LibraryResponse | null;
@@ -90,6 +92,11 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 export function AppViewCacheProvider({ children }: { children: ReactNode }) {
+  const adminCursorRef = useRef<string | null>(null);
+  const reviewVersionRef = useRef(0);
+  const libraryVersionRef = useRef(0);
+  const reviewUpdatedRef = useRef(0);
+  const libraryUpdatedRef = useRef(new Map<string, number>());
   const adminTracesRef = useRef<LlmTraceInteraction[] | null>(null);
   const adminViewRef = useRef<AdminCachedViewState | null>(null);
   const reviewRef = useRef<V2ReviewQueueResponse | null>(null);
@@ -104,6 +111,12 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
     new Map<string, Promise<V2LibraryResponse>>(),
   );
 
+  const invalidateLearningViews = useCallback(() => {
+    ++reviewVersionRef.current; ++libraryVersionRef.current;
+    reviewRef.current = null; libraryRef.current.clear(); libraryUpdatedRef.current.clear();
+    reviewRequestsRef.current.clear(); libraryRequestsRef.current.clear();
+  }, []);
+  const readAdminCursor = useCallback(() => adminCursorRef.current, []);
   const readAdminTraces = useCallback(() => adminTracesRef.current, []);
   const writeAdminTraces = useCallback((interactions: LlmTraceInteraction[]) => {
     adminTracesRef.current = interactions;
@@ -112,8 +125,10 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
   const writeAdminView = useCallback((view: AdminCachedViewState) => {
     adminViewRef.current = view;
   }, []);
-  const readReview = useCallback(() => reviewRef.current, []);
+  const readReview = useCallback(() => Date.now() - reviewUpdatedRef.current < 60_000 ? reviewRef.current : null, []);
   const writeReview = useCallback((data: V2ReviewQueueResponse) => {
+    ++reviewVersionRef.current;
+    reviewUpdatedRef.current = Date.now();
     reviewRef.current = data;
   }, []);
   const readReviewDraft = useCallback(
@@ -134,11 +149,18 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
     libraryViewRef.current = view;
   }, []);
   const readLibrary = useCallback((view = libraryViewRef.current) => {
-    return libraryRef.current.get(libraryUrl(view)) ?? null;
+    const url = libraryUrl(view);
+    return Date.now() - (libraryUpdatedRef.current.get(url) ?? 0) < 60_000
+      ? libraryRef.current.get(url) ?? null : null;
   }, []);
   const writeLibrary = useCallback(
     (view: LibraryViewState, data: V2LibraryResponse) => {
+      ++libraryVersionRef.current;
+      ++reviewVersionRef.current; reviewRef.current = null;
+      libraryRef.current.clear();
+      libraryUpdatedRef.current.clear();
       libraryRef.current.set(libraryUrl(view), data);
+      libraryUpdatedRef.current.set(libraryUrl(view), Date.now());
     },
     [],
   );
@@ -146,7 +168,7 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
   const refreshAdminTraces = useCallback(async () => {
     if (adminRequestRef.current) return adminRequestRef.current;
 
-    const request = getJson<{ interactions: LlmTraceInteraction[] }>(
+    const request = getJson<{ interactions: LlmTraceInteraction[]; nextCursor?: string | null }>(
       "/api/admin/traces",
     )
       .then((data) => {
@@ -154,6 +176,7 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
           throw new Error("Admin traces response was malformed.");
         }
 
+        adminCursorRef.current = data.nextCursor ?? null;
         adminTracesRef.current = data.interactions;
         return data.interactions;
       })
@@ -169,12 +192,15 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
     const existing = reviewRequestsRef.current.get(url);
     if (existing) return existing;
 
+    const version = ++reviewVersionRef.current;
     const request = getJson<V2ReviewQueueResponse>(url)
       .then((data) => {
-        reviewRef.current = data;
+        if (reviewVersionRef.current === version) {
+          reviewRef.current = data; reviewUpdatedRef.current = Date.now();
+        }
         return data;
       })
-      .finally(() => reviewRequestsRef.current.delete(url));
+      .finally(() => { if (reviewRequestsRef.current.get(url) === request) reviewRequestsRef.current.delete(url); });
     reviewRequestsRef.current.set(url, request);
     return request;
   }, []);
@@ -184,12 +210,19 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
     const existing = libraryRequestsRef.current.get(url);
     if (existing) return existing;
 
+    const version = libraryVersionRef.current;
     const request = getJson<V2LibraryResponse>(url)
       .then((data) => {
-        libraryRef.current.set(url, data);
+        if (libraryVersionRef.current === version) {
+          libraryRef.current.set(url, data); libraryUpdatedRef.current.set(url, Date.now());
+          while (libraryRef.current.size > 20) {
+            const oldest = libraryRef.current.keys().next().value!;
+            libraryRef.current.delete(oldest); libraryUpdatedRef.current.delete(oldest);
+          }
+        }
         return data;
       })
-      .finally(() => libraryRequestsRef.current.delete(url));
+      .finally(() => { if (libraryRequestsRef.current.get(url) === request) libraryRequestsRef.current.delete(url); });
     libraryRequestsRef.current.set(url, request);
     return request;
   }, []);
@@ -222,6 +255,8 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppViewCacheValue>(
     () => ({
+      invalidateLearningViews,
+      readAdminCursor,
       preloadAdmin,
       preloadLibrary,
       preloadReview,
@@ -242,6 +277,8 @@ export function AppViewCacheProvider({ children }: { children: ReactNode }) {
       writeReviewDraft,
     }),
     [
+      invalidateLearningViews,
+      readAdminCursor,
       preloadAdmin,
       preloadLibrary,
       preloadReview,

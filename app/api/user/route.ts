@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { getV2Db } from "@/app/db/v2/client";
 import { users } from "@/app/db/v2/schema";
-import { getCurrentUser } from "@/app/lib/auth";
+import { getCurrentUser, invalidateUserProfile } from "@/app/lib/auth";
 import type { UserProfile } from "@/app/lib/userProfile";
 
 const MAX_AVATAR_DATA_URL_LENGTH = 700_000;
@@ -83,5 +83,6 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
+  invalidateUserProfile(row.id);
   return NextResponse.json(toUserProfile(row));
 }

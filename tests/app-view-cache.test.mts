@@ -214,10 +214,9 @@ test("authenticated views warm their routes, clients, and data", async () => {
   assert.match(toolbarSource, /href="\/review"\s+prefetch/u);
   assert.match(toolbarSource, /href="\/library"\s+prefetch/u);
   assert.match(toolbarSource, /href="\/admin"\s+prefetch/u);
-  assert.match(providersSource, /canViewAdmin\s+&&/u);
-  assert.match(providersSource, /router\.prefetch\("\/admin"\)/u);
-  assert.match(providersSource, /AdminHydrator\.preload\(\)/u);
-  assert.match(providersSource, /viewCache\.preloadAdmin\(\)/u);
+  assert.doesNotMatch(providersSource, /preloadAdmin|AdminHydrator/u);
+  assert.match(providersSource, /viewCache\.preloadReview\(\)/u);
+  assert.match(providersSource, /viewCache\.preloadLibrary\(\)/u);
   assert.match(
     adminHydratorSource,
     /preload:\s*AdminPageClientHydrator\.preload/u,
@@ -235,4 +234,39 @@ test("authenticated views warm their routes, clients, and data", async () => {
     hydratorSource,
     /useState<ComponentType<TProps> \| null>\(\(\) => preloadedClient\)/u,
   );
+});
+
+test("late Review responses cannot replace navigation or survive a mutation invalidation", async () => {
+  const pending: Array<(response: Response) => void> = [];
+  Object.defineProperty(globalThis, "fetch", { configurable: true,
+    value: () => new Promise<Response>((resolve) => pending.push(resolve)),
+  });
+  let cache: ViewCache | null = null;
+  function Harness() { cache = useAppViewCache(); return null; }
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => { root.render(React.createElement(AppViewCacheProvider, null, React.createElement(Harness))); });
+  const mounted = cache as ViewCache | null;
+  assert.ok(mounted);
+  const response = (questionId: string) => new Response(JSON.stringify({ question: { questionId }, summary: { queueRemaining: 2 } }));
+  mounted.writeReviewDraft("current", "Keep my draft");
+  const stale = mounted.refreshReview({ questionId: "old" });
+  const newest = mounted.refreshReview({ questionId: "current" });
+  pending[1](response("current")); await newest;
+  pending[0](response("old")); await stale;
+  assert.equal(mounted.readReview()?.question?.questionId, "current");
+
+  const beforeMutation = mounted.refreshReview();
+  mounted.invalidateLearningViews();
+  const afterMutation = mounted.refreshReview();
+  pending[2](response("before-mutation")); await beforeMutation;
+  assert.equal(mounted.readReview(), null);
+  const duplicate = mounted.refreshReview();
+  assert.equal(pending.length, 4, "an older request's cleanup must not remove the current in-flight request");
+  pending[3](response("after-mutation")); await Promise.all([afterMutation, duplicate]);
+  assert.equal(mounted.readReview()?.question?.questionId, "after-mutation");
+  assert.equal(mounted.readReviewDraft("current"), "Keep my draft");
+  await act(async () => { root.unmount(); });
+  container.remove();
 });

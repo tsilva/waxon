@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as Sentry from "@sentry/nextjs";
+import { RequestTimings } from "@/app/lib/requestTimings";
 import { NextResponse } from "next/server";
 import { consumeUserRateLimit, readJsonBodyWithLimit } from "@/app/lib/apiLimits";
 import { getCurrentUser } from "@/app/lib/auth";
@@ -26,8 +27,10 @@ async function startEmbeddingJobsBestEffort(userId: string) {
 }
 
 export async function GET(request: Request) {
+  const timings = new RequestTimings();
   try {
     const user = await getCurrentUser();
+    timings.mark("auth");
     const application = waxonApplication.forLearner(user.id);
     const url = new URL(request.url);
     const requested = url.searchParams.get("lifecycle");
@@ -39,14 +42,14 @@ export async function GET(request: Request) {
     if (tagIds.length > 10 || tagIds.some((tagId) => !UUID_PATTERN.test(tagId))) {
       throw new Error("Choose at most 10 valid Tags.");
     }
-    return NextResponse.json(
-      await application.questionBank.list({
+    const result = await application.questionBank.list({
         lifecycle,
         search: url.searchParams.get("search") ?? "",
         tagIds,
         cursor: url.searchParams.get("cursor") ?? undefined,
-      }),
-    );
+      });
+    timings.mark("library");
+    return timings.json(result);
   } catch (error) {
     return v2Error(error);
   }

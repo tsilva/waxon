@@ -516,7 +516,8 @@ export async function listLibrary(input: {
           AND ($2::text IS NULL OR q.lifecycle::text = $2)
           AND (
             $3 = ''
-            OR to_tsvector('simple', q.prompt || ' ' || q.reference_answer)
+            OR (setweight(to_tsvector('simple', coalesce(q.prompt, '')), 'A') ||
+                setweight(to_tsvector('simple', coalesce(q.reference_answer, '')), 'B'))
                @@ websearch_to_tsquery('simple', $3)
             OR q.prompt % $3
           )
@@ -550,10 +551,9 @@ export async function listLibrary(input: {
       questionIds: pageRows.map((row) => row.id),
       limit: 3,
     }),
-    referenceTags({
-      learnerId: input.userId,
-      questionIds: pageRows.map((row) => row.id),
-    }),
+    process.env.WAXON_TAG_REFERENCE_DIAGNOSTICS === "1"
+      ? referenceTags({ learnerId: input.userId, questionIds: pageRows.map((row) => row.id) })
+      : Promise.resolve(new Map()),
     pool.query<{ lifecycle: string; count: string }>(
       `SELECT lifecycle::text, count(*)::text
          FROM waxon_v2.questions

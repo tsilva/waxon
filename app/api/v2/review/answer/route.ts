@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { RequestTimings } from "@/app/lib/requestTimings";
 import {
   consumeUserRateLimit,
   readJsonBodyWithLimit,
@@ -13,8 +13,10 @@ export async function POST(request: Request) {
   if (!parsed.ok) {
     return parsed.response;
   }
+  const timings = new RequestTimings();
   try {
     const user = await getCurrentUser();
+    timings.mark("auth");
     const application = waxonApplication.forLearner(user.id);
     const limited = consumeUserRateLimit({
       userId: user.id,
@@ -49,10 +51,12 @@ export async function POST(request: Request) {
       answer,
       idempotencyKey,
     });
+    timings.mark("save");
     if (evaluation.status === "pending") {
       await startBackgroundJobs(user.id, 4);
     }
-    return NextResponse.json(evaluation, { status: 202 });
+    timings.mark("dispatch");
+    return timings.json(evaluation, { status: 202 });
   } catch (error) {
     return v2Error(error);
   }

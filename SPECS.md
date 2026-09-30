@@ -4,6 +4,10 @@ Waxon is a multi-user question bank and adaptive recall-practice system. Learner
 
 ## PROJECT REQUIREMENTS
 
+### Responsiveness
+
+- Waxon must keep learner interactions responsive without perceptible UI stalls during navigation, rendering, or automated evaluation.
+
 ### Ownership and access
 
 - Production must authenticate each learner and isolate all of their learning data.

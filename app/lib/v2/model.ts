@@ -13,6 +13,7 @@ import {
 } from "../browserSmokeSupport.ts";
 import { beginLlmTrace, finishLlmTrace } from "../llmTraceStore.ts";
 import {
+  EvaluationFailure,
   RECALL_EVALUATION_SYSTEM_PROMPT,
   reconcileRecallEvaluation,
   type NormalizedRecallEvaluation,
@@ -70,11 +71,12 @@ async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
   url: string,
   body: unknown,
   trace: { operation: string; model: string; question: string },
+  signal?: AbortSignal,
 ): Promise<T> {
   const apiKey = resolveOpenRouterApiKey();
 
   if (!apiKey) {
-    throw new Error("Model work is unavailable because no API key is configured.");
+    throw new EvaluationFailure("Model work is unavailable because no API key is configured.", false);
   }
 
   const pending = beginLlmTrace({
@@ -89,13 +91,13 @@ async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
       method: "POST",
       headers: buildOpenRouterHeaders(apiKey),
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(60_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(
-        `Model request failed (${response.status}): ${text.slice(0, 300)}`,
-      );
+      throw new EvaluationFailure(`Model request failed (${response.status}): ${text.slice(0, 300)}`,
+        response.status === 408 || response.status === 429 || response.status >= 500);
+
     }
     const parsed = JSON.parse(text) as T;
     await finishLlmTrace(pending, {
@@ -138,14 +140,14 @@ export function parseRecallEvaluationResponse(
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new Error("Model returned malformed evaluation JSON.", {
+    throw new EvaluationFailure("Model returned malformed evaluation JSON.", true, {
       cause: error,
     });
   }
 
   const result = recallEvaluationResponseSchema.safeParse(parsed);
   if (!result.success) {
-    throw new Error("Model returned an evaluation outside the required schema.");
+    throw new EvaluationFailure("Model returned an evaluation outside the required schema.", true);
   }
   return result.data;
 }
@@ -156,6 +158,7 @@ export async function evaluateRecall(input: {
   referenceAnswer: string;
   answer: string;
   browserAcceptanceEvaluationAuthorized?: boolean;
+  signal?: AbortSignal;
 }): Promise<NormalizedRecallEvaluation> {
   if (
     shouldUseBrowserAcceptanceEvaluator({
@@ -188,7 +191,7 @@ export async function evaluateRecall(input: {
     model,
     temperature: 0,
     max_tokens: 900,
-    provider: { require_parameters: true },
+    provider: { require_parameters: true, sort: "latency" },
     response_format: {
       type: "json_schema",
       json_schema: {
@@ -205,16 +208,16 @@ export async function evaluateRecall(input: {
       },
       {
         role: "user",
-        content: JSON.stringify(input),
+        content: JSON.stringify({ prompt: input.prompt, referenceAnswer: input.referenceAnswer, answer: input.answer }),
       },
     ],
   }, {
     operation: "evaluate_answer",
     model,
     question: input.prompt,
-  });
+  }, input.signal);
   if (response.model !== model) {
-    throw new Error("Model response did not identify the requested evaluator.");
+    throw new EvaluationFailure("Model response did not identify the requested evaluator.", false);
   }
   const parsed = parseRecallEvaluationResponse(chatText(response));
 

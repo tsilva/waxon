@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   and,
   asc,
@@ -16,7 +16,6 @@ import {
   mutationReceipts,
   questionFlags,
   questions,
-  recallResultCorrections,
   learnerSettings,
 } from "../../db/v2/schema.ts";
 import { claimV2Job } from "./jobs.ts";
@@ -29,7 +28,6 @@ import {
 } from "./scheduler.ts";
 import {
   dateInTimezone,
-  getLearnerReviewDay,
 } from "./settings.ts";
 import { normalizeReviewFlagInput } from "./reviewFlag.ts";
 import { relatedTags } from "./semanticTags.ts";
@@ -37,6 +35,7 @@ import {
   composeRecallFeedback,
   deriveAnswerGrades,
   evaluateRecallWithRetries,
+  isRetryableEvaluationError,
   legacyGradeToRecallResult,
   type RecallEvaluationResult,
 } from "./recallEvaluation.ts";
@@ -70,17 +69,12 @@ async function learnerReviewDayInTransaction(
   userId: string,
   now: Date,
 ): Promise<{ effectiveTimezone: string; localDay: string }> {
-  await tx
-    .insert(learnerSettings)
-    .values({ userId })
-    .onConflictDoNothing({ target: learnerSettings.userId });
   const [settings] = await tx
     .select({ timezone: learnerSettings.timezone })
     .from(learnerSettings)
     .where(eq(learnerSettings.userId, userId))
     .limit(1);
-  if (!settings) throw new Error("Could not load learner settings.");
-  const effectiveTimezone = settings.timezone ?? "UTC";
+  const effectiveTimezone = settings?.timezone ?? "UTC";
   return {
     effectiveTimezone,
     localDay: dateInTimezone(now, effectiveTimezone),
@@ -161,160 +155,96 @@ function activeQuestionEligibility(localDay: string) {
   );
 }
 
-async function queueRows(
-  userId: string,
-  localDay: string,
-  database: Pick<ReturnType<typeof getV2Db>, "select"> = getV2Db(),
-) {
-  const unansweredMcpQuestion = sql`(${questions.addedThroughMcp} AND NOT EXISTS (
-    SELECT 1 FROM waxon_v2.answer_submissions submission
-     WHERE submission.user_id = ${questions.userId}
-       AND submission.question_id = ${questions.id}
-  ))`;
-  const latestEffectiveGrade = sql`(
-    SELECT event.grade::text
-      FROM waxon_v2.answer_submissions submission
-      JOIN waxon_v2.grade_events event
-        ON event.user_id = submission.user_id
-       AND event.submission_id = submission.id
-     WHERE submission.user_id = ${questions.userId}
-       AND submission.question_id = ${questions.id}
-     ORDER BY submission.submitted_at DESC,
-              submission.created_at DESC,
-              submission.id DESC,
-              event.created_at DESC,
-              event.id DESC
-     LIMIT 1
-  )`;
-  return database
-    .select({
-      questionId: questions.id,
-      prompt: questions.prompt,
-      scheduledFor: memoryStates.dueOn,
-    })
-    .from(questions)
-    .leftJoin(
-      memoryStates,
-      and(
-        eq(memoryStates.userId, questions.userId),
-        eq(memoryStates.questionId, questions.id),
-      ),
-    )
-    .where(
-      and(
-        eq(questions.userId, userId),
-        activeQuestionEligibility(localDay),
-      ),
-    )
-    .orderBy(
-      sql`${unansweredMcpQuestion} DESC`,
-      sql`CASE WHEN ${unansweredMcpQuestion} THEN ${questions.creationOrder} END DESC NULLS LAST`,
-      sql`COALESCE(${memoryStates.dueOn}, ${localDay}::date) ASC`,
-      sql`(${memoryStates.questionId} IS NULL) DESC`,
-      sql`CASE
-        WHEN ${memoryStates.dueOn} = ${localDay}::date
-         AND ${latestEffectiveGrade} = 'again'
-        THEN 1 ELSE 0
-      END ASC`,
-      sql`CASE
-        WHEN ${memoryStates.dueOn} = ${localDay}::date
-         AND ${latestEffectiveGrade} = 'again'
-        THEN ${memoryStates.updatedAt}
-        ELSE NULL
-      END ASC NULLS FIRST`,
-      questions.creationOrder,
-      questions.id,
-    );
-}
-
-async function reviewStatus(userId: string, now: Date) {
-  const day = await getLearnerReviewDay(userId, now);
-  const [queue, pending, future] = await Promise.all([
-    queueRows(userId, day.localDay),
-    getV2Client().pool.query<{ count: string }>(
-      `SELECT count(*)::text AS count
-         FROM waxon_v2.answer_submissions
-        WHERE user_id = $1 AND status = 'pending'`,
-      [userId],
-    ),
-    getV2Client().pool.query<{ next_scheduled_on: string | null }>(
-      `SELECT min(ms.due_on)::text AS next_scheduled_on
-         FROM waxon_v2.questions q
-         JOIN waxon_v2.memory_states ms
-           ON ms.user_id = q.user_id AND ms.question_id = q.id
-        WHERE q.user_id = $1
-          AND q.lifecycle::text = 'active'
-          AND ms.due_on > $2::date`,
-      [userId, day.localDay],
-    ),
-  ]);
-  return {
-    day,
-    queue,
-    waitingOnEvaluation: Number(pending.rows[0]?.count ?? 0) > 0,
-    nextScheduledOn: future.rows[0]?.next_scheduled_on ?? null,
-  };
+// The count covers every eligible Question; the window only bounds transferred content.
+async function reviewStatus(userId: string, now: Date, selection: {
+  questionId?: string | null; afterQuestionId?: string | null;
+} = {}, includeQuestions = true) {
+  const result = await getV2Client().pool.query<{
+    timezone: string | null; local_day: string; total: string;
+    waiting: boolean; next_scheduled_on: string | null; library_empty: boolean;
+    candidates: Array<{ questionId: string; prompt: string; scheduledFor: string | null }>;
+  }>(
+    `WITH day AS (
+       SELECT settings.timezone,
+              ($2::timestamptz AT TIME ZONE COALESCE(settings.timezone, 'UTC'))::date AS local_day
+         FROM waxon_v2.users learner
+         LEFT JOIN waxon_v2.learner_settings settings ON settings.user_id = learner.id
+        WHERE learner.id = $1
+     ), eligible AS MATERIALIZED (
+       SELECT q.id, q.prompt, q.creation_order, q.added_through_mcp,
+              ms.question_id AS memory_id, ms.due_on, ms.updated_at
+         FROM waxon_v2.questions q CROSS JOIN day
+         LEFT JOIN waxon_v2.memory_states ms ON ms.user_id = q.user_id AND ms.question_id = q.id
+        WHERE q.user_id = $1 AND q.lifecycle = 'active'
+          AND (ms.question_id IS NULL OR ms.due_on <= day.local_day)
+          AND NOT EXISTS (SELECT 1 FROM waxon_v2.answer_submissions pending
+                           WHERE pending.user_id = $1 AND pending.question_id = q.id AND pending.status = 'pending')
+     ), latest AS (
+       SELECT DISTINCT ON (submission.question_id) submission.question_id, event.grade
+         FROM waxon_v2.answer_submissions submission
+         JOIN waxon_v2.grade_events event ON event.user_id = submission.user_id AND event.submission_id = submission.id
+        WHERE submission.user_id = $1 AND $5::boolean
+        ORDER BY submission.question_id, submission.submitted_at DESC, submission.created_at DESC,
+                 submission.id DESC, event.created_at DESC, event.id DESC
+     ), prioritized AS (
+       SELECT eligible.*, latest.grade,
+              (added_through_mcp AND NOT EXISTS (
+                 SELECT 1 FROM waxon_v2.answer_submissions submission
+                  WHERE submission.user_id = $1 AND submission.question_id = eligible.id
+              )) AS unanswered_mcp
+         FROM eligible LEFT JOIN latest ON latest.question_id = eligible.id WHERE $5::boolean
+     ), ordered AS MATERIALIZED (
+       SELECT prioritized.*, row_number() OVER (ORDER BY
+         unanswered_mcp DESC,
+         CASE WHEN unanswered_mcp THEN creation_order END DESC NULLS LAST,
+         COALESCE(due_on, day.local_day), (memory_id IS NULL) DESC,
+         CASE WHEN due_on = day.local_day AND grade = 'again' THEN 1 ELSE 0 END,
+         CASE WHEN due_on = day.local_day AND grade = 'again' THEN updated_at END ASC NULLS FIRST,
+         creation_order, id) AS position
+         FROM prioritized CROSS JOIN day
+     ), chosen AS (
+       SELECT COALESCE(
+         (SELECT position % (SELECT count(*) FROM ordered) + 1 FROM ordered WHERE id::text = $4),
+         (SELECT position FROM ordered WHERE id::text = $3), 1) AS position
+     ), candidate_window AS (
+       SELECT ordered.*, (ordered.position - chosen.position + (SELECT count(*) FROM ordered))
+              % (SELECT count(*) FROM ordered) AS advance_offset
+         FROM ordered CROSS JOIN chosen
+     )
+     SELECT day.timezone, day.local_day::text,
+            (SELECT count(*)::text FROM eligible) AS total,
+            EXISTS (SELECT 1 FROM waxon_v2.answer_submissions WHERE user_id = $1 AND status = 'pending') AS waiting,
+            (SELECT min(ms.due_on)::text FROM waxon_v2.memory_states ms
+               JOIN waxon_v2.questions q ON q.user_id = ms.user_id AND q.id = ms.question_id
+              WHERE q.user_id = $1 AND q.lifecycle = 'active' AND ms.due_on > day.local_day) AS next_scheduled_on,
+            NOT EXISTS (SELECT 1 FROM waxon_v2.questions WHERE user_id = $1) AS library_empty,
+            COALESCE((SELECT jsonb_agg(jsonb_build_object('questionId', id, 'prompt', prompt,
+                         'scheduledFor', due_on::text) ORDER BY advance_offset) FROM candidate_window WHERE advance_offset < 9), '[]'::jsonb) AS candidates
+       FROM day`,
+    [userId, now, selection.questionId?.trim() || null, selection.afterQuestionId?.trim() || null, includeQuestions],
+  );
+  const row = result.rows[0];
+  if (!row) throw new Error("Could not load learner Review state.");
+  return row;
 }
 
 export async function getLiveReviewQueue(
   userId: string,
   dependencies: Pick<ReviewDependencies, "now"> = defaultReviewDependencies,
-  selection: {
-    questionId?: string | null;
-    afterQuestionId?: string | null;
-  } = {},
+  selection: { questionId?: string | null; afterQuestionId?: string | null } = {},
 ): Promise<V2ReviewQueueResponse> {
   const [status, recentAnswers] = await Promise.all([
-    reviewStatus(userId, dependencies.now()),
-    recentReviewAnswers(userId),
+    reviewStatus(userId, dependencies.now(), selection), recentReviewAnswers(userId),
   ]);
-  const requestedQuestionId = selection.questionId?.trim();
-  const afterQuestionId = selection.afterQuestionId?.trim();
-  const requested = requestedQuestionId
-    ? status.queue.find((question) => question.questionId === requestedQuestionId)
-    : undefined;
-  const afterIndex = afterQuestionId
-    ? status.queue.findIndex((question) => question.questionId === afterQuestionId)
-    : -1;
-  const selected =
-    afterIndex >= 0
-      ? status.queue[(afterIndex + 1) % status.queue.length]
-      : requested ?? status.queue[0];
-  const selectedTags = selected
-    ? await relatedTags({
-        learnerId: userId,
-        questionIds: [selected.questionId],
-        limit: 3,
-      })
-    : null;
-  const couldBeEmpty = !selected && recentAnswers.length === 0 &&
-    !status.waitingOnEvaluation && !status.nextScheduledOn;
-  const isLibraryEmpty = couldBeEmpty
-    ? (await getV2Db()
-        .select({ id: questions.id })
-        .from(questions)
-        .where(eq(questions.userId, userId))
-        .limit(1)).length === 0
-    : false;
+  const tags = await relatedTags({ learnerId: userId,
+    questionIds: status.candidates.map((question) => question.questionId), limit: 3 });
+  const candidates = status.candidates.map((question) => ({ ...question,
+    total: Number(status.total), relatedTags: tags.get(question.questionId) ?? [] }));
   return {
-    question: selected
-      ? {
-          questionId: selected.questionId,
-          prompt: selected.prompt,
-          relatedTags: selectedTags?.get(selected.questionId) ?? [],
-          total: status.queue.length,
-          scheduledFor: selected.scheduledFor,
-        }
-      : null,
-    recentAnswers,
-    isLibraryEmpty,
-    waitingOnEvaluation: status.waitingOnEvaluation,
-    timezone: status.day.timezone,
-    localDay: status.day.localDay,
-    summary: {
-      queueRemaining: status.queue.length,
-      nextScheduledOn: status.nextScheduledOn,
-    },
+    question: candidates[0] ?? null, upcomingQuestions: candidates.slice(1), recentAnswers,
+    isLibraryEmpty: status.library_empty, waitingOnEvaluation: status.waiting,
+    timezone: status.timezone, localDay: status.local_day,
+    summary: { queueRemaining: Number(status.total), nextScheduledOn: status.next_scheduled_on },
   };
 }
 
@@ -345,8 +275,10 @@ export async function flagCurrentReviewQuestion(input: {
       input.userId,
       now,
     );
-    const available = (await queueRows(input.userId, reviewDay.localDay, tx))
-      .some((question) => question.questionId === questionId);
+    const [available] = await tx.select({ questionId: questions.id }).from(questions)
+      .leftJoin(memoryStates, and(eq(memoryStates.userId, questions.userId), eq(memoryStates.questionId, questions.id)))
+      .where(and(eq(questions.userId, input.userId), eq(questions.id, questionId), activeQuestionEligibility(reviewDay.localDay)))
+      .limit(1);
     if (!available) {
       throw new Error("This Question is no longer available in Review.");
     }
@@ -383,7 +315,7 @@ export async function flagCurrentReviewQuestion(input: {
   });
 }
 
-async function recentReviewAnswers(userId: string) {
+async function recentReviewAnswers(userId: string, submissionIds: string[] | null = null) {
   const result = await getV2Client().pool.query<{
     submission_id: string;
     answer: string;
@@ -451,10 +383,10 @@ async function recentReviewAnswers(userId: string) {
        LEFT JOIN waxon_v2.memory_states memory
          ON memory.user_id = submission.user_id
         AND memory.question_id = submission.question_id
-      WHERE submission.user_id = $1
+      WHERE submission.user_id = $1 AND ($2::uuid[] IS NULL OR submission.id = ANY($2::uuid[]))
       ORDER BY submission.submitted_at DESC, submission.id DESC
       LIMIT 20`,
-    [userId],
+    [userId, submissionIds],
   );
   return result.rows.map((row) => ({
       prompt: row.prompt,
@@ -495,11 +427,21 @@ export async function getLiveReviewSummary(
   userId: string,
   now = defaultReviewDependencies.now(),
 ): Promise<V2ReviewSummary> {
-  const status = await reviewStatus(userId, now);
-  return {
-    queueRemaining: status.queue.length,
-    nextScheduledOn: status.nextScheduledOn,
-  };
+  const result = await getV2Client().pool.query<{ queue_remaining: number; next_scheduled_on: string | null }>(
+    `WITH day AS (
+       SELECT ($2::timestamptz AT TIME ZONE COALESCE(settings.timezone, 'UTC'))::date AS local_day
+         FROM waxon_v2.users learner LEFT JOIN waxon_v2.learner_settings settings ON settings.user_id = learner.id
+        WHERE learner.id = $1
+     )
+     SELECT count(*) FILTER (WHERE (ms.question_id IS NULL OR ms.due_on <= day.local_day)
+              AND NOT EXISTS (SELECT 1 FROM waxon_v2.answer_submissions pending
+                WHERE pending.user_id = $1 AND pending.question_id = q.id AND pending.status = 'pending'))::integer AS queue_remaining,
+            (min(ms.due_on) FILTER (WHERE ms.due_on > day.local_day))::text AS next_scheduled_on
+       FROM waxon_v2.questions q CROSS JOIN day
+       LEFT JOIN waxon_v2.memory_states ms ON ms.user_id = q.user_id AND ms.question_id = q.id
+      WHERE q.user_id = $1 AND q.lifecycle = 'active'`, [userId, now]);
+  return { queueRemaining: result.rows[0].queue_remaining, nextScheduledOn: result.rows[0].next_scheduled_on };
+
 }
 
 function reviewAnswerRequestHash(
@@ -525,18 +467,18 @@ export async function submitLiveReviewAnswer(
     throw new Error("A free-text answer and idempotency key are required.");
   }
   const requestHash = reviewAnswerRequestHash(input.questionId, answer);
-  const submissionId = await getV2Db().transaction(async (tx) => {
+  const saved = await getV2Db().transaction(async (tx) => {
     await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${input.userId}`}))`,
+      sql`WITH queue_lock AS MATERIALIZED (
+        SELECT pg_advisory_xact_lock(hashtext(${`review-queue:${input.userId}`}))
+      ) SELECT pg_advisory_xact_lock(hashtext(${`review-answer:${input.userId}:${input.questionId}`})) FROM queue_lock`,
     );
     const reviewDay = await learnerReviewDayInTransaction(
       tx,
       input.userId,
       now,
     );
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext(${`review-answer:${input.userId}:${input.questionId}`}))`,
-    );
+
     const [receipt] = await tx
       .select({
         requestHash: mutationReceipts.requestHash,
@@ -589,129 +531,52 @@ export async function submitLiveReviewAnswer(
       throw new Error("This Question is no longer available in Review.");
     }
 
-    const [submission] = await tx
-      .insert(answerSubmissions)
-      .values({
-        userId: input.userId,
-        questionId: question.questionId,
-        answer,
-        submittedAt: now,
-      })
-      .returning({ id: answerSubmissions.id });
-    const [evaluation] = await tx
-      .insert(evaluations)
-      .values({
-        userId: input.userId,
-        questionId: question.questionId,
-        submissionId: submission.id,
-        evaluator: "model",
-      })
-      .returning({ id: evaluations.id });
-    const browserAcceptanceEvaluationAuthorized =
-      authorizeBrowserAcceptanceEvaluation({
-        learnerId: input.userId,
-        prompt: question.prompt,
-      });
-    await tx.insert(jobs).values({
-      userId: input.userId,
-      type: "evaluate_submission",
-      idempotencyKey: submission.id,
-      priority: 0,
-      payload: {
-        submissionId: submission.id,
-        evaluationId: evaluation.id,
-        ...(browserAcceptanceEvaluationAuthorized
-          ? { browserAcceptanceEvaluationAuthorized: true }
-          : {}),
-      },
+    const submissionId = randomUUID();
+    const evaluationId = randomUUID();
+    const browserAcceptanceEvaluationAuthorized = authorizeBrowserAcceptanceEvaluation({
+      learnerId: input.userId, prompt: question.prompt,
     });
-    await tx.insert(mutationReceipts).values({
-      userId: input.userId,
-      scope: "review-answer",
-      key,
-      requestHash,
-      response: { submissionId: submission.id },
-    });
-    return submission.id;
+    const payload = JSON.stringify({ submissionId, evaluationId,
+      ...(browserAcceptanceEvaluationAuthorized ? { browserAcceptanceEvaluationAuthorized: true } : {}) });
+    // Evidence, evaluator, durable job, and retry receipt commit together in one trip.
+    await tx.execute(sql`WITH submission AS (
+      INSERT INTO waxon_v2.answer_submissions (id, user_id, question_id, answer, submitted_at)
+      VALUES (${submissionId}::uuid, ${input.userId}, ${question.questionId}::uuid, ${answer}, ${now.toISOString()}::timestamptz)
+      RETURNING id, user_id, question_id
+    ), evaluation AS (
+      INSERT INTO waxon_v2.evaluations (id, user_id, question_id, submission_id, evaluator)
+      SELECT ${evaluationId}::uuid, user_id, question_id, id, 'model' FROM submission
+      RETURNING id
+    ), job AS (
+      INSERT INTO waxon_v2.jobs (user_id, type, idempotency_key, priority, payload)
+      SELECT ${input.userId}, 'evaluate_submission', ${submissionId}, 0, ${payload}::jsonb FROM evaluation
+      RETURNING id
+    )
+    INSERT INTO waxon_v2.mutation_receipts (user_id, scope, key, request_hash, response)
+    SELECT ${input.userId}, 'review-answer', ${key}, ${requestHash},
+           ${JSON.stringify({ submissionId })}::jsonb FROM job`);
+    return evaluationView({ submissionId, evaluationId, evaluationStatus: "pending",
+      proposedGrade: null, proposedRecallResult: null, correctedRecallResult: null,
+      effectiveGrade: null, dueOn: null, feedback: null, expectedAnswer: null,
+      coveredPoints: [], missingPoints: [], scoringIssues: [], confidence: null });
   });
-  return getLiveEvaluation(input.userId, submissionId);
+  return typeof saved === "string" ? getLiveEvaluation(input.userId, saved) : saved;
 }
 
-export async function getLiveEvaluation(
-  userId: string,
-  submissionId: string,
-): Promise<V2Evaluation> {
-  const db = getV2Db();
-  const [row] = await db
-    .select()
-    .from(evaluations)
-    .where(
-      and(
-        eq(evaluations.userId, userId),
-        eq(evaluations.submissionId, submissionId),
-      ),
-    )
-    .orderBy(desc(evaluations.createdAt), desc(evaluations.id))
-    .limit(1);
-  if (!row) throw new Error("Evaluation not found.");
-  const [correction] = await db
-    .select({ value: recallResultCorrections.value })
-    .from(recallResultCorrections)
-    .where(
-      and(
-        eq(recallResultCorrections.userId, userId),
-        eq(recallResultCorrections.submissionId, submissionId),
-      ),
-    )
-    .orderBy(
-      desc(recallResultCorrections.createdAt),
-      desc(recallResultCorrections.id),
-    )
-    .limit(1);
-  const [effectiveGrade] = await db
-    .select({ value: gradeEvents.value })
-    .from(gradeEvents)
-    .where(
-      and(
-        eq(gradeEvents.userId, userId),
-        eq(gradeEvents.submissionId, submissionId),
-      ),
-    )
-    .orderBy(desc(gradeEvents.createdAt), desc(gradeEvents.id))
-    .limit(1);
-  const [schedule] = await db
-    .select({ dueOn: memoryStates.dueOn })
-    .from(answerSubmissions)
-    .leftJoin(
-      memoryStates,
-      and(
-        eq(memoryStates.userId, answerSubmissions.userId),
-        eq(memoryStates.questionId, answerSubmissions.questionId),
-      ),
-    )
-    .where(
-      and(
-        eq(answerSubmissions.userId, userId),
-        eq(answerSubmissions.id, submissionId),
-      ),
-    )
-    .limit(1);
-  return evaluationView({
-    submissionId,
-    evaluationId: row.id,
-    evaluationStatus: row.status,
-    proposedGrade: row.proposedGrade,
-    proposedRecallResult: row.proposedRecallResult,
-    correctedRecallResult: correction?.value ?? null,
-    effectiveGrade: effectiveGrade?.value ?? null,
-    dueOn: schedule?.dueOn ?? null,
-    feedback: row.feedback,
-    expectedAnswer: row.expectedAnswer,
-    coveredPoints: row.coveredPoints,
-    missingPoints: row.missingPoints,
-    scoringIssues: row.scoringIssues,
-    confidence: row.confidence,
-  });
+
+export async function getLiveEvaluations(userId: string, submissionIds: string[]): Promise<V2Evaluation[]> {
+  if (submissionIds.length === 0 || submissionIds.length > 20) throw new Error("Request 1–20 evaluations.");
+  if (submissionIds.some((id) => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id))) {
+    throw new Error("Invalid submission ID.");
+  }
+  const turns = await recentReviewAnswers(userId, submissionIds);
+  return turns.map((turn) => turn.evaluation);
+}
+
+export async function getLiveEvaluation(userId: string, submissionId: string): Promise<V2Evaluation> {
+  const [evaluation] = await getLiveEvaluations(userId, [submissionId]);
+  if (!evaluation) throw new Error("Evaluation not found.");
+  return evaluation;
 }
 
 async function rebuildMemoryFromGradeHistory(
@@ -1044,12 +909,13 @@ export async function runLiveEvaluationJob(
   try {
     const result = await evaluateRecallWithRetries({
       prompt: row.prompt,
-      evaluate: () =>
+      evaluate: (signal) =>
         dependencies.evaluateAnswer({
           userId: job.userId,
           prompt: row.prompt,
           referenceAnswer: row.referenceAnswer,
           answer: row.answer,
+          signal,
           browserAcceptanceEvaluationAuthorized:
             job.payload.browserAcceptanceEvaluationAuthorized === true,
         }),
@@ -1128,7 +994,7 @@ export async function runLiveEvaluationJob(
       })
       .where(eq(jobs.id, job.id));
   } catch (error) {
-    const exhausted = job.attempts >= 3;
+    const exhausted = job.attempts >= 3 || !isRetryableEvaluationError(error);
     await db
       .update(jobs)
       .set({
@@ -1235,13 +1101,16 @@ export async function applyLiveRecallResultCorrection(
     if (submission.status !== "graded") {
       throw new Error("Only a completed evaluation can be corrected.");
     }
-    await tx.insert(recallResultCorrections).values({
-      userId: input.userId,
-      questionId: submission.questionId,
-      submissionId: input.submissionId,
-      value: input.recallResult,
-      createdAt: now,
-    });
+    // Queue lock serializes corrections; advance equal timestamps so the latest
+    // correction never depends on randomly ordered UUIDs.
+    await tx.execute(sql`INSERT INTO waxon_v2.recall_result_corrections
+      (user_id, question_id, submission_id, recall_result, created_at)
+      SELECT ${input.userId}, ${submission.questionId}::uuid, ${input.submissionId}::uuid,
+             ${input.recallResult}::waxon_v2.recall_result,
+             GREATEST(${now.toISOString()}::timestamptz,
+               COALESCE(max(created_at) + interval '1 millisecond', ${now.toISOString()}::timestamptz))
+        FROM waxon_v2.recall_result_corrections
+       WHERE user_id = ${input.userId} AND submission_id = ${input.submissionId}::uuid`);
     await rebuildDerivedGradesInTransaction(
       tx,
       {

@@ -4963,3 +4963,13 @@ body:has(.review-welcome) .queue-summary {
       rgb(247 241 227 / 42%);
   }
 }
+
+/* Retain complete loaded lists while skipping offscreen style/layout/paint work. */
+.lean-question-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
+}
+.previous-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 170px;
+}
