@@ -260,137 +260,11 @@ function StatusPill({ status }: { status: TraceStatus }) {
   );
 }
 
-function operationPrompt(call: LlmCall, interaction: TraceInteraction): string {
-  if (call.operation.includes("embedding")) {
-    return `Embed the Question prompt for "${interaction.title}" so advisory search can compare it with stored Questions.`;
-  }
-
-  if (call.operation.includes("feedback")) {
-    return `Turn the evaluation notes for "${interaction.title}" into learner-facing feedback.`;
-  }
-
-  return `Evaluate the Learner Answer for "${interaction.title}" against the stored Answer Standard.`;
+function formatCallRequest(call: LlmCall): string {
+  return call.requestPayload ?? "Request payload unavailable.";
 }
-
-function operationResponse(call: LlmCall): string {
-  if (call.status === "pending") {
-    return "The provider has not returned a final response for this call yet.";
-  }
-
-  if (call.status === "error") {
-    return "The provider returned an error before a complete response body was recorded.";
-  }
-
-  if (call.operation.includes("embedding")) {
-    return "Embedding vector created and stored for semantic duplicate checks.";
-  }
-
-  if (call.operation.includes("feedback")) {
-    return "The answer identified the high-level idea, but it should separate label-preserving transformations from regularization effects and mention when augmentation can hurt.";
-  }
-
-  return JSON.stringify(
-    {
-      score: 4,
-      justification:
-        "The answer is mostly correct and identifies the central mechanism, with minor gaps in edge cases.",
-    },
-    null,
-    2,
-  );
-}
-
-function formatCallRequest(call: LlmCall, interaction: TraceInteraction): string {
-  if (call.requestPayload) {
-    return call.requestPayload;
-  }
-
-  if (call.callType === "embedding") {
-    return JSON.stringify(
-      {
-        model: call.model,
-        input: operationPrompt(call, interaction),
-        metadata: {
-          interactionId: interaction.id,
-          callId: call.id,
-          operation: call.operation,
-        },
-      },
-      null,
-      2,
-    );
-  }
-
-  return JSON.stringify(
-    {
-      model: call.model,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are an LLM trace replay surface. Preserve technical precision and return concise structured output.",
-        },
-        {
-          role: "user",
-          content: operationPrompt(call, interaction),
-        },
-      ],
-      metadata: {
-        interactionId: interaction.id,
-        callId: call.id,
-        operation: call.operation,
-      },
-    },
-    null,
-    2,
-  );
-}
-
 function formatCallResponse(call: LlmCall): string {
-  if (call.responsePayload) {
-    return call.responsePayload;
-  }
-
-  if (call.callType === "embedding") {
-    return JSON.stringify(
-      {
-        model: call.model,
-        data: [
-          {
-            object: "embedding",
-            embedding: "[512 floats omitted]",
-          },
-        ],
-        usage: {
-          prompt_tokens: call.inputTokens,
-          total_tokens: call.inputTokens + call.outputTokens,
-        },
-      },
-      null,
-      2,
-    );
-  }
-
-  return JSON.stringify(
-    {
-      model: call.model,
-      choices: [
-        {
-          message: {
-            role: "assistant",
-            content: operationResponse(call),
-          },
-        },
-      ],
-      usage: {
-        prompt_tokens: call.inputTokens,
-        completion_tokens: call.outputTokens,
-        total_tokens: call.inputTokens + call.outputTokens,
-      },
-    },
-    null,
-    2,
-  );
+  return call.responsePayload ?? (call.status === "pending" ? "Waiting for provider response." : "Response payload unavailable.");
 }
 
 function parseJsonPayload(payload: string): unknown | null {
@@ -1038,6 +912,10 @@ export function AdminPageClient({
   const [expandedInteractionId, setExpandedInteractionId] = useState(
     () => resolvedInitialViewState.expandedInteractionId,
   );
+  const [detailInteraction, setDetailInteraction] = useState<TraceInteraction | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(() => viewCache.readAdminCursor());
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selectedCallId, setSelectedCallId] = useState<string | null>(
     selectedTraceId,
   );
@@ -1051,6 +929,7 @@ export function AdminPageClient({
 
     try {
       const interactions = await viewCache.refreshAdminTraces();
+      setNextCursor(viewCache.readAdminCursor());
 
       setTraceInteractions((current) => {
         const next = mergeTraceInteractions(current, interactions);
@@ -1187,12 +1066,43 @@ export function AdminPageClient({
       const call = interaction.calls.find((candidate) => candidate.id === selectedCallId);
 
       if (call) {
-        return { call, interaction };
+        const detailed = detailInteraction?.id === interaction.id
+          ? detailInteraction.calls.find((candidate) => candidate.id === call.id) : null;
+        return { call: detailed ?? call, interaction };
       }
     }
 
     return null;
-  }, [selectedCallId, traceInteractions]);
+  }, [selectedCallId, traceInteractions, detailInteraction]);
+
+  const selectedInteractionId = selectedCallContext?.interaction.id ?? selectedTraceId;
+  useEffect(() => {
+    if (!selectedInteractionId) return;
+    const controller = new AbortController();
+    setDetailInteraction(null); setDetailError(null);
+    fetch(`/api/admin/traces/${encodeURIComponent(selectedInteractionId)}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load trace payloads.");
+        return await response.json() as { interaction: TraceInteraction };
+      }).then(({ interaction }) => { if (!controller.signal.aborted) {
+        setDetailInteraction(interaction);
+        setTraceInteractions((current) => mergeTraceInteractions(current, [interaction]));
+      } })
+      .catch((error: unknown) => { if (!controller.signal.aborted) setDetailError(error instanceof Error ? error.message : "Could not load trace."); });
+    return () => controller.abort();
+  }, [selectedInteractionId]);
+
+  async function loadMoreTraces() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const response = await fetch(`/api/admin/traces?cursor=${encodeURIComponent(nextCursor)}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not load more traces.");
+      const page = await response.json() as { interactions: TraceInteraction[]; nextCursor: string | null };
+      setTraceInteractions((current) => mergeTraceInteractions(current, page.interactions));
+      setNextCursor(page.nextCursor);
+    } finally { setLoadingMore(false); }
+  }
 
   usePageScrollLock(Boolean(selectedCallContext));
 
@@ -1201,19 +1111,20 @@ export function AdminPageClient({
       return "";
     }
 
+    if (!detailInteraction) return detailError ?? "Loading request payload…";
     return formatCallRequest(
       selectedCallContext.call,
-      selectedCallContext.interaction,
     );
-  }, [selectedCallContext]);
+  }, [selectedCallContext, detailError, detailInteraction]);
 
   const selectedResponsePayload = useMemo(() => {
     if (!selectedCallContext) {
       return "";
     }
 
+    if (!detailInteraction) return detailError ?? "Loading response payload…";
     return formatCallResponse(selectedCallContext.call);
-  }, [selectedCallContext]);
+  }, [selectedCallContext, detailError, detailInteraction]);
 
   const selectedCacheStats = useMemo(() => {
     if (!selectedCallContext) {
@@ -1348,7 +1259,7 @@ export function AdminPageClient({
             <div>
               <p className="admin-kicker">Observability</p>
               <h1>Admin traces</h1>
-              <p>LLM activity grouped by user interaction.</p>
+              <p>LLM activity grouped by user interaction. Totals reflect loaded trace groups.</p>
             </div>
             <div className="admin-range-controls" aria-label="Date range controls">
               <div className="admin-segmented" aria-label="Date preset">
@@ -1402,7 +1313,7 @@ export function AdminPageClient({
             <AdminLoadingPlaceholders />
           ) : (
             <>
-              <section className="admin-metrics" aria-label="Current range totals">
+              <section className="admin-metrics" aria-label="Loaded trace totals">
                 <div>
                   <span>Total cost</span>
                   <strong>{formatCurrency(totals.cost)}</strong>
@@ -1594,6 +1505,7 @@ export function AdminPageClient({
           )}
         </div>
       </section>
+      {nextCursor ? <div className="lean-load-more"><button disabled={loadingMore} onClick={() => void loadMoreTraces().catch(() => setDetailError("Could not load more traces."))} type="button">{loadingMore ? "Loading…" : "Load more traces"}</button></div> : null}
       {selectedCallContext ? (
         <div
           className="admin-call-modal-backdrop"

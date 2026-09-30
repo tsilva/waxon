@@ -1,6 +1,6 @@
 "use client";
 
-import {
+import { memo,
   Fragment,
   type ReactNode,
 } from "react";
@@ -404,7 +404,7 @@ function renderInlineMarkdown(
   return nodes;
 }
 
-export function MarkdownInline({
+export const MarkdownInline = memo(function MarkdownInline({
   as: Element,
   className,
   enableMath = false,
@@ -425,7 +425,7 @@ export function MarkdownInline({
       ))}
     </Element>
   );
-}
+});
 
 type MarkdownListKind = "ordered" | "unordered";
 
@@ -623,7 +623,7 @@ function renderMarkdownBlock(
   return renderMarkdownLineRuns(lines, key, options);
 }
 
-export function MarkdownContent({
+export const MarkdownContent = memo(function MarkdownContent({
   className,
   codeBlockClassName = "markdown-code",
   enableCodeBlocks = false,
@@ -651,4 +651,4 @@ export function MarkdownContent({
       )}
     </div>
   );
-}
+});

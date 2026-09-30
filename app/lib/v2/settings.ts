@@ -29,17 +29,12 @@ export async function getLearnerSettings(
   userId: string,
 ): Promise<V2LearnerSettings> {
   const db = getV2Db();
-  await db
-    .insert(learnerSettings)
-    .values({ userId })
-    .onConflictDoNothing({ target: learnerSettings.userId });
   const [row] = await db
     .select({ timezone: learnerSettings.timezone })
     .from(learnerSettings)
     .where(eq(learnerSettings.userId, userId))
     .limit(1);
-  if (!row) throw new Error("Could not load learner settings.");
-  return row;
+  return row ?? { timezone: null };
 }
 
 export async function updateLearnerTimezone(input: {
@@ -69,26 +64,29 @@ export async function getLearnerReviewDay(
   userId: string,
   now: Date,
 ): Promise<LearnerReviewDay> {
-  const settings = await getLearnerSettings(userId);
-  const effectiveTimezone = settings.timezone ?? "UTC";
+
   const [row] = await getV2Client().pool.query<{
+    timezone: string | null;
     local_day: string;
     next_local_day: string;
     day_start: Date;
     day_end: Date;
   }>(
-    `SELECT
-       ($2::timestamptz AT TIME ZONE $1)::date::text AS local_day,
-       (($2::timestamptz AT TIME ZONE $1)::date + 1)::text AS next_local_day,
-       date_trunc('day', $2::timestamptz AT TIME ZONE $1) AT TIME ZONE $1 AS day_start,
-       (date_trunc('day', $2::timestamptz AT TIME ZONE $1) + interval '1 day')
-         AT TIME ZONE $1 AS day_end`,
-    [effectiveTimezone, now],
+    `SELECT settings.timezone,
+       ($2::timestamptz AT TIME ZONE COALESCE(settings.timezone, 'UTC'))::date::text AS local_day,
+       (($2::timestamptz AT TIME ZONE COALESCE(settings.timezone, 'UTC'))::date + 1)::text AS next_local_day,
+       date_trunc('day', $2::timestamptz AT TIME ZONE COALESCE(settings.timezone, 'UTC')) AT TIME ZONE COALESCE(settings.timezone, 'UTC') AS day_start,
+       (date_trunc('day', $2::timestamptz AT TIME ZONE COALESCE(settings.timezone, 'UTC')) + interval '1 day')
+         AT TIME ZONE COALESCE(settings.timezone, 'UTC') AS day_end
+       FROM waxon_v2.users learner
+       LEFT JOIN waxon_v2.learner_settings settings ON settings.user_id = learner.id
+       WHERE learner.id = $1`,
+    [userId, now],
   ).then((result) => result.rows);
   if (!row) throw new Error("Could not determine the learner's Local Day.");
   return {
-    timezone: settings.timezone,
-    effectiveTimezone,
+    timezone: row.timezone,
+    effectiveTimezone: row.timezone ?? "UTC",
     localDay: row.local_day,
     nextLocalDay: row.next_local_day,
     dayStart: row.day_start,

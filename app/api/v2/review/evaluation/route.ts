@@ -7,13 +7,17 @@ import {
   v2Error,
 } from "@/app/lib/v2/http";
 import { waxonApplication } from "@/app/lib/v2/application";
+import { getLiveEvaluations } from "@/app/lib/v2/liveReview";
 import { startBackgroundJobs } from "@/app/lib/v2/backgroundJobRuntime";
 
 export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
     const application = waxonApplication.forLearner(user.id);
-    const submissionId = new URL(request.url).searchParams.get("submissionId");
+    const params = new URL(request.url).searchParams;
+    const batch = params.getAll("submissionIds");
+    if (batch.length) return NextResponse.json({ evaluations: await getLiveEvaluations(user.id, batch) });
+    const submissionId = params.get("submissionId");
     if (!submissionId) {
       throw new Error("submissionId is required.");
     }

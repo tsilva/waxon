@@ -159,32 +159,25 @@ export async function relatedTags(input: {
                         AS lexical_match
                  FROM active_tags tag
                 WHERE selected.embedding IS NOT NULL
-             ), classified AS MATERIALIZED (
+             ), classified AS (
                SELECT *,
                       distance <= $5 AS semantic_match,
                       lexical_match AND distance <= $6 AS lexical_priority,
                       lexical_match AND distance > $5 AND distance <= $6
                         AS lexical_rescue
                  FROM scored
-             ), stats AS (
-               SELECT count(*) FILTER (WHERE lexical_match) AS lexical_match_count,
-                      count(*) FILTER (
-                        WHERE lexical_match
-                          AND NOT semantic_match
-                          AND NOT lexical_rescue
-                      ) AS rejected_literal_match_count
+             ), measured AS (
+               SELECT *, count(*) FILTER (WHERE lexical_match) OVER () AS lexical_match_count,
+                      count(*) FILTER (WHERE lexical_match AND NOT semantic_match AND NOT lexical_rescue)
+                        OVER () AS rejected_literal_match_count
                  FROM classified
-             ), nearest_tags AS (
-               SELECT tag_id, label, distance, lexical_priority, lexical_rescue
-                 FROM classified
-                WHERE semantic_match OR lexical_priority
-                ORDER BY lexical_priority DESC, distance, tag_id
-                LIMIT $4
              )
-             SELECT nearest_tags.*, stats.lexical_match_count,
-                    stats.rejected_literal_match_count
-               FROM stats
-               LEFT JOIN nearest_tags ON true
+             SELECT CASE WHEN semantic_match OR lexical_priority THEN tag_id END AS tag_id,
+                    CASE WHEN semantic_match OR lexical_priority THEN label END AS label,
+                    distance, lexical_priority, lexical_rescue, lexical_match_count, rejected_literal_match_count
+               FROM measured
+              ORDER BY (semantic_match OR lexical_priority) DESC, lexical_priority DESC, distance, tag_id
+              LIMIT $4
            ) nearest ON true
           ORDER BY selected.question_id, nearest.lexical_priority DESC NULLS LAST,
                    nearest.distance, nearest.tag_id`,

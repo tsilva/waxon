@@ -8,6 +8,7 @@ import {
   getLocalTestLearner,
   isLocalTestAuthEnabled,
 } from "@/app/lib/localTestAuth";
+import { ExpiringCache } from "@/app/lib/expiringCache";
 import type { UserProfile } from "@/app/lib/userProfile";
 
 export type AuthenticatedUser = UserProfile;
@@ -47,122 +48,45 @@ function setTraceIdentity(input: {
   });
 }
 
-export async function getCurrentUser(): Promise<AuthenticatedUser> {
+const profiles = new ExpiringCache<string, AuthenticatedUser>(60_000, 512);
+
+export function invalidateUserProfile(userId: string) {
+  profiles.delete(userId);
+  profiles.delete(`local:${getLocalTestLearner().email}`);
+}
+
+export async function getCurrentUser(options: { fresh?: boolean } = {}): Promise<AuthenticatedUser> {
   const db = getV2Db();
-
-  if (isLocalTestAuthEnabled()) {
-    const localTestLearner = getLocalTestLearner();
-    const now = new Date();
-    const [existingLocalUser] = await db
-      .select({
-        id: users.id,
-        displayName: users.displayName,
-        email: users.email,
-        avatarUrl: users.avatarUrl,
-      })
-      .from(users)
-      .where(eq(users.email, localTestLearner.email))
-      .limit(1);
-
-    const localUserId = existingLocalUser?.id ?? localTestLearner.id;
-    const localUserDisplayName =
-      existingLocalUser?.displayName ?? localTestLearner.displayName;
-    const localUserEmail = existingLocalUser?.email ?? localTestLearner.email;
-
-    setTraceIdentity({
-      userId: localUserId,
-      email: localUserEmail,
-      displayName: localUserDisplayName,
-    });
-
-    const [row] = await db
-      .insert(users)
-      .values({
-        id: localUserId,
-        displayName: localUserDisplayName,
-        email: localUserEmail,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: users.id,
-        set: {
-          displayName: localUserDisplayName,
-          email: localUserEmail,
-          updatedAt: now,
-        },
-      })
-      .returning({
-        id: users.id,
-        displayName: users.displayName,
-        email: users.email,
-        avatarUrl: users.avatarUrl,
-      });
-
-    if (!row) {
-      throw new Error("Could not load current user.");
-    }
-
-    await db
-      .insert(learnerSettings)
-      .values({ userId: row.id })
-      .onConflictDoNothing({ target: learnerSettings.userId });
-
-    return row;
-  }
-
-  const authObject = await auth.protect();
-  const clerkUserId = authObject.userId;
-  const client = await clerkClient();
-  const clerkUser = await client.users.getUser(clerkUserId);
-  const email =
-    clerkUser.primaryEmailAddress?.emailAddress ??
-    clerkUser.emailAddresses[0]?.emailAddress ??
-    `${clerkUserId}@clerk.local`;
-  const displayName = normalizeDisplayName({
-    fullName: clerkUser.fullName,
-    firstName: clerkUser.firstName,
-    lastName: clerkUser.lastName,
-    username: clerkUser.username,
-    email,
-  });
-  const now = new Date();
-
-  const userId = appUserIdForClerkUser(clerkUser);
-  setTraceIdentity({ userId, email, displayName });
-
-  const [row] = await db
-    .insert(users)
-    .values({
-      id: userId,
-      displayName,
-      email,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: users.id,
-      set: {
-        displayName,
-        email,
-        updatedAt: now,
-      },
-    })
-    .returning({
-      id: users.id,
-      displayName: users.displayName,
-      email: users.email,
+  const local = isLocalTestAuthEnabled() ? getLocalTestLearner() : null;
+  // Verify the session for EVERY request, even when the display profile is cached.
+  const clerkUserId = local ? null : (await auth.protect()).userId;
+  const key = local ? `local:${local.email}` : appUserIdForClerkUser({ id: clerkUserId! });
+  if (options.fresh) profiles.delete(key);
+  const row = await profiles.get(key, async () => {
+    const [existing] = await db.select({
+      id: users.id, displayName: users.displayName, email: users.email,
       avatarUrl: users.avatarUrl,
+    }).from(users).where(local ? eq(users.email, local.email) : eq(users.id, key)).limit(1);
+    if (local && existing) return existing;
+
+    const clerkUser = clerkUserId ? await (await clerkClient()).users.getUser(clerkUserId) : null;
+    const email = local?.email ?? clerkUser!.primaryEmailAddress?.emailAddress ??
+      clerkUser!.emailAddresses[0]?.emailAddress ?? `${clerkUserId}@clerk.local`;
+    const displayName = local?.displayName ?? normalizeDisplayName({
+      fullName: clerkUser!.fullName, firstName: clerkUser!.firstName,
+      lastName: clerkUser!.lastName, username: clerkUser!.username, email,
     });
-
-  if (!row) {
-    throw new Error("Could not load current user.");
-  }
-
-  await db
-    .insert(learnerSettings)
-    .values({ userId })
-    .onConflictDoNothing({ target: learnerSettings.userId });
-
+    if (existing?.email === email && existing.displayName === displayName) return existing;
+    const [saved] = await db.insert(users).values({
+      id: existing?.id ?? local?.id ?? key, email, displayName,
+    }).onConflictDoUpdate({ target: users.id, set: { email, displayName, updatedAt: new Date() } })
+      .returning({ id: users.id, displayName: users.displayName, email: users.email, avatarUrl: users.avatarUrl });
+    if (!saved) throw new Error("Could not load current user.");
+    // Provision only on a missing learner; ordinary reads have no writes.
+    if (!existing) await db.insert(learnerSettings).values({ userId: saved.id })
+      .onConflictDoNothing({ target: learnerSettings.userId });
+    return saved;
+  });
+  setTraceIdentity({ userId: row.id, email: row.email, displayName: row.displayName });
   return row;
 }

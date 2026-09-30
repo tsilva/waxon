@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import type { llmTraceInteractions } from "../db/v2/schema";
 import {
   promptCacheMetricsFromOpenRouterUsage,
@@ -255,8 +255,11 @@ export async function recordFailedLlmTrace(input: {
   });
 }
 
-export async function listLlmTraceInteractions(): Promise<LlmTraceInteraction[]> {
-  const localInteractions = listLocalTraceInteractions();
+export async function listLlmTraceInteractions(options: { includePayloads?: boolean } = {}): Promise<LlmTraceInteraction[]> {
+  const includePayloads = options.includePayloads !== false;
+  const localInteractions = listLocalTraceInteractions().map((interaction) => includePayloads ? interaction : {
+    ...interaction, calls: interaction.calls.map((call) => { const summary = { ...call }; delete summary.requestPayload; delete summary.responsePayload; return summary; }),
+  });
 
   if (process.env.DATABASE_URL) {
     try {
@@ -265,7 +268,16 @@ export async function listLlmTraceInteractions(): Promise<LlmTraceInteraction[]>
         "../db/v2/schema.ts"
       );
       const rows = await getV2Db()
-        .select()
+        .select({
+          id: llmTraceInteractionsTable.id, title: llmTraceInteractionsTable.title,
+          kind: llmTraceInteractionsTable.kind, startedAt: llmTraceInteractionsTable.startedAt,
+          status: llmTraceInteractionsTable.status,
+          calls: includePayloads ? llmTraceInteractionsTable.calls : sql<string>`(
+            SELECT COALESCE(jsonb_agg(call - 'requestPayload' - 'responsePayload'), '[]'::jsonb)::text
+              FROM jsonb_array_elements(${llmTraceInteractionsTable.calls}::jsonb) call
+          )`,
+          updatedAt: llmTraceInteractionsTable.updatedAt,
+        })
         .from(llmTraceInteractionsTable)
         .orderBy(desc(llmTraceInteractionsTable.startedAt))
         .limit(MAX_TRACE_INTERACTIONS);
@@ -282,6 +294,16 @@ export async function listLlmTraceInteractions(): Promise<LlmTraceInteraction[]>
   }
 
   return localInteractions;
+}
+
+export async function getLlmTraceInteraction(id: string): Promise<LlmTraceInteraction | null> {
+  const local = state.interactions.find((interaction) => interaction.id === id);
+  if (local) return { ...local, calls: local.calls.map((call) => ({ ...call })) };
+  if (!process.env.DATABASE_URL) return null;
+  const { getV2Db } = await import("../db/v2/client.ts");
+  const { llmTraceInteractions: table } = await import("../db/v2/schema.ts");
+  const [row] = await getV2Db().select().from(table).where(eq(table.id, id)).limit(1);
+  return row ? rowToTraceInteraction(row) : null;
 }
 
 function listLocalTraceInteractions(): LlmTraceInteraction[] {

@@ -51,7 +51,7 @@ test("previous answers start collapsed but a newly completed evaluation opens", 
 });
 
 test("only expanded answers put the Markdown copy action in the bottom-left footer", () => {
-  assert.match(reviewApp, /hidden=\{!open\}/u);
+  assert.match(reviewApp, /\{open \? <div className="previous-detail-grid">/u);
   assert.match(
     reviewApp,
     /<div className="previous-row-footer">\s*\{open \? \(\s*<div className="review-handoff-actions">/u,
@@ -109,7 +109,7 @@ test("answer submission keeps its text until the next Review state is ready", ()
     submitStart,
   );
   const submit = reviewApp.slice(submitStart, submitEnd);
-  const requestIndex = submit.indexOf("await jsonRequest(");
+  const requestIndex = submit.indexOf("await jsonRequest<V2Evaluation>(");
   const clearDraftIndex = submit.indexOf(
     'viewCache.writeReviewDraft(question.questionId, "");',
   );

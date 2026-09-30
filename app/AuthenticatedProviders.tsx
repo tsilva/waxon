@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { AppViewCacheProvider, useAppViewCache } from "./AppViewCache";
 import { AppErrorProvider } from "./AppErrorModal";
@@ -9,29 +9,24 @@ import { LocalAccountSettings } from "./LocalAccountSettings";
 import { PersistentReviewToolbarActions } from "./PersistentReviewToolbarActions";
 import { ToolbarStateProvider, useToolbarState } from "./ToolbarState";
 
-function AdminViewPreloader() {
+function LearningViewPreloader() {
   const pathname = usePathname();
-  const router = useRouter();
   const viewCache = useAppViewCache();
-  const { canViewAdmin } = useToolbarState();
-  const shouldPreload =
-    canViewAdmin &&
-    (pathname.startsWith("/review") || pathname.startsWith("/library"));
-
+  const { setDueCount } = useToolbarState();
   useEffect(() => {
-    if (!shouldPreload) {
-      return;
-    }
-
-    router.prefetch("/admin");
-    void import("./(app)/admin/AdminHydrator")
-      .then(({ AdminHydrator }) => AdminHydrator.preload())
-      .catch(() => {
-        // Preloading is opportunistic; navigation can load the client normally.
+    if (pathname.startsWith("/review") || pathname.startsWith("/library")) {
+      void viewCache.preloadReview().then(() => {
+        const review = viewCache.readReview(); if (review) setDueCount(review.summary.queueRemaining);
       });
-    void viewCache.preloadAdmin();
-  }, [router, shouldPreload, viewCache]);
-
+    } else {
+      const controller = new AbortController();
+      void fetch("/api/v2/review/summary", { signal: controller.signal, cache: "no-store" })
+        .then(async (response) => { if (response.ok) { const summary = await response.json();
+          if (!controller.signal.aborted) setDueCount(summary.queueRemaining); } }).catch(() => {});
+      return () => controller.abort();
+    }
+    if (pathname.startsWith("/library")) void viewCache.preloadLibrary();
+  }, [pathname, setDueCount, viewCache]);
   return null;
 }
 
@@ -52,7 +47,7 @@ export function AuthenticatedProviders({
       <AppErrorProvider>
         <ToolbarStateProvider>
           <AppViewCacheProvider>
-            <AdminViewPreloader />
+            <LearningViewPreloader />
             <PersistentReviewToolbarActions
               onManageLocalAccount={() => setIsLocalAccountSettingsOpen(true)}
             />

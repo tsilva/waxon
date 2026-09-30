@@ -102,6 +102,8 @@ export function createAuthenticatedClientHydrator<TProps extends object>({
     );
   }
 
+  // Begin code loading while the provider starts the current view data request.
+  if (typeof window !== "undefined") void preload().catch(() => {});
   Hydrator.preload = preload;
   return Hydrator;
 }

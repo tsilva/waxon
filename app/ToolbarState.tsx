@@ -10,7 +10,6 @@ import {
   type SetStateAction,
 } from "react";
 import { isAdminEmail } from "@/app/lib/adminAccess";
-import type { V2ReviewSummary } from "@/app/lib/v2/types";
 import type { UserProfile } from "@/app/lib/userProfile";
 
 type ToolbarStateValue = {
@@ -36,29 +35,9 @@ export function ToolbarStateProvider({
 
     async function loadToolbarState() {
       try {
-        const [userResult, summaryResult] = await Promise.allSettled([
-          fetch("/api/user", {
-            cache: "no-store",
-            signal: controller.signal,
-          }),
-          fetch("/api/v2/review/summary", {
-            cache: "no-store",
-            signal: controller.signal,
-          }),
-        ]);
+        const response = await fetch("/api/user", { cache: "no-store", signal: controller.signal });
+        if (response.ok && !controller.signal.aborted) setCurrentUser((await response.json()) as UserProfile);
 
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        if (userResult.status === "fulfilled" && userResult.value.ok) {
-          setCurrentUser((await userResult.value.json()) as UserProfile);
-        }
-
-        if (summaryResult.status === "fulfilled" && summaryResult.value.ok) {
-          const summary = (await summaryResult.value.json()) as V2ReviewSummary;
-          setDueCount(summary.queueRemaining);
-        }
       } catch {
         // Toolbar data is supplemental; page-level content remains usable.
       }

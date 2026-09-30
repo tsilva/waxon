@@ -155,7 +155,6 @@ export function AnswerComposer({
           value={value}
           onChange={(event) => {
             onValueChange(event.currentTarget.value, event.currentTarget);
-            resizeComposerTextarea(event.currentTarget);
           }}
           onKeyDown={onKeyDown}
           placeholder={placeholder}

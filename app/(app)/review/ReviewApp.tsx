@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  memo,
   useCallback,
   useEffect,
   useRef,
@@ -24,11 +25,13 @@ import { MarkdownContent, MarkdownInline } from "@/app/MarkdownContent";
 import { QuestionTags } from "@/app/QuestionTags";
 import { ReviewToolbar } from "@/app/ReviewToolbar";
 import { useToolbarState } from "@/app/ToolbarState";
+import { advanceReviewWindow } from "@/app/lib/v2/reviewWindow";
 import { reviewIntervalLabel } from "@/app/lib/reviewIntervalLabel";
 import { reviewHandoffMarkdown } from "@/app/lib/reviewHandoffMarkdown";
 import { ReviewFlagDialog } from "./ReviewFlagDialog";
 import { ReviewWelcome } from "./ReviewWelcome";
 import type {
+  V2Evaluation,
   V2LearnerSettings,
   V2RecallResult,
   V2ReviewAnswer,
@@ -90,7 +93,7 @@ function submittedDate(value: string): string {
     : "Saved answer";
 }
 
-function FeedbackRow({
+const FeedbackRow = memo(function FeedbackRow({
   turn,
   onCorrectRecallResult,
   onRetryEvaluation,
@@ -221,7 +224,7 @@ function FeedbackRow({
             ) : null}
           </div>
 
-          <div className="previous-detail-grid" hidden={!open}>
+          {open ? <div className="previous-detail-grid">
             <div className="previous-field">
               <span className="previous-field-label">Your answer</span>
               <p className="previous-answer">{turn.answer}</p>
@@ -296,7 +299,7 @@ function FeedbackRow({
                 </div>
               </fieldset>
             ) : null}
-          </div>
+          </div> : null}
         </div>
       </div>
 
@@ -357,7 +360,7 @@ function FeedbackRow({
       </div>
     </li>
   );
-}
+});
 
 function TimezoneSettings({
   onClose,
@@ -486,6 +489,11 @@ export default function ReviewApp() {
     initialReview?.question?.questionId ?? null,
   );
 
+  const queueRequestRef = useRef(0);
+  const answerRequestRef = useRef<{ questionId: string; answer: string; key: string } | null>(null);
+  const reviewRef = useRef(review);
+  useEffect(() => { reviewRef.current = review; }, [review]);
+
   const updateAnswer = useCallback(
     (next: string) => {
       setAnswer(next);
@@ -498,7 +506,9 @@ export default function ReviewApp() {
     questionId?: string | null;
     afterQuestionId?: string | null;
   } = {}) => {
+    const request = ++queueRequestRef.current;
     const next = await viewCache.refreshReview(selection);
+    if (request !== queueRequestRef.current) return next;
     setAnswer(viewCache.readReviewDraft(next.question?.questionId));
     selectedQuestionIdRef.current = next.question?.questionId ?? null;
     setReview(next);
@@ -516,16 +526,16 @@ export default function ReviewApp() {
 
   useEffect(() => {
     async function initializeReview() {
-      const settings = await jsonRequest<V2LearnerSettings>("/api/v2/settings");
-      if (!settings.timezone) {
+      const next = initialReview ?? await loadQueue({ questionId: selectedQuestionIdRef.current });
+      if (!next.timezone) {
         const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
         await jsonRequest<V2LearnerSettings>("/api/v2/settings", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ timezone: detected }),
         });
+        await loadQueue({ questionId: selectedQuestionIdRef.current });
       }
-      await loadQueue({ questionId: selectedQuestionIdRef.current });
     }
 
     initializeReview()
@@ -535,49 +545,85 @@ export default function ReviewApp() {
         ),
       )
       .finally(() => setIsLoading(false));
-  }, [loadQueue]);
+  }, [initialReview, loadQueue]);
 
   useEffect(() => {
     answerRef.current?.focus();
   }, [review?.question?.questionId]);
 
+  const pendingIds = review?.recentAnswers.filter((turn) => turn.evaluation.status === "pending")
+    .map((turn) => turn.evaluation.submissionId).join(",") ?? "";
   useEffect(() => {
-    if (!review?.recentAnswers.some(
-      (turn) => turn.evaluation.status === "pending",
-    )) return;
+    if (!pendingIds) return;
     let cancelled = false;
     let timer = 0;
     const poll = async () => {
       try {
-        await loadQueue({ questionId: selectedQuestionIdRef.current });
-      } catch (caught) {
-        if (!cancelled) {
-          setError(
-            caught instanceof Error
-              ? caught.message
-              : "Could not refresh feedback.",
-          );
+        if (document.visibilityState !== "hidden") {
+          const params = new URLSearchParams();
+          for (const id of pendingIds.split(",")) params.append("submissionIds", id);
+          const result = await jsonRequest<{ evaluations: V2Evaluation[] }>(`/api/v2/review/evaluation?${params}`);
+          if (cancelled) return;
+          const resolved = new Map(result.evaluations.filter((evaluation) => evaluation.status !== "pending")
+            .map((evaluation) => [evaluation.submissionId, evaluation]));
+          if (resolved.size) {
+            setReview((current) => current ? { ...current, recentAnswers: current.recentAnswers.map((turn) =>
+              resolved.has(turn.evaluation.submissionId) ? { ...turn, evaluation: resolved.get(turn.evaluation.submissionId)! } : turn) } : current);
+            void loadQueue({ questionId: selectedQuestionIdRef.current }).catch(() => {});
+          }
         }
+      } catch (caught) {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : "Could not refresh feedback.");
       } finally {
         if (!cancelled) timer = window.setTimeout(poll, 900);
       }
     };
     timer = window.setTimeout(poll, 900);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [loadQueue, pendingIds]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "visible") {
+        void loadQueue({ questionId: selectedQuestionIdRef.current }).catch(() => {});
+      }
     };
-  }, [loadQueue, review?.recentAnswers]);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    // Refresh external changes and the learner's local day, including a tab left open overnight.
+    const timer = window.setInterval(refresh, 60_000);
+    return () => { window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh); window.clearInterval(timer); };
+  }, [loadQueue]);
+
+  function advanceLocally(removeCurrent = false, evaluation?: V2Evaluation) {
+    const current = reviewRef.current;
+    if (!current) return false;
+    const updated = advanceReviewWindow(current, { removeCurrent, evaluation, answer: answer.trim() });
+    if (!updated?.question) return false;
+    const next = updated.question;
+    ++queueRequestRef.current;
+    selectedQuestionIdRef.current = next.questionId;
+    setAnswer(viewCache.readReviewDraft(next.questionId));
+    reviewRef.current = updated;
+    setReview(updated); viewCache.writeReview(updated); setDueCount(updated.summary.queueRemaining);
+    void loadQueue({ questionId: next.questionId }).catch(() => {});
+    return true;
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     const question = review?.question;
     const responseText = answer.trim();
     if (!question || !responseText || isSubmitting) return;
+    const savedRequest = answerRequestRef.current;
+    const idempotencyKey = savedRequest?.questionId === question.questionId && savedRequest.answer === responseText
+      ? savedRequest.key : crypto.randomUUID();
+    answerRequestRef.current = { questionId: question.questionId, answer: responseText, key: idempotencyKey };
     setIsSubmitting(true);
     setError(null);
     try {
-      await jsonRequest(
+      const evaluation = await jsonRequest<V2Evaluation>(
         "/api/v2/review/answer",
         {
           method: "POST",
@@ -585,13 +631,17 @@ export default function ReviewApp() {
           body: JSON.stringify({
             questionId: question.questionId,
             answer: responseText,
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey,
           }),
         },
       );
+      answerRequestRef.current = null;
+      viewCache.invalidateLearningViews();
       viewCache.writeReviewDraft(question.questionId, "");
-      selectedQuestionIdRef.current = null;
-      await loadQueue();
+      if (!advanceLocally(true, evaluation)) {
+        selectedQuestionIdRef.current = null;
+        await loadQueue();
+      }
     } catch (caught) {
       updateAnswer(responseText);
       setError(caught instanceof Error ? caught.message : "Could not submit.");
@@ -608,6 +658,8 @@ export default function ReviewApp() {
       isSubmitting ||
       isAdvancing
     ) return;
+    viewCache.writeReviewDraft(current.questionId, "");
+    if (advanceLocally()) return;
     const draft = answer;
     setIsAdvancing(true);
     setError(null);
@@ -626,10 +678,10 @@ export default function ReviewApp() {
     }
   }
 
-  async function correctRecallResult(
+  const correctRecallResult = useCallback(async (
     submissionId: string,
     recallResult: V2RecallResult,
-  ) {
+  ) => {
     await jsonRequest(
       "/api/v2/review/evaluation",
       {
@@ -638,10 +690,11 @@ export default function ReviewApp() {
         body: JSON.stringify({ submissionId, recallResult }),
       },
     );
+    viewCache.invalidateLearningViews();
     await loadQueue();
-  }
+  }, [loadQueue, viewCache]);
 
-  async function retryEvaluation(submissionId: string) {
+  const retryEvaluation = useCallback(async (submissionId: string) => {
     await jsonRequest(
       "/api/v2/review/evaluation",
       {
@@ -650,8 +703,9 @@ export default function ReviewApp() {
         body: JSON.stringify({ submissionId, action: "retry" }),
       },
     );
+    viewCache.invalidateLearningViews();
     await loadQueue();
-  }
+  }, [loadQueue, viewCache]);
 
   const question: V2ReviewQuestion | null = review?.question ?? null;
   const isResting = !isLoading && !question;
