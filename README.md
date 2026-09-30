@@ -1,116 +1,72 @@
-<div align="center">
-  <img src="./public/brand/logo/logo-1024.png" alt="Waxon" width="512" />
+<p align="center">
+  <img src="./public/brand/logo/logo-1024.png" alt="Waxon" width="360" />
+  <br />
+  <!-- repo-tagline:start -->
+  <strong>🧠 Build knowledge and keep it 🔁</strong>
+  <!-- repo-tagline:end -->
+</p>
 
-  **Build knowledge. Keep it.**
-</div>
+<p align="center">
+  <a href="https://github.com/tsilva/waxon/actions/workflows/ci.yml"><img src="https://github.com/tsilva/waxon/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status" /></a>
+  <a href="https://github.com/tsilva/waxon/blob/main/package.json"><img src="https://img.shields.io/badge/node-%E2%89%A522.5.0-blue" alt="Node.js 22.5.0 or newer" /></a>
+</p>
 
-Waxon is a multi-user library with adaptive Review. Learners add standalone Questions, answer from memory in their own words, and let Answer Grade history schedule each Question near the point where recall is likely to fade. Authorized MCP Clients can add and search Questions in one Learner's private Library.
+Waxon is a web app for learners who want to remember what they study. Add questions and answer standards to your private question bank, then practice answering from memory in your own words. Waxon evaluates each answer and schedules future reviews from your recall history.
 
-## Product loop
+Use **Library** to manage and find questions through text search and related subject tags. Open **Review** to practice due questions, read feedback, and correct an evaluation when needed. You can also authorize an agent to search and add questions through MCP.
 
-- **Library** adds, searches, replaces, flags, archives, restores, and unflags Questions.
-- **Review** derives a live due-first queue, evaluates free-text recall, accepts Answer Grade corrections, and updates per-Question scheduling state.
-- **MCP** exposes the same isolated question service through `search_questions`, pre-add `check_questions`, and transactional `add_questions` tools.
-- **Admin** retains model traces, latency, token use, and cost for operators.
+## Install
 
-Waxon stores standalone Questions and immutable Learning Evidence. Optional prompt-only embeddings improve advisory MCP search but are never required to add a Question.
-
-## Install and run
+Requires Node.js **22.5.0+**, **pnpm 10.33.0**, a PostgreSQL database with **pgvector** and **pg_trgm**, and the configured **keyenv** CLI for macOS Keychain credentials. Configure database, OpenRouter, Clerk, and Sentry credentials before running the app; see the [local setup guide](./docs/local-development.md).
 
 ```bash
 git clone https://github.com/tsilva/waxon.git
 cd waxon
-pnpm install
+pnpm install --frozen-lockfile
 keyenv doctor
 keyenv run -- pnpm db:migrate
 keyenv run -- pnpm dev --port auto
 ```
 
-`db:migrate` expects the clean migration history. For an existing installation,
-the issue #19 clean break intentionally discards all Waxon data and migration
-metadata before applying the baseline:
+Open the local URL printed by the server. Development uses the configured test learner by default; production sign-in uses Clerk.
+
+For installations that still use the legacy schema, read the [destructive clean-break procedure](./docs/local-development.md#legacy-database-reset) before migrating or deploying.
+
+## Commands
+
+Run commands from the repository root. Wrap commands that need credentials with `keyenv run --`.
 
 ```bash
-keyenv run -- pnpm db:reset -- --confirm-clean-break
+pnpm dev --port auto  # start development on an available port
+pnpm test            # run tests; database suites need test URLs
+pnpm lint            # run ESLint
+pnpm typecheck       # check TypeScript
+pnpm build           # create a production build
+pnpm start --port auto  # serve the production build
+pnpm db:migrate      # apply database migrations
+pnpm db:studio       # open Drizzle Studio
+pnpm security:check  # check dependency sources and audit packages
 ```
 
-Run that destructive replacement once before deploying a build that contains
-the clean baseline. The reset removes Waxon's application schema, migration
-metadata, and named former Waxon tables in `public`; unrelated `public` objects
-and extensions remain. The destructive drops, clean-baseline installation, and
-matching Drizzle migration record commit atomically. An external dependency on
-a former Waxon object, or any baseline installation failure, blocks and rolls
-back the entire reset for explicit operator resolution. The reset has no
-legacy-data upgrade path and cannot be undone after a successful commit.
+See the [local setup guide](./docs/local-development.md#verification) for database-backed verification, browser acceptance, and retrieval tools. The [question quality experiment](./docs/question-quality-experiment.md) tests questions with model answers without writing learning history.
 
-Secrets declared in `.keyenv.toml`—including Neon, OpenRouter, Clerk, and Sentry credentials—remain in macOS Keychain and are injected by `keyenv run -- ...`. Do not put them in `.env` files. Application traffic uses Neon's pooled `DATABASE_URL`; migrations and maintenance scripts use `DATABASE_URL_UNPOOLED` when available.
+## MCP
 
-Optional non-secret model overrides may remain in `.env.local`:
-
-```bash
-LLM_EVALUATION_MODEL=google/gemini-3.8-flash
-WAXON_QUESTION_SEARCH_MODE=lexical
-```
-
-`LLM_API_KEY` is accepted when `OPENROUTER_API_KEY` is not set.
-
-## Authentication and MCP
-
-Production browser authentication uses Clerk and all Library and learning records are user-owned. Local development uses the configured TCLV/Tiago test identity unless `NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1` is set.
-
-In the Library, open **Agent access**, create a personal token, and copy it immediately. Waxon stores only its SHA-256 hash. Configure the remote Streamable HTTP endpoint as:
+In Library, open **Agent access**, create a personal token, and copy it immediately. Configure your MCP client with the remote Streamable HTTP endpoint and bearer header:
 
 ```text
 https://<your-waxon-host>/api/mcp
 Authorization: Bearer waxon_mcp_...
 ```
 
-Rotating the token invalidates the previous value; revocation disables MCP access without affecting browser sessions.
+The tools are `search_questions`, pre-add `check_questions`, and `add_questions`. Access is limited to your private bank and uses the same validation and duplicate prevention as the app. Waxon stores only the token's SHA-256 hash; rotating it invalidates the previous value, and revoking it leaves browser sessions intact.
 
-## Commands
+## Notes
 
-```bash
-pnpm dev --port auto  # start development on an available port
-pnpm test             # run the Node test suite
-pnpm lint             # run ESLint
-pnpm typecheck        # check TypeScript
-pnpm build            # create a production build
-pnpm db:migrate       # create or verify the clean database baseline
-pnpm db:reset -- --confirm-clean-break  # discard Waxon data and recreate the baseline
-pnpm db:studio        # open Drizzle Studio
-pnpm question-search:evaluate  # inspect/score the 120-case retrieval fixture
-pnpm question-search:benchmark -- --user-id=<id>  # measure a learner's Library
-```
-
-The complete clean-break product suite lives in [`tests/browser-use-clean-break-journey.md`](./tests/browser-use-clean-break-journey.md). It uses the native Codex Desktop in-app Browser, a disposable clean database baseline, and development-only deterministic fixtures; it never calls a live model.
-
-For a clean acceptance baseline, point both database variables at the same disposable pgvector/Postgres database and run:
-
-```bash
-DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL_UNPOOLED="$ISSUE20_DATABASE_URL" pnpm db:reset -- --confirm-clean-break
-APPLICATION_CONTRACT_TEST_DATABASE_URL="$ISSUE20_DATABASE_URL" QUESTION_SEARCH_TEST_DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL_UNPOOLED="$ISSUE20_DATABASE_URL" pnpm test
-DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL_UNPOOLED="$ISSUE20_DATABASE_URL" pnpm db:generate
-git diff --exit-code -- drizzle-v2
-VERCEL_ENV=preview DATABASE_URL="$ISSUE20_DATABASE_URL" DATABASE_URL_UNPOOLED="$ISSUE20_DATABASE_URL" pnpm build
-```
-
-`ISSUE20_DATABASE_URL` must never identify production. The exact clean catalog is asserted by the database-backed tests; `db:generate` followed by the scoped diff check proves the Drizzle declaration and baseline have not drifted.
-
-## Auxiliary scripts
-
-The [question quality experiment](./docs/question-quality-experiment.md) sends each question independently to DeepSeek and grades its answer with the production evaluator. Run a two-question pilot with `keyenv run -- pnpm question-quality:experiment --limit 2`, then generate a local report with `pnpm question-quality:report`.
-
-These tools keep experiment results under ignored `test-results/question-quality/` and do not write learning history. Applying question flags requires `--apply-flags`. The experiment guide covers full-bank runs, concurrency, resuming, and learner selection.
-
-## Implementation notes
-
-- Schema declarations live in `app/db/v2/schema.ts`; the clean baseline lives in `drizzle-v2/`.
-- Questions are immutable; Learner Answers, evaluations, and Answer Grade events remain immutable Learning Evidence, while scheduling state is derived from effective grades.
-- Every Learner Answer follows the same free-text evaluation workflow.
-- MCP batches share Library validation, duplicate detection, limits, idempotency receipts, transactions, and user isolation.
-- Library uses weighted full-text plus trigram relevance. MCP can add one compact prompt embedding and RRF, with a visible lexical fallback and no server-side LLM reranker.
-- JavaScript dependency hardening is configured in `pnpm-workspace.yaml` and `.npmrc`.
-
-## License
-
-No license file or package license is currently included.
+- Questions contain a standalone prompt and answer standard. Editing creates a new question with reset mastery and archives the original with its history.
+- Active questions enter Review; Flagged and Archived questions stay out until restored. New Active questions are due immediately, and missed questions return the same day.
+- Tags describe subject matter. Relatedness is calculated from compatible embeddings and prompt matches; tags do not change review scheduling. Adding questions does not require embeddings or a model call.
+- Review evaluates free-text answers through OpenRouter. Feedback explains what you got right and what needs work; evaluation corrections rebuild scheduling while preserving the original evidence.
+- Secrets stay in macOS Keychain through `.keyenv.toml`. Keep only non-secret overrides in `.env.local`; configuration and deployment details are in the [setup guide](./docs/local-development.md#configuration).
+- Built with Next.js, React, TypeScript, Drizzle, PostgreSQL, and FSRS scheduling. Admin provides model traces, latency, token use, and cost.
+- No license is currently declared.
