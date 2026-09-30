@@ -1715,6 +1715,151 @@ textarea {
   visibility: visible;
 }
 
+.page-review-welcome {
+  background: var(--bg);
+}
+
+.page-review-welcome .review-shell {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.page-review-welcome .review-stage {
+  display: block;
+  padding: clamp(64px, 12.5vh, 108px) 24px 56px;
+}
+
+.page-review-welcome .question-area {
+  max-width: none;
+  min-height: 0;
+  padding: 0;
+  overflow: visible;
+}
+
+body:has(.review-welcome) .queue-summary {
+  display: none;
+}
+
+.review-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  text-align: center;
+}
+
+.review-welcome-art {
+  width: 240px;
+  max-width: 60%;
+  height: auto;
+  margin-bottom: 24px;
+}
+
+.review-welcome-kicker {
+  margin: 0 0 20px;
+  color: var(--ink-soft);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.07em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.review-welcome-title {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-question);
+  font-size: clamp(36px, 7.35vw, 58px);
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 1.03;
+}
+
+.review-welcome-title span,
+.review-welcome-copy span {
+  display: block;
+}
+
+.review-welcome-copy {
+  max-width: 600px;
+  margin: 26px 0 0;
+  color: var(--ink-soft);
+  font-family: var(--font-question);
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.42;
+}
+
+.review-welcome-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-width: 244px;
+  min-height: 46px;
+  margin-top: 30px;
+  border-radius: 7px;
+  padding: 10px 24px;
+  background: #916c46;
+  color: #ffffff;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-decoration: none;
+  transition: background-color 150ms ease;
+}
+
+.review-welcome-primary svg {
+  width: 20px;
+  height: 20px;
+}
+
+.review-welcome-primary:hover {
+  background: var(--accent-hover);
+}
+
+.review-welcome-primary:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}
+
+.review-welcome-note {
+  margin: 28px 0 0;
+  color: var(--ink-soft);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+@media (max-width: 420px) {
+  .page-review-welcome .review-stage {
+    padding: 64px 20px 44px;
+  }
+
+  .review-welcome-art {
+    width: 210px;
+  }
+
+  .review-welcome-kicker {
+    font-size: 11px;
+    letter-spacing: 0.05em;
+  }
+
+  .review-welcome-copy {
+    font-size: 17px;
+  }
+
+  .review-welcome-note {
+    max-width: 270px;
+    font-size: 12px;
+  }
+}
+
 .resting-state {
   display: grid;
   align-content: center;

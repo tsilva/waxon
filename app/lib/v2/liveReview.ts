@@ -287,6 +287,15 @@ export async function getLiveReviewQueue(
         limit: 3,
       })
     : null;
+  const couldBeEmpty = !selected && recentAnswers.length === 0 &&
+    !status.waitingOnEvaluation && !status.nextScheduledOn;
+  const isLibraryEmpty = couldBeEmpty
+    ? (await getV2Db()
+        .select({ id: questions.id })
+        .from(questions)
+        .where(eq(questions.userId, userId))
+        .limit(1)).length === 0
+    : false;
   return {
     question: selected
       ? {
@@ -298,6 +307,7 @@ export async function getLiveReviewQueue(
         }
       : null,
     recentAnswers,
+    isLibraryEmpty,
     waitingOnEvaluation: status.waitingOnEvaluation,
     timezone: status.day.timezone,
     localDay: status.day.localDay,

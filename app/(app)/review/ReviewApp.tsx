@@ -27,6 +27,7 @@ import { useToolbarState } from "@/app/ToolbarState";
 import { reviewIntervalLabel } from "@/app/lib/reviewIntervalLabel";
 import { reviewHandoffMarkdown } from "@/app/lib/reviewHandoffMarkdown";
 import { ReviewFlagDialog } from "./ReviewFlagDialog";
+import { ReviewWelcome } from "./ReviewWelcome";
 import type {
   V2LearnerSettings,
   V2RecallResult,
@@ -654,10 +655,16 @@ export default function ReviewApp() {
 
   const question: V2ReviewQuestion | null = review?.question ?? null;
   const isResting = !isLoading && !question;
+  const isWelcome =
+    isResting &&
+    !error &&
+    review?.isLibraryEmpty === true &&
+    !review.waitingOnEvaluation &&
+    review.recentAnswers.length === 0;
   const nextScheduled = scheduledDate(review?.summary.nextScheduledOn ?? null);
 
   return (
-    <main className="page">
+    <main className={`page${isWelcome ? " page-review-welcome" : ""}`}>
       <section className="review-shell" aria-label="Recall practice">
         <ReviewToolbar />
         <div
@@ -712,6 +719,8 @@ export default function ReviewApp() {
                   </div>
                 </div>
               </div>
+            ) : isWelcome ? (
+              <ReviewWelcome />
             ) : (
               <div className="resting-state" ref={restingRef} tabIndex={-1}>
                 <p className="resting-kicker">
@@ -729,7 +738,7 @@ export default function ReviewApp() {
                     ? "Your answer is saved while the evaluator finishes."
                     : nextScheduled
                       ? `The next scheduled Review is ${nextScheduled}.`
-                      : "Add an Active Question to your Library whenever you learn something worth keeping."}
+                      : "Open Library whenever you learn something worth keeping."}
                 </p>
               </div>
             )}
@@ -773,50 +782,52 @@ export default function ReviewApp() {
             <p className="error-message" role="alert">{error}</p>
           ) : null}
 
-          <section className="previous-panel" aria-label="Answer feedback">
-            <div className="previous-header">
-              <h2>Previous answers</h2>
-              {!isLoading ? (
-                <button
-                  aria-label="Local Day settings"
-                  className="review-settings-button"
-                  onClick={() => setSettingsOpen(true)}
-                  type="button"
-                >
-                  <Settings2 aria-hidden="true" />
-                </button>
-              ) : null}
-            </div>
-            <ol className="previous-list">
-              {isLoading ? (
-                Array.from({ length: 2 }).map((_, index) => (
-                  <li
-                    className="previous-row previous-row-placeholder"
-                    key={`review-loading-placeholder-${index}`}
+          {!isWelcome ? (
+            <section className="previous-panel" aria-label="Answer feedback">
+              <div className="previous-header">
+                <h2>Previous answers</h2>
+                {!isLoading ? (
+                  <button
+                    aria-label="Local Day settings"
+                    className="review-settings-button"
+                    onClick={() => setSettingsOpen(true)}
+                    type="button"
                   >
-                    <div className="previous-placeholder-score" />
-                    <div className="previous-placeholder-copy">
-                      <span />
-                      <span />
-                    </div>
+                    <Settings2 aria-hidden="true" />
+                  </button>
+                ) : null}
+              </div>
+              <ol className="previous-list">
+                {isLoading ? (
+                  Array.from({ length: 2 }).map((_, index) => (
+                    <li
+                      className="previous-row previous-row-placeholder"
+                      key={`review-loading-placeholder-${index}`}
+                    >
+                      <div className="previous-placeholder-score" />
+                      <div className="previous-placeholder-copy">
+                        <span />
+                        <span />
+                      </div>
+                    </li>
+                  ))
+                ) : review && review.recentAnswers.length > 0 ? (
+                  review.recentAnswers.map((turn) => (
+                    <FeedbackRow
+                      key={turn.evaluation.submissionId}
+                      onCorrectRecallResult={correctRecallResult}
+                      onRetryEvaluation={retryEvaluation}
+                      turn={turn}
+                    />
+                  ))
+                ) : (
+                  <li className="previous-row previous-row-empty">
+                    <p>Your evaluated answers will appear here.</p>
                   </li>
-                ))
-              ) : review && review.recentAnswers.length > 0 ? (
-                review.recentAnswers.map((turn) => (
-                  <FeedbackRow
-                    key={turn.evaluation.submissionId}
-                    onCorrectRecallResult={correctRecallResult}
-                    onRetryEvaluation={retryEvaluation}
-                    turn={turn}
-                  />
-                ))
-              ) : (
-                <li className="previous-row previous-row-empty">
-                  <p>Your evaluated answers will appear here.</p>
-                </li>
-              )}
-            </ol>
-          </section>
+                )}
+              </ol>
+            </section>
+          ) : null}
         </div>
       </section>
       {settingsOpen ? (

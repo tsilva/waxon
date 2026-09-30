@@ -182,6 +182,9 @@ test(
           const learner = await provisionDefaultLearner(
             "Default validation learner",
           );
+          const emptyReview = await learner.direct.review.open();
+          assert.equal(emptyReview.isLibraryEmpty, true);
+          assert.equal(emptyReview.question, null);
           const active = await learner.direct.questionBank.add({
             idempotencyKey: "default-valid-question",
             items: [
@@ -202,6 +205,7 @@ test(
             (await learner.direct.review.open()).question?.questionId,
             active.results[0]?.id,
           );
+          assert.equal((await learner.direct.review.open()).isLibraryEmpty, false);
 
           const questionable = await learner.direct.questionBank.add({
             idempotencyKey: "default-questionable-question",
@@ -700,7 +704,10 @@ test(
             (result) => result.id,
           );
 
-          assert.equal((await learner.direct.review.open()).question, null);
+          const flaggedReview = await learner.direct.review.open();
+          assert.equal(flaggedReview.question, null);
+          assert.equal(flaggedReview.isLibraryEmpty, false);
+          assert.equal((await otherLearner.direct.review.open()).isLibraryEmpty, true);
           await assert.rejects(
             otherLearner.direct.questionBank.restore(restoreId ?? ""),
             /Question not found/u,
