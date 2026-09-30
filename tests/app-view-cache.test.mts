@@ -45,6 +45,7 @@ test("the authenticated view cache deduplicates preloads and keys drafts to ques
       scheduledFor: null,
     },
     recentAnswers: [],
+    isLibraryEmpty: false,
     waitingOnEvaluation: false,
     timezone: "Europe/Lisbon",
     localDay: "2026-08-29",

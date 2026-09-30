@@ -58,6 +58,7 @@ export type V2ReviewAnswer = {
 
 export type V2ReviewQueueResponse = {
   question: V2ReviewQuestion | null;
+  isLibraryEmpty: boolean;
   recentAnswers: V2ReviewAnswer[];
   waitingOnEvaluation: boolean;
   timezone: string | null;
