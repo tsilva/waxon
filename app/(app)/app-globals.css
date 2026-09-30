@@ -1728,7 +1728,7 @@ textarea {
 
 .page-review-welcome .review-stage {
   display: block;
-  padding: clamp(64px, 12.5vh, 108px) 24px 56px;
+  padding: clamp(64px, 9.65vh, 108px) 24px 56px;
 }
 
 .page-review-welcome .question-area {
@@ -1758,7 +1758,7 @@ body:has(.review-welcome) .queue-summary {
 }
 
 .review-welcome-kicker {
-  margin: 0 0 20px;
+  margin: 0 0 12px;
   color: var(--ink-soft);
   font-family: var(--font-ui);
   font-size: 13px;
@@ -1775,7 +1775,7 @@ body:has(.review-welcome) .queue-summary {
   font-size: clamp(36px, 7.35vw, 58px);
   font-weight: 400;
   letter-spacing: -0.025em;
-  line-height: 1.03;
+  line-height: 1;
 }
 
 .review-welcome-title span,
@@ -1785,7 +1785,7 @@ body:has(.review-welcome) .queue-summary {
 
 .review-welcome-copy {
   max-width: 600px;
-  margin: 26px 0 0;
+  margin: 20px 0 0;
   color: var(--ink-soft);
   font-family: var(--font-question);
   font-size: 18px;
