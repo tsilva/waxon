@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppViewCacheProvider, useAppViewCache } from "./AppViewCache";
 import { AppErrorProvider } from "./AppErrorModal";
 import { AuthShell } from "./AuthShell";
+import { AppStaticLoadingView } from "./(app)/AppStaticLoadingView";
 import { LocalAccountSettings } from "./LocalAccountSettings";
 import { PersistentReviewToolbarActions } from "./PersistentReviewToolbarActions";
 import { ToolbarStateProvider, useToolbarState } from "./ToolbarState";
@@ -35,6 +36,10 @@ export function AuthenticatedProviders({
 }: {
   children: React.ReactNode;
 }) {
+  const pathname = usePathname();
+  const publicView = pathname.startsWith("/review")
+    ? "review"
+    : pathname.startsWith("/library") ? "library" : null;
   const [isLocalAccountSettingsOpen, setIsLocalAccountSettingsOpen] =
     useState(false);
   const closeLocalAccountSettings = useCallback(
@@ -43,7 +48,11 @@ export function AuthenticatedProviders({
   );
 
   return (
-    <AuthShell>
+    <AuthShell
+      fallback={publicView ? (
+        <AppStaticLoadingView staticView={publicView} showAccountPlaceholder />
+      ) : null}
+    >
       <AppErrorProvider>
         <ToolbarStateProvider>
           <AppViewCacheProvider>

@@ -10,6 +10,7 @@ const postAuthReviewUrl = "/review";
 
 type ClientAuthGateViewProps = {
   children?: React.ReactNode;
+  fallback?: React.ReactNode;
   isLoaded: boolean;
   isSignedIn: boolean | undefined;
   redirectToSignIn: () => void | Promise<unknown>;
@@ -17,6 +18,7 @@ type ClientAuthGateViewProps = {
 
 export function ClientAuthGateView({
   children,
+  fallback,
   isLoaded,
   isSignedIn,
   redirectToSignIn,
@@ -30,7 +32,7 @@ export function ClientAuthGateView({
   }, [isLoaded, isSignedIn, redirectToSignIn]);
 
   if (!isLoaded || !isSignedIn) {
-    return null;
+    return fallback ?? null;
   }
 
   return (
@@ -41,7 +43,12 @@ export function ClientAuthGateView({
   );
 }
 
-function ClientAuthGate({ children }: { children: React.ReactNode }) {
+type AuthShellProps = {
+  children: React.ReactNode;
+  fallback?: React.ReactNode;
+};
+
+function ClientAuthGate({ children, fallback }: AuthShellProps) {
   const { isLoaded, isSignedIn } = useAuth();
   const clerk = useClerk();
   const redirectToSignIn = useCallback(
@@ -54,17 +61,18 @@ function ClientAuthGate({ children }: { children: React.ReactNode }) {
       isLoaded={isLoaded}
       isSignedIn={isSignedIn}
       redirectToSignIn={redirectToSignIn}
+      fallback={fallback}
     >
       {children}
     </ClientAuthGateView>
   );
 }
 
-export function AuthShell({ children }: { children: React.ReactNode }) {
+export function AuthShell({ children, fallback }: AuthShellProps) {
   if (isLocalTestAuthEnabled()) {
     return (
       <LocalClerkProvider>
-        <ClientAuthGate>{children}</ClientAuthGate>
+        <ClientAuthGate fallback={fallback}>{children}</ClientAuthGate>
       </LocalClerkProvider>
     );
   }
@@ -74,7 +82,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
       signInForceRedirectUrl={postAuthReviewUrl}
       signUpForceRedirectUrl={postAuthReviewUrl}
     >
-      <ClientAuthGate>{children}</ClientAuthGate>
+      <ClientAuthGate fallback={fallback}>{children}</ClientAuthGate>
     </ClerkProvider>
   );
 }
