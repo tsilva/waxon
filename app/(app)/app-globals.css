@@ -1223,6 +1223,82 @@ textarea {
   flex: 0 0 auto;
 }
 
+.reader-actions-placeholder {
+  justify-content: flex-end;
+}
+
+.reader-actions .user-menu-placeholder {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+/* Animate only the highlight; placeholder dimensions never change. */
+.review-skeleton {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  border-radius: 6px;
+  background: rgb(168 148 132 / 14%);
+}
+
+.review-skeleton::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 50%), transparent);
+  transform: translateX(-100%);
+  animation: review-skeleton-shimmer 1.8s ease-in-out infinite;
+  content: "";
+}
+
+@keyframes review-skeleton-shimmer {
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-skeleton::after { animation: none; }
+}
+
+.review-skeleton-tags {
+  display: flex;
+  gap: 8px;
+}
+
+.review-skeleton-tag {
+  width: 90px;
+  height: 24px;
+  border-radius: 999px;
+}
+
+.review-skeleton-tag + .review-skeleton-tag { width: 66px; }
+
+.review-skeleton-action {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+.review-skeleton-prompt {
+  display: grid;
+  gap: 12px;
+  padding-block: 6px;
+}
+
+.review-skeleton-prompt > span {
+  width: 92%;
+  height: clamp(24px, 1.8vw, 29px);
+}
+
+.review-skeleton-prompt > span:last-child { width: 68%; }
+
+.review-settings-placeholder {
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  border-radius: 50%;
+}
+
 .queue-summary:hover,
 .queue-summary:focus-visible,
 .queue-summary-active {
@@ -2048,10 +2124,14 @@ body:has(.review-welcome) .queue-summary {
 
 .composer-loading-input {
   width: 100%;
-  height: 84px;
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, rgb(251 248 240 / 72%), rgb(247 241 227 / 42%));
+  /* Four text rows plus the textarea's native vertical padding. */
+  height: 100px;
+  padding-top: 6px;
+}
+
+.composer-loading-input > span {
+  width: min(270px, 76%);
+  height: 16px;
 }
 
 .composer-loading-button {
@@ -2181,6 +2261,7 @@ body:has(.review-welcome) .queue-summary {
   align-items: center;
   gap: 18px;
   margin-bottom: 18px;
+  min-height: 32px;
 }
 
 .previous-header h2 {
@@ -2289,12 +2370,8 @@ body:has(.review-welcome) .queue-summary {
 .previous-row-placeholder {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
-  min-height: 94px;
+  min-height: 162px;
   pointer-events: none;
-  background:
-    linear-gradient(90deg, rgb(251 248 240 / 76%), rgb(247 241 227 / 56%));
-  border-style: dashed;
-  opacity: 0.72;
 }
 
 .previous-row-empty {
@@ -2321,14 +2398,13 @@ body:has(.review-welcome) .queue-summary {
 .previous-placeholder-score {
   width: 58px;
   height: 58px;
-  border: 2px dashed rgb(166 124 82 / 22%);
   border-radius: 999px;
-  background: rgb(255 255 255 / 48%);
 }
 
 .previous-placeholder-copy {
   display: grid;
   gap: 10px;
+  padding-top: 4px;
 }
 
 .previous-placeholder-copy span {
@@ -2344,6 +2420,12 @@ body:has(.review-welcome) .queue-summary {
 
 .previous-placeholder-copy span:last-child {
   width: min(440px, 76%);
+}
+
+.previous-placeholder-meta {
+  width: 160px;
+  height: 12px;
+  margin-left: auto;
 }
 
 .previous-row-pending {
@@ -4525,6 +4607,16 @@ body:has(.review-welcome) .queue-summary {
     height: 34px;
   }
 
+  .queue-summary-placeholder {
+    width: 58px;
+    height: 16px;
+  }
+
+  .reader-actions .user-menu-placeholder {
+    width: 34px;
+    height: 34px;
+  }
+
   .persistent-toolbar-actions {
     top: 12px;
     right: 18px;
@@ -4555,6 +4647,7 @@ body:has(.review-welcome) .queue-summary {
 
   .review-stage {
     grid-template-rows: auto auto auto auto;
+    align-content: start;
     row-gap: 0;
     width: 100%;
     max-width: 100vw;
@@ -4573,7 +4666,7 @@ body:has(.review-welcome) .queue-summary {
     max-width: calc(100vw - 44px);
     min-width: 0;
     margin-left: 0;
-    min-height: 148px;
+    min-height: 184px;
     padding-block: 0;
     padding-inline: 5px;
   }
@@ -4677,6 +4770,13 @@ body:has(.review-welcome) .queue-summary {
     line-height: 1.34;
   }
 
+  .composer-loading-input { height: 90px; }
+
+  .composer-loading-button-accent {
+    width: 42px;
+    height: 42px;
+  }
+
   .composer-submit {
     width: 42px;
     height: 42px;
@@ -4715,6 +4815,7 @@ body:has(.review-welcome) .queue-summary {
 
   .previous-row-placeholder {
     grid-template-columns: 46px minmax(0, 1fr);
+    min-height: 190px;
   }
 
   .previous-placeholder-score {

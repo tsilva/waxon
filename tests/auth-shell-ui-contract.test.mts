@@ -25,6 +25,44 @@ const React = await import("react");
 const { act } = React;
 const { createRoot } = await import("react-dom/client");
 const { ClientAuthGateView } = await import("../app/AuthShell.tsx");
+const { renderToStaticMarkup } = await import("react-dom/server");
+
+test("the public loading shell renders before auth without rendering learner content", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  let redirectCount = 0;
+  let learnerRenderCount = 0;
+  function LearnerContent() {
+    learnerRenderCount++;
+    return React.createElement("div", { "data-private": true }, "Private question");
+  }
+  const fallback = React.createElement("main", { "data-public-shell": true }, "Review placeholders");
+  const props = {
+    fallback,
+    isLoaded: false,
+    isSignedIn: undefined as boolean | undefined,
+    redirectToSignIn: () => { redirectCount++; },
+  };
+  const children = React.createElement(LearnerContent);
+  const html = renderToStaticMarkup(React.createElement(ClientAuthGateView, props, children));
+  assert.match(html, /Review placeholders/u);
+  assert.doesNotMatch(html, /Private question/u);
+
+  await act(async () => root.render(React.createElement(ClientAuthGateView, props, children)));
+  assert.ok(container.querySelector("[data-public-shell]"));
+  assert.equal(learnerRenderCount, 0);
+  assert.equal(redirectCount, 0);
+
+  await act(async () => root.render(React.createElement(ClientAuthGateView, {
+    ...props, isLoaded: true, isSignedIn: false,
+  }, children)));
+  assert.ok(container.querySelector("[data-public-shell]"));
+  assert.equal(learnerRenderCount, 0);
+  assert.equal(redirectCount, 1);
+  await act(async () => root.unmount());
+  container.remove();
+});
 
 test("auth routes render only Clerk's prebuilt panels", async () => {
   const [layout, provider, signInPage, signUpPage, styles] = await Promise.all([

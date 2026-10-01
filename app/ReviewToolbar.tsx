@@ -203,7 +203,7 @@ export function ReviewToolbarActions({
   return (
     <div className={`reader-actions ${className}`.trim()}>
       {dueCount === null ? (
-        <span className="queue-summary-placeholder" aria-hidden="true" />
+        <span className="queue-summary-placeholder review-skeleton" aria-hidden="true" />
       ) : (
         <Link
           className="queue-summary"

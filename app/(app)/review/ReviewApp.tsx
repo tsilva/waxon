@@ -1,6 +1,12 @@
 "use client";
 
 import {
+  ReviewComposerSkeleton,
+  ReviewHistorySkeleton,
+  ReviewQuestionSkeleton,
+} from "./ReviewLoading";
+
+import {
   ArrowRight,
   Check,
   ChevronDown,
@@ -723,15 +729,15 @@ export default function ReviewApp() {
         <ReviewToolbar />
         <div
           aria-labelledby="review-tab"
+          aria-busy={isLoading}
           className={`review-stage${isResting ? " review-stage-resting" : ""}`}
           id="review-panel"
           role="tabpanel"
         >
+          {isLoading ? <span className="sr-only" role="status">Loading Review…</span> : null}
           <section className="question-area">
             {isLoading ? (
-              <div className="question-copy">
-                <h2 className="question-title">Loading next question...</h2>
-              </div>
+              <ReviewQuestionSkeleton />
             ) : question ? (
               <div className="question-copy">
                 <QuestionTags
@@ -799,13 +805,7 @@ export default function ReviewApp() {
           </section>
 
           {isLoading ? (
-            <div className="composer composer-loading" aria-hidden="true">
-              <div className="composer-row composer-loading-row">
-                <div className="composer-loading-input" />
-                <div className="composer-loading-button" />
-                <div className="composer-loading-button composer-loading-button-accent" />
-              </div>
-            </div>
+            <ReviewComposerSkeleton />
           ) : question ? (
             <AnswerComposer
               ariaLabel="Your answer"
@@ -840,7 +840,9 @@ export default function ReviewApp() {
             <section className="previous-panel" aria-label="Answer feedback">
               <div className="previous-header">
                 <h2>Previous answers</h2>
-                {!isLoading ? (
+                {isLoading ? (
+                  <span className="review-skeleton review-settings-placeholder" aria-hidden="true" />
+                ) : (
                   <button
                     aria-label="Local Day settings"
                     className="review-settings-button"
@@ -849,22 +851,11 @@ export default function ReviewApp() {
                   >
                     <Settings2 aria-hidden="true" />
                   </button>
-                ) : null}
+                )}
               </div>
               <ol className="previous-list">
                 {isLoading ? (
-                  Array.from({ length: 2 }).map((_, index) => (
-                    <li
-                      className="previous-row previous-row-placeholder"
-                      key={`review-loading-placeholder-${index}`}
-                    >
-                      <div className="previous-placeholder-score" />
-                      <div className="previous-placeholder-copy">
-                        <span />
-                        <span />
-                      </div>
-                    </li>
-                  ))
+                  <ReviewHistorySkeleton />
                 ) : review && review.recentAnswers.length > 0 ? (
                   review.recentAnswers.map((turn) => (
                     <FeedbackRow

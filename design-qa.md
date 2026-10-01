@@ -1,63 +1,79 @@
-**Comparison Target**
+# Review welcome verification
 
-- Source visual truth: `/var/folders/wz/x29jb7_x5rdc_5dcjr4qnhg00000gn/T/codex-clipboard-0c2b9b90-97dd-4bc0-93c5-eb3b748bb878.png`
-- Rendered implementation: captured and emitted inline from the Codex in-app Browser; its runtime did not expose a persisted filesystem path.
-- Viewport: 1280 × 720 CSS pixels at device pixel ratio 2.
-- Dimensions and normalization: source 1654 × 302 PNG pixels; implementation browser capture 1280 × 720 JPEG pixels. Density and crop normalization were not useful because the artifacts show different data states.
-- State: source shows a populated, collapsed Library row with predicted and ground-truth Tags; implementation shows the Library empty/error state because the running local server has no `DATABASE_URL` or `DATABASE_URL_UNPOOLED`.
+Date: 2026-09-30. Final result: **passed**.
 
-**Findings**
+## Findings
 
-- [P2] The requested unified Tag row could not be visually compared.
-  Location: Library question-row metadata.
-  Evidence: the source contains a populated row and two Tag groups, while the implementation capture reports zero Questions and displays the database-configuration error before any `.lean-question-row` exists.
-  Impact: the browser capture cannot independently verify that matched Tags stay neutral, missing ground-truth Tags render green, extra predictions render red, or all Tags occupy one metadata row.
-  Fix: capture the same Library fixture from a server started with its configured database, then compare the populated row at a matching crop.
+No actionable P0/P1/P2 design findings remain after the spacing correction.
 
-**Fidelity Surfaces**
+- Resolved [P2]: The first implementation placed the welcome content about 40 px too low relative to the selected mockup. Reduced stage top padding, kicker gap, heading line height, and paragraph gap in `app/(app)/app-globals.css`. The revised production capture aligns the illustration, heading, supporting text, CTA, and final note with the target.
+- Accepted differences: the existing Bradford LL serif and Red Hat Mono preserve Waxon's type system; the real account avatar replaces the mockup's generic avatar; the brown CTA is darker for readable white text; the cream background uses the existing product palette. The generated illustration follows the same two study cards and green leaves art direction, with small natural differences in the card edges and leaves.
 
-- Fonts and typography: the rendered Library shell uses the expected Bradford LL and Red Hat Mono hierarchy, but populated-row Tag typography cannot be compared in the missing state.
-- Spacing and layout rhythm: shell proportions remain consistent; source and implementation states differ, so the single-row Tag rhythm cannot be visually judged.
-- Colors and visual tokens: the implementation retains the existing cream, brown, muted red, and green design tokens. The semantic Tag colors cannot be inspected on the empty page.
-- Image quality and asset fidelity: no image assets are part of the affected Tag comparison; the existing icon library remains unchanged.
-- Copy and content: the separate visible `Ground Truth` label was removed by design. Accessible names describe matched, missing, and extra states without relying on color alone.
+## Evidence and comparison history
 
-**Full-view Comparison Evidence**
+Source visual truth: `/Users/tsilva/.codex/generated_images/01a0f26d-cba9-77c0-8aaa-e8c8fb6c3fd4/exec-ed947a3b-e544-417b-9d97-ae52bfca7d33.png`.
 
-- The source and the browser-rendered implementation were emitted together for direct comparison. The application shell is consistent, but the state mismatch prevents a valid question-row fidelity judgment.
+Evidence folder: `/Users/tsilva/.codex/visualizations/2026/09/30/01a0f26d-cba9-77c0-8aaa-e8c8fb6c3fd4`.
 
-**Focused Region Comparison Evidence**
+- Source: 1100 × 1430 px, normalized to 656 × 853 px in `selected-design-656x853.png`.
+- Implementation: `04-live-welcome-final.png`, 656 × 853 px at a 656 × 853 CSS viewport, 1:1 screenshot density.
+- State: authenticated learner, genuinely empty Library, Review selected, no dialog open, light theme.
+- First comparison: `comparison-initial.png`, source and `03-live-welcome-initial.png` together; result blocked by the P2 vertical spacing drift.
+- Fixed comparison: `comparison-final.png`, source on the left and final implementation on the right at equal scale; result passed. The final heading starts at y=355.94 and the illustration at y=140.31 CSS px.
+- Additional captures: `05-live-welcome-mobile.png` at 390 × 844 CSS px and `06-live-welcome-desktop.png` at 1440 × 1024 CSS px.
+- Separate focused-region crops were unnecessary: the full comparison shows all text, controls, illustration edges, navigation, and spacing clearly at readable scale.
 
-- A focused Tag-region comparison was impossible because the rendered implementation contains no question rows.
+Production: https://waxon.tsilva.eu/review. Vercel deployment `dpl_AJhU7V8BziH4nbEHZSM3mLoUVDhP` is Ready and aliased to the production domain. Code commits: `db79459`, `f0edd0d`.
 
-**Browser Verification**
+## Required fidelity surfaces
 
-- URL: `http://localhost:65492/library`
-- Primary interaction tested: Library navigation and settled data-load state.
-- Changed Tag interaction: blocked because no populated question row rendered.
-- Console errors checked: no browser console warnings or errors were reported.
-- Visible blocker: `DATABASE_URL or DATABASE_URL_UNPOOLED is required`.
+| Surface | Assessment |
+| --- | --- |
+| Fonts and typography | Existing Bradford LL display/body serif and Red Hat Mono UI text match the intended serif/mono hierarchy. Two-line heading, line height, weight, tracking, wrapping, and supporting copy remain readable. No truncation. Small mockup font differences are accepted within the existing product type system. |
+| Spacing and layout rhythm | Centered illustration and content, generous margins, compact heading-to-copy gap, CTA spacing, and final note align after the second capture. Existing navigation is preserved. No overlapping or clipped controls. |
+| Colors and tokens | Warm cream, muted brown type, green leaves, brown CTA, and subtle card shadow follow the target. Solid product colors replace the generated mockup's slight texture. Darker CTA is intentional. |
+| Image quality | Transparent 1536 × 1024 PNG generated with imagegen, displayed at about 240 × 160 CSS px. Correct two-card/leaf subject, clean edges, soft ground shadow, no visible checkerboard or disruptive halo. No CSS or SVG approximation of the illustration. |
+| Copy and content | Kicker, title, Library instructions, CTA, and final note match the selected concept. The screen offers one clear next step. Empty previous-answer history and zero-due status are hidden only on this welcome state. |
 
-**Comparison History**
+## Browser and interaction checks
 
-- Initial pass: source and implementation were opened together. The implementation lacked database-backed row content, so the requested visual state could not be inspected and no visual correction loop could be completed.
+Tested in the native Codex in-app browser using the learner's signed-in production account.
 
-**Implementation Checklist**
+- Fresh production navigation renders the final welcome and loads the image successfully.
+- “Open Library” activated with Return navigates to `/library`.
+- “Add your first question” opens the existing dialog containing Prompt, Answer standard, Cancel, and Add to Library. Cancel closes it successfully. No production question was submitted.
+- At 390 × 844, the CTA is 244 × 46 CSS px and fully visible. At 656 × 853 and 1440 × 1024, the welcome and persistent controls fit without horizontal overflow. Document scroll height equals viewport height in all three captures.
+- The decorative illustration has empty alt text and is excluded from the accessibility tree. The CTA is a semantic link, and the title is a heading.
+- Browser console logs checked after the final deployment: empty, no reported errors.
+- Browser viewport restored and the tab returned to Review.
 
-- [x] Merge predicted and reference Tags into one ordered row.
-- [x] Append missing reference Tags after predicted Tags.
-- [x] Style missing reference Tags green and extra predicted Tags red.
-- [x] Preserve neutral styling for matches and unscored predictions.
-- [x] Expose comparison meaning through accessible names and titles.
-- [x] Remove the separate ground-truth row and its obsolete styles.
-- [x] Pass unit contracts, lint, and type-checking.
-- [ ] Capture and compare a populated Library row against the source.
+## Code validation and limits
 
-**Follow-up Polish**
+- `pnpm typecheck`, `pnpm lint`, and `keyenv run -- pnpm build` passed.
+- New contract assertions passed for an empty learner, a learner with a newly added question, and a learner whose bank contains only flagged questions.
+- The full test run was not green: 162 tests reported, 155 pass, 6 failures including a parent suite, 1 skip. Scheduling, stale migration expectations, and the Library footer assertion also failed on untouched main. A correction-chain assertion failed in the changed tree but passed on baseline repeats; its cause remains unresolved, and its implementation was not changed here. Logs are retained in the evidence folder. This report passes the welcome design and tested navigation, not the entire application's behavior.
+- Bank creation submission, populated Review, and answer evaluation were not exercised on the production account. Those are outside this empty-state change's live browser checks.
+- Root SPECS.md was reread before handoff. No new project-wide requirement or specification edit was needed; question creation remains in Library.
 
-- None identified outside the blocked populated-row capture.
+## Open questions
 
-final result: blocked
+None blocking this welcome implementation. The broader test failures require separate investigation.
+
+## Implementation checklist
+
+- [x] Implement the selected centered welcome with generated study-card art.
+- [x] Keep all bank-management actions in Library.
+- [x] Distinguish a truly empty bank from a nonempty bank with no due questions.
+- [x] Fix the initial spacing drift and compare the revised production capture.
+- [x] Verify phone, reference-size, and desktop layouts.
+- [x] Verify the primary link and dialog open/cancel on the live domain.
+- [x] Deploy the final change and confirm the production alias.
+
+## Follow-up polish
+
+No P3 work required for handoff.
+
+final result: passed
 
 ---
 

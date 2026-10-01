@@ -1,8 +1,10 @@
 import Image from "next/image";
 import Link from "next/link";
+import { ReviewLoadingStage } from "./review/ReviewLoading";
 
 type AppStaticLoadingViewProps = {
   staticView?: "review" | "library" | "admin";
+  showAccountPlaceholder?: boolean;
 };
 
 const staticViewAttributes = {
@@ -18,6 +20,7 @@ const readerTabs = [
 
 export function AppStaticLoadingView({
   staticView,
+  showAccountPlaceholder = false,
 }: AppStaticLoadingViewProps) {
   const markerAttributes = staticView
     ? staticViewAttributes[staticView]
@@ -26,7 +29,7 @@ export function AppStaticLoadingView({
   return (
     <main className="page page-route-loading" {...markerAttributes}>
       <section className="review-shell" aria-label="Loading Waxon view">
-        <header className="reader-header reader-header-route-loading">
+        <header className="reader-header">
           <div className="reader-heading">
             <Link className="reader-brand admin-brand-link" href="/" prefetch={false}>
               <Image
@@ -40,14 +43,15 @@ export function AppStaticLoadingView({
               <span>waxon</span>
             </Link>
             <div
-              className="reader-tabs reader-tabs-route-loading"
+              className="reader-tabs"
               role="tablist"
               aria-label="Waxon views"
               aria-busy="true"
             >
               {readerTabs.map(([label, href]) => (
                 <Link
-                  className="reader-tab"
+                  className={`reader-tab${staticView === href.slice(1) ? " reader-tab-active" : ""}`}
+                  aria-selected={staticView === href.slice(1)}
                   href={href}
                   key={href}
                   prefetch={false}
@@ -58,59 +62,20 @@ export function AppStaticLoadingView({
               ))}
             </div>
           </div>
-          <div className="reader-actions reader-actions-placeholder" />
+          <div className="reader-actions reader-actions-placeholder" aria-hidden="true">
+            {showAccountPlaceholder ? <>
+              <span className="queue-summary-placeholder review-skeleton" />
+              <span className="review-skeleton user-menu-placeholder" />
+            </> : null}
+          </div>
         </header>
 
         {staticView === "review" ? (
-          <ReviewRouteLoadingStage />
+          <ReviewLoadingStage />
         ) : (
           <div className="route-loading-stage" aria-hidden="true" />
         )}
       </section>
     </main>
-  );
-}
-
-function ReviewRouteLoadingStage() {
-  return (
-    <div
-      className="review-stage route-loading-review-stage"
-      aria-hidden="true"
-    >
-      <section className="question-area">
-        <div className="question-copy">
-          <h2 className="question-title">Loading next question...</h2>
-        </div>
-      </section>
-
-      <div className="composer composer-loading">
-        <div className="composer-row composer-loading-row">
-          <div className="composer-loading-input" />
-          <div className="composer-loading-button" />
-          <div className="composer-loading-button composer-loading-button-accent" />
-        </div>
-      </div>
-
-      <section className="previous-panel">
-        <div className="previous-header">
-          <h2>Previous answers</h2>
-        </div>
-
-        <ol className="previous-list">
-          {Array.from({ length: 2 }).map((_, index) => (
-            <li
-              className="previous-row previous-row-placeholder"
-              key={`route-loading-previous-placeholder-${index}`}
-            >
-              <div className="previous-placeholder-score" />
-              <div className="previous-placeholder-copy">
-                <span />
-                <span />
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
-    </div>
   );
 }
