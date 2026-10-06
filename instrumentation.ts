@@ -6,7 +6,7 @@ export function register() {
     process.env.NEXT_RUNTIME === "edge"
   ) {
     Sentry.init({
-      dsn: "https://edadd0eec2d226fbf85747941c24a155@o4511061698478080.ingest.de.sentry.io/4511508028522576",
+      dsn: process.env.SENTRY_DSN ?? process.env.NEXT_PUBLIC_SENTRY_DSN,
       tracesSampleRate: 1,
       enableLogs: true,
       sendDefaultPii: true,

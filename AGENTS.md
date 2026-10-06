@@ -54,3 +54,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Secrets
+
+Default dev uses the human Infisical CLI login and fixed development project in `.infisical.json`. Production is isolated in `waxon-production`, Production `/`, synced to Vercel Production. Redeploy after changes. Never print credentials, commit plaintext exports, or run database reset/backfill while verifying a secret migration. Verify production migration history with read-only queries before deploying a build that automatically invokes db:migrate. Keep destructive database tests on explicitly disposable databases. Run `pnpm test:secrets` alongside app checks.

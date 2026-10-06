@@ -1,6 +1,5 @@
 node_modules
 .next
-.next-dev-*/
 .vercel
 out
 .env
@@ -22,3 +21,11 @@ data/questions.sqlite-*
 /.clerk/
 .env*
 /.swc
+
+.git
+**/.env*
+!.env.example
+!**/.env.example
+.codex
+.runs
+.next-dev-*

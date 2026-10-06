@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
   globalIgnores([
     "next-env.d.ts",
     ".next/**",
+    ".next-dev-*/**",
     "node_modules/**",
     "app/.well-known/workflow/**",
   ]),

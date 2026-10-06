@@ -17,15 +17,13 @@ Use **Library** to manage and find questions through text search and related sub
 
 ## Install
 
-Requires Node.js **22.5.0+**, **pnpm 10.33.0**, a PostgreSQL database with **pgvector** and **pg_trgm**, and the configured **keyenv** CLI for macOS Keychain credentials. Configure database, OpenRouter, Clerk, and Sentry credentials before running the app; see the [local setup guide](./docs/local-development.md).
-
 ```bash
 git clone https://github.com/tsilva/waxon.git
 cd waxon
 pnpm install --frozen-lockfile
-keyenv doctor
-keyenv run -- pnpm db:migrate
-keyenv run -- pnpm dev --port auto
+pnpm secrets:check
+pnpm db:migrate:secrets
+pnpm dev --port auto
 ```
 
 Open the local URL printed by the server. Development uses the configured test learner by default; production sign-in uses Clerk.
@@ -33,8 +31,6 @@ Open the local URL printed by the server. Development uses the configured test l
 For installations that still use the legacy schema, read the [destructive clean-break procedure](./docs/local-development.md#legacy-database-reset) before migrating or deploying.
 
 ## Commands
-
-Run commands from the repository root. Wrap commands that need credentials with `keyenv run --`.
 
 ```bash
 pnpm dev --port auto  # start development on an available port
@@ -67,6 +63,5 @@ The tools are `search_questions`, pre-add `check_questions`, and `add_questions`
 - Active questions enter Review; Flagged and Archived questions stay out until restored. New Active questions are due immediately, and missed questions return the same day.
 - Tags describe subject matter. Relatedness is calculated from compatible embeddings and prompt matches; tags do not change review scheduling. Adding questions does not require embeddings or a model call.
 - Review evaluates free-text answers through OpenRouter. Feedback explains what you got right and what needs work; evaluation corrections rebuild scheduling while preserving the original evidence.
-- Secrets stay in macOS Keychain through `.keyenv.toml`. Keep only non-secret overrides in `.env.local`; configuration and deployment details are in the [setup guide](./docs/local-development.md#configuration).
 - Built with Next.js, React, TypeScript, Drizzle, PostgreSQL, and FSRS scheduling. Admin provides model traces, latency, token use, and cost.
 - No license is currently declared.
