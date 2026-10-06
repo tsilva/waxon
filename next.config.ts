@@ -4,6 +4,7 @@ import { withWorkflow } from "workflow/next";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
+  distDir: process.env.NEXT_DEV_OUTPUT_DIR || ".next",
   htmlLimitedBots: /.*/,
   webpack(config) {
     config.module.rules.push({
@@ -37,12 +38,14 @@ const nextConfig: NextConfig = {
 };
 
 export default withSentryConfig(withWorkflow(nextConfig), {
+  authToken: process.env.SENTRY_AUTH_TOKEN,
   org: "tsilva",
   project: "waxon",
   silent: !process.env.CI,
   sourcemaps: {
-    disable: true,
+    disable: !process.env.SENTRY_AUTH_TOKEN,
   },
+  widenClientFileUpload: Boolean(process.env.SENTRY_AUTH_TOKEN),
   tunnelRoute: "/monitoring",
 
   webpack: {

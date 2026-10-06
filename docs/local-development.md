@@ -4,19 +4,18 @@ Run commands from the repository root. Use Node.js 22.5.0 or newer and pnpm 10.3
 
 ## Configuration
 
-The current local credential workflow uses the macOS `keyenv` CLI. It must be installed and configured before the README setup commands can run. `.keyenv.toml` declares these required credentials:
+Use `infisical login --domain https://app.infisical.com` and the development project pinned in `.infisical.json` (`waxon`, Development `/`). Application credentials are fetched into memory by `pnpm dev`, `pnpm build:secrets`, and `pnpm start:secrets`:
 
-- `DATABASE_URL`: the pooled Neon/PostgreSQL connection used by application traffic.
-- `DATABASE_URL_UNPOOLED`: the direct connection preferred by migrations and maintenance scripts.
-- `OPENROUTER_API_KEY`: model evaluation and embedding requests.
-- `CLERK_SECRET_KEY`: Clerk browser authentication.
-- `SENTRY_AUTH_TOKEN`: Sentry build integration.
+- `DATABASE_URL` and `DATABASE_URL_UNPOOLED`: development database access.
+- `OPENROUTER_API_KEY`: evaluation and embedding requests.
+- `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`: a matching development authentication pair.
+- `SENTRY_AUTH_TOKEN`: build integration.
 
-Store credentials through `keyenv set <name>` and follow its authorization procedure for this checkout. `keyenv doctor` checks configuration without reading Keychain. `keyenv run -- <command>` injects credentials into the child process. Do not put secrets in `.env` files.
+`pnpm secrets:migrate:keyenv` copies manifest-bound originals with exact readback and retains them in Keychain. No credentials are written to dotenv files or printed. Missing Infisical values cannot fall back to stale dotenv values. Production is isolated in `waxon-production`, Production `/`, automatically synced to Vercel Production with destination deletion disabled. Redeploy after changes.
 
-The database must support the `vector` and `pg_trgm` extensions, which migrations create. Fresh databases use `keyenv run -- pnpm db:migrate`; databases already using the clean migration history use that same command for subsequent migrations.
+The database must support the `vector` and `pg_trgm` extensions, which migrations create. Fresh databases use `pnpm db:migrate:secrets`; databases already using the clean migration history use that same command for subsequent migrations.
 
-Set the public Clerk application key as `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` in `.env.local`. Optional non-secret overrides may also remain there:
+The public Clerk key is fetched with its matching private key from Infisical. Optional non-secret overrides may remain in `.env.local`:
 
 ```dotenv
 LLM_EVALUATION_MODEL=google/gemini-3.8-flash
@@ -34,7 +33,7 @@ The build script applies migrations when `VERCEL_ENV` is `preview` or `productio
 The [clean-break decision](./adr/0001-remove-legacy-source-data-with-a-clean-break.md) removes all legacy Waxon data instead of upgrading it. For an existing installation with the legacy schema, run this destructive replacement once before deploying a build with the clean baseline:
 
 ```bash
-keyenv run -- pnpm db:reset -- --confirm-clean-break
+infisical run --env dev --path / -- pnpm db:reset -- --confirm-clean-break
 ```
 
 The reset discards all Waxon data and migration metadata, installs the clean baseline and subsequent migrations, and records the matching Drizzle migration history. It removes Waxon's application schema, migration metadata, and named former Waxon tables in `public`; unrelated `public` objects and extensions remain.
@@ -76,7 +75,7 @@ Export the learner's ID as `WAXON_LEARNER_ID` before benchmarking.
 ```bash
 pnpm question-search:evaluate  # inspect/score the 120-case retrieval fixture
 : "${WAXON_LEARNER_ID:?Set this to the learner ID to benchmark}"
-keyenv run -- pnpm question-search:benchmark -- --user-id="$WAXON_LEARNER_ID"
+infisical run --env dev --path / -- pnpm question-search:benchmark -- --user-id="$WAXON_LEARNER_ID"
 ```
 
 Library text search uses weighted full-text and trigram relevance. Related tags and tag-filtered questions use compatible embeddings plus whole-token or consecutive-phrase prompt matches; see the [semantic-tag decision](./adr/0005-retrieve-questions-through-semantic-tags.md) and [lexical-evidence decision](./adr/0006-augment-semantic-tags-with-lexical-evidence.md).
@@ -86,7 +85,7 @@ Library text search uses weighted full-text and trigram relevance. Related tags 
 The [experiment guide](./question-quality-experiment.md) covers full-bank runs, concurrency, resuming, and learner selection. For a two-question pilot and a local report:
 
 ```bash
-keyenv run -- pnpm question-quality:experiment --limit 2
+infisical run --env dev --path / -- pnpm question-quality:experiment --limit 2
 pnpm question-quality:report
 ```
 
