@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -105,15 +105,15 @@ const expectedColumns: Record<string, string[]> = {
   question_embeddings: ["user_id", "space_id", "question_id", "embedding"],
   questions: [
     "id", "user_id", "prompt", "reference_answer", "lifecycle", "target_key",
-    "creation_order", "created_at", "updated_at",
+    "creation_order", "created_at", "updated_at", "added_through_mcp",
   ],
   recall_result_corrections: [
     "id", "user_id", "question_id", "submission_id", "recall_result", "created_at",
   ],
   tag_embeddings: ["user_id", "space_id", "tag_id", "embedding"],
   tags: [
-    "id", "user_id", "label", "normalized_label", "aliases", "scope_note", "deleted_at",
-    "created_at", "updated_at",
+    "id", "user_id", "label", "normalized_label", "scope_note", "deleted_at",
+    "created_at", "updated_at", "aliases",
   ],
   users: [
     "id", "display_name", "email", "avatar_url", "created_at", "updated_at",
@@ -184,12 +184,14 @@ const expectedDefaults: Record<string, string> = {
   "question_flags.reasons": "'[]'::jsonb",
   "recall_result_corrections.created_at": "now()",
   "recall_result_corrections.id": "gen_random_uuid()",
+  "questions.added_through_mcp": "false",
   "questions.created_at": "now()",
   "questions.creation_order":
     "nextval('waxon_v2.questions_creation_order_seq'::regclass)",
   "questions.id": "gen_random_uuid()",
   "questions.lifecycle": "'active'::waxon_v2.question_lifecycle",
   "questions.updated_at": "now()",
+  "tags.aliases": "'{}'::text[]",
   "tags.created_at": "now()",
   "tags.id": "gen_random_uuid()",
   "tags.updated_at": "now()",
@@ -420,7 +422,7 @@ test(
 
     assert.deepEqual(
       journal.entries.map(({ idx }) => idx),
-      [0, 1, 2, 3],
+      Array.from({ length: journal.entries.length }, (_, index) => index),
       "the migration history must start at the clean baseline and remain sequential",
     );
 
@@ -608,6 +610,15 @@ test(
   { skip: testDatabaseUrl ? false : "APPLICATION_CONTRACT_TEST_DATABASE_URL is not set" },
   async () => {
     if (!testDatabaseUrl) return;
+    const journal = JSON.parse(
+      await readFile(new URL("../drizzle-v2/meta/_journal.json", import.meta.url), "utf8"),
+    ) as MigrationJournal;
+    const expectedMigrations = await Promise.all(journal.entries.map(async (entry) => ({
+      hash: createHash("sha256").update(await readFile(
+        new URL(`../drizzle-v2/${entry.tag}.sql`, import.meta.url), "utf8",
+      )).digest("hex"),
+      createdAt: String(entry.when),
+    })));
     const pool = new Pool({ connectionString: testDatabaseUrl });
 
     try {
@@ -745,25 +756,12 @@ test(
         ).rows,
         [
           { hash: "legacy-cutover-probe", createdAt: "1" },
-          {
-            hash: "3cce11497894f07624fc4a358471687b3754453757d5433501f966c7ea574494",
-            createdAt: "1787774146240",
-          },
-          {
-            hash: "6143ce68278638ad8bfd8e27a86bed2d65b3d0c2aa0b45e9ebfe11c6ee54a09b",
-            createdAt: "1787936466888",
-          },
+          ...expectedMigrations,
         ],
         "a cross-schema dependency must preserve old migration metadata",
       );
       await pool.query("DROP VIEW public.issue19_waxon_dependency");
 
-      const journal = JSON.parse(
-        await readFile(
-          new URL("../drizzle-v2/meta/_journal.json", import.meta.url),
-          "utf8",
-        ),
-      ) as MigrationJournal;
       const entry = journal.entries[0];
       assert.ok(entry);
       const baseline = await readFile(
@@ -820,14 +818,7 @@ test(
         ).rows,
         [
           { hash: "legacy-cutover-probe", createdAt: "1" },
-          {
-            hash: "3cce11497894f07624fc4a358471687b3754453757d5433501f966c7ea574494",
-            createdAt: "1787774146240",
-          },
-          {
-            hash: "6143ce68278638ad8bfd8e27a86bed2d65b3d0c2aa0b45e9ebfe11c6ee54a09b",
-            createdAt: "1787936466888",
-          },
+          ...expectedMigrations,
         ],
         "a baseline installation failure must restore old migration metadata",
       );
@@ -853,16 +844,7 @@ test(
            FROM drizzle.__drizzle_migrations
           ORDER BY created_at`,
       );
-      assert.deepEqual(migrations.rows, [
-        {
-          hash: "3cce11497894f07624fc4a358471687b3754453757d5433501f966c7ea574494",
-          createdAt: "1787774146240",
-        },
-        {
-          hash: "6143ce68278638ad8bfd8e27a86bed2d65b3d0c2aa0b45e9ebfe11c6ee54a09b",
-          createdAt: "1787936466888",
-        },
-      ]);
+      assert.deepEqual(migrations.rows, expectedMigrations);
       assert.deepEqual(
         (
           await pool.query<{ name: string }>(
@@ -917,7 +899,7 @@ test(
             "SELECT count(*)::text AS count FROM drizzle.__drizzle_migrations",
           )
         ).rows,
-        [{ count: "2" }],
+        [{ count: String(expectedMigrations.length) }],
       );
     } finally {
       await pool.query(

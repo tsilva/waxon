@@ -503,7 +503,7 @@ test("Review Flag modal has a narrow responsive contract and Library groups ques
     '<div className="lean-question-footer">',
   );
   const questionDateIndex = questionBank.indexOf(
-    'className="lean-question-date"',
+    '<LibraryDueDate dueAt={question.dueAt} />',
   );
   const questionToggleIndex = questionBank.indexOf(
     'aria-controls={`question-details-${question.id}`}',
