@@ -1,0 +1,22 @@
+{
+  "repository": "tsilva/waxon",
+  "githubRepositoryId": 1252573192,
+  "identityId": "e7300834-dfcc-4124-9f6b-f4556d9c158f",
+  "infisicalProjectId": "ad93d013-8087-4bcb-bf12-63ef33e13282",
+  "secretNames": [
+    "CLERK_SECRET_KEY",
+    "DATABASE_URL",
+    "DATABASE_URL_UNPOOLED",
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    "NEXT_PUBLIC_SENTRY_DSN",
+    "OPENROUTER_API_KEY",
+    "SENTRY_AUTH_TOKEN",
+    "SENTRY_DSN",
+    "SENTRY_ORG",
+    "SENTRY_PROJECT"
+  ],
+  "destination": "vercel",
+  "vercelProjectId": "prj_wfpyQUxJK3cZKK3UbRmqnCAKfGrs",
+  "vercelProjectName": "waxon",
+  "vercelTeamId": "team_eE2Iv7IMqPOx8ZVN2xNfR2f0"
+}
