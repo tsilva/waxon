@@ -65,9 +65,6 @@
   },
   "pnpm": {
     "overrides": {
-      "@clerk/nextjs>@clerk/backend": "3.4.14",
-      "@clerk/nextjs>@clerk/react": "6.7.2",
-      "@clerk/nextjs>@clerk/shared": "4.14.0",
       "@esbuild-kit/core-utils>esbuild": "0.25.0",
       "@workflow/core>nanoid": "5.1.16",
       "nanoid@<4": "3.3.18",
