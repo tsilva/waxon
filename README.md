@@ -74,5 +74,5 @@ Development uses AgentBridge (`AGENTBRIDGE_BASE_URL`, default
 Production and Preview call OpenRouter directly using their own server-only
 `OPENROUTER_API_KEY`; a missing production key disables model requests.
 Production credentials come from this app’s isolated Infisical project.
-Production text requests use `deepseek/deepseek-v4.1-flash` with reasoning disabled.
+Production text requests use `deepseek/deepseek-v4.1-flash` with low reasoning effort.
 Embedding requests keep their existing models and embedding spaces.

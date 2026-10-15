@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   providerBaseUrl,
+  usesProductionProvider,
   providerModel,
   buildOpenRouterHeaders,
   resolveOpenRouterApiKey,
@@ -91,7 +92,7 @@ async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
     const response = await fetch(`${providerBaseUrl()}${path}`, {
       method: "POST",
       headers: buildOpenRouterHeaders(apiKey),
-      body: JSON.stringify({ ...(body as Record<string, unknown>), model: providerModel(trace.model), reasoning: { enabled: false } }),
+      body: JSON.stringify({ ...(body as Record<string, unknown>), model: providerModel(trace.model), ...(usesProductionProvider() ? { reasoning: { effort: "low" } } : {}) }),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
     const text = await response.text();

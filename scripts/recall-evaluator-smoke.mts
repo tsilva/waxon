@@ -108,7 +108,16 @@ for (const smokeCase of cases) {
     expected: smokeCase.expected,
     actual: evaluation.recallResult,
     confidence: evaluation.confidence,
+    coveredPoints: evaluation.coveredPoints,
+    scoringIssues: evaluation.scoringIssues,
   });
+}
+
+console.table(results.map((result) => ({
+  name: result.name, expected: result.expected, actual: result.actual, confidence: result.confidence,
+})));
+for (const result of results.filter((result) => result.actual !== result.expected)) {
+  console.log(JSON.stringify(result));
 }
 
 for (const result of results) {
