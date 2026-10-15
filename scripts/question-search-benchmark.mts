@@ -12,7 +12,7 @@ for (const envFile of [".env", ".env.local"]) {
   try {
     process.loadEnvFile(envFile);
   } catch {
-    // CI and keyenv can provide configuration without local env files.
+    // CI and Infisical can provide configuration without local env files.
   }
 }
 

@@ -1,6 +1,6 @@
 # Question quality experiment
 
-These auxiliary scripts run from the repository root:
+These auxiliary scripts run from the repository root. Credentials are supplied by Infisical in the process environment; the experiment does not load local dotenv files:
 
 - [`scripts/question-quality-experiment.mts`](../scripts/question-quality-experiment.mts) runs the experiment, checkpoints results, and optionally applies question flags.
 - [`scripts/question-quality-report.mts`](../scripts/question-quality-report.mts) creates a Markdown report from a checkpoint without model requests or database access.
@@ -13,13 +13,13 @@ The best result is `correct`. FSRS grades are not calculated because they depend
 Run a two-question pilot:
 
 ```sh
-keyenv run -- pnpm question-quality:experiment --limit 2 --concurrency 2
+infisical run --env=dev -- pnpm question-quality:experiment --limit 2 --concurrency 2
 ```
 
 Resume across the complete bank and flag non-correct results:
 
 ```sh
-keyenv run -- pnpm question-quality:experiment --limit all --concurrency 4 --apply-flags
+infisical run --env=dev -- pnpm question-quality:experiment --limit all --concurrency 4 --apply-flags
 ```
 
 Without `--apply-flags`, the database is read-only. With it, only question lifecycle and flag feedback are written after evaluations finish. Existing flags are preserved. Archived questions are evaluated but remain archived. Changed questions are skipped when applying flags. Transport errors, empty answers, truncated answers, and model identity mismatches do not become flags.

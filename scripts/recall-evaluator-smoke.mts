@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { evaluateRecall } from "../app/lib/v2/model.ts";
 import { evaluateRecallWithRetries } from "../app/lib/v2/recallEvaluation.ts";
-import { resolveOpenRouterApiKey } from "../shared/openrouter-config.mts";
+import { resolveOpenRouterApiKey } from "../shared/agentbridge-config.mts";
 
 if (process.env.DATABASE_URL || process.env.DATABASE_URL_UNPOOLED) {
   throw new Error(
@@ -9,7 +9,7 @@ if (process.env.DATABASE_URL || process.env.DATABASE_URL_UNPOOLED) {
   );
 }
 if (!resolveOpenRouterApiKey()) {
-  throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required.");
+  throw new Error("AgentBridge authentication is unavailable.");
 }
 
 type RecallResult = "incorrect" | "partial" | "correct";

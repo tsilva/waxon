@@ -1,10 +1,11 @@
 import pg from "pg";
 
 import {
+  providerModel,
   buildOpenRouterHeaders,
-  OPENROUTER_EMBEDDINGS_URL,
+  providerBaseUrl,
   resolveOpenRouterApiKey,
-} from "../shared/openrouter-config.mts";
+} from "../shared/agentbridge-config.mts";
 import { questionSearchVectorLiteral } from "../shared/question-search.mts";
 import { tagEmbeddingInput } from "../shared/tag-embedding.mts";
 import {
@@ -16,7 +17,7 @@ for (const envFile of [".env", ".env.local"]) {
   try {
     process.loadEnvFile(envFile);
   } catch {
-    // CI and keyenv may provide the environment directly.
+    // CI and Infisical may provide the environment directly.
   }
 }
 
@@ -26,7 +27,7 @@ if (!connectionString) {
   throw new Error("DATABASE_URL or DATABASE_URL_UNPOOLED is required.");
 }
 const apiKey = resolveOpenRouterApiKey();
-if (!apiKey) throw new Error("OPENROUTER_API_KEY is required.");
+if (!apiKey) throw new Error("AgentBridge authentication is unavailable.");
 
 const space = activeEmbeddingSpace();
 const pool = new pg.Pool({ connectionString });
@@ -40,11 +41,11 @@ type TagRow = {
 };
 
 async function embed(inputs: readonly string[], userId: string): Promise<number[][]> {
-  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
+  const response = await fetch(`${providerBaseUrl()}/embeddings`, {
     method: "POST",
     headers: buildOpenRouterHeaders(apiKey!),
     body: JSON.stringify({
-      model: space.requestModel,
+      model: providerModel(space.requestModel),
       dimensions: space.dimensions,
       encoding_format: "float",
       input: inputs,

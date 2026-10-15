@@ -7,11 +7,11 @@ Run commands from the repository root. Use Node.js 22.5.0 or newer and pnpm 10.3
 Use `infisical login --domain https://app.infisical.com` and the development project pinned in `.infisical.json` (`waxon`, Development `/`). Application credentials are fetched into memory by `pnpm dev`, `pnpm build:secrets`, and `pnpm start:secrets`:
 
 - `DATABASE_URL` and `DATABASE_URL_UNPOOLED`: development database access.
-- `OPENROUTER_API_KEY`: evaluation and embedding requests.
+- `AGENTBRIDGE_API_KEY`: evaluation and embedding requests.
 - `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`: a matching development authentication pair.
 - `SENTRY_AUTH_TOKEN`: build integration.
 
-`pnpm secrets:migrate:keyenv` copies manifest-bound originals with exact readback and retains them in Keychain. No credentials are written to dotenv files or printed. Missing Infisical values cannot fall back to stale dotenv values. Production is isolated in `waxon-production`, Production `/`, automatically synced to Vercel Production with destination deletion disabled. Redeploy after changes.
+Keychain originals are retained until migration and rotation are verified. No credentials are written to dotenv files or printed. Missing Infisical values cannot fall back to stale dotenv values. Production is isolated in `waxon-production`, Production `/`, automatically synced to Vercel Production with destination deletion disabled. Redeploy after changes.
 
 The database must support the `vector` and `pg_trgm` extensions, which migrations create. Fresh databases use `pnpm db:migrate:secrets`; databases already using the clean migration history use that same command for subsequent migrations.
 
@@ -22,7 +22,7 @@ LLM_EVALUATION_MODEL=google/gemini-3.8-flash
 WAXON_QUESTION_SEARCH_MODE=lexical
 ```
 
-`LLM_API_KEY` is accepted when `OPENROUTER_API_KEY` is not set. MCP search defaults to lexical retrieval. Optional hybrid search combines lexical and prompt-embedding ranks, exposes a lexical fallback when embeddings are unavailable, and uses no server-side model reranker. Search embeddings remain advisory and are never required to add a question.
+`AGENTBRIDGE_API_KEY` is optional gateway authentication; upstream credential aliases are ignored. MCP search defaults to lexical retrieval. Optional hybrid search combines lexical and prompt-embedding ranks, exposes a lexical fallback when embeddings are unavailable, and uses no server-side model reranker. Search embeddings remain advisory and are never required to add a question.
 
 Development uses the configured Tiago test identity unless `NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1` is set. Production uses Clerk, and each learner's bank and learning records are isolated.
 
@@ -90,3 +90,5 @@ pnpm question-quality:report
 ```
 
 Each question is independently answered by DeepSeek and graded by the production evaluator. Results stay under ignored `test-results/question-quality/`; the tools do not write learning history. Applying question flags requires `--apply-flags`.
+
+Production builds and `next start` require the deployment’s own `OPENROUTER_API_KEY`. The development launcher supplies AgentBridge only; it does not deliver production credentials.

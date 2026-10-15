@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
+  providerBaseUrl,
+  providerModel,
   buildOpenRouterHeaders,
-  OPENROUTER_CHAT_URL,
   resolveOpenRouterApiKey,
   resolveOpenRouterModel,
   DEFAULT_OPENROUTER_EVALUATION_MODEL,
-} from "../../../shared/openrouter-config.mts";
+} from "../../../shared/agentbridge-config.mts";
 import {
   BROWSER_SMOKE_CORRECT_TOKEN,
   shouldUseBrowserAcceptanceEvaluator,
@@ -68,7 +69,7 @@ export const RECALL_EVALUATION_JSON_SCHEMA = {
 } as const;
 
 async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
-  url: string,
+  path: string,
   body: unknown,
   trace: { operation: string; model: string; question: string },
   signal?: AbortSignal,
@@ -87,10 +88,10 @@ async function postOpenRouter<T extends { usage?: Record<string, unknown> }>(
     requestBody: body,
   });
   try {
-    const response = await fetch(url, {
+    const response = await fetch(`${providerBaseUrl()}${path}`, {
       method: "POST",
       headers: buildOpenRouterHeaders(apiKey),
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...(body as Record<string, unknown>), model: providerModel(trace.model), reasoning: { enabled: false } }),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
     const text = await response.text();
@@ -187,7 +188,7 @@ export async function evaluateRecall(input: {
     model?: unknown;
     choices?: Array<{ message?: { content?: unknown } }>;
     usage?: Record<string, unknown>;
-  }>(OPENROUTER_CHAT_URL, {
+  }>("/chat/completions", {
     model,
     temperature: 0,
     max_tokens: 900,
@@ -216,7 +217,7 @@ export async function evaluateRecall(input: {
     model,
     question: input.prompt,
   }, input.signal);
-  if (response.model !== model) {
+  if (response.model !== providerModel(model)) {
     throw new EvaluationFailure("Model response did not identify the requested evaluator.", false);
   }
   const parsed = parseRecallEvaluationResponse(chatText(response));

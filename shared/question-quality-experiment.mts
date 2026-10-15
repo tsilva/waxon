@@ -1,6 +1,6 @@
 import {
-  buildOpenRouterHeaders, OPENROUTER_CHAT_URL, resolveOpenRouterApiKey,
-} from "./openrouter-config.mts";
+  providerModel, buildOpenRouterHeaders, providerBaseUrl, resolveOpenRouterApiKey,
+} from "./agentbridge-config.mts";
 import { evaluateRecall } from "../app/lib/v2/model.ts";
 import { evaluateRecallWithRetries, type NormalizedRecallEvaluation } from "../app/lib/v2/recallEvaluation.ts";
 
@@ -24,7 +24,7 @@ export type ExperimentResult = {
 // Accept only a string: answer standards and adjacent questions cannot enter this request.
 export function answerRequest(prompt: string) {
   return {
-    model: ANSWER_MODEL,
+    model: providerModel(ANSWER_MODEL),
     messages: [{ role: "user", content: `Answer the following question:\n\n${prompt}` }],
     temperature: 0,
     reasoning: { enabled: false },
@@ -35,11 +35,11 @@ export function answerRequest(prompt: string) {
 
 export async function answerQuestion(prompt: string): Promise<string> {
   const key = resolveOpenRouterApiKey();
-  if (!key) throw new Error("OPENROUTER_API_KEY or LLM_API_KEY is required.");
+  if (!key) throw new Error("AgentBridge authentication is unavailable.");
   for (let attempt = 0; attempt < 3; attempt++) {
     let response: Response;
     try {
-      response = await fetch(OPENROUTER_CHAT_URL, {
+      response = await fetch(`${providerBaseUrl()}/chat/completions`, {
       method: "POST",
       headers: buildOpenRouterHeaders(key),
       body: JSON.stringify(answerRequest(prompt)),
@@ -73,7 +73,7 @@ export async function answerQuestion(prompt: string): Promise<string> {
       await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
       continue;
     }
-    if (body.model !== ANSWER_MODEL) throw new Error("Answer model identity mismatch.");
+    if (body.model !== providerModel(ANSWER_MODEL)) throw new Error("Answer model identity mismatch.");
     const choice = body.choices?.[0];
     if (choice?.finish_reason !== "stop" || !choice.message?.content?.trim()) {
       throw new Error(`Answer was empty or incomplete (finish_reason=${choice?.finish_reason ?? "missing"}); not a quality failure.`);

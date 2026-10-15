@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import {
+  providerModel,
   buildOpenRouterHeaders,
   DEFAULT_QUESTION_SEARCH_EMBEDDING_MODEL,
-  OPENROUTER_EMBEDDINGS_URL,
+  providerBaseUrl,
   resolveOpenRouterApiKey,
   resolveQuestionSearchEmbeddingModel,
   type OpenRouterEnvironment,
-} from "./openrouter-config.mts";
+} from "./agentbridge-config.mts";
 
 export const QUESTION_SEARCH_EMBEDDING_MODEL =
   DEFAULT_QUESTION_SEARCH_EMBEDDING_MODEL;
@@ -156,11 +157,11 @@ export async function requestQuestionSearchEmbeddings(input: {
     );
   }
   const { model } = resolveQuestionSearchConfig(env);
-  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
+  const response = await fetch(`${providerBaseUrl(env)}/embeddings`, {
     method: "POST",
     headers: buildOpenRouterHeaders(apiKey, env),
     body: JSON.stringify({
-      model,
+      model: providerModel(model, env),
       dimensions: QUESTION_SEARCH_EMBEDDING_DIMENSIONS,
       encoding_format: "float",
       input: input.prompts.map(questionSearchEmbeddingInput),

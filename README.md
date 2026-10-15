@@ -62,6 +62,17 @@ The tools are `search_questions`, pre-add `check_questions`, and `add_questions`
 - Questions contain a standalone prompt and answer standard. Editing creates a new question with reset mastery and archives the original with its history.
 - Active questions enter Review; Flagged and Archived questions stay out until restored. New Active questions are due immediately, and missed questions return the same day.
 - Tags describe subject matter. Relatedness is calculated from compatible embeddings and prompt matches; tags do not change review scheduling. Adding questions does not require embeddings or a model call.
-- Review evaluates free-text answers through OpenRouter. Feedback explains what you got right and what needs work; evaluation corrections rebuild scheduling while preserving the original evidence.
+- Review evaluates free-text answers through OpenRouter in production and AgentBridge in development. Feedback explains what you got right and what needs work; evaluation corrections rebuild scheduling while preserving the original evidence.
 - Built with Next.js, React, TypeScript, Drizzle, PostgreSQL, and FSRS scheduling. Admin provides model traces, latency, token use, and cost.
 - No license is currently declared.
+
+
+## Model routing
+
+Development uses AgentBridge (`AGENTBRIDGE_BASE_URL`, default
+`http://127.0.0.1:8082/api/v1`, and optional `AGENTBRIDGE_API_KEY`).
+Production and Preview call OpenRouter directly using their own server-only
+`OPENROUTER_API_KEY`; a missing production key disables model requests.
+Production credentials come from this app’s isolated Infisical project.
+Production text requests use `deepseek/deepseek-v4.1-flash` with reasoning disabled.
+Embedding requests keep their existing models and embedding spaces.

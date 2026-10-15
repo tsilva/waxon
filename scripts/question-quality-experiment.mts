@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import pg from "pg";
 import { ANSWER_MODEL, flagDetail, runConcurrent, runQuestion, type ExperimentQuestion, type ExperimentResult } from "../shared/question-quality-experiment.mts";
-import { DEFAULT_OPENROUTER_EVALUATION_MODEL, resolveOpenRouterApiKey } from "../shared/openrouter-config.mts";
+import { DEFAULT_OPENROUTER_EVALUATION_MODEL, resolveOpenRouterApiKey } from "../shared/agentbridge-config.mts";
 
 const { values } = parseArgs({ options: {
   "user-id": { type: "string" },
@@ -13,11 +13,8 @@ const { values } = parseArgs({ options: {
   output: { type: "string", default: "test-results/question-quality/prompt-only.jsonl" },
   "apply-flags": { type: "boolean", default: false },
 } });
-for (const envFile of [".env", ".env.local"]) {
-  if (existsSync(envFile)) process.loadEnvFile(envFile);
-}
 const connectionString = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
-if (!connectionString) throw new Error("Run with keyenv run -- to supply database access.");
+if (!connectionString) throw new Error("Run with infisical run --env=dev -- to supply database access.");
 if (!resolveOpenRouterApiKey()) throw new Error("OpenRouter API key is required.");
 // The production evaluator's trace writer is disabled without DATABASE_URL.
 // Keep database access only in these explicit SQL connections, never in evaluator code.

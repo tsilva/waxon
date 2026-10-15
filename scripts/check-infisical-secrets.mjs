@@ -1,4 +1,4 @@
-const keys = ['CLERK_SECRET_KEY', 'DATABASE_URL', 'DATABASE_URL_UNPOOLED', 'OPENROUTER_API_KEY', 'SENTRY_AUTH_TOKEN'];
+const keys = ['CLERK_SECRET_KEY', 'DATABASE_URL', 'DATABASE_URL_UNPOOLED', 'AGENTBRIDGE_API_KEY', 'SENTRY_AUTH_TOKEN'];
 const managerKeys = ['BWS_ACCESS_TOKEN', 'INFISICAL_TOKEN', 'INFISICAL_CLIENT_SECRET', 'INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET', 'INFISICAL_UNIVERSAL_AUTH_ACCESS_TOKEN'];
 for (const key of keys) console.log(`${key}: ${process.env[key] ? 'present' : 'absent'}`);
 if (managerKeys.some(key => process.env[key])) {

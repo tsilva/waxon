@@ -50,12 +50,12 @@ test("non-correct feedback is framed as suspected quality and fits the flag limi
 });
 
 test("live transport rejects truncated output and substituted models before evaluation", async () => {
-  const oldKey = process.env.OPENROUTER_API_KEY;
+  const oldKey = process.env.AGENTBRIDGE_API_KEY;
   const oldFetch = globalThis.fetch;
-  process.env.OPENROUTER_API_KEY = "test-only-key";
+  process.env.AGENTBRIDGE_API_KEY = "test-only-key";
   try {
     for (const [model, finishReason, message] of [
-      ["deepseek/deepseek-v4.1-flash", "length", /incomplete/],
+      ["openrouter/deepseek/deepseek-v4.1-flash", "length", /incomplete/],
       ["other-model", "stop", /identity mismatch/],
     ] as const) {
       globalThis.fetch = async (_url, options) => {
@@ -66,8 +66,8 @@ test("live transport rejects truncated output and substituted models before eval
     }
   } finally {
     globalThis.fetch = oldFetch;
-    if (oldKey === undefined) delete process.env.OPENROUTER_API_KEY;
-    else process.env.OPENROUTER_API_KEY = oldKey;
+    if (oldKey === undefined) delete process.env.AGENTBRIDGE_API_KEY;
+    else process.env.AGENTBRIDGE_API_KEY = oldKey;
   }
 });
 
@@ -80,21 +80,21 @@ test("dispatch stops after a failure signal while retaining completed work", asy
   assert.deepEqual(visited, [1, 2]);
 });
 test("body-read failures are retried, not just failures before headers", async () => {
-  const oldKey = process.env.OPENROUTER_API_KEY;
+  const oldKey = process.env.AGENTBRIDGE_API_KEY;
   const oldFetch = globalThis.fetch;
-  process.env.OPENROUTER_API_KEY = "test-only-key";
+  process.env.AGENTBRIDGE_API_KEY = "test-only-key";
   let attempts = 0;
   try {
     globalThis.fetch = async () => {
       attempts++;
       if (attempts === 1) return new Response(new ReadableStream({ start(controller) { controller.error(new Error("body timeout")); } }));
-      return new Response(JSON.stringify({ model: "deepseek/deepseek-v4.1-flash", choices: [{ finish_reason: "stop", message: { content: "four" } }] }));
+      return new Response(JSON.stringify({ model: "openrouter/deepseek/deepseek-v4.1-flash", choices: [{ finish_reason: "stop", message: { content: "four" } }] }));
     };
     assert.equal(await answerQuestion(question.prompt), "four");
     assert.equal(attempts, 2);
   } finally {
     globalThis.fetch = oldFetch;
-    if (oldKey === undefined) delete process.env.OPENROUTER_API_KEY;
-    else process.env.OPENROUTER_API_KEY = oldKey;
+    if (oldKey === undefined) delete process.env.AGENTBRIDGE_API_KEY;
+    else process.env.AGENTBRIDGE_API_KEY = oldKey;
   }
 });
