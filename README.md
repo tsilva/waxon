@@ -76,3 +76,5 @@ Production and Preview call OpenRouter directly using their own server-only
 Production credentials come from this app’s isolated Infisical project.
 Production text requests use `deepseek/deepseek-v4.1-flash` with low reasoning effort.
 Embedding requests keep their existing models and embedding spaces.
+
+Production delivery keeps Vercel secret isolation enabled and distinguishes public configuration from private credentials; see [production delivery](docs/production-delivery.md).

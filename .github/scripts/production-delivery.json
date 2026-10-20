@@ -18,5 +18,12 @@
   "destination": "vercel",
   "vercelProjectId": "prj_wfpyQUxJK3cZKK3UbRmqnCAKfGrs",
   "vercelProjectName": "waxon",
-  "vercelTeamId": "team_eE2Iv7IMqPOx8ZVN2xNfR2f0"
+  "vercelTeamId": "team_eE2Iv7IMqPOx8ZVN2xNfR2f0",
+  "configNames": [
+    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
+    "NEXT_PUBLIC_SENTRY_DSN",
+    "SENTRY_DSN",
+    "SENTRY_ORG",
+    "SENTRY_PROJECT"
+  ]
 }
