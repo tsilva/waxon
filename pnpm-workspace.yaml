@@ -6,3 +6,5 @@ blockExoticSubdeps: true
 
 minimumReleaseAgeExclude:
   - source-map-js@1.2.2
+  # Exact security patch approved on 2026-10-27.
+  - body-parser@2.4.0
