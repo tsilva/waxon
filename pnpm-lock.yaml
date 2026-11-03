@@ -9,15 +9,31 @@ overrides:
   '@workflow/core>nanoid': 5.1.16
   nanoid@<4: 3.3.18
   undici@>=6 <7: 6.28.0
-  undici@>=7 <7.30.1: 7.30.1
   devalue@<5.9.3: 5.9.3
   workflow>@workflow/nest: '-'
   '@next/eslint-plugin-next>fast-glob': npm:tinyglobby@0.2.15
   source-map-js: 1.2.2
+  undici@>=7 <7.30.1: 7.30.1
   fast-uri: 3.1.9
   zod@>=4 <4.6.6: 4.6.6
-  eslint-plugin-react-hooks>zod: 4.6.6
   body-parser@>=2 <2.4.0: 2.4.0
+  qs@>=6.7.0 <6.16.2: 6.17.0
+  minimatch@<11.0.1: 11.0.1
+  '@sentry/bundler-plugin-core@5.3.0>glob': 14.0.2
+  '@sentry/bundler-plugins@10.75.3>glob': 14.0.2
+  glob@14.0.2>path-scurry: 3.0.0
+  eslint-plugin-react-hooks>zod: 4.6.6
+
+patchedDependencies:
+  '@sentry/bundler-plugin-core@5.3.0':
+    hash: feb699f89313c5ade2d2a3f13b7371c775c601f24bfaf7d922bac5814a31abc6
+    path: patches/@sentry__bundler-plugin-core@5.3.0.patch
+  '@sentry/bundler-plugins@10.75.3':
+    hash: facad64940996f23de2ea57d68dc283ea25c4fed4d150294e19534e5bd71fc7e
+    path: patches/@sentry__bundler-plugins@10.75.3.patch
+  minimatch@11.0.1:
+    hash: 5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3
+    path: patches/minimatch@11.0.1.patch
 
 importers:
 
@@ -999,6 +1015,9 @@ packages:
     engines: {node: '>=20.9.0'}
     cpu: [x64]
     os: [win32]
+
+  '@isaacs/nonrecursive-glob-match@1.0.1':
+    resolution: {integrity: sha512-rNKPuTXBacPpn5+CP+S3/UI6uq/0jHZjPpaBLaRE3blpgX+E+ZUIrGfViPvUjUnQG6W1+3OTFUiVRCjTffs2+Q==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -2148,9 +2167,6 @@ packages:
     resolution: {integrity: sha512-qIj0G9wZbMGNLjLmg1PT6v2mE9AH2zlnADJD/2tC6E00hgmhUOfEB6greHPAfLRSufHqROIUTkw6E+M3lH0PTQ==}
     engines: {node: '>= 0.4'}
 
-  balanced-match@1.0.2:
-    resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
-
   balanced-match@4.0.4:
     resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
     engines: {node: 18 || 20 || >=22}
@@ -2170,12 +2186,6 @@ packages:
   boxen@8.0.1:
     resolution: {integrity: sha512-F3PH5k5juxom4xktynS7MoFY+NUWH5LC4CnH11YB8NPew+HLpmBLCybSAEyb2F+4pRXhuhWqFesoQd6DAyc2hw==}
     engines: {node: '>=18'}
-
-  brace-expansion@1.1.21:
-    resolution: {integrity: sha512-9zeA+KLZNNzglF2TPKRQEDyx6Yby7daAkuy8MiPzpXPsYDWi/DRM8jmwUDxokQjYqBpv5DgPiwD4h4ZZSy1Ujw==}
-
-  brace-expansion@2.1.7:
-    resolution: {integrity: sha512-uZbew1NqdmPDTMJ8ah1y+b+9QEJrfkXFk3RcTQw3X0jW/xRUvFKsg1CfQdSYGdTbXZWExtU3J3ccxtnfw1Fi0g==}
 
   brace-expansion@5.0.12:
     resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
@@ -2300,9 +2310,6 @@ packages:
 
   commondir@1.0.1:
     resolution: {integrity: sha512-W9pAhw0ja1Edb5GVdIF1mjZw/ASI0AlShXM83UUGe2DVr5TdAPEA1OA8m/g8zWp9x6On7gqufY+FatDbC3MDQg==}
-
-  concat-map@0.0.1:
-    resolution: {integrity: sha512-/Srv4dswyQNBfohGpz9o6Yb3Gz3SrUDqBH5rTuhGR7ahtlbYKnVxw2bCFMRljaA7EXHaXZ8wsHdodFvbkhKmqg==}
 
   confbox@0.1.8:
     resolution: {integrity: sha512-RMtmw0iFkeR4YV+fUOSucriAQNb9g8zFR52MWCtl+cCZOFRNL6zeB395vPzFhEjjn4fMxXudmELnl/KF/WrK6w==}
@@ -2960,8 +2967,8 @@ packages:
   glob-to-regexp@0.4.1:
     resolution: {integrity: sha512-lkX1HJXwyMcprw/5YUZc2s7DrpAiHB21/V+E1rHUrVNokkvB6bqMzT0VfV6/86ZNabt1k14YOIaT7nDvOX3Iiw==}
 
-  glob@13.0.6:
-    resolution: {integrity: sha512-Wjlyrolmm8uDpm/ogGyXZXb1Z+Ca2B8NbJwqBVg0axK9GbBeoS7yGV6vjXnYdGm6X53iehEuxxbyiKp8QmN4Vw==}
+  glob@14.0.2:
+    resolution: {integrity: sha512-vfMgTR2djMHPUchsJMLpZlYQvtjVL+mHpEr5wPpoCbQs2vr/FBNK+3Gnl9Ara1DSs4Aeg4eG9HiADb5/rkY/ZA==}
     engines: {node: 18 || 20 || >=22}
 
   globals@14.0.0:
@@ -3421,16 +3428,9 @@ packages:
     resolution: {integrity: sha512-VP79XUPxV2CigYP3jWwAUFSku2aKqBH7uTAapFWCBqutsbmDo96KY5o8uh6U+/YSIn5OxJnXp73beVkpqMIGhA==}
     engines: {node: '>=18'}
 
-  minimatch@10.2.6:
-    resolution: {integrity: sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==}
+  minimatch@11.0.1:
+    resolution: {integrity: sha512-t+Vn6DX4wPCxS23y03C0uhF7S1jpi1GfqPrnlEipCJaA2ykiNbMkVlDutZtmvLfRcUN6R8AYVlzTsQrT4RZoLQ==}
     engines: {node: 18 || 20 || >=22}
-
-  minimatch@3.1.5:
-    resolution: {integrity: sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w==}
-
-  minimatch@5.1.9:
-    resolution: {integrity: sha512-7o1wEA2RyMP7Iu7GNba9vc0RWWGACJOCZBJX2GJWip0ikV+wcOsgVuY9uE8CPiyQhkGFSlhuSkZPavN7u1c2Fw==}
-    engines: {node: '>=10'}
 
   minimist@1.2.8:
     resolution: {integrity: sha512-2yyAR8qBkN3YuheJanUpWC5U3bb5osDywNB8RzDVlDwDHbocAJveqqj1u8+SVD7jkWT4yvsHCpWqqWqAxb0zCA==}
@@ -3701,8 +3701,8 @@ packages:
   path-parse@1.0.7:
     resolution: {integrity: sha512-LDJzPVEEEPR+y48z93A0Ed0yXb8pAByGWo/k5YYdYgpY2/2EsOsksJrq7lOHxryrVOn1ejG6oAp8ahvOIQD8sw==}
 
-  path-scurry@2.0.2:
-    resolution: {integrity: sha512-3O/iVVsJAPsOnpwWIeD+d6z/7PmqApyQePUtCndjatj/9I5LylHvt5qluFaBT3I5h3r1ejfR056c+FCv+NnNXg==}
+  path-scurry@3.0.0:
+    resolution: {integrity: sha512-1pTbQqH1wIwMi/eleQ5leFTTCkzFsPcgXNjwOA8YGGW/W4/kHT3dssE7Z6NH+zuqNLOzOB0uaD61yl7cAcVhgg==}
     engines: {node: 18 || 20 || >=22}
 
   path-to-regexp@8.4.2:
@@ -3810,12 +3810,8 @@ packages:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
 
-  qs@6.16.0:
-    resolution: {integrity: sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==}
-    engines: {node: '>=0.6'}
-
-  qs@6.16.1:
-    resolution: {integrity: sha512-5Px6J7rfHBAGUhNQ3es4YzcOdBBw0SDcVtThJml4RdnKw4tKs2epA0kPZ+K8X+WiHktT93RHVcQ/3ym5aTCgtg==}
+  qs@6.17.0:
+    resolution: {integrity: sha512-5LK5BZ2XDHMvcUJaf0CQ5HL3aVgKbpklvByC7qLSxYkfE8COEEbJg5xCHWCTqzqi0Gs4Jn5Mv5v3R38W6edscA==}
     engines: {node: '>=0.6'}
 
   range-parser@1.3.0:
@@ -4987,7 +4983,7 @@ snapshots:
     dependencies:
       '@eslint/object-schema': 2.1.7
       debug: 4.4.3(supports-color@8.1.1)
-      minimatch: 3.1.5
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
     transitivePeerDependencies:
       - supports-color
 
@@ -5008,7 +5004,7 @@ snapshots:
       ignore: 5.3.2
       import-fresh: 3.3.1
       js-yaml: 4.3.2
-      minimatch: 3.1.5
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
       strip-json-comments: 3.1.1
     transitivePeerDependencies:
       - supports-color
@@ -5145,6 +5141,8 @@ snapshots:
   '@img/sharp-win32-x64@0.35.5':
     optional: true
 
+  '@isaacs/nonrecursive-glob-match@1.0.1': {}
+
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
@@ -5260,7 +5258,7 @@ snapshots:
       indent-string: 4.0.0
       is-wsl: 2.2.0
       lilconfig: 3.1.3
-      minimatch: 10.2.6
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
       semver: 7.8.5
       string-width: 4.2.3
       supports-color: 8.1.1
@@ -5429,27 +5427,27 @@ snapshots:
       '@sentry/replay': 10.75.3
       '@sentry/replay-canvas': 10.75.3
 
-  '@sentry/bundler-plugin-core@5.3.0':
+  '@sentry/bundler-plugin-core@5.3.0(patch_hash=feb699f89313c5ade2d2a3f13b7371c775c601f24bfaf7d922bac5814a31abc6)':
     dependencies:
       '@babel/core': 7.29.7
       '@sentry/babel-plugin-component-annotate': 5.3.0
       '@sentry/cli': 2.58.6
       dotenv: 16.6.1
       find-up: 5.0.0
-      glob: 13.0.6
+      glob: 14.0.2
       magic-string: 0.30.21
     transitivePeerDependencies:
       - encoding
       - supports-color
 
-  '@sentry/bundler-plugins@10.75.3(rollup@4.63.5)(webpack@5.109.2(@swc/core@1.15.3(@swc/helpers@0.5.23)))':
+  '@sentry/bundler-plugins@10.75.3(patch_hash=facad64940996f23de2ea57d68dc283ea25c4fed4d150294e19534e5bd71fc7e)(rollup@4.63.5)(webpack@5.109.2(@swc/core@1.15.3(@swc/helpers@0.5.23)))':
     dependencies:
       '@babel/core': 7.29.7
       '@sentry/cli': 2.58.6
       '@sentry/core': 10.75.3
       dotenv: 17.4.2
       find-up: 5.0.0
-      glob: 13.0.6
+      glob: 14.0.2
       magic-string: 0.30.21
     optionalDependencies:
       rollup: 4.63.5
@@ -5517,7 +5515,7 @@ snapshots:
       '@opentelemetry/api': 1.9.1
       '@rollup/plugin-commonjs': 28.0.1(rollup@4.63.5)
       '@sentry/browser-utils': 10.75.3
-      '@sentry/bundler-plugin-core': 5.3.0
+      '@sentry/bundler-plugin-core': 5.3.0(patch_hash=feb699f89313c5ade2d2a3f13b7371c775c601f24bfaf7d922bac5814a31abc6)
       '@sentry/conventions': 0.16.0
       '@sentry/core': 10.75.3
       '@sentry/node': 10.75.3(@opentelemetry/core@2.11.0(@opentelemetry/api@1.9.1))
@@ -5603,7 +5601,7 @@ snapshots:
 
   '@sentry/webpack-plugin@5.4.0(rollup@4.63.5)(webpack@5.109.2(@swc/core@1.15.3(@swc/helpers@0.5.23)))':
     dependencies:
-      '@sentry/bundler-plugins': 10.75.3(rollup@4.63.5)(webpack@5.109.2(@swc/core@1.15.3(@swc/helpers@0.5.23)))
+      '@sentry/bundler-plugins': 10.75.3(patch_hash=facad64940996f23de2ea57d68dc283ea25c4fed4d150294e19534e5bd71fc7e)(rollup@4.63.5)(webpack@5.109.2(@swc/core@1.15.3(@swc/helpers@0.5.23)))
       webpack: 5.109.2(@swc/core@1.15.3(@swc/helpers@0.5.23))
     transitivePeerDependencies:
       - encoding
@@ -5812,7 +5810,7 @@ snapshots:
       '@typescript-eslint/types': 8.71.1
       '@typescript-eslint/visitor-keys': 8.71.1
       debug: 4.4.3(supports-color@8.1.1)
-      minimatch: 10.2.6
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
       semver: 7.8.5
       tinyglobby: 0.2.17
       ts-api-utils: 2.5.0(typescript@5.9.3)
@@ -5945,7 +5943,7 @@ snapshots:
   '@vercel/queue@0.3.1':
     dependencies:
       '@vercel/oidc': 3.8.9
-      minimatch: 10.2.6
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
       mixpart: 0.0.6
       picocolors: 1.1.1
 
@@ -6423,8 +6421,6 @@ snapshots:
 
   axobject-query@4.1.0: {}
 
-  balanced-match@1.0.2: {}
-
   balanced-match@4.0.4: {}
 
   baseline-browser-mapping@2.11.28: {}
@@ -6437,7 +6433,7 @@ snapshots:
       http-errors: 2.0.1
       iconv-lite: 0.7.3
       on-finished: 2.4.1
-      qs: 6.16.1
+      qs: 6.17.0
       raw-body: 3.0.2
       type-is: 2.1.0
     transitivePeerDependencies:
@@ -6455,15 +6451,6 @@ snapshots:
       type-fest: 4.41.0
       widest-line: 5.0.0
       wrap-ansi: 9.0.2
-
-  brace-expansion@1.1.21:
-    dependencies:
-      balanced-match: 1.0.2
-      concat-map: 0.0.1
-
-  brace-expansion@2.1.7:
-    dependencies:
-      balanced-match: 1.0.2
 
   brace-expansion@5.0.12:
     dependencies:
@@ -6590,8 +6577,6 @@ snapshots:
   commander@2.20.3: {}
 
   commondir@1.0.1: {}
-
-  concat-map@0.0.1: {}
 
   confbox@0.1.8: {}
 
@@ -7049,7 +7034,7 @@ snapshots:
       hasown: 2.0.4
       is-core-module: 2.17.0
       is-glob: 4.0.3
-      minimatch: 3.1.5
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
       object.fromentries: 2.0.8
       object.groupby: 1.0.3
       object.values: 1.2.1
@@ -7077,7 +7062,7 @@ snapshots:
       hasown: 2.0.4
       jsx-ast-utils: 3.3.5
       language-tags: 1.0.9
-      minimatch: 3.1.5
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
       object.fromentries: 2.0.8
       safe-regex-test: 1.1.0
       string.prototype.includes: 2.0.1
@@ -7105,7 +7090,7 @@ snapshots:
       estraverse: 5.3.0
       hasown: 2.0.4
       jsx-ast-utils: 3.3.5
-      minimatch: 3.1.5
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
       object.entries: 1.1.9
       object.fromentries: 2.0.8
       object.values: 1.2.1
@@ -7164,7 +7149,7 @@ snapshots:
       is-glob: 4.0.3
       json-stable-stringify-without-jsonify: 1.0.1
       lodash.merge: 4.6.2
-      minimatch: 3.1.5
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
       natural-compare: 1.4.0
       optionator: 0.9.4
     optionalDependencies:
@@ -7236,7 +7221,7 @@ snapshots:
       once: 1.4.0
       parseurl: 1.3.3
       proxy-addr: 2.0.8
-      qs: 6.16.0
+      qs: 6.17.0
       range-parser: 1.3.0
       router: 2.2.0
       send: 1.2.1
@@ -7273,7 +7258,7 @@ snapshots:
 
   filelist@1.0.6:
     dependencies:
-      minimatch: 5.1.9
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
 
   finalhandler@2.1.1:
     dependencies:
@@ -7383,11 +7368,11 @@ snapshots:
 
   glob-to-regexp@0.4.1: {}
 
-  glob@13.0.6:
+  glob@14.0.2:
     dependencies:
-      minimatch: 10.2.6
+      minimatch: 11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3)
       minipass: 7.1.3
-      path-scurry: 2.0.2
+      path-scurry: 3.0.0
 
   globals@14.0.0: {}
 
@@ -7823,17 +7808,10 @@ snapshots:
 
   mimic-function@5.0.1: {}
 
-  minimatch@10.2.6:
+  minimatch@11.0.1(patch_hash=5ba83c88d49a25b9ec0801edb17bf08fa8c5bfdd19f1129388b302fbe9b848f3):
     dependencies:
+      '@isaacs/nonrecursive-glob-match': 1.0.1
       brace-expansion: 5.0.12
-
-  minimatch@3.1.5:
-    dependencies:
-      brace-expansion: 1.1.21
-
-  minimatch@5.1.9:
-    dependencies:
-      brace-expansion: 2.1.7
 
   minimist@1.2.8: {}
 
@@ -8065,7 +8043,7 @@ snapshots:
 
   path-parse@1.0.7: {}
 
-  path-scurry@2.0.2:
+  path-scurry@3.0.0:
     dependencies:
       lru-cache: 11.5.3
       minipass: 7.1.3
@@ -8166,12 +8144,7 @@ snapshots:
 
   punycode@2.3.1: {}
 
-  qs@6.16.0:
-    dependencies:
-      es-define-property: 1.0.1
-      side-channel: 1.1.1
-
-  qs@6.16.1:
+  qs@6.17.0:
     dependencies:
       es-define-property: 1.0.1
       side-channel: 1.1.1

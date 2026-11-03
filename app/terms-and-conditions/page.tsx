@@ -1,3 +1,10 @@
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Terms and conditions | waxon",
+  alternates: { canonical: "/terms-and-conditions" },
+};
+
 export default function TermsAndConditionsPage() {
   return (
     <main className="legal-page">

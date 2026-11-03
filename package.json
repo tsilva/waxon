@@ -76,6 +76,11 @@
       "fast-uri": "3.1.9",
       "zod@>=4 <4.6.6": "4.6.6",
       "body-parser@>=2 <2.4.0": "2.4.0",
+      "qs@>=6.7.0 <6.16.2": "6.17.0",
+      "minimatch@<11.0.1": "11.0.1",
+      "@sentry/bundler-plugin-core@5.3.0>glob": "14.0.2",
+      "@sentry/bundler-plugins@10.75.3>glob": "14.0.2",
+      "glob@14.0.2>path-scurry": "3.0.0",
       "eslint-plugin-react-hooks>zod": "4.6.6"
     }
   },

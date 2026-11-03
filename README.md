@@ -59,6 +59,8 @@ The tools are `search_questions`, pre-add `check_questions`, and `add_questions`
 
 ## Notes
 
+The public sitemap and canonical metadata use `https://waxon.tsilva.eu` by default. Set `NEXT_PUBLIC_SITE_URL` when hosting on a different origin.
+
 - Questions contain a standalone prompt and answer standard. Editing creates a new question with reset mastery and archives the original with its history.
 - Active questions enter Review; Flagged and Archived questions stay out until restored. New Active questions are due immediately, and missed questions return the same day.
 - Tags describe subject matter. Relatedness is calculated from compatible embeddings and prompt matches; tags do not change review scheduling. Adding questions does not require embeddings or a model call.

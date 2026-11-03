@@ -1,0 +1,18 @@
+diff --git a/build/cjs/core/glob.js b/build/cjs/core/glob.js
+--- a/build/cjs/core/glob.js
++++ b/build/cjs/core/glob.js
+@@ -2,3 +2,3 @@
+-
++
+-const glob = require('glob');
++const glob = require('glob/raw');
+-
++
+diff --git a/build/esm/core/glob.js b/build/esm/core/glob.js
+--- a/build/esm/core/glob.js
++++ b/build/esm/core/glob.js
+@@ -1,2 +1,2 @@
+-import { glob } from 'glob';
++import { glob } from 'glob/raw';
+-
++
