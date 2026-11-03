@@ -9,7 +9,8 @@ Use `infisical login --domain https://app.infisical.com` and the development pro
 - `DATABASE_URL` and `DATABASE_URL_UNPOOLED`: development database access.
 - `AGENTBRIDGE_API_KEY`: evaluation and embedding requests.
 - `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`: a matching development authentication pair.
-- `SENTRY_AUTH_TOKEN`: build integration.
+
+Local builds skip Sentry source-map uploads. Hosted Vercel builds handle uploads.
 
 Keychain originals are retained until migration and rotation are verified. No credentials are written to dotenv files or printed. Missing Infisical values cannot fall back to stale dotenv values. Production is isolated in `waxon-production`, Production `/`, automatically synced to Vercel Production with destination deletion disabled. Redeploy after changes.
 
