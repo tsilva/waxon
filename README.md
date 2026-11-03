@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./public/brand/logo/logo-1024.png" alt="Waxon" width="360" />
+  <img src="./logo.png" alt="Waxon" width="360" />
   <br />
   <!-- repo-tagline:start -->
   <strong>🧠 Build knowledge and keep it 🔁</strong>

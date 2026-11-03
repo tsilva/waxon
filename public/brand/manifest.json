@@ -66,6 +66,12 @@
       "path": "web-seo/site.webmanifest",
       "width": 0,
       "height": 0
+    },
+    {
+      "key": "root-logo",
+      "path": "../../logo.png",
+      "width": 844,
+      "height": 848
     }
   ]
 }

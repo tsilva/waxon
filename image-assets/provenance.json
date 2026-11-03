@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "profiles": [
+    "web"
+  ],
+  "sources": [
+    {
+      "path": "image-assets/sources/logo-source.png",
+      "sha256": "493051c5af50cfcb59d88601b8b9a8f519a98cd6459f32845428cc3477d3aa14",
+      "evidence": "Native Codex ImageGen output exec-2acc9c09-75a1-4575-9e53-da3aa66c8957.png for Waxon Recall Loop, option 1."
+    },
+    {
+      "path": "image-assets/sources/icon-source.png",
+      "sha256": "06c56c12165c25fa046305d1adfd12e05b2c9c92c860a32703e31c9cff4a45c7",
+      "evidence": "Native Codex ImageGen output exec-f5934e2a-5d68-4ae7-bf39-63cc373eb63b.png for Waxon Recall Loop, option 1."
+    },
+    {
+      "path": "image-assets/sources/social-source.png",
+      "sha256": "ed9a60609ff6b1101efe478eff675a4d495d75c4b4f82fb6ab2e37fd9d6bfe48",
+      "evidence": "Native Codex ImageGen output exec-438e219f-cf58-41dd-a6c8-206c448d42c6.png for Waxon Recall Loop, option 1."
+    }
+  ],
+  "exports": [
+    {
+      "role": "readme-logo",
+      "path": "logo.png",
+      "sha256": "d9edba96fd215de79678bddd1b90e2b119ffdfeb6297ff6370a829ab064e3f7a",
+      "source": "image-assets/sources/logo-source.png"
+    },
+    {
+      "role": "favicon",
+      "path": "public/favicon.ico",
+      "sha256": "5b75bc541b46046077442905b1b4ce96ef36e6e727b018366a331e281ca3998b",
+      "source": "image-assets/sources/icon-source.png"
+    },
+    {
+      "role": "social-preview",
+      "path": "public/brand/web-seo/og-image-1200x630.png",
+      "sha256": "c9e38a45eea50614e0e7cf6a301636de59f92ce3dc9fd7e102554bcc917b4cca",
+      "source": "image-assets/sources/social-source.png"
+    }
+  ]
+}
