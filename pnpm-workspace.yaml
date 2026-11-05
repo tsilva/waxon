@@ -8,3 +8,14 @@ minimumReleaseAgeExclude:
   - source-map-js@1.2.2
   # Exact security patch approved on 2026-10-27.
   - body-parser@2.4.0
+  # Exact security patches approved on 2026-11-03.
+  - minimatch@11.0.1
+  - glob@14.0.2
+  - path-scurry@3.0.0
+
+patchedDependencies:
+  # Use glob/raw so Sentry loads the patched minimatch outside glob's bundle.
+  '@sentry/bundler-plugin-core@5.3.0': patches/@sentry__bundler-plugin-core@5.3.0.patch
+  '@sentry/bundler-plugins@10.75.3': patches/@sentry__bundler-plugins@10.75.3.patch
+  # Preserve the legacy default and callable API used by ESLint and filelist.
+  minimatch@11.0.1: patches/minimatch@11.0.1.patch
