@@ -4,7 +4,7 @@ import {
 import { evaluateRecall } from "../app/lib/v2/model.ts";
 import { evaluateRecallWithRetries, type NormalizedRecallEvaluation } from "../app/lib/v2/recallEvaluation.ts";
 
-export const ANSWER_MODEL = "deepseek/deepseek-v4.1-flash";
+export const ANSWER_MODEL = "deepseek/deepseek-v4.1-flash-1017";
 export type ExperimentQuestion = {
   id: string;
   userId: string;

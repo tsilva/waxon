@@ -22,3 +22,5 @@ data/questions.sqlite-*
 /.clerk/
 .env*
 /.swc
+/INBOX.md
+/.local/repo-inbox/

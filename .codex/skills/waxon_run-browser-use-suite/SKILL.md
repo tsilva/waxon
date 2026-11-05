@@ -1,5 +1,5 @@
 ---
-name: run-browser-use-suite
+name: waxon_run-browser-use-suite
 description: Run a Waxon browser-use test suite from a markdown file. Use when the user asks to run, rerun, execute, validate, or fix a Browser Use or signed-in user experience suite and provides or references a `.md` test-suite file such as `tests/browser-use-clean-break-journey.md`.
 ---
 
@@ -14,7 +14,7 @@ Treat the markdown file as the source of truth for scope, preconditions, destruc
 ## Workflow
 
 1. Read the suite markdown fully.
-2. Use the native Codex Desktop in-app Browser for all local browser testing. Read and follow the bundled Browser skill, initialize `browser-client`, select the `iab` browser with `agent.browsers.get("iab")`, and drive that tab through the skill's documented Playwright/CUA APIs.
+2. Follow the global Browser Use and Testing policy for local browser testing. Read the bundled Browser runtime instructions, initialize `browser-client`, select Brave Stable’s Agents profile with `agent.browsers.get("brave")` unless the user explicitly requests another browser, and use documented APIs. If Brave is unavailable, report the connection problem without switching browsers.
 3. Reuse an existing local dev server at the suite's target URL when one is already running. Do not kill or restart existing servers. If no server is running, start one with:
 
    ```bash
@@ -22,7 +22,7 @@ Treat the markdown file as the source of truth for scope, preconditions, destruc
    ```
 
    Report the printed URL. If automatic ports are unsupported or startup fails, stop and warn the user.
-4. Open the app with the in-app Browser and perform the suite through visible UI interactions. Prefer DOM snapshots and scoped locators from the current visible page. Use direct API or shell checks only as diagnostics when the in-app Browser cannot inspect the needed state.
+4. Open the app with the configured agent browser and perform the suite through visible UI interactions. Prefer DOM snapshots and scoped locators from the current visible page. Use direct API or shell checks only as diagnostics when the configured agent browser cannot inspect the needed state.
 5. Record each test as `pass`, `fail`, or `skipped`, including route, visible assertions, console warnings/errors, and screenshots for failures or ambiguous states.
 6. When a real app bug is found, make the smallest focused fix, reload the page, and rerun the failing test plus any affected nearby flow. Do not clean up data if the suite says not to.
 7. After code changes, run:
@@ -38,7 +38,7 @@ Treat the markdown file as the source of truth for scope, preconditions, destruc
 ## Browser Use Notes
 
 - Capture screenshots under `/private/tmp` with names that include the suite or state, for example `/private/tmp/waxon-signed-in-question-bank.png`.
-- If `fill("")` does not clear an input in the in-app Browser, click the input, press `ControlOrMeta+A`, then press `Backspace`.
+- If `fill("")` does not clear an input in the configured agent browser, click the input, press `ControlOrMeta+A`, then press `Backspace`.
 - If exact locators fail because rendered markdown splits text across inline elements, take a fresh DOM snapshot and use the accessible name shown there.
 - For Next.js local apps, use `domcontentloaded` waits and content-specific text waits. Avoid relying on `networkidle`.
 - Treat expected Clerk development-key warnings as non-blocking, but report them. Explain any other warnings or errors.
@@ -55,7 +55,7 @@ Treat the markdown file as the source of truth for scope, preconditions, destruc
 Lead with findings if bugs were found. Then include:
 
 - suite path and URL
-- native Codex Desktop in-app Browser used, with any explicitly approved fallback noted
+- configured agent browser and profile used, with any explicitly approved fallback noted
 - pass/fail/skipped table for every test
 - fixes made with file links
 - commands run

@@ -1,5 +1,7 @@
 "use client";
 
+import { useReviewRealtime } from "@/app/lib/useReviewRealtime";
+
 import {
   ReviewComposerSkeleton,
   ReviewHistorySkeleton,
@@ -557,50 +559,12 @@ export default function ReviewApp() {
     answerRef.current?.focus();
   }, [review?.question?.questionId]);
 
-  const pendingIds = review?.recentAnswers.filter((turn) => turn.evaluation.status === "pending")
-    .map((turn) => turn.evaluation.submissionId).join(",") ?? "";
-  useEffect(() => {
-    if (!pendingIds) return;
-    let cancelled = false;
-    let timer = 0;
-    const poll = async () => {
-      try {
-        if (document.visibilityState !== "hidden") {
-          const params = new URLSearchParams();
-          for (const id of pendingIds.split(",")) params.append("submissionIds", id);
-          const result = await jsonRequest<{ evaluations: V2Evaluation[] }>(`/api/v2/review/evaluation?${params}`);
-          if (cancelled) return;
-          const resolved = new Map(result.evaluations.filter((evaluation) => evaluation.status !== "pending")
-            .map((evaluation) => [evaluation.submissionId, evaluation]));
-          if (resolved.size) {
-            setReview((current) => current ? { ...current, recentAnswers: current.recentAnswers.map((turn) =>
-              resolved.has(turn.evaluation.submissionId) ? { ...turn, evaluation: resolved.get(turn.evaluation.submissionId)! } : turn) } : current);
-            void loadQueue({ questionId: selectedQuestionIdRef.current }).catch(() => {});
-          }
-        }
-      } catch (caught) {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : "Could not refresh feedback.");
-      } finally {
-        if (!cancelled) timer = window.setTimeout(poll, 900);
-      }
-    };
-    timer = window.setTimeout(poll, 900);
-    return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [loadQueue, pendingIds]);
-
-  useEffect(() => {
-    const refresh = () => {
-      if (document.visibilityState === "visible") {
-        void loadQueue({ questionId: selectedQuestionIdRef.current }).catch(() => {});
-      }
-    };
-    window.addEventListener("focus", refresh);
-    document.addEventListener("visibilitychange", refresh);
-    // Refresh external changes and the learner's local day, including a tab left open overnight.
-    const timer = window.setInterval(refresh, 60_000);
-    return () => { window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", refresh); window.clearInterval(timer); };
-  }, [loadQueue]);
+  useReviewRealtime({
+    enabled: review !== null,
+    timezone: review?.timezone ?? null,
+    onChange: () => loadQueue({ questionId: selectedQuestionIdRef.current }),
+    onError: setError,
+  });
 
   function advanceLocally(removeCurrent = false, evaluation?: V2Evaluation) {
     const current = reviewRef.current;

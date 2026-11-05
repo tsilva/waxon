@@ -111,6 +111,12 @@ export const users = waxonV2.table(
   ],
 );
 
+// Realtime transfers only this revision; learning history stays authoritative.
+export const reviewRevisions = waxonV2.table("review_revisions", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  revision: bigint("revision", { mode: "bigint" }).notNull().default(sql`0`),
+});
+
 export const learnerSettings = waxonV2.table("learner_settings", {
   userId: text("user_id")
     .primaryKey()

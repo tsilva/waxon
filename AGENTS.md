@@ -10,13 +10,10 @@ Every question is stored and resurfaced later based on the user's past performan
 
 ## Product Specifications
 
-At the start of substantive repository work, use `$specs-author` to read the entire root `SPECS.md` once per ongoing task. Reuse unchanged contents across follow-ups and composed skills. Reread when the file or repository association changes, or new stakeholder intent requires a fresh comparison. Before finishing, always check for new or changed stakeholder intent; reread if the file or intent changed. Purely conversational follow-ups do not require another full read.
-
-- Treat `SPECS.md` as the persistent source of stakeholder requirements that cannot be inferred reliably from code or remembered conversations.
-- Apply the scope test to proposed and existing requirements: root `SPECS.md` contains only project-wide intent; scoped intent belongs in its nearest authoritative specification and must not be broadened to fit the root.
-- If the task, repository, or user request contradicts, omits, or ambiguously interprets the specification, tell the user. Continue safe exploration and work that does not depend on resolving the issue, but never silently choose an interpretation.
-- Never edit `SPECS.md` from inference. Propose the exact change, explain why it reflects stakeholder intent, and edit the file only after the user explicitly approves that exact change.
-- Keep `SPECS.md` complete, concise, and compacted. It must contain stakeholder intent rather than implementation, architecture, operations, or transient project detail.
+When specifications exist, use `$private-skills_specs-author` for substantive work and
+specification changes. Follow its shared read/reuse cadence, provisional-scenario
+guidance, proportional detail, decision-based approval, and closing intent check.
+The maintained procedure is `/Users/tsilva/.codex/skills/private-skills/private-skills_specs-author/SKILL.md`.
 
 ## Superset Provider Lock
 
@@ -43,7 +40,7 @@ This is a single-context repository using root `CONTEXT.md` and `docs/adr/`. See
 
 ## Questions
 
-The authoritative scoped specification for Question quality is [reference/question-quality.md](reference/question-quality.md). Use it whenever creating, cleaning up, deduplicating, or generating knowledge-bank Questions and probing questions. Treat its normative requirements as stakeholder intent: propose exact changes and obtain explicit stakeholder approval before editing them. Keep project-wide invariants and lifecycle policy in root `SPECS.md`.
+The authoritative scoped specification for Question quality is [reference/question-quality.md](reference/question-quality.md). Use it whenever creating, cleaning up, deduplicating, or generating knowledge-bank Questions and probing questions. Treat its normative requirements as stakeholder intent and apply the shared `$private-skills_specs-author` decision-based approval policy to changes. Keep project-wide invariants and lifecycle policy in root `SPECS.md`.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

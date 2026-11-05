@@ -55,6 +55,14 @@ export function invalidateUserProfile(userId: string) {
   profiles.delete(`local:${getLocalTestLearner().email}`);
 }
 
+// Capability renewal needs identity, not the display profile. Authenticate each
+// request without waking Postgres just to reissue the same learner-scoped query.
+export async function getCurrentLearnerId(): Promise<string | null> {
+  if (isLocalTestAuthEnabled()) return (await getCurrentUser()).id;
+  const { userId } = await auth();
+  return userId ? appUserIdForClerkUser({ id: userId }) : null;
+}
+
 export async function getCurrentUser(options: { fresh?: boolean } = {}): Promise<AuthenticatedUser> {
   const db = getV2Db();
   const local = isLocalTestAuthEnabled() ? getLocalTestLearner() : null;

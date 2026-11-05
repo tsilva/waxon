@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./public/brand/logo/logo-1024.png" alt="Waxon" width="360" />
+  <img src="./logo.png" alt="Waxon" width="360" />
   <br />
   <!-- repo-tagline:start -->
   <strong>🧠 Build knowledge and keep it 🔁</strong>
@@ -61,8 +61,9 @@ The tools are `search_questions`, pre-add `check_questions`, and `add_questions`
 
 - Questions contain a standalone prompt and answer standard. Editing creates a new question with reset mastery and archives the original with its history.
 - Active questions enter Review; Flagged and Archived questions stay out until restored. New Active questions are due immediately, and missed questions return the same day.
-- Tags describe subject matter. Relatedness is calculated from compatible embeddings and prompt matches; tags do not change review scheduling. Adding questions does not require embeddings or a model call.
+- Tags describe subject matter. Relatedness comes from compatible embeddings and prompt matches; rebuildable indexes or caches may accelerate retrieval without changing discovery behavior. Tags do not change review scheduling. Adding questions does not require embeddings or a model call.
 - Review evaluates free-text answers through OpenRouter in production and AgentBridge in development. Feedback explains what you got right and what needs work; evaluation corrections rebuild scheduling while preserving the original evidence.
+- Review uses Neon Realtime for committed changes instead of polling for feedback or queue updates. See [live update setup](docs/local-development.md#live-review-updates).
 - Built with Next.js, React, TypeScript, Drizzle, PostgreSQL, and FSRS scheduling. Admin provides model traces, latency, token use, and cost.
 - No license is currently declared.
 
@@ -74,7 +75,13 @@ Development uses AgentBridge (`AGENTBRIDGE_BASE_URL`, default
 Production and Preview call OpenRouter directly using their own server-only
 `OPENROUTER_API_KEY`; a missing production key disables model requests.
 Production credentials come from this app’s isolated Infisical project.
-Production text requests use `deepseek/deepseek-v4.1-flash` with low reasoning effort.
+Production text requests use `deepseek/deepseek-v4.1-flash-1017` with low reasoning effort.
 Embedding requests keep their existing models and embedding spaces.
 
+Production secrets are delivered through the pinned shared GitHub Actions workflow. The standalone signed Infisical relay triggers synchronization and deployment; see [production delivery](docs/production-delivery.md) for scope and recovery.
+
 Production delivery keeps Vercel secret isolation enabled and distinguishes public configuration from private credentials; see [production delivery](docs/production-delivery.md).
+
+## License
+
+[MIT License](LICENSE).

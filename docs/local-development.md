@@ -9,7 +9,9 @@ Use `infisical login --domain https://app.infisical.com` and the development pro
 - `DATABASE_URL` and `DATABASE_URL_UNPOOLED`: development database access.
 - `AGENTBRIDGE_API_KEY`: evaluation and embedding requests.
 - `CLERK_SECRET_KEY` and `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`: a matching development authentication pair.
-- `SENTRY_AUTH_TOKEN`: build integration.
+- `NEON_REALTIME_URL` and server-only `NEON_REALTIME_SECRET`: Neon Realtime for the same database branch as `DATABASE_URL`.
+
+Local builds skip Sentry source-map uploads. Hosted Vercel builds handle uploads.
 
 Keychain originals are retained until migration and rotation are verified. No credentials are written to dotenv files or printed. Missing Infisical values cannot fall back to stale dotenv values. Production is isolated in `waxon-production`, Production `/`, automatically synced to Vercel Production with destination deletion disabled. Redeploy after changes.
 
@@ -25,6 +27,18 @@ WAXON_QUESTION_SEARCH_MODE=lexical
 `AGENTBRIDGE_API_KEY` is optional gateway authentication; upstream credential aliases are ignored. MCP search defaults to lexical retrieval. Optional hybrid search combines lexical and prompt-embedding ranks, exposes a lexical fallback when embeddings are unavailable, and uses no server-side model reranker. Search embeddings remain advisory and are never required to add a question.
 
 Development uses the configured Tiago test identity unless `NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1` is set. Production uses Clerk, and each learner's bank and learning records are isolated.
+
+## Live Review updates
+
+Enable Realtime on the development Neon branch, apply migrations with `pnpm db:migrate:secrets`, and save its `NEON_REALTIME_URL` and `NEON_REALTIME_SECRET` in Development `/` in the pinned Infisical project. Retrieve credentials in memory using Neon's authenticated tooling; do not use `neon env pull`, which writes a dotenv file. Each environment must use its own branch's credentials. The application launcher injects both variables without printing them or falling back to dotenv values.
+
+Review subscribes to one learner-scoped `review_revisions` row. The server verifies the browser session and seals the fixed SQL query; the browser receives a short-lived capability and the public Realtime URL, never the sealing secret or a database credential. Authorization renewals run about every 50 seconds and reuse the existing subscription; they do not read questions or feedback. Production derives the learner ID directly from the verified Clerk session without loading the display profile from Postgres, so renewal does not keep the database awake. Development resolves the configured test learner through the existing profile cache. Keep capabilities out of logs and persistent storage.
+
+Neon's beta rejects the custom enum types in the domain tables. Statement-level database triggers therefore bump the learner's revision in the same transaction as Question, scheduling, answer, evaluation, correction, grade-history, or timezone changes. Bulk statements bump once per affected learner; rolled-back writes emit nothing. This adds a small revision write to mutations while avoiding repeated reads and transfers of unchanged learning content.
+
+The client coalesces changes for 150 ms before refreshing the current Review window. It also catches changes between the initial HTTP load and the first subscription snapshot, and suppresses refreshes for identical reconnect snapshots. Hidden tabs close their subscription and reopen it on return. Local midnight schedules one refresh without querying the server every minute; DST days are handled in the learner's timezone. A terminal connection error is shown instead of silently restoring polling; refocusing the tab retries the connection. Each active tab has its own connection.
+
+Live integration verification uses an explicitly disposable Neon branch with Realtime enabled and migrations applied. Set that branch's database URL as `WAXON_REALTIME_TEST_DATABASE_URL` and inject its `NEON_REALTIME_URL` and `NEON_REALTIME_SECRET` into `node --import tsx --test tests/review-realtime-db.test.mts`. The test creates and removes its own learners and verifies isolation, bulk writes, evaluation completion, rollback behavior and delta delivery. Never use a production database or a learner bank for this test.
 
 The build script applies migrations when `VERCEL_ENV` is `preview` or `production`, before building Next.js. Setting `WAXON_BACKFILL_SEMANTIC_TAGS=1` also runs the semantic-tag backfill after migrations.
 

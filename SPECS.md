@@ -26,12 +26,12 @@ Waxon is a multi-user question bank and adaptive recall-practice system. Learner
 - Questions must be discoverable through learner-specific, flat subject-matter Tags rather than decks, categories, or a topic hierarchy.
 - Tag labels, aliases, and semantic descriptions must always use English; Waxon must not support multilingual Tags or Tag localization.
 - Tags must describe subject matter materially relevant to a Question's Recall Target rather than lifecycle, learning state, difficulty, importance, or Review behavior.
-- Tags must act as hybrid semantic and lexical search queries; Waxon must derive Question–Tag relevance at read time from compatible embeddings and whole-token or consecutive-phrase matches of English Tag labels and aliases in the Question Prompt rather than persist Tag assignments, assignment provenance, learner overrides, or an Untagged state.
+- Tags must act as hybrid semantic and lexical search queries using compatible embeddings and whole-token or consecutive-phrase matches of English Tag labels and aliases in the Question Prompt. Rebuildable indexes or caches may accelerate retrieval while preserving current results, established ranking, learner isolation, and complete pagination. Tags must not become authoritative Question assignments or introduce assignment provenance, learner overrides, or an Untagged state.
 - A Question and Tag may each have multiple embedding representations, but Waxon must compare only representations from the same declared embedding space.
 - Learners must be able to view the most relevant Tags to a Question and the most relevant Questions to one or more selected Tags; exact Prompt matches to a Tag label or alias must rank ahead of purely semantic matches when compatible embeddings remain sufficiently related, multiple selected Tags must match by strongest relevance to any selected Tag, and lifecycle and text search must narrow the result.
 - Synonymous or overlapping Tags may coexist without automatic renaming, merging, or deletion.
 - Learners must be able to reach every semantically ranked result through stable pagination without silent truncation.
-- Tag discovery must remain learner-isolated and responsive with billions of Questions overall and thousands in one learner's Library.
+- Tag discovery must remain learner-isolated and responsive for Libraries containing thousands of Questions. Billions of Questions overall is a long-term capacity goal; larger-scale guarantees should be established when the deployment's expected workload requires them.
 - Tags must not affect Review scheduling or queue membership.
 - Archived questions must remain out of Review until restored, and restoration without replacement must preserve their learning evidence.
 - Flagged questions must remain out of Review until restored unchanged, replaced by a new question, or archived.

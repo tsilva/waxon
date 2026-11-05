@@ -55,7 +55,7 @@ test("live transport rejects truncated output and substituted models before eval
   process.env.AGENTBRIDGE_API_KEY = "test-only-key";
   try {
     for (const [model, finishReason, message] of [
-      ["openrouter/deepseek/deepseek-v4.1-flash", "length", /incomplete/],
+      ["openrouter/deepseek/deepseek-v4.1-flash-1017", "length", /incomplete/],
       ["other-model", "stop", /identity mismatch/],
     ] as const) {
       globalThis.fetch = async (_url, options) => {
@@ -88,7 +88,7 @@ test("body-read failures are retried, not just failures before headers", async (
     globalThis.fetch = async () => {
       attempts++;
       if (attempts === 1) return new Response(new ReadableStream({ start(controller) { controller.error(new Error("body timeout")); } }));
-      return new Response(JSON.stringify({ model: "openrouter/deepseek/deepseek-v4.1-flash", choices: [{ finish_reason: "stop", message: { content: "four" } }] }));
+      return new Response(JSON.stringify({ model: "openrouter/deepseek/deepseek-v4.1-flash-1017", choices: [{ finish_reason: "stop", message: { content: "four" } }] }));
     };
     assert.equal(await answerQuestion(question.prompt), "four");
     assert.equal(attempts, 2);

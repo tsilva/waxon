@@ -1,8 +1,19 @@
 # Embedding-space strategy for semantic Tags
 
-## Recommendation
+## Research record and provenance
 
-Use `text-embedding-3-small` at 512 dimensions as Waxon's first production space, but treat 512 as a measured default rather than a permanent optimum. Evaluate 256, 512, and the model's full 1,536 dimensions on Waxon relevance judgments before storing a second dimension globally. Add 1,024 only if the first experiment shows that quality is still improving enough between 512 and 1,536 to justify another point on the curve.
+Repository document snapshot: 2026-09-02, commit
+`892134b7a9997724f78ff25eb1c802283a08bcab`. Documentation review: 2026-10-27.
+The technical observations, comparisons and recommendations below preserve that
+research context. Provider contracts, source pages and production configuration
+were not rechecked, and no retrieval evaluation was run during this review.
+Proposed experiments have no results recorded here. Current requirements and
+accepted decisions live in [SPECS.md](../SPECS.md) and the
+[semantic Tag retrieval ADR](adr/0005-retrieve-questions-through-semantic-tags.md).
+
+## Recommendation recorded in the research
+
+The research proposed `text-embedding-3-small` at 512 dimensions as Waxon's first production space, with 512 as a provisional default rather than a measured optimum. Evaluate 256, 512, and the model's full 1,536 dimensions on Waxon relevance judgments before storing a second dimension globally. Add 1,024 only if the first experiment shows that quality is still improving enough between 512 and 1,536 to justify another point on the curve.
 
 Provider plus dimension is **not** a sufficient compatibility key. `text-embedding-3-small` and `text-embedding-3-large` can both emit 512 numbers, but those coordinates were produced by different learned transformations. Dimension equality makes a dot product computable; it does not make the score meaningful. Search should therefore compare only records with the same immutable `embedding_space_id`.
 
@@ -56,7 +67,7 @@ tag_embeddings(learner_id, tag_id, embedding_space_id, input_hash, embedding, ..
 
 Use `(learner_id, entity_id, embedding_space_id)` as the entity-embedding uniqueness boundary. Validate the stored vector length against the registry. A search selects one `embedding_space_id`; it must never merge raw scores or nearest-neighbor lists from different spaces as though the values shared a calibration.
 
-## Model-support decisions to make before the abstraction hardens
+## Model-support decisions proposed in the research
 
 1. **Start with one model family.** Support single-vector dense text embeddings first. Sparse, late-interaction/multivector, image, and hybrid models have different storage and retrieval contracts and should be new strategies, not squeezed into this row shape.
 2. **Use a capability registry, not scattered model conditionals.** For every allowed model record native and allowed dimensions, maximum input tokens, whether server-side shortening exists, normalization behavior, role mode, required prefixes/instructions, and supported encoding formats. OpenAI currently documents 8,192 maximum input tokens for both v3 models and `dimensions` only for v3-and-later models. ([OpenAI embeddings guide](https://developers.openai.com/api/docs/guides/embeddings), [OpenAI API client contract](https://github.com/openai/openai-node/blob/master/src/resources/embeddings.ts))
@@ -67,7 +78,7 @@ Use `(learner_id, entity_id, embedding_space_id)` as the entity-embedding unique
 7. **Calibrate per space.** Similarity thresholds and confidence labels are model-, dimension-, recipe-, and precision-specific. Store them against `embedding_space_id`; never reuse a 512-dimensional threshold for 256 or 1,536.
 8. **Define retirement and reproducibility.** Spaces need `shadow`, `active`, and `retired` lifecycle states. Keep the exact configuration and evaluation record after retiring vectors so old experiment results remain interpretable.
 
-## Dimension experiment
+## Proposed dimension experiment — no results recorded
 
 The decision should come from Waxon's two actual rankings, not aggregate MTEB alone. MTEB itself spans distinct task families and uses nDCG@10 for retrieval, which is useful external context but not a substitute for a product dataset. ([MTEB project](https://github.com/embeddings-benchmark/mteb), [MTEB metric definitions](https://github.com/embeddings-benchmark/leaderboard/blob/main/config.yaml))
 

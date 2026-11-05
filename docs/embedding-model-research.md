@@ -1,25 +1,39 @@
 # Embedding model selection for question-and-answer relatedness
 
-## Decision summary
+## Research record and provenance
 
-`openai/text-embedding-3-small` is a good conservative baseline, but there is not enough evidence to call it the best cost-effective model for Waxon. If a model had to be trialled first today, use `qwen/qwen3-embedding-8b` at 512 dimensions as the price/performance challenger, keep the current OpenAI model as the baseline, and use `google/gemini-embedding-2` as the quality-oriented challenger. Do not switch production or backfill millions of rows until all three have been evaluated on Waxon-labelled pairs at the actual 512 dimensions and with the exact input formatting that production will use.
+Repository document snapshot: 2026-09-02, commit
+`892134b7a9997724f78ff25eb1c802283a08bcab`. Documentation review: 2026-10-27.
+The technical observations, comparisons and recommendations below preserve that
+research context. Provider contracts, source pages and production configuration
+were not rechecked, and no retrieval evaluation was run during this review.
+Proposed experiments have no results recorded here. Current requirements and
+accepted decisions live in [SPECS.md](../SPECS.md) and the
+[semantic Tag retrieval ADR](adr/0005-retrieve-questions-through-semantic-tags.md).
+
+The original comparison explicitly dates its pricing snapshot to 2026-08-31;
+those prices and owner-reported benchmark scores retain their original scope.
+
+## Recommendation recorded in the research
+
+The research treated `openai/text-embedding-3-small` as a conservative baseline, with insufficient evidence to call it the best cost-effective model for Waxon. It proposed `qwen/qwen3-embedding-8b` at 512 dimensions as the first price/performance challenger and `google/gemini-embedding-2` as the quality-oriented challenger. It conditioned any production switch or bulk backfill on evaluating all three on Waxon-labelled pairs at the actual 512 dimensions and with the exact intended input formatting; no such evaluation result is recorded here.
 
 The embedding-generation bill should not decide this choice. At an illustrative 100 tokens for a labelled Prompt plus Answer Standard, one million records cost about $1 with Qwen, $2 with OpenAI, or $20 with Gemini Embedding 2 at standard rates. A small gain in duplicate/related-question recall or a reduction in false positives is worth much more than that difference. Storage, indexing, re-embedding, latency, and evaluation are the material costs.
 
-## Waxon constraints found in the repository
+## Repository observations recorded in the research
 
 - `shared/question-search.mts` fixes question-search output to 512 dimensions, L2-normalizes every vector, and sends `dimensions: 512` to OpenRouter.
-- The current stored input is only `Question:\n<normalized prompt>`. The Answer Standard is not embedded, and the prompt hash therefore does not invalidate when only an answer representation changes.
+- The stored input described by the research was only `Question:\n<normalized prompt>`. The Answer Standard is not embedded, and the prompt hash therefore does not invalidate when only an answer representation changes.
 - `app/db/v2/schema.ts` stores one `halfvec(512)` per learner/question/model/version. The model and embedding version are part of the primary key, so a migration can coexist with old vectors, but every row must be regenerated for a new embedding space.
 - `app/lib/v2/questionSearch.ts` uses negative inner product over normalized vectors, which is equivalent to cosine ranking. Hybrid mode fuses lexical and semantic ranks and requires complete embedding coverage.
 - The semantic SQL has no HNSW or IVFFlat vector index; the only embedding index is a B-tree on learner, model, and version. A bank containing millions of questions would therefore perform an exact similarity scan and sort after filtering. This is likely to become a larger scaling issue than model inference price. If “millions” means total rows spread across many small learner banks, the learner filter changes that assessment and should be benchmarked with the expected per-learner distribution.
 - The product specification requires semantic similarity to remain advisory and never automatically merge questions. Model selection and thresholding must preserve that boundary.
 
-## Current model comparison
+## Model comparison — pricing snapshot 2026-08-31
 
 Pricing is a snapshot from 2026-08-31. Benchmark numbers below come from different model owners, suites, dates, dimensions, and evaluation protocols; they are evidence for choosing challengers, not a valid head-to-head ranking.
 
-| Model | Current price per 1M input tokens | Context and dimensions | Task handling and multilingual evidence | First-party quality evidence | Waxon assessment |
+| Model | Recorded price per 1M input tokens | Context and dimensions | Task handling and multilingual evidence | First-party quality evidence | Waxon assessment |
 | --- | ---: | --- | --- | --- | --- |
 | `openai/text-embedding-3-small` | $0.02 on OpenRouter and from OpenAI | 8,192 tokens; 1,536 default; supports shortening with `dimensions`, including Waxon's 512 | OpenAI does not expose separate query/document task types for this model. Its launch evaluation reported MIRACL 44.0 and English MTEB 62.3. | OpenAI's launch post reports the scores and states that the v3 models were trained for dimension shortening. | Lowest migration risk because it already satisfies the API and schema contract. It is inexpensive and predictable, but old relative to the current alternatives and its published score is not specifically for 512 dimensions or Waxon's duplicate-detection task. |
 | `google/gemini-embedding-001` | $0.15 standard or $0.075 batch from Google | 2,048 tokens; 128–3,072 dimensions | Explicit `SEMANTIC_SIMILARITY`, `RETRIEVAL_QUERY`, `RETRIEVAL_DOCUMENT`, question-answering, clustering, and other task types. Google reports broad multilingual capability. | Google reports multilingual MTEB 68.4 at full size and publishes a dimensionality ablation: 67.55 at 512 versus 68.16 at 2,048. | Strong evidence that 512 preserves most reported quality, but it is now the legacy text-only Gemini option and costs more than Embedding 2 batch. Do not begin a new large migration to it. |
@@ -44,7 +58,7 @@ Primary sources:
 - [OpenRouter embedding API: `dimensions` and `input_type` request fields](https://openrouter.ai/docs/api/api-reference/embeddings/create-embeddings)
 - [pgvector: `halfvec` storage and indexing guidance](https://github.com/pgvector/pgvector#halfvec-type)
 
-## Cost at one million questions
+## Illustrative cost at one million questions — recorded rates
 
 These estimates deliberately expose the assumptions instead of pretending Waxon's token distribution is known:
 
@@ -63,7 +77,7 @@ These estimates deliberately expose the assumptions instead of pretending Waxon'
 
 At 512 dimensions, pgvector documents `halfvec` storage as `2 * dimensions + 8` bytes: 1,032 bytes per vector, or about 1.03 GB (0.96 GiB) for one million raw vectors before tuple, key, index, WAL, backup, and replication overhead. Two separate 512-dimensional vectors roughly double that raw vector payload. For comparison, a 768-dimensional `halfvec` is about 1.54 GB per million and a 3,072-dimensional vector about 6.15 GB per million. This is why testing at the production 512 dimensions matters.
 
-## What should be embedded
+## Proposed representation study
 
 A labelled composite is a better first production candidate than the current prompt-only string:
 
@@ -91,7 +105,7 @@ Task formatting must match the operation:
 
 Any input change requires a new embedding version and complete re-embedding because vectors from different models, tasks, dimensions, or input formats are not comparable.
 
-## Required Waxon-specific evaluation
+## Proposed Waxon-specific evaluation — no results recorded
 
 Build a small labelled set before a bulk backfill. Include:
 
@@ -107,7 +121,7 @@ For each model and representation, generate actual 512-dimensional vectors and m
 
 Use shadow mode first. Select a threshold on held-out examples, then manually review disagreements between lexical and semantic results. The acceptance criterion is not the highest generic MTEB score; it is the best recall of same-target questions at an acceptable advisory false-positive rate on Waxon's data.
 
-## Recommendation
+## Proposed follow-up decisions
 
 1. Keep `text-embedding-3-small` as the production baseline until the representation and evaluation set exist.
 2. Change the evaluation input to include a labelled Answer Standard and increment the embedding version; do not silently reuse prompt-only vectors.

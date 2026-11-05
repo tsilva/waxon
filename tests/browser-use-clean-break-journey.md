@@ -1,6 +1,6 @@
 # Issue 20 clean-break learner journey
 
-This is the source of truth for the final native-browser acceptance run for GitHub issue #20 and the Library Flagging extension in issue #32. Run every case with the project-level `run-browser-use-suite` skill and the native Codex Desktop in-app Browser (`iab`). Do not substitute standalone Playwright, another browser, Computer Use, or API-only evidence.
+This is the source of truth for the final native-browser acceptance run for GitHub issue #20 and the Library Flagging extension in issue #32. Run every case with the project-level `waxon_run-browser-use-suite` skill and the native Codex Desktop in-app Browser (`iab`). Do not substitute standalone Playwright, another browser, Computer Use, or API-only evidence.
 
 ## Result policy
 

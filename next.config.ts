@@ -37,18 +37,22 @@ const nextConfig: NextConfig = {
   },
 };
 
+const isHostedBuild = process.env.VERCEL === "1" && Boolean(process.env.VERCEL_DEPLOYMENT_ID);
+
 export default withSentryConfig(withWorkflow(nextConfig), {
-  authToken: process.env.SENTRY_AUTH_TOKEN,
+  useRunAfterProductionCompileHook: isHostedBuild ? undefined : false,
+  authToken: isHostedBuild ? process.env.SENTRY_AUTH_TOKEN : undefined,
   org: "tsilva",
   project: "waxon",
   silent: !process.env.CI,
   sourcemaps: {
-    disable: !process.env.SENTRY_AUTH_TOKEN,
+    disable: !isHostedBuild || !process.env.SENTRY_AUTH_TOKEN,
   },
   widenClientFileUpload: Boolean(process.env.SENTRY_AUTH_TOKEN),
   tunnelRoute: "/monitoring",
 
   webpack: {
+    disableSentryConfig: !isHostedBuild,
     treeshake: {
       removeDebugLogging: true,
     },

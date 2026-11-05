@@ -2,7 +2,7 @@
 
 Date: 2026-09-02
 
-Scope: one billion Questions in total, but only thousands of Questions and thousands of Tags per learner. All searches are learner-private.
+Planning scenario: one billion Questions in total, but only thousands of Questions and thousands of Tags per learner. This explores a long-term capacity goal, not an upfront acceptance condition. All searches are learner-private.
 
 ## Conclusion
 

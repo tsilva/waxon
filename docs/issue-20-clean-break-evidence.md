@@ -1,5 +1,22 @@
 # Issue 20 clean-break evidence
 
+## Record dates and scope
+
+The original clean-break evidence was recorded in commit
+`9720e0f6e683a7cfbc128e326ba51403099a7f92` on 2026-08-27. The Issue 32
+extension was recorded in `70cc992e7745cf8c46ae0f1d7cadbee59a16149c`, followed
+by the Library terminology update in `0eb6a0a3352627d564b0767001d302f8cb68a858`,
+both also dated 2026-08-27. These are source-record dates; exact test execution
+timestamps are not supplied here. Dates used in timezone/scheduling assertions
+below are fixture values, not verification timestamps.
+
+Documentation review on 2026-10-27 added this provenance only. The results,
+candidate revisions, temporary screenshot paths, superseded attempts and
+remaining merge/preview gates below describe the recorded candidates. Those
+handoff gates are historical, not a current outstanding-work list. No browser,
+test, CI or hosted-preview verification was repeated. Current product
+requirements remain in [SPECS.md](../SPECS.md).
+
 ## Issue 32 Library Flagging extension
 
 - Branch: `codex/issue-32-final-question-semantics`
