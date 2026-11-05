@@ -28,6 +28,7 @@ const expectedTables = [
   "question_flags",
   "questions",
   "recall_result_corrections",
+  "review_revisions",
   "tag_embeddings",
   "tags",
   "users",
@@ -110,6 +111,7 @@ const expectedColumns: Record<string, string[]> = {
   recall_result_corrections: [
     "id", "user_id", "question_id", "submission_id", "recall_result", "created_at",
   ],
+  review_revisions: ["user_id", "revision"],
   tag_embeddings: ["user_id", "space_id", "tag_id", "embedding"],
   tags: [
     "id", "user_id", "label", "normalized_label", "scope_note", "deleted_at",
@@ -138,6 +140,7 @@ const expectedNullableColumns: Record<string, string[]> = {
   question_embeddings: [],
   questions: [],
   recall_result_corrections: [],
+  review_revisions: [],
   tag_embeddings: [],
   tags: ["deleted_at"],
   users: ["avatar_url"],
@@ -184,6 +187,7 @@ const expectedDefaults: Record<string, string> = {
   "question_flags.reasons": "'[]'::jsonb",
   "recall_result_corrections.created_at": "now()",
   "recall_result_corrections.id": "gen_random_uuid()",
+  "review_revisions.revision": "0",
   "questions.added_through_mcp": "false",
   "questions.created_at": "now()",
   "questions.creation_order":
@@ -250,6 +254,9 @@ const expectedConstraintDefinitions: Record<string, string> = {
   questions_pkey: "PRIMARY KEY (id)",
   questions_user_id_id_unique: "UNIQUE (user_id, id)",
   questions_user_id_users_id_fk:
+    "FOREIGN KEY (user_id) REFERENCES waxon_v2.users(id) ON DELETE CASCADE",
+  review_revisions_pkey: "PRIMARY KEY (user_id)",
+  review_revisions_user_id_users_id_fk:
     "FOREIGN KEY (user_id) REFERENCES waxon_v2.users(id) ON DELETE CASCADE",
   tag_embeddings_pk: "PRIMARY KEY (user_id, space_id, tag_id)",
   tag_embeddings_space_id_embedding_spaces_id_fk:
