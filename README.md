@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./public/brand/logo/logo-1024.png" alt="Waxon" width="360" />
+  <img src="./logo.png" alt="Waxon" width="360" />
   <br />
   <!-- repo-tagline:start -->
   <strong>🧠 Build knowledge and keep it 🔁</strong>
@@ -58,6 +58,8 @@ Authorization: Bearer waxon_mcp_...
 The tools are `search_questions`, pre-add `check_questions`, and `add_questions`. Access is limited to your private bank and uses the same validation and duplicate prevention as the app. Waxon stores only the token's SHA-256 hash; rotating it invalidates the previous value, and revoking it leaves browser sessions intact.
 
 ## Notes
+
+The public sitemap and canonical metadata use `https://waxon.tsilva.eu` by default. Set `NEXT_PUBLIC_SITE_URL` when hosting on a different origin.
 
 - Questions contain a standalone prompt and answer standard. Editing creates a new question with reset mastery and archives the original with its history.
 - Active questions enter Review; Flagged and Archived questions stay out until restored. New Active questions are due immediately, and missed questions return the same day.

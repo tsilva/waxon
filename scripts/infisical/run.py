@@ -30,6 +30,8 @@ def main():
     environment.pop("WAXON_BACKFILL_SEMANTIC_TAGS", None)
     if sys.argv[1] == "dev":
         environment["NEXT_DEV_OUTPUT_DIR"] = f".next-dev-{os.getpid()}"
+    if sys.argv[1] in ("dev", "build", "start", "migrate"):
+        environment["SENTRY_AUTH_TOKEN"] = ""
     os.chdir(ROOT)
     os.execvpe(command[0], command, environment)
 
