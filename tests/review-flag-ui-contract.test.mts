@@ -552,9 +552,9 @@ test("Review Flag modal has a narrow responsive contract and Library groups ques
     collapsedQuestionRule?.style.getPropertyValue("padding-bottom"),
     "10px",
   );
-  assert.equal(
-    collapsedQuestionHeadingRule?.style.getPropertyValue("margin-bottom"),
-    "0",
+  assert.match(
+    collapsedQuestionHeadingRule?.style.getPropertyValue("margin-bottom") ?? "",
+    /^0(?:px)?$/,
   );
   assert.equal(questionSideRule?.style.getPropertyValue("flex-direction"), "column");
   assert.equal(
@@ -628,6 +628,6 @@ test("Library programmatic focus target suppresses the browser default outline",
   ) as CSSStyleRule | undefined;
 
   assert.ok(stageRule);
-  assert.equal(stageRule.style.getPropertyValue("outline"), "0");
+  assert.match(stageRule.style.getPropertyValue("outline"), /^0(?:px)?$/);
   style.remove();
 });
