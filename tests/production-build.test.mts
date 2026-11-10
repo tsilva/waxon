@@ -43,6 +43,21 @@ test("local builds do not mutate a database", () => {
   assert.deepEqual(runner.calls, [{ command: "next", args: ["build"] }]);
 });
 
+test("GitHub prebuilt compilation never runs database preparation", () => {
+  const runner = recordingSpawn();
+
+  assert.equal(runBuild({
+    environment: {
+      GITHUB_ACTIONS: "true",
+      VERCEL_ENV: "production",
+      VERCEL_DEPLOYMENT_ID: "gha-123-1",
+      WAXON_BACKFILL_SEMANTIC_TAGS: "1",
+    },
+    spawn: runner.spawn,
+  }), 0);
+  assert.deepEqual(runner.calls, [{ command: "next", args: ["build"] }]);
+});
+
 test("a requested production build prepares the enriched semantic Tag space", () => {
   const runner = recordingSpawn();
 

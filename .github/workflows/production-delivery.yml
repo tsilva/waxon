@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths-ignore:
       - .github/workflows/production-delivery.yml
+      - scripts/build.mjs
+      - tests/production-build.test.mts
   workflow_dispatch:
     inputs:
       stage_prebuilt:
