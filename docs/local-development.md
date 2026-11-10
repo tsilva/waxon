@@ -27,7 +27,7 @@ WAXON_QUESTION_SEARCH_MODE=lexical
 
 Development uses the configured Tiago test identity unless `NEXT_PUBLIC_WAXON_DISABLE_LOCAL_TEST_AUTH=1` is set. Production uses Clerk, and each learner's bank and learning records are isolated.
 
-The build script applies migrations when `VERCEL_ENV` is `preview` or `production`, before building Next.js. Setting `WAXON_BACKFILL_SEMANTIC_TAGS=1` also runs the semantic-tag backfill after migrations.
+The hosted build script applies migrations before building Next.js. GitHub prebuilt production delivery runs migrations in a separate job, and its staging runs skip them. Setting `WAXON_BACKFILL_SEMANTIC_TAGS=1` also runs the semantic-tag backfill after migrations.
 
 ## Legacy database reset
 
