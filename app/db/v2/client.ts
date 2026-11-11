@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import { captureException } from "@sentry/nextjs";
 import * as schema from "./schema.ts";
 
 function createV2Client() {
@@ -11,6 +12,10 @@ function createV2Client() {
   }
 
   const pool = new Pool({ connectionString });
+  // pg replaces disconnected idle clients; report the error without terminating the process.
+  pool.on("error", (error: Error) => {
+    captureException(error, { tags: { component: "database-pool" } });
+  });
 
   return {
     pool,
