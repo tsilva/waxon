@@ -1,0 +1,6 @@
+(version 1)
+(allow default)
+(deny network*)
+(allow network-outbound (remote tcp "localhost:8283"))
+(deny file-read-data file-write* (subpath (param "USER_HOME")))
+(allow file-read-data (literal (param "CA_FILE")))

@@ -10,6 +10,7 @@
     "build": "node scripts/build.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "db:check-migrations": "python3 -I scripts/infisical/check_migrations.py",
     "db:reset": "node scripts/reset-v2.mjs",
     "db:studio": "drizzle-kit studio",
     "question-search:evaluate": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/question-search-evaluate.mts",
