@@ -1,7 +1,9 @@
 name: Production delivery
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -19,17 +21,38 @@ concurrency:
 
 jobs:
   secrets:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' && github.event.action == 'completed' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_sha == github.sha &&
+        github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+        github.event.workflow_run.repository.id == github.repository_id &&
+        github.event.workflow_run.head_repository.id == github.repository_id))
     name: Check committed secrets before production delivery
     uses: ./.github/workflows/secret-scanning.yml
 
   deliver:
     needs: secrets
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' && github.event.action == 'completed' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_sha == github.sha &&
+        github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+        github.event.workflow_run.repository.id == github.repository_id &&
+        github.event.workflow_run.head_repository.id == github.repository_id))
     permissions:
       contents: read
       actions: read
       id-token: write
-    uses: tsilva/.github/.github/workflows/production-delivery.yml@48a4449de4ac5f4d5e14343f70fe5fc57bc2cd74
+    uses: tsilva/.github/.github/workflows/production-delivery.yml@c262be7b75fe4654c170eb5e13240808a70b9936
     with:
       sync_only: true
     secrets:
@@ -38,7 +61,18 @@ jobs:
   migrate:
     name: Verify and apply pending Waxon migrations
     needs: deliver
-    if: github.ref == 'refs/heads/main' && !inputs.stage_prebuilt
+    if: >-
+      (github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' && github.event.action == 'completed' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_sha == github.sha &&
+        github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+        github.event.workflow_run.repository.id == github.repository_id &&
+        github.event.workflow_run.head_repository.id == github.repository_id))) &&
+      (github.ref == 'refs/heads/main' && !inputs.stage_prebuilt)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: Production
@@ -47,6 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
@@ -68,9 +103,17 @@ jobs:
   publish:
     needs: [deliver, migrate]
     if: >-
-      always() && github.ref == 'refs/heads/main' && needs.deliver.result == 'success' &&
-      ((inputs.stage_prebuilt && needs.migrate.result == 'skipped') ||
-       (!inputs.stage_prebuilt && needs.migrate.result == 'success'))
+      (github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' && github.event.action == 'completed' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_sha == github.sha &&
+        github.event.workflow_run.path == '.github/workflows/ci.yml' &&
+        github.event.workflow_run.repository.id == github.repository_id &&
+        github.event.workflow_run.head_repository.id == github.repository_id))) &&
+      (always() && github.ref == 'refs/heads/main' && needs.deliver.result == 'success' && ((inputs.stage_prebuilt && needs.migrate.result == 'skipped') || (!inputs.stage_prebuilt && needs.migrate.result == 'success')))
     uses: tsilva/.github/.github/workflows/vercel-prebuilt.yml@e11e1d0beb80276055c14630c2bc1e9515a94eaa
     with:
       project_id: prj_wfpyQUxJK3cZKK3UbRmqnCAKfGrs
