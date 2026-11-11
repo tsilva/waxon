@@ -54,16 +54,23 @@ export default function LandingPage() {
         </div>
 
         <figure className="landing-hero-visual">
-          <Image
-            className="landing-hero-image"
-            src="/landing/practice-journal-hero.png"
-            alt="Paper study cards showing a question about the Moon’s phases, an answer in the learner’s own words, helpful Correct feedback, and a scheduled review."
-            width={1342}
-            height={1172}
-            sizes="(max-width: 760px) 100vw, (max-width: 1100px) 62vw, 820px"
-            loading="eager"
-            fetchPriority="high"
-          />
+          <picture>
+            <source
+              type="image/avif"
+              srcSet="/landing/practice-journal-hero-640.ad26af0ef262.avif 640w, /landing/practice-journal-hero-828.00e5f02aabf7.avif 828w, /landing/practice-journal-hero-1342.0e990f995638.avif 1342w"
+              sizes="(max-width: 760px) 100vw, (max-width: 1100px) 62vw, 820px"
+            />
+            <Image
+              className="landing-hero-image"
+              src="/landing/practice-journal-hero.png"
+              alt="Paper study cards showing a question about the Moon’s phases, an answer in the learner’s own words, helpful Correct feedback, and a scheduled review."
+              width={1342}
+              height={1172}
+              sizes="(max-width: 760px) 100vw, (max-width: 1100px) 62vw, 820px"
+              loading="eager"
+              fetchPriority="high"
+            />
+          </picture>
         </figure>
       </section>
 

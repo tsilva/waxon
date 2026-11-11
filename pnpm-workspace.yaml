@@ -5,6 +5,19 @@ minimumReleaseAge: 10080
 blockExoticSubdeps: true
 
 minimumReleaseAgeExclude:
+  # November 2026 security release. Remove this exact group once normally eligible.
+  - '@next/env@16.4.5'
+  - '@next/eslint-plugin-next@16.4.5'
+  - '@next/swc-darwin-arm64@16.4.5'
+  - '@next/swc-darwin-x64@16.4.5'
+  - '@next/swc-linux-arm64-gnu@16.4.5'
+  - '@next/swc-linux-arm64-musl@16.4.5'
+  - '@next/swc-linux-x64-gnu@16.4.5'
+  - '@next/swc-linux-x64-musl@16.4.5'
+  - '@next/swc-win32-arm64-msvc@16.4.5'
+  - '@next/swc-win32-x64-msvc@16.4.5'
+  - 'eslint-config-next@16.4.5'
+  - 'next@16.4.5'
   - source-map-js@1.2.2
   # Exact security patch approved on 2026-10-27.
   - body-parser@2.4.0
@@ -15,7 +28,6 @@ minimumReleaseAgeExclude:
 
 patchedDependencies:
   # Use glob/raw so Sentry loads the patched minimatch outside glob's bundle.
-  '@sentry/bundler-plugin-core@5.3.0': patches/@sentry__bundler-plugin-core@5.3.0.patch
-  '@sentry/bundler-plugins@10.75.3': patches/@sentry__bundler-plugins@10.75.3.patch
+  '@sentry/bundler-plugins@11.8.0': patches/@sentry__bundler-plugins@11.8.0.patch
   # Preserve the legacy default and callable API used by ESLint and filelist.
   minimatch@11.0.1: patches/minimatch@11.0.1.patch

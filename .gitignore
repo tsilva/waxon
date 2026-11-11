@@ -24,3 +24,4 @@ data/questions.sqlite-*
 /.swc
 /INBOX.md
 /.local/repo-inbox/
+/.internal/

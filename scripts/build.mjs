@@ -15,9 +15,14 @@ export function runBuild({
   environment = process.env,
   spawn = spawnSync,
 } = {}) {
+  const githubPrebuilt =
+    environment.GITHUB_ACTIONS === "true" &&
+    environment.VERCEL_ENV === "production" &&
+    environment.VERCEL_DEPLOYMENT_ID?.startsWith("gha-");
   const shouldPrepareDatabase =
-    environment.VERCEL_ENV === "preview" ||
-    environment.VERCEL_ENV === "production";
+    !githubPrebuilt &&
+    (environment.VERCEL_ENV === "preview" ||
+      environment.VERCEL_ENV === "production");
 
   if (shouldPrepareDatabase) {
     const migrationStatus = runCommand(

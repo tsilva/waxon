@@ -40,7 +40,8 @@ The client coalesces changes for 150 ms before refreshing the current Review win
 
 Live integration verification uses an explicitly disposable Neon branch with Realtime enabled and migrations applied. Set that branch's database URL as `WAXON_REALTIME_TEST_DATABASE_URL` and inject its `NEON_REALTIME_URL` and `NEON_REALTIME_SECRET` into `node --import tsx --test tests/review-realtime-db.test.mts`. The test creates and removes its own learners and verifies isolation, bulk writes, evaluation completion, rollback behavior and delta delivery. Never use a production database or a learner bank for this test.
 
-The build script applies migrations when `VERCEL_ENV` is `preview` or `production`, before building Next.js. Setting `WAXON_BACKFILL_SEMANTIC_TAGS=1` also runs the semantic-tag backfill after migrations.
+The hosted build script applies migrations before building Next.js. GitHub prebuilt production delivery runs migrations in a separate job, and its staging runs skip them. Setting `WAXON_BACKFILL_SEMANTIC_TAGS=1` also runs the semantic-tag backfill after migrations.
+
 
 ## Legacy database reset
 

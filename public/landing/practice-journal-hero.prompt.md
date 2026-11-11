@@ -6,6 +6,17 @@ Reference: the approved option 1 landing-page mockup at `/Users/tsilva/.codex/ge
 
 Output: `practice-journal-hero.png`, 1342 × 1172 pixels, PNG with alpha transparency. Card copy and composition were visually inspected.
 
+## Delivery formats
+
+The responsive AVIF delivery files are derived from the original PNG, retaining
+its transparency, framing and text. Regenerate them with
+`node scripts/build-landing-hero.mjs` after a frozen dependency install. The
+script reuses Next.js's locked Sharp encoder at quality 50 and effort 7, at
+640, 828 and 1342 pixels wide. Filenames include the encoded content's SHA-256
+prefix; update the landing page's source set when the output changes. These
+hashed files receive immutable caching. The original PNG remains the
+`next/image` fallback for browsers without AVIF support.
+
 ## Generation prompt
 
 Use case: product-mockup
