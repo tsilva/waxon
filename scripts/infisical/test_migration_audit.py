@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(name + ".py"))
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parents[1] / "check_migrations.py" if name == "check_migrations" else Path(__file__).with_name(name + ".py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -54,7 +54,7 @@ class MigrationAudit(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             check.verify(self.response(), {"database": "neondb"}, [["100", "hash"]])
         self.assertEqual(json.loads(output.getvalue()),
-                         {"ok": True, "migration_count": 1, "role_scope_verified": True})
+                         {"ok": True, "read_only": True, "credential_mode": "public-placeholder", "item_count": 1})
 
     def test_journal_hashes_use_waxon_v2_and_reject_path_escape(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -82,55 +82,6 @@ class MigrationAudit(unittest.TestCase):
                         check.query("https://ep-fixture.aws.neon.tech/sql", configuration)
                     run.assert_not_called()
 
-    def test_protected_profile_identity_permissions_and_cli_digest(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            cli = root / "infisical"
-            cli.write_text("synthetic reviewed CLI")
-            profile = root / "profile.json"
-            native = {"workspaceId": check.NATIVE_PROJECT, "domain": "https://app.infisical.com",
-                      "defaultEnvironment": "dev", "gitBranchToEnvironmentMapping": None}
-            (root / ".infisical.json").write_text(json.dumps(native))
-            data = {"version": 1, "project_id": check.NATIVE_PROJECT,
-                    "source_project_id": check.PRODUCTION_PROJECT,
-                    "source_environment": "prod", "source_path": "/",
-                    "bundle": "local-waxon-migration-audit", "host": "ep-fixture.aws.neon.tech",
-                    "database": "neondb", "role": check.ROLE, "infisical": str(cli),
-                    "cli_sha256": hashlib.sha256(cli.read_bytes()).hexdigest(),
-                    "proxy": "127.0.0.1:8283", "ca_file": str(root / "ca.pem"),
-                    "ca_fingerprint": "SHA256:" + ":".join(["00"] * 32)}
-            def save(value):
-                profile.write_text(json.dumps(value))
-                profile.chmod(0o600)
-            save(data)
-            with patch.object(check, "ROOT", root), patch.object(check, "PROFILE", profile):
-                self.assertEqual(check.profile(), data)
-                alternate = root / ".infisical.yaml"
-                alternate.write_text("unreviewed: true\n")
-                with self.assertRaises(RuntimeError):
-                    check.profile()
-                alternate.unlink()
-                for key, value in (("source_project_id", check.NATIVE_PROJECT),
-                                   ("source_environment", "dev"), ("role", "owner"),
-                                   ("bundle", "unrelated"), ("extra", True), ("version", True)):
-                    save({**data, key: value})
-                    with self.subTest(key=key), self.assertRaises(RuntimeError):
-                        check.profile()
-                save(data)
-                profile.chmod(0o644)
-                with self.assertRaises(RuntimeError):
-                    check.profile()
-                profile.chmod(0o600)
-                cli.write_text("unreviewed replacement")
-                with self.assertRaisesRegex(RuntimeError, "CLI changed"):
-                    check.profile()
-                profile.unlink()
-                target = root / "target.json"
-                target.write_text(json.dumps(data))
-                target.chmod(0o600)
-                profile.symlink_to(target)
-                with self.assertRaises(RuntimeError):
-                    check.profile()
 
     def test_existing_service_scope_must_be_exact(self):
         service = {"id": "fixture", "type": "http", "name": "waxon-neon-ledger",

@@ -4,7 +4,7 @@ Run commands from the repository root. Use Node.js 22.5.0 or newer and pnpm 10.3
 
 ## Configuration
 
-Use `infisical login --domain https://app.infisical.com` and the development project pinned in `.infisical.json` (`waxon`, Development `/`). Application credentials are fetched into memory by `pnpm dev`, `pnpm build:secrets`, and `pnpm start:secrets`:
+Configure the server environment before running the application:
 
 - `DATABASE_URL` and `DATABASE_URL_UNPOOLED`: development database access.
 - `AGENTBRIDGE_API_KEY`: evaluation and embedding requests.
@@ -13,11 +13,11 @@ Use `infisical login --domain https://app.infisical.com` and the development pro
 
 Local builds skip Sentry source-map uploads. Hosted Vercel builds handle uploads.
 
-Keychain originals are retained until migration and rotation are verified. No credentials are written to dotenv files or printed. Missing Infisical values cannot fall back to stale dotenv values. Production is isolated in `waxon-production`, Production `/`, automatically synced to Vercel Production with destination deletion disabled. Redeploy after changes.
+Keep credentials out of logs and committed files. Production is isolated in `waxon-production`, Production `/`, automatically synced to Vercel Production with destination deletion disabled. Redeploy after changes.
 
-The database must support the `vector` and `pg_trgm` extensions, which migrations create. Fresh databases use `pnpm db:migrate:secrets`; databases already using the clean migration history use that same command for subsequent migrations.
+The database must support the `vector` and `pg_trgm` extensions, which migrations create. Fresh databases use `pnpm db:migrate`; databases already using the clean migration history use that same command for subsequent migrations.
 
-The public Clerk key is fetched with its matching private key from Infisical. Optional non-secret overrides may remain in `.env.local`:
+Configure a matching Clerk public/private development key pair. Optional non-secret overrides may remain in `.env.local`:
 
 ```dotenv
 LLM_EVALUATION_MODEL=google/gemini-3.8-flash
@@ -30,7 +30,7 @@ Development uses the configured Tiago test identity unless `NEXT_PUBLIC_WAXON_DI
 
 ## Live Review updates
 
-Enable Realtime on the development Neon branch, apply migrations with `pnpm db:migrate:secrets`, and save its `NEON_REALTIME_URL` and `NEON_REALTIME_SECRET` in Development `/` in the pinned Infisical project. Retrieve credentials in memory using Neon's authenticated tooling; do not use `neon env pull`, which writes a dotenv file. Each environment must use its own branch's credentials. The application launcher injects both variables without printing them or falling back to dotenv values.
+Enable Realtime on the development Neon branch, apply migrations with `pnpm db:migrate`, and configure its `NEON_REALTIME_URL` and server-only `NEON_REALTIME_SECRET`. Each environment must use its own branch's credentials.
 
 Review subscribes to one learner-scoped `review_revisions` row. The server verifies the browser session and seals the fixed SQL query; the browser receives a short-lived capability and the public Realtime URL, never the sealing secret or a database credential. Authorization renewals run about every 50 seconds and reuse the existing subscription; they do not read questions or feedback. Production derives the learner ID directly from the verified Clerk session without loading the display profile from Postgres, so renewal does not keep the database awake. Development resolves the configured test learner through the existing profile cache. Keep capabilities out of logs and persistent storage.
 
@@ -48,7 +48,7 @@ The hosted build script applies migrations before building Next.js. GitHub prebu
 The [clean-break decision](./adr/0001-remove-legacy-source-data-with-a-clean-break.md) removes all legacy Waxon data instead of upgrading it. For an existing installation with the legacy schema, run this destructive replacement once before deploying a build with the clean baseline:
 
 ```bash
-infisical run --env dev --path / -- pnpm db:reset -- --confirm-clean-break
+pnpm db:reset -- --confirm-clean-break
 ```
 
 The reset discards all Waxon data and migration metadata, installs the clean baseline and subsequent migrations, and records the matching Drizzle migration history. It removes Waxon's application schema, migration metadata, and named former Waxon tables in `public`; unrelated `public` objects and extensions remain.
@@ -90,7 +90,7 @@ Export the learner's ID as `WAXON_LEARNER_ID` before benchmarking.
 ```bash
 pnpm question-search:evaluate  # inspect/score the 120-case retrieval fixture
 : "${WAXON_LEARNER_ID:?Set this to the learner ID to benchmark}"
-infisical run --env dev --path / -- pnpm question-search:benchmark -- --user-id="$WAXON_LEARNER_ID"
+pnpm question-search:benchmark -- --user-id="$WAXON_LEARNER_ID"
 ```
 
 Library text search uses weighted full-text and trigram relevance. Related tags and tag-filtered questions use compatible embeddings plus whole-token or consecutive-phrase prompt matches; see the [semantic-tag decision](./adr/0005-retrieve-questions-through-semantic-tags.md) and [lexical-evidence decision](./adr/0006-augment-semantic-tags-with-lexical-evidence.md).
@@ -100,7 +100,7 @@ Library text search uses weighted full-text and trigram relevance. Related tags 
 The [experiment guide](./question-quality-experiment.md) covers full-bank runs, concurrency, resuming, and learner selection. For a two-question pilot and a local report:
 
 ```bash
-infisical run --env dev --path / -- pnpm question-quality:experiment --limit 2
+pnpm question-quality:experiment --limit 2
 pnpm question-quality:report
 ```
 

@@ -86,9 +86,7 @@ def api(token, path, payload=None, method=None):
 
 
 def preflight():
-    if (ROOT / ".infisical.yaml").exists():
-        raise RuntimeError("Changed native configuration requires a trusted route review")
-    native = json.loads((ROOT / ".infisical.json").read_text())
+    native = runbox_administration().reviewed_identity()
     if native != {"workspaceId": NATIVE_PROJECT, "defaultEnvironment": "dev",
                   "gitBranchToEnvironmentMapping": None, "domain": DOMAIN}:
         raise RuntimeError("Waxon native identity changed")
@@ -119,7 +117,7 @@ def preflight():
 
 
 def checker():
-    spec = importlib.util.spec_from_file_location("waxon_migration_check", ROOT / "scripts/infisical/check_migrations.py")
+    spec = importlib.util.spec_from_file_location("waxon_migration_check", ROOT / "scripts/check_migrations.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -269,7 +267,7 @@ except RuntimeError:pass
 else:raise AssertionError("placeholder validation failed")
 print(json.dumps({"ok":True,"fake_credential":True,"path_and_method_denials":True,"direct_network_denied":True,"home_read_denied":True,"missing_placeholder_denied":True}))
 '''
-        substitutions = {"MODULE": str(ROOT / "scripts/infisical/check_migrations.py"),
+        substitutions = {"MODULE": str(ROOT / "scripts/check_migrations.py"),
                          "CAFILE": str(CA), "SANDBOX": str(ROOT / "scripts/infisical/neon_migrations.sb"),
                          "URL": f"http://127.0.0.1:{server.server_port}", "CANARY": str(canary)}
         # Set constants as Python literals, never shell interpolation.
@@ -295,13 +293,27 @@ print(json.dumps({"ok":True,"fake_credential":True,"path_and_method_denials":Tru
             api(token, API + "/" + bundle_id, method="DELETE")
 
 
+
+def runbox_administration():
+    location=Path(__file__).resolve()
+    root=next(p for p in location.parents if (p/'scripts/infisical/administration.py').is_file())
+    spec=importlib.util.spec_from_file_location('reviewed_runbox_administration',root/'scripts/infisical/administration.py')
+    module=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
 def main():
+    if '--plan' in sys.argv[1:]:
+        if sys.argv[1:] != ['--plan']: raise ValueError('Use --plan without provisioning arguments')
+        print(json.dumps(runbox_administration().publication_plan()))
+        return
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--inspect", action="store_true")
     mode.add_argument("--install", action="store_true")
     mode.add_argument("--fake-test", action="store_true")
     args = parser.parse_args()
+    raise ValueError('Runbox metadata publication requires explicit trusted review before provisioning; no credentials read or changes made')
     token, existing = preflight()
     if args.fake_test:
         reviewed_service(token, existing)

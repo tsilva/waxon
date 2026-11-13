@@ -33,17 +33,8 @@ class SecretError(Exception):
 
 
 def configuration(root=ROOT):
-    try:
-        settings = json.loads((root / ".infisical.json").read_text())
-        project = str(UUID(settings["workspaceId"]))
-        domain = settings.get("domain", "https://app.infisical.com")
-        if domain not in ("https://app.infisical.com", "https://eu.infisical.com"):
-            raise ValueError()
-        return project, domain
-    except Exception:
-        raise SecretError(
-            "Run infisical init in this repository and set its US/EU domain in .infisical.json."
-        ) from None
+    # Separate trusted Development administration; never used for app startup.
+    return 'e1b073e7-bd52-46c9-bd69-5241202680ee', "https://app.infisical.com"
 
 
 def cli_environment():
@@ -153,17 +144,3 @@ class Infisical:
 
 def matches(left, right):
     return hmac.compare_digest(left.encode(), right.encode())
-
-
-def application_environment(values):
-    environment = cli_environment()
-    for key in RETIRED_KEYS:
-        environment[key] = ""
-    for key in KEYS:
-        value = values.get(key, "")
-        if "\0" in value:
-            raise SecretError("An application secret contains an invalid null byte.")
-        # Next.js preserves existing process.env entries, including empty ones.
-        # An absent Infisical key must not fall back to an old dotenv credential.
-        environment[key] = value
-    return environment

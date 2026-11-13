@@ -6,11 +6,10 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "dev": "python3 scripts/infisical/run.py dev",
+    "dev": "node scripts/next-server.mjs dev",
     "build": "node scripts/build.mjs",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:check-migrations": "python3 -I scripts/infisical/check_migrations.py",
     "db:reset": "node scripts/reset-v2.mjs",
     "db:studio": "drizzle-kit studio",
     "question-search:evaluate": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/question-search-evaluate.mts",
@@ -26,20 +25,13 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "security:check": "node scripts/check-dependency-sources.mjs && pnpm audit --audit-level=low",
-    "performance:benchmark": "node --import tsx scripts/performance-benchmark.mts",
-    "dev:app": "node scripts/next-server.mjs dev",
-    "build:secrets": "python3 scripts/infisical/run.py build",
-    "start:secrets": "python3 scripts/infisical/run.py start",
-    "db:migrate:secrets": "python3 scripts/infisical/run.py migrate",
-    "secrets:check": "python3 scripts/infisical/run.py check",
-    "test:secrets": "python3 -m unittest discover -s scripts/infisical -p test_secrets.py"
+    "performance:benchmark": "node --import tsx scripts/performance-benchmark.mts"
   },
   "dependencies": {
     "@clerk/nextjs": "7.9.23",
     "@modelcontextprotocol/server": "2.4.0",
     "@sentry/nextjs": "11.8.0",
     "@neon/realtime": "0.1.1",
-
     "@vercel/analytics": "2.0.1",
     "drizzle-orm": "^0.45.4",
     "lucide-react": "^1.66.0",
@@ -82,7 +74,7 @@
       "body-parser@>=2 <2.4.0": "2.4.0",
       "qs@>=6.7.0 <6.16.2": "6.17.0",
       "minimatch@<11.0.1": "11.0.1",
-        "@sentry/bundler-plugins@11.8.0>glob": "14.0.2",
+      "@sentry/bundler-plugins@11.8.0>glob": "14.0.2",
       "glob@14.0.2>path-scurry": "3.0.0",
       "eslint-plugin-react-hooks>zod": "4.6.6"
     }

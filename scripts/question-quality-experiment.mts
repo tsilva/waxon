@@ -14,7 +14,7 @@ const { values } = parseArgs({ options: {
   "apply-flags": { type: "boolean", default: false },
 } });
 const connectionString = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
-if (!connectionString) throw new Error("Run with infisical run --env=dev -- to supply database access.");
+if (!connectionString) throw new Error("Configure DATABASE_URL in the server environment before running this experiment.");
 if (!resolveOpenRouterApiKey()) throw new Error("OpenRouter API key is required.");
 // The production evaluator's trace writer is disabled without DATABASE_URL.
 // Keep database access only in these explicit SQL connections, never in evaluator code.

@@ -25,3 +25,4 @@ data/questions.sqlite-*
 /INBOX.md
 /.local/repo-inbox/
 /.internal/
+/.runbox.yaml

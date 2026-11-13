@@ -52,26 +52,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
-## Secrets
+## Service access
 
-Default dev uses the human Infisical CLI login and fixed development project in `.infisical.json`. Production is isolated in `waxon-production`, Production `/`, synced to Vercel Production. Redeploy after changes. Never print credentials, commit plaintext exports, or run database reset/backfill while verifying a secret migration. Verify production migration history with read-only queries before deploying a build that automatically invokes db:migrate. Keep destructive database tests on explicitly disposable databases. Run `pnpm test:secrets` alongside app checks.
+Normal commands use the configured server environment. Keep credentials server-only and out of logs, browser bundles and committed files. Preserve separate Production delivery and all transport permission checks. Read-only migration audits must inspect only permissions and the migration ledger; never apply migrations or read application rows. Provisioning requires explicit administrative review before credential reads or infrastructure changes.
 
-### Read-only Production migration audit
-
-Use `pnpm db:check-migrations` for the separate Agent Vault bundle
-`local-waxon-migration-audit`, service `waxon-neon-ledger`. It permits only
-`POST /sql` on the reviewed Production Neon endpoint and substitutes the
-`waxon_migration_auditor` connection credential into `Neon-Connection-String`.
-The SQL client receives only `waxon_neon_migration_placeholder` and runs in a
-macOS sandbox restricted to the local proxy and public CA file.
-
-The owner-only local profile is
-`~/.config/infisical/neon-migration-checks/waxon.json`. It binds this repository's
-native Development identity to the separately reviewed Production provenance:
-`waxon-production` (`ad93d013-8087-4bcb-bf12-63ef33e13282`), `prod`, `/`.
-Ordinary audits never read that source's application credential. They read only
-permission metadata and `drizzle.__drizzle_migrations`, comparing timestamps
-and hashes against `drizzle-v2`. Missing bindings, unexpected permissions,
-changed CLI pins, authentication failures and history mismatches stop explicitly.
-Never fall back to application credentials or apply migrations through this route.
-See [the audit guide](docs/production-migration-audit.md) for trusted setup and limits.
+MCP imports require approval of the exact content, duplicate checks and stable idempotency keys. A connection does not authorize importing questions or deleting candidates.

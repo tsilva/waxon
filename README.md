@@ -21,8 +21,7 @@ Use **Library** to manage and find questions through text search and related sub
 git clone https://github.com/tsilva/waxon.git
 cd waxon
 pnpm install --frozen-lockfile
-pnpm secrets:check
-pnpm db:migrate:secrets
+pnpm db:migrate
 pnpm dev --port auto
 ```
 
@@ -76,11 +75,11 @@ Development uses AgentBridge (`AGENTBRIDGE_BASE_URL`, default
 `http://127.0.0.1:8082/api/v1`, and optional `AGENTBRIDGE_API_KEY`).
 Production and Preview call OpenRouter directly using their own server-only
 `OPENROUTER_API_KEY`; a missing production key disables model requests.
-Production credentials come from this app’s isolated Infisical project.
+Production credentials remain isolated from Development and Preview.
 Production text requests use `deepseek/deepseek-v4.1-flash-1017` with low reasoning effort.
 Embedding requests keep their existing models and embedding spaces.
 
-Production secrets are delivered through the pinned shared GitHub Actions workflow. The standalone signed Infisical relay triggers synchronization and deployment; see [production delivery](docs/production-delivery.md) for scope and recovery.
+Production delivery uses the pinned shared GitHub Actions workflow; see [production delivery](docs/production-delivery.md) for scope and recovery.
 
 Production delivery keeps Vercel secret isolation enabled and distinguishes public configuration from private credentials; see [production delivery](docs/production-delivery.md).
 
