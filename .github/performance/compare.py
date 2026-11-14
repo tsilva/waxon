@@ -209,8 +209,63 @@ def response_samples(stage, builds, env, output):
     return results
 
 
+def wait_file(path, process, timeout=30):
+    deadline=time.monotonic()+timeout
+    while not path.exists():
+        if process.poll() is not None:raise RuntimeError('Owned profiler server exited')
+        error=Path(str(path).removesuffix('.ready')+'.error')
+        if error.exists():raise RuntimeError('Owned profiler failed: '+error.read_text()[:1000])
+        if time.monotonic()>deadline:raise RuntimeError('Owned profiler acknowledgement timeout')
+        time.sleep(.01)
+
+
+def profile_command(path, command):
+    pending=Path(str(path)+'.pending')
+    pending.write_text(json.dumps({'command':command}));pending.replace(path)
+
+
+def profile_startup(repo, stage, builds, env, output):
+    """Attribute startup and first-request CPU separately; not comparison timing."""
+    results=[]
+    quiet(output/'quiet-1.json')
+    for index,variant in enumerate(('baseline','candidate','candidate','baseline'),1):
+        artifact=builds[variant];active=stage/'.next';assert not active.exists();artifact.rename(active)
+        prefix=f'profile-{index:02d}-{variant}'
+        control=output/(prefix+'.control');profile=output/(prefix+'.json');log_path=output/(prefix+'.log')
+        target=(stage/'node_modules/next/dist/bin/next').resolve()
+        child_env={**env,'NODE_ENV':'production','NODE_OPTIONS':'--import='+str(repo/'.github/performance/cpu-probe.mjs'),
+                   'WAXON_PROFILE_TARGET':str(target),'WAXON_PROFILE_CONTROL':str(control),'WAXON_PROFILE_OUTPUT':str(profile)}
+        with log_path.open('w') as log:
+            process=subprocess.Popen(['node','scripts/next-server.mjs','start','--port','auto','--hostname','127.0.0.1'],cwd=stage,env=child_env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+            try:
+                deadline=time.monotonic()+30
+                while True:
+                    text=log_path.read_text();match=re.search(r'http://127[.]0[.]0[.]1:(\d+)',text)
+                    if match and 'Ready in' in text:break
+                    if process.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Owned profiler readiness failed')
+                    time.sleep(.01)
+                profile_command(control,'first')
+                wait_file(Path(str(profile)+'.ready'),process)
+                connection=http.client.HTTPConnection('127.0.0.1',int(match.group(1)),timeout=30)
+                before=time.perf_counter();connection.request('GET','/',headers={'Accept':'text/html'})
+                response=connection.getresponse();body=response.read();elapsed=1000*(time.perf_counter()-before);connection.close()
+                assert response.status==200 and b'landing-hero' in body
+                policy={k:response.getheader(k) for k in ('cache-control','x-frame-options','x-content-type-options','referrer-policy','permissions-policy')}
+                profile_command(control,'stop')
+                wait_file(profile,process)
+                parsed=json.loads(profile.read_text());assert [p['phase'] for p in parsed['phases']]==['startup','first']
+                results.append({'variant':variant,'profile':profile.name,'firstDocumentMsWithProfiler':elapsed,'htmlBytes':len(body),'policy':policy})
+            finally:
+                if process.poll() is None:os.killpg(process.pid,signal.SIGTERM)
+                process.wait(timeout=15);active.rename(artifact)
+                for path in (control,Path(str(control)+'.pending'),Path(str(profile)+'.ready')):
+                    path.unlink(missing_ok=True)
+    assert all(row['policy']==results[0]['policy'] for row in results),'Profiled response policy differs'
+    return results
+
+
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--kind',choices=['catalogue','proxy'],required=True);parser.add_argument('--baseline',required=True);parser.add_argument('--output',type=Path,required=True);args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--kind',choices=['catalogue','proxy'],required=True);parser.add_argument('--baseline',required=True);parser.add_argument('--output',type=Path,required=True);parser.add_argument('--profile-startup',action='store_true');args=parser.parse_args()
     assert re.fullmatch(r'[0-9a-f]{40}',args.baseline), 'Baseline must be a full immutable commit SHA'
     if os.environ.get('GITHUB_ACTIONS')!='true':raise SystemExit('Execution is restricted to the reviewed Actions job; local unit/syntax checks do not run benchmarks')
     repo=Path(__file__).resolve().parents[2];out=prepare_output(args.output,Path(os.environ['RUNNER_TEMP']))
@@ -231,7 +286,12 @@ def main():
         run_logged(command,stage,env,out/'candidate-check.log')
         run_logged(['pnpm','build'],stage,env,out/'candidate-build.log');shutil.move(stage/'.next',builds['candidate'])
         report={'kind':args.kind,'baseline':args.baseline,'diagnosticCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=repo,text=True).strip(),'node':subprocess.check_output(['node','--version'],text=True).strip(),'cpus':os.cpu_count(),'payload':{k:payload(v,args.kind) for k,v in builds.items()},'normalLighthouseScores':False,'productionChanged':False,'unchangedMonitoringAndLockHashes':invariants,'monitoring':'Installed SDK with synthetic loopback DSN; production ingestion is not newly certified'}
-        if args.kind=='proxy':
+        if args.profile_startup:
+            assert args.kind=='proxy'
+            report['profiles']=profile_startup(repo,stage,builds,env,out)
+            report['samples']=[]
+            report['timingAcceptance']='CPU attribution only; profiler changes runtime; not new unprofiled performance evidence'
+        elif args.kind=='proxy':
             report['samples']=response_samples(stage,builds,env,out)
             report['verifiedLocalResponsePolicy']=ensure_proxy_policy(report['samples'])
         else:

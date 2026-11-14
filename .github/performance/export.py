@@ -10,7 +10,7 @@ def selected_files(output, extra=None):
     if root.exists():
         for path in sorted(root.iterdir()):
             name=path.name
-            allowed=name in JSON_NAMES or name in LOG_NAMES or name in {'baseline-detail.png','candidate-detail.png'} or re.fullmatch(r'response-[0-9]{2}-(baseline|candidate)[.]log',name)
+            allowed=name in JSON_NAMES or name in LOG_NAMES or name in {'baseline-detail.png','candidate-detail.png'} or re.fullmatch(r'response-[0-9]{2}-(baseline|candidate)[.]log',name) or re.fullmatch(r'profile-0[1-4]-(baseline|candidate)[.](json|log)',name)
             if allowed:
                 assert not path.is_symlink() and stat.S_ISREG(path.stat().st_mode),'Export must be a regular owned result file'
                 assert path.resolve().parent==root

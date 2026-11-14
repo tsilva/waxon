@@ -10,6 +10,9 @@ from unittest.mock import patch
 import http.client
 import base64
 import hashlib
+import gzip
+import subprocess
+import time
 
 export_spec=importlib.util.spec_from_file_location("evidence_export",Path(__file__).with_name("export.py"))
 exporter=importlib.util.module_from_spec(export_spec);export_spec.loader.exec_module(exporter)
@@ -18,6 +21,38 @@ spec=importlib.util.spec_from_file_location("comparison",Path(__file__).with_nam
 comparison=importlib.util.module_from_spec(spec);spec.loader.exec_module(comparison)
 
 class Boundaries(unittest.TestCase):
+    def test_profiler_captures_separate_windows_without_a_debugging_listener(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);script=root/'synthetic.mjs';control=root/'control.json';output=root/'profile.json'
+            script.write_text('''import {existsSync,writeFileSync} from 'node:fs';
+function startupWork(){const end=Date.now()+25;while(Date.now()<end){Math.sqrt(Math.random());}}
+function firstWork(){const end=Date.now()+25;while(Date.now()<end){Math.sqrt(Math.random());}}
+startupWork();writeFileSync(process.env.SYNTHETIC_READY,'ready');
+setInterval(()=>{if(existsSync(process.env.SYNTHETIC_FIRST)&&!existsSync(process.env.SYNTHETIC_DONE)){firstWork();writeFileSync(process.env.SYNTHETIC_DONE,'done');}},10);
+''')
+            env=comparison.clean_environment('http://public@127.0.0.1:1/1')|{'WAXON_PROFILE_TARGET':str(script),'WAXON_PROFILE_CONTROL':str(control),'WAXON_PROFILE_OUTPUT':str(output),'SYNTHETIC_READY':str(root/'ready'),'SYNTHETIC_FIRST':str(root/'first'),'SYNTHETIC_DONE':str(root/'done')}
+            with (root/'node.log').open('w') as log:
+                process=subprocess.Popen(['node','--import',str(Path(__file__).with_name('cpu-probe.mjs')),str(script)],env=env,stdout=log,stderr=subprocess.STDOUT)
+                try:
+                    comparison.wait_file(root/'ready',process,timeout=10)
+                    comparison.profile_command(control,'first');comparison.wait_file(Path(str(output)+'.ready'),process,timeout=10)
+                    (root/'first').write_text('go');comparison.wait_file(root/'done',process,timeout=10)
+                    comparison.profile_command(control,'stop');comparison.wait_file(output,process,timeout=10)
+                    phases=json.loads(output.read_text())['phases'];self.assertEqual([p['phase'] for p in phases],['startup','first'])
+                    for phase,expected in zip(phases,['startupWork','firstWork']):
+                        raw=gzip.decompress(base64.b64decode(phase['gzipBase64']));self.assertEqual(len(raw),phase['bytes']);self.assertEqual(hashlib.sha256(raw).hexdigest(),phase['sha256'])
+                        profile=json.loads(raw);self.assertTrue(profile['samples']);self.assertEqual(len(profile['samples']),len(profile['timeDeltas']))
+                        self.assertIn(expected,[n['callFrame']['functionName'] for n in profile['nodes']])
+                finally:
+                    process.terminate();process.wait(timeout=10)
+            self.assertNotIn('Debugger listening',(root/'node.log').read_text())
+
+    def test_profile_exports_exclude_control_and_partial_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            for name in ['profile-01-baseline.json','profile-02-candidate.log','profile-01-baseline.control','profile-01-baseline.json.tmp','profile-01-baseline.json.ready','profile-05-baseline.json']:(root/name).write_text('{}')
+            self.assertEqual([p.name for p in exporter.selected_files(root)],['profile-01-baseline.json','profile-02-candidate.log'])
+
     def test_child_environment_excludes_live_credentials(self):
         with patch.dict(os.environ,{"PATH":"/tools","HOME":"/runner","SENTRY_AUTH_TOKEN":"synthetic-forbidden","DATABASE_URL":"synthetic-forbidden","GITHUB_TOKEN":"synthetic-forbidden"},clear=True):
             result=comparison.clean_environment("http://public@127.0.0.1:1/1")
