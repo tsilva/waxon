@@ -15,5 +15,18 @@
       "npm:@next/swc-linux-arm64-musl@16.4.5#age": "Audited Next.js 16.4.5 security release (vercel/next.js@4e5335a). Verified signed registry archives and source provenance. Remove the temporary release exceptions after 2026-11-10 18:01:54 UTC.",
       "npm:@next/swc-win32-arm64-msvc@16.4.5#age": "Audited Next.js 16.4.5 security release (vercel/next.js@4e5335a). Verified signed registry archives and source provenance. Remove the temporary release exceptions after 2026-11-10 18:01:54 UTC."
     }
+  },
+  "websites": {
+    "waxon.tsilva.eu": {
+      "url": "https://waxon.tsilva.eu/",
+      "availability": "reachable",
+      "ga4": "tag-detected",
+      "sentry": "source-detected",
+      "checked-on": "2026-11-03",
+      "ga4-expectation": "required",
+      "ga4-verification-path": "/",
+      "sentry-expectation": "required",
+      "sentry-verification-path": "/"
+    }
   }
 }
