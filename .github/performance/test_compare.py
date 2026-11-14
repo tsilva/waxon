@@ -8,6 +8,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import http.client
+import base64
+import hashlib
+
+export_spec=importlib.util.spec_from_file_location("evidence_export",Path(__file__).with_name("export.py"))
+exporter=importlib.util.module_from_spec(export_spec);export_spec.loader.exec_module(exporter)
 
 spec=importlib.util.spec_from_file_location("comparison",Path(__file__).with_name("compare.py"))
 comparison=importlib.util.module_from_spec(spec);spec.loader.exec_module(comparison)
@@ -71,6 +76,25 @@ class Boundaries(unittest.TestCase):
         self.assertEqual(comparison.ensure_proxy_policy(samples),{'x-content-type-options':'nosniff'})
         samples[1]['measurements'][0]['policy']['x-content-type-options']=None
         with self.assertRaisesRegex(AssertionError,'policy changed'):comparison.ensure_proxy_policy(samples)
+
+    def test_evidence_export_excludes_sources_and_unknown_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);(root/'result.json').write_text('{"synthetic":true}');(root/'.env').write_text('synthetic-private');(root/'stage').mkdir();(root/'stage/result.json').write_text('not an export')
+            self.assertEqual([p.name for p in exporter.selected_files(root)],['result.json'])
+
+    def test_evidence_export_rejects_symlinks_and_oversized_logs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);output=root/'out';output.mkdir();(root/'outside').write_text('synthetic-private');(output/'result.json').symlink_to(root/'outside')
+            with self.assertRaises(AssertionError):exporter.selected_files(output)
+            (output/'result.json').unlink();(output/'install.log').write_bytes(b'x'*1000001)
+            with self.assertRaisesRegex(AssertionError,'bound'):exporter.selected_files(output)
+
+    def test_evidence_frames_round_trip_with_integrity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'candidate-detail.png';data=bytes(range(256))*40;path.write_bytes(data);frames=list(exporter.frames(path));start=json.loads(frames[0].split(' ',1)[1]);chunks=[json.loads(x.split(' ',1)[1]) for x in frames[1:-1]]
+            self.assertEqual([c['offset'] for c in chunks],list(range(0,len(data),3072)))
+            self.assertEqual(b''.join(base64.b64decode(c['data']) for c in chunks),data)
+            self.assertEqual(start['sha256'],hashlib.sha256(data).hexdigest())
 
     def test_counter_only_collector_accepts_chunked_envelopes(self):
         with tempfile.TemporaryDirectory() as temporary:

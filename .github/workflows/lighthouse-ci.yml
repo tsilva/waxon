@@ -33,15 +33,6 @@ jobs:
         run: python3 -B -m unittest discover -s .github/performance -p test_compare.py
       - name: Compare the frozen baseline and candidate
         run: python3 .github/performance/compare.py --kind proxy --baseline b1b9fcf24581e945940c5be153496562df0d9cec --output "$RUNNER_TEMP/lighthouse-comparison"
-      - name: Retain bounded diagnostic evidence
+      - name: Export bounded diagnostic evidence through native job logs
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: startup-comparison
-          path: |
-            ${{ runner.temp }}/lighthouse-comparison/*.json
-            ${{ runner.temp }}/lighthouse-comparison/*.log
-            ${{ runner.temp }}/lighthouse-comparison/*.png
-          retention-days: 7
-          if-no-files-found: error
-          include-hidden-files: false
+        run: python3 .github/performance/export.py --output "$RUNNER_TEMP/lighthouse-comparison"

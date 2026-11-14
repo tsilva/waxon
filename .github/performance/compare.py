@@ -251,7 +251,7 @@ def main():
                     report['payload'][variant]['jsGzipThroughDetail']=sum(len(gzip.compress((build/u.removeprefix('/_next/')).read_bytes(),mtime=0)) for u in paths)
             finally:
                 for s in servers.values():s.shutdown();s.server_close()
-        (out/'result.json').write_text(json.dumps(report,indent=2)+'\n');print('COMPARISON_RESULT '+json.dumps(report,separators=(',',':')))
+        (out/'result.json').write_text(json.dumps(report,indent=2)+'\n');print('COMPARISON_COMPLETE '+json.dumps({'kind':args.kind,'samples':len(report['samples'])}))
     finally:
         server.shutdown();server.server_close()
         # Artifacts contain only results and bounded synthetic logs, never installs/builds.
