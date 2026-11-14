@@ -21,6 +21,19 @@ spec=importlib.util.spec_from_file_location("comparison",Path(__file__).with_nam
 comparison=importlib.util.module_from_spec(spec);spec.loader.exec_module(comparison)
 
 class Boundaries(unittest.TestCase):
+    def test_proxy_homepage_uses_root_route_artifact_and_never_infers_dynamic_from_absence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary)
+            missing=comparison.payload(root,'proxy')
+            self.assertIn('no static/dynamic classification inferred',missing['note'])
+            (root/'server/app').mkdir(parents=True);(root/'static/chunks').mkdir(parents=True)
+            html=b'<html><script src="/_next/static/chunks/root.js"></script></html>'
+            (root/'server/app/index.html').write_bytes(html);(root/'static/chunks/root.js').write_bytes(b'console.log("synthetic root route")')
+            result=comparison.payload(root,'proxy')
+            self.assertEqual(result['htmlGzip'],len(gzip.compress(html,mtime=0)))
+            self.assertEqual(len(result['assets']),1)
+            self.assertEqual(result['assets'][0]['url'],'/_next/static/chunks/root.js')
+
     def test_profiler_captures_separate_windows_without_a_debugging_listener(self):
         with tempfile.TemporaryDirectory() as temporary:
             root=Path(temporary);script=root/'synthetic.mjs';control=root/'control.json';output=root/'profile.json'

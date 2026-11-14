@@ -99,8 +99,8 @@ def run_logged(command, stage, env, path):
 
 
 def payload(build, kind):
-    page = build / ('server/app/index.html' if kind == 'catalogue' else 'server/app/landing.html')
-    if not page.exists(): return {'note':'Dynamic homepage; response bytes are measured per request'}
+    page = build / 'server/app/index.html'
+    if not page.exists(): return {'note':'Homepage HTML artifact unavailable; no static/dynamic classification inferred'}
     html = page.read_bytes(); assets = sorted(set(re.findall(rb'(?:src|href)="(/_next/static/[^"?]+)',html)))
     rows = []
     for raw in assets:
