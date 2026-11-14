@@ -1,19 +1,47 @@
-name: Lighthouse CI
+name: Lighthouse comparison
 
 on:
-  push:
-    branches: ["main"]
   workflow_dispatch:
 
-permissions: {}
+permissions:
+  contents: read
 
 concurrency:
-  group: lighthouse-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: lighthouse-comparison-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  audit:
-    uses: tsilva/.github/.github/workflows/lighthouse-ci.yml@1eb40277dd97b1c617d4ae53aef7bf21f5dd1dd3
-    with:
-      url: "https://waxon.tsilva.eu/"
-      sample_timings: true
+  compare:
+    if: github.repository == 'tsilva/waxon' && github.ref == 'refs/heads/codex/lighthouse-comparison-20261114'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413
+        with:
+          version: 10.33.0
+          run_install: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Test comparison boundaries
+        run: python3 -B -m unittest discover -s .github/performance -p test_compare.py
+      - name: Compare the frozen baseline and candidate
+        run: python3 .github/performance/compare.py --kind proxy --baseline b1b9fcf24581e945940c5be153496562df0d9cec --output "$RUNNER_TEMP/lighthouse-comparison"
+      - name: Retain bounded diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: startup-comparison
+          path: |
+            ${{ runner.temp }}/lighthouse-comparison/*.json
+            ${{ runner.temp }}/lighthouse-comparison/*.log
+            ${{ runner.temp }}/lighthouse-comparison/*.png
+          retention-days: 7
+          if-no-files-found: error
+          include-hidden-files: false

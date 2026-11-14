@@ -1,0 +1,379 @@
+--- a/proxy.ts
++++ b/proxy.ts
+@@ -1,38 +1,9 @@
+-import {
+-  clerkMiddleware,
+-  createRouteMatcher,
+-} from "@clerk/nextjs/server";
+ import { NextResponse } from "next/server";
+ import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
++import { isProtectedRoute, isMcpRoute, isPublicStaticPage, isPublicAppShellRoute } from "@/app/lib/proxyRouteMatchers";
+ 
+-const isProtectedRoute = createRouteMatcher([
+-  "/admin(.*)",
+-  "/api(.*)",
+-]);
+-
+-const isMcpRoute = createRouteMatcher(["/api/mcp(.*)"]);
+-
+-const isPublicStaticPage = createRouteMatcher([
+-  "/",
+-  "/privacy-policy",
+-  "/robots.txt",
+-  "/sitemap.xml",
+-  "/terms-and-conditions",
+-]);
+-
+-const isPublicAppShellRoute = createRouteMatcher([
+-  "/library(.*)",
+-  "/review(.*)",
+-]);
+-
+-const handleClerkMiddleware = clerkMiddleware(async (auth, request) => {
+-  if (isProtectedRoute(request) && !isLocalTestAuthEnabled()) {
+-    await auth.protect();
+-  }
+-});
+-
+-export default function proxy(
+-  ...args: Parameters<typeof handleClerkMiddleware>
++export default async function proxy(
++  ...args: Parameters<typeof import("./app/lib/clerkProxy").handleClerkMiddleware>
+ ) {
+   const [request] = args;
+ 
+@@ -59,6 +30,7 @@
+     return NextResponse.next();
+   }
+ 
++  const { handleClerkMiddleware } = await import("./app/lib/clerkProxy");
+   return handleClerkMiddleware(...args);
+ }
+ 
+--- /dev/null
++++ b/app/lib/proxyRouteMatchers.ts
+@@ -0,0 +1,22 @@
++import { createRouteMatcher } from "@clerk/nextjs/server";
++
++export const isProtectedRoute = createRouteMatcher([
++  "/admin(.*)",
++  "/api(.*)",
++]);
++
++export const isMcpRoute = createRouteMatcher(["/api/mcp(.*)"]);
++
++export const isPublicStaticPage = createRouteMatcher([
++  "/",
++  "/privacy-policy",
++  "/robots.txt",
++  "/sitemap.xml",
++  "/terms-and-conditions",
++]);
++
++export const isPublicAppShellRoute = createRouteMatcher([
++  "/library(.*)",
++  "/review(.*)",
++]);
++
+--- /dev/null
++++ b/app/lib/clerkProxy.ts
+@@ -0,0 +1,9 @@
++import { clerkMiddleware } from "@clerk/nextjs/server";
++import { isLocalTestAuthEnabled } from "./localTestAuth";
++import { isProtectedRoute } from "./proxyRouteMatchers";
++
++export const handleClerkMiddleware = clerkMiddleware(async (auth, request) => {
++  if (isProtectedRoute(request) && !isLocalTestAuthEnabled()) {
++    await auth.protect();
++  }
++});
+--- /dev/null
++++ b/tests/proxy-startup.test.mts
+@@ -0,0 +1,20 @@
++import assert from "node:assert/strict";
++import { spawnSync } from "node:child_process";
++import { fileURLToPath } from "node:url";
++import test from "node:test";
++
++const root = fileURLToPath(new URL("..", import.meta.url));
++
++test("lazy proxy preserves route policy, real SDK verification and request identity", () => {
++  const allowed = new Set(["PATH", "HOME", "TMPDIR", "USER", "LANG", "TERM"]);
++  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed.has(key)));
++  const result = spawnSync(process.execPath, ["--experimental-vm-modules", "tests/fixtures/check-proxy-auth.mjs"], {
++    cwd: root, env: { ...environment, NODE_ENV: "test" }, encoding: "utf8", timeout: 30_000,
++  });
++  assert.equal(result.error, undefined);
++  assert.equal(result.status, 0, result.stderr || result.stdout);
++  const lastLine = result.stdout.trim().split("\n").at(-1);
++  assert.deepEqual(JSON.parse(lastLine ?? "{}"), {
++    policyCases: 648, sdkCases: 15, parallelIdentityIsolation: true, publicInitialization: false,
++  });
++});
+--- /dev/null
++++ b/tests/fixtures/check-proxy-auth.mjs
+@@ -0,0 +1,123 @@
++import assert from "node:assert/strict";
++import { generateKeyPairSync, sign } from "node:crypto";
++import { createRequire } from "node:module";
++import path from "node:path";
++import { loadProxy } from "./proxy-fixture-loader.mjs";
++
++const root = process.cwd();
++const require = createRequire(path.join(root, "package.json"));
++const { NextRequest, NextResponse } = require("next/server");
++const blockedNetwork = [];
++globalThis.fetch = async () => {
++  blockedNetwork.push(true);
++  throw new Error("Synthetic auth fixture blocks upstream requests");
++};
++// These are public placeholders. Signing keys and tokens exist only in memory.
++process.env.CLERK_SECRET_KEY = "sk_test_fixture";
++process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_test_ZnJvbnRlbmQuZXhhbXBsZS5jb20k";
++const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
++const jwtKey = publicKey.export({ type: "spki", format: "pem" });
++process.env.CLERK_JWT_KEY = jwtKey;
++const { clerkMiddleware } = require("@clerk/nextjs/server");
++const silent = () => {};
++console.warn = silent;
++console.error = silent;
++const event = { waitUntil() {}, sourcePage: "proxy" };
++function policyMiddleware(callback, stats) {
++  return async (request) => {
++    stats.delegations++;
++    const auth = Object.assign(async () => ({}), { protect: async () => {
++      stats.protects++;
++      if (request.headers.get("x-fixture-auth") !== "valid") {
++        throw Object.assign(new Error("fixture unauthorized"), { status: 401 });
++      }
++    } });
++    await callback(auth, request, event);
++    return NextResponse.next();
++  };
++}
++async function policyResult(implementation, pathname, method, cookie, valid) {
++  const before = { ...implementation.stats };
++  const request = new NextRequest("https://waxon.invalid" + pathname, { method, headers: {
++    ...(cookie ? { cookie: "__session=fixture-invalid-session" } : {}),
++    ...(valid ? { "x-fixture-auth": "valid" } : {}),
++  } });
++  let response;
++  try {
++    const result = await implementation.proxy(request, event);
++    response = { status: result?.status, location: result?.headers.get("location"), next: result?.headers.get("x-middleware-next") };
++  } catch (error) { response = { error: error.message, status: error.status }; }
++  return { ...response, delegations: implementation.stats.delegations - before.delegations, protects: implementation.stats.protects - before.protects };
++}
++const paths = ["/", "/?q=x", "/privacy-policy", "/privacy-policy/", "/robots.txt", "/sitemap.xml", "/terms-and-conditions", "/library", "/library/nested", "/libraryish", "/review", "/review/nested", "/reviewer", "/admin", "/admin/trace", "/administrator", "/api", "/api/v2/settings", "/api/mcp", "/api/mcp/nested", "/api/mcpx", "/sign-in", "/sign-up", "/__clerk", "/trpc", "/%61dmin", "/api%2fv2/settings"];
++let policyCases = 0;
++for (const localTest of [false, true]) {
++  const baseline = await loadProxy({ root, baseline: true, localTest, makeMiddleware: policyMiddleware });
++  const candidate = await loadProxy({ root, localTest, makeMiddleware: policyMiddleware });
++  assert.deepEqual(JSON.parse(JSON.stringify(candidate.config)), JSON.parse(JSON.stringify(baseline.config)));
++  assert.equal(candidate.stats.factories, 0);
++  for (const pathname of paths) for (const method of ["GET", "POST", "OPTIONS"]) for (const cookie of [false, true]) for (const valid of [false, true]) {
++    const args = [pathname, method, cookie, valid];
++    assert.deepEqual(await policyResult(candidate, ...args), await policyResult(baseline, ...args), JSON.stringify({ localTest, pathname, method, cookie, valid }));
++    policyCases++;
++  }
++  assert.equal(candidate.stats.factories, 1);
++}
++const publicOnly = await loadProxy({ root, makeMiddleware: policyMiddleware });
++for (const pathname of ["/", "/privacy-policy", "/robots.txt", "/sitemap.xml", "/terms-and-conditions", "/library", "/review", "/api/mcp"]) {
++  await publicOnly.proxy(new NextRequest("https://waxon.invalid" + pathname), event);
++}
++assert.equal(publicOnly.stats.factories, 0);
++assert.equal(publicOnly.stats.dynamicImports, 0);
++
++function token(user, expired = false, forged = false) {
++  const now = Math.floor(Date.now() / 1000);
++  const header = { alg: "RS256", typ: "JWT", kid: "fixture-rsa" };
++  const payload = { iss: "https://frontend.example.com", sub: user, sid: "sess_fixture", azp: "https://waxon.invalid", iat: now - 60, nbf: now - 60, exp: expired ? now - 10 : now + 300, v: 2, fva: [1, -1] };
++  const data = [header, payload].map((item) => Buffer.from(JSON.stringify(item)).toString("base64url")).join(".");
++  return data + "." + (forged ? Buffer.alloc(256).toString("base64url") : sign("RSA-SHA256", Buffer.from(data), privateKey).toString("base64url"));
++}
++function sdkMiddleware(callback, stats) {
++  return clerkMiddleware(async (auth, request, sdkEvent) => {
++    stats.users.set(request, (await auth()).userId);
++    return callback(auth, request, sdkEvent);
++  }, { jwtKey, authorizedParties: ["https://waxon.invalid"], clockSkewInMs: 0 });
++}
++const cases = [
++  { label: "anonymous", jwt: null, user: null },
++  { label: "valid-A", jwt: token("user_fixture_a"), user: "user_fixture_a" },
++  { label: "valid-B", jwt: token("user_fixture_b"), user: "user_fixture_b" },
++  { label: "expired", jwt: token("user_fixture_a", true), user: null },
++  { label: "forged", jwt: token("user_fixture_a", false, true), user: null },
++];
++async function sdkResult(implementation, pathname, item) {
++  const request = new NextRequest("https://waxon.invalid" + pathname, { headers: {
++    accept: "application/json", ...(item.jwt ? { authorization: "Bearer " + item.jwt } : {}),
++  } });
++  const result = await implementation.proxy(request, event);
++  const rewrite = result?.headers.get("x-middleware-rewrite");
++  const location = result?.headers.get("location");
++  return { status: result?.status, next: result?.headers.get("x-middleware-next"),
++    rewrite: rewrite ? new URL(rewrite, request.url).pathname : null,
++    location: location ? new URL(location, request.url).pathname : null,
++    user: implementation.stats.users.get(request) ?? null };
++}
++const baseline = await loadProxy({ root, baseline: true, makeMiddleware: sdkMiddleware });
++const candidate = await loadProxy({ root, makeMiddleware: sdkMiddleware });
++let sdkCases = 0;
++for (const pathname of ["/api/v2/settings", "/admin", "/sign-in"]) for (const item of cases) {
++  const a = await sdkResult(baseline, pathname, item);
++  const b = await sdkResult(candidate, pathname, item);
++  const normalize = (result) => ({ ...result, rewrite: result.rewrite?.replace(/^\/clerk_\d+$/, "/clerk_[generated]") ?? null });
++  assert.deepEqual(normalize(b), normalize(a), pathname + " " + item.label);
++  assert.equal(b.user, item.user);
++  if (pathname !== "/sign-in") {
++    assert.equal(b.next === "1" || b.rewrite === pathname, Boolean(item.user), pathname + " " + item.label);
++  }
++  sdkCases++;
++}
++const parallelItems = [cases[1], cases[2], cases[0], cases[1], cases[2], cases[4]];
++const parallel = await Promise.all(parallelItems.map((item) => sdkResult(candidate, "/api/v2/settings", item)));
++assert.deepEqual(parallel.map((item) => item.user), parallelItems.map((item) => item.user));
++assert.equal(blockedNetwork.length, 0);
++console.log(JSON.stringify({ policyCases, sdkCases, parallelIdentityIsolation: true, publicInitialization: false }));
+--- /dev/null
++++ b/tests/fixtures/proxy-before-lazy.ts
+@@ -0,0 +1,72 @@
++// Frozen pre-split behavior for comparative route-policy regression checks.
++import {
++  clerkMiddleware,
++  createRouteMatcher,
++} from "@clerk/nextjs/server";
++import { NextResponse } from "next/server";
++import { isLocalTestAuthEnabled } from "@/app/lib/localTestAuth";
++
++const isProtectedRoute = createRouteMatcher([
++  "/admin(.*)",
++  "/api(.*)",
++]);
++
++const isMcpRoute = createRouteMatcher(["/api/mcp(.*)"]);
++
++const isPublicStaticPage = createRouteMatcher([
++  "/",
++  "/privacy-policy",
++  "/robots.txt",
++  "/sitemap.xml",
++  "/terms-and-conditions",
++]);
++
++const isPublicAppShellRoute = createRouteMatcher([
++  "/library(.*)",
++  "/review(.*)",
++]);
++
++const handleClerkMiddleware = clerkMiddleware(async (auth, request) => {
++  if (isProtectedRoute(request) && !isLocalTestAuthEnabled()) {
++    await auth.protect();
++  }
++});
++
++export default function proxy(
++  ...args: Parameters<typeof handleClerkMiddleware>
++) {
++  const [request] = args;
++
++  if (request.nextUrl.pathname === "/") {
++    if (isLocalTestAuthEnabled()) {
++      return NextResponse.redirect(new URL("/review", request.url));
++    }
++
++    if (request.cookies.has("__session")) {
++      return NextResponse.redirect(new URL("/review", request.url));
++    }
++  }
++
++  if (isPublicStaticPage(request) || isPublicAppShellRoute(request)) {
++    return NextResponse.next();
++  }
++
++  // MCP uses its own revocable bearer credential instead of a browser session.
++  if (isMcpRoute(request)) {
++    return NextResponse.next();
++  }
++
++  if (isLocalTestAuthEnabled() && isProtectedRoute(request)) {
++    return NextResponse.next();
++  }
++
++  return handleClerkMiddleware(...args);
++}
++
++export const config = {
++  matcher: [
++    "/((?!_next|\\.well-known/workflow/|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|avif|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
++    "/__clerk/:path*",
++    "/(api|trpc)(.*)",
++  ],
++};
+--- /dev/null
++++ b/tests/fixtures/proxy-fixture-loader.mjs
+@@ -0,0 +1,63 @@
++import fs from "node:fs/promises";
++import path from "node:path";
++import vm from "node:vm";
++import { createRequire } from "node:module";
++
++// VM modules let these checks observe lazy initialization without changing the SDK.
++export async function loadProxy({ root, baseline = false, localTest = false, makeMiddleware }) {
++  const require = createRequire(path.join(root, "package.json"));
++  const ts = require("typescript");
++  const { NextResponse } = require("next/server");
++  const { createRouteMatcher } = require("@clerk/nextjs/server");
++  const context = vm.createContext({ URL, console });
++  const stats = { factories: 0, delegations: 0, protects: 0, dynamicImports: 0, users: new WeakMap() };
++  const cache = new Map();
++  function synthetic(key, exports) {
++    const mod = new vm.SyntheticModule(Object.keys(exports), function () {
++      for (const [name, value] of Object.entries(exports)) this.setExport(name, value);
++    }, { context, identifier: key });
++    return mod;
++  }
++  const clerk = synthetic("clerk", {
++    createRouteMatcher,
++    clerkMiddleware(callback) {
++      stats.factories++;
++      return makeMiddleware(callback, stats);
++    },
++  });
++  const next = synthetic("next", { NextResponse });
++  const local = synthetic("local", { isLocalTestAuthEnabled: () => localTest });
++  async function resolve(spec, parent) {
++    if (spec === "@clerk/nextjs/server") return clerk;
++    if (spec === "next/server") return next;
++    if (spec.endsWith("localTestAuth")) return local;
++    const file = spec.startsWith("@/")
++      ? path.join(root, spec.slice(2) + ".ts")
++      : path.resolve(path.dirname(parent.identifier), spec + ".ts");
++    return fileModule(file);
++  }
++  async function fileModule(file) {
++    if (cache.has(file)) return cache.get(file);
++    const source = await fs.readFile(file, "utf8");
++    const code = ts.transpileModule(source, { compilerOptions: {
++      module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022,
++    } }).outputText;
++    const mod = new vm.SourceTextModule(code, {
++      context, identifier: file,
++      importModuleDynamically: async (spec, parent) => {
++        stats.dynamicImports++;
++        const child = await resolve(spec, parent);
++        if (child.status === "unlinked") await child.link(resolve);
++        if (child.status === "linked") await child.evaluate();
++        return child;
++      },
++    });
++    cache.set(file, mod);
++    await mod.link(resolve);
++    return mod;
++  }
++  const entry = baseline ? "tests/fixtures/proxy-before-lazy.ts" : "proxy.ts";
++  const mod = await fileModule(path.join(root, entry));
++  await mod.evaluate();
++  return { proxy: mod.namespace.default, config: mod.namespace.config, stats };
++}
