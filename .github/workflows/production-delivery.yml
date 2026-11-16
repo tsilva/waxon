@@ -114,7 +114,7 @@ jobs:
         github.event.workflow_run.repository.id == github.repository_id &&
         github.event.workflow_run.head_repository.id == github.repository_id))) &&
       (always() && github.ref == 'refs/heads/main' && needs.deliver.result == 'success' && ((inputs.stage_prebuilt && needs.migrate.result == 'skipped') || (!inputs.stage_prebuilt && needs.migrate.result == 'success')))
-    uses: tsilva/.github/.github/workflows/vercel-prebuilt.yml@e11e1d0beb80276055c14630c2bc1e9515a94eaa
+    uses: tsilva/.github/.github/workflows/vercel-prebuilt.yml@a20dac1368cedf94bf81e0af5eb38f844a924240
     with:
       project_id: prj_wfpyQUxJK3cZKK3UbRmqnCAKfGrs
       project_name: waxon
