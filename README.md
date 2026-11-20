@@ -11,77 +11,24 @@
   <a href="https://github.com/tsilva/waxon/blob/main/package.json"><img src="https://img.shields.io/badge/node-%E2%89%A522.5.0-blue" alt="Node.js 22.5.0 or newer" /></a>
 </p>
 
-Waxon is a web app for learners who want to remember what they study. Add questions and answer standards to your private question bank, then practice answering from memory in your own words. Waxon evaluates each answer and schedules future reviews from your recall history.
+Waxon helps you remember what you study. Keep a private bank of questions and
+answer from memory in your own words. Feedback and recall history determine
+when each question comes up for review again.
 
-Use **Library** to manage and find questions through text search and related subject tags. Open **Review** to practice due questions, read feedback, and correct an evaluation when needed. You can also authorize an agent to search and add questions through MCP.
+## Try it
 
-## Install
+Open [Waxon](https://waxon.tsilva.eu), sign in, and add a question and answer
+standard in **Library**. Open **Review** to answer due questions and read the
+feedback. You can correct an evaluation from the review flow.
 
-```bash
-git clone https://github.com/tsilva/waxon.git
-cd waxon
-pnpm install --frozen-lockfile
-pnpm db:migrate
-pnpm dev --port auto
-```
-
-Open the local URL printed by the server. Development uses the configured test learner by default; production sign-in uses Clerk.
-
-For installations that still use the legacy schema, read the [destructive clean-break procedure](./docs/local-development.md#legacy-database-reset) before migrating or deploying.
-
-## Commands
-
-```bash
-pnpm dev --port auto  # start development on an available port
-pnpm test            # run tests; database suites need test URLs
-pnpm lint            # run ESLint
-pnpm typecheck       # check TypeScript
-pnpm build           # create a production build
-pnpm start --port auto  # serve the production build
-pnpm db:migrate      # apply database migrations
-pnpm db:studio       # open Drizzle Studio
-pnpm security:check  # check dependency sources and audit packages
-```
-
-See the [local setup guide](./docs/local-development.md#verification) for database-backed verification, browser acceptance, and retrieval tools. The [question quality experiment](./docs/question-quality-experiment.md) tests questions with model answers without writing learning history.
-
-## MCP
-
-In Library, open **Agent access**, create a personal token, and copy it immediately. Configure your MCP client with the remote Streamable HTTP endpoint and bearer header:
-
-```text
-https://<your-waxon-host>/api/mcp
-Authorization: Bearer waxon_mcp_...
-```
-
-The tools are `search_questions`, pre-add `check_questions`, and `add_questions`. Access is limited to your private bank and uses the same validation and duplicate prevention as the app. Waxon stores only the token's SHA-256 hash; rotating it invalidates the previous value, and revoking it leaves browser sessions intact.
-
-## Notes
-
-The public sitemap and canonical metadata use `https://waxon.tsilva.eu` by default. Set `NEXT_PUBLIC_SITE_URL` when hosting on a different origin.
-
-- Questions contain a standalone prompt and answer standard. Editing creates a new question with reset mastery and archives the original with its history.
-- Active questions enter Review; Flagged and Archived questions stay out until restored. New Active questions are due immediately, and missed questions return the same day.
-- Tags describe subject matter. Relatedness comes from compatible embeddings and prompt matches; rebuildable indexes or caches may accelerate retrieval without changing discovery behavior. Tags do not change review scheduling. Adding questions does not require embeddings or a model call.
-- Review evaluates free-text answers through OpenRouter in production and AgentBridge in development. Feedback explains what you got right and what needs work; evaluation corrections rebuild scheduling while preserving the original evidence.
-- Review uses Neon Realtime for committed changes instead of polling for feedback or queue updates. See [live update setup](docs/local-development.md#live-review-updates).
-- Built with Next.js, React, TypeScript, Drizzle, PostgreSQL, and FSRS scheduling. Admin provides model traces, latency, token use, and cost.
-- No license is currently declared.
-
-
-## Model routing
-
-Development uses AgentBridge (`AGENTBRIDGE_BASE_URL`, default
-`http://127.0.0.1:8082/api/v1`, and optional `AGENTBRIDGE_API_KEY`).
-Production and Preview call OpenRouter directly using their own server-only
-`OPENROUTER_API_KEY`; a missing production key disables model requests.
-Production credentials remain isolated from Development and Preview.
-Production text requests use `deepseek/deepseek-v4.1-flash-1017` with low reasoning effort.
-Embedding requests keep their existing models and embedding spaces.
-
-Production delivery uses the pinned shared GitHub Actions workflow; see [production delivery](docs/production-delivery.md) for scope and recovery.
-
-Production delivery keeps Vercel secret isolation enabled and distinguishes public configuration from private credentials; see [production delivery](docs/production-delivery.md).
+- [Local development](docs/local-development.md) covers installation,
+  database setup, and checks. Existing legacy databases require the
+  [separate reset procedure](docs/local-development.md#legacy-database-reset).
+- [Agent access](docs/agent-access.md) covers searching and adding questions
+  through MCP.
+- [Question quality](reference/question-quality.md) explains how to write
+  a question and answer standard.
+- [Production delivery](docs/production-delivery.md) covers deployment.
 
 ## License
 
