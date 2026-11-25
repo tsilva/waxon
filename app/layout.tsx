@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
-import { Analytics } from "@vercel/analytics/next";
 import { getSiteUrl } from "./site-url";
 import "./globals.css";
 const googleAnalyticsId = process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_ID;
@@ -84,7 +83,6 @@ export default function RootLayout({
       </head>
       <body>
         {children}
-        <Analytics />
         {googleAnalyticsId ? (
           <>
             <Script

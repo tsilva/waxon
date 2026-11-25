@@ -32,7 +32,6 @@
     "@modelcontextprotocol/server": "2.4.0",
     "@sentry/nextjs": "11.8.0",
     "@neon/realtime": "0.1.1",
-    "@vercel/analytics": "2.0.1",
     "drizzle-orm": "^0.45.4",
     "lucide-react": "^1.66.0",
     "next": "16.4.5",
